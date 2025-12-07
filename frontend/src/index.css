@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: dark;
+  background-color: #020617; /* slate-950 */
+}
+
+/* Custom Scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(30, 41, 59, 0.5);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(71, 85, 105, 0.8);
+    border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 116, 139, 1);
+}
+
+.code-editor-scroll {
+    height: 100%;
+    min-height: 100%;
+    overflow: auto;
+}
+
+.code-editor-textarea {
+    height: 100%;
+    min-height: 100%;
+    width: 100%;
+    color: #e2e8f0;
+    background: transparent;
+    line-height: 1.4;
+    padding: 0 !important;
+    overflow: auto !important;
+}
+
+/* Raw editor */
+.raw-editor-shell {
+    height: 100%;
+    overflow: auto;
+}
+
+.raw-editor {
+    font-family: Menlo, Monaco, 'Fira Code', monospace !important;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100%;
+    color: #e2e8f0;
+    background: #0f172a;
+}
+
+.raw-editor textarea {
+    outline: none;
+    color: #e2e8f0;
+    caret-color: #e2e8f0;
+    min-height: 100% !important;
+}
+
+.raw-editor pre {
+    margin: 0;
+    min-height: 100%;
+    white-space: pre;
+}
