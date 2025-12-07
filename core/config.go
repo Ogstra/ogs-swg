@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -126,6 +127,8 @@ func LoadUsersFromSingboxConfig(path string, managed []string) ([]UserAccount, e
 }
 
 func (c *Config) AddUser(name, uuid, flow string) error {
+	flow = normalizeFlow(flow)
+
 	cfgMap, err := c.loadConfigMap()
 	if err != nil {
 		return err
@@ -138,7 +141,6 @@ func (c *Config) AddUser(name, uuid, flow string) error {
 
 	for _, inbound := range inbounds {
 		users := ensureUsers(inbound)
-		exists := false
 		for _, u := range users {
 			if um, ok := u.(map[string]interface{}); ok {
 				if um["name"] == name {
@@ -146,13 +148,12 @@ func (c *Config) AddUser(name, uuid, flow string) error {
 				}
 			}
 		}
-		if !exists {
-			users = append(users, map[string]interface{}{
-				"name": name,
-				"uuid": uuid,
-				"flow": flow,
-			})
+		user := map[string]interface{}{
+			"name": name,
+			"uuid": uuid,
 		}
+		user["flow"] = flow
+		users = append(users, user)
 		inbound["users"] = users
 	}
 
@@ -188,6 +189,8 @@ func (c *Config) RemoveUser(name string) error {
 }
 
 func (c *Config) UpdateUser(name, uuid, flow string) error {
+	flow = normalizeFlow(flow)
+
 	cfgMap, err := c.loadConfigMap()
 	if err != nil {
 		return err
@@ -208,9 +211,7 @@ func (c *Config) UpdateUser(name, uuid, flow string) error {
 					if uuid != "" {
 						um["uuid"] = uuid
 					}
-					if flow != "" {
-						um["flow"] = flow
-					}
+					um["flow"] = flow
 				}
 			}
 		}
@@ -359,6 +360,14 @@ func toInterfaceSlice(list []string) []interface{} {
 		out = append(out, v)
 	}
 	return out
+}
+
+func normalizeFlow(flow string) string {
+	flow = strings.TrimSpace(flow)
+	if strings.EqualFold(flow, "none") {
+		return ""
+	}
+	return flow
 }
 func (c *Config) SaveAppConfig() error {
 	path := c.ConfigPath

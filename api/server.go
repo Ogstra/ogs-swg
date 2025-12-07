@@ -89,6 +89,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("PUT /api/wireguard/peer", s.secure(s.handleUpdateWireGuardPeer))
 
 	mux.HandleFunc("POST /api/service/restart", s.secure(s.handleRestartService))
+	mux.HandleFunc("POST /api/service/start", s.secure(s.handleStartService))
 	mux.HandleFunc("POST /api/service/stop", s.secure(s.handleStopService))
 
 	mux.HandleFunc("GET /api/settings/features", s.secure(s.handleGetFeatures))
@@ -115,6 +116,8 @@ func (s *Server) Routes() *http.ServeMux {
 }
 
 func StartServer(cfg *core.Config) {
+	cfg.LogSource = detectLogSource(cfg)
+
 	store, err := core.NewStore(cfg.DatabasePath)
 	if err != nil {
 		panic("StartServer: failed to open database: " + err.Error())
@@ -617,6 +620,13 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		lines, err = readJournalLines("sing-box", 200)
 	} else {
 		lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, 200)
+		if err != nil && s.config.LogSource == "file" {
+			// Fallback to journal if file missing or unreadable
+			if linesJ, jErr := readJournalLines("sing-box", 200); jErr == nil {
+				lines = linesJ
+				err = nil
+			}
+		}
 	}
 	if err != nil {
 		log.Printf("handleGetLogs: cannot read logs: %v", err)
@@ -672,6 +682,13 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		lines, err = searchJournalLines("sing-box", q, limit)
 	} else {
 		lines, err = searchFileLines(s.config.AccessLogPath, q, limit)
+		if (err != nil || len(lines) == 0) && s.config.LogSource == "file" {
+			// Fallback to journal if file missing/unreadable or no matches
+			if linesJ, jErr := searchJournalLines("sing-box", q, limit); jErr == nil {
+				lines = linesJ
+				err = nil
+			}
+		}
 	}
 	if err != nil {
 		log.Printf("handleSearchLogs: cannot search logs: %v", err)
@@ -727,9 +744,17 @@ func tailFileLines(path string, maxBytes int64, maxLines int) ([]string, error) 
 }
 
 func readJournalLines(unit string, maxLines int) ([]string, error) {
+	if _, err := exec.LookPath("journalctl"); err != nil {
+		log.Printf("journalctl not found: %v", err)
+		return []string{"(journalctl not available on this system)"}, nil
+	}
 	cmd := exec.Command("journalctl", "-u", unit, "-n", strconv.Itoa(maxLines), "--no-pager")
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {
+			return []string{}, nil
+		}
 		return nil, err
 	}
 	data := strings.TrimSpace(string(out))
@@ -740,33 +765,95 @@ func readJournalLines(unit string, maxLines int) ([]string, error) {
 }
 
 func searchJournalLines(unit, query string, maxLines int) ([]string, error) {
-	cmd := exec.Command("journalctl", "-u", unit, "--no-pager", "-n", strconv.Itoa(maxLines), "--grep", query, "-i")
-	out, err := cmd.Output()
+	if _, err := exec.LookPath("journalctl"); err != nil {
+		log.Printf("journalctl not found: %v", err)
+		return []string{"(journalctl not available on this system)"}, nil
+	}
+	// journalctl --grep does not match timestamps; fetch full log and filter newest first until limit.
+	cmd := exec.Command("journalctl", "-u", unit, "--no-pager")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {
+			return []string{}, nil
+		}
 		return nil, err
 	}
 	data := strings.TrimSpace(string(out))
 	if data == "" {
 		return []string{}, nil
 	}
-	return strings.Split(data, "\n"), nil
+	lines := strings.Split(data, "\n")
+	q := strings.ToLower(query)
+	matched := make([]string, 0, maxLines)
+	for i := len(lines) - 1; i >= 0 && len(matched) < maxLines; i-- {
+		if strings.Contains(strings.ToLower(lines[i]), q) {
+			matched = append(matched, lines[i])
+		}
+	}
+	// reverse to keep chronological order
+	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
+		matched[i], matched[j] = matched[j], matched[i]
+	}
+	return matched, nil
 }
 
 func searchFileLines(path, query string, maxLines int) ([]string, error) {
-	content, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	lines := strings.Split(string(content), "\n")
+	defer f.Close()
+
+	const chunkSize = 64 * 1024
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	size := info.Size()
 	q := strings.ToLower(query)
-	var result []string
-	for i := len(lines) - 1; i >= 0 && len(result) < maxLines; i-- {
-		if strings.Contains(strings.ToLower(lines[i]), q) {
-			result = append(result, lines[i])
+	var matched []string
+	rem := ""
+
+	for offset := size; offset > 0 && len(matched) < maxLines; {
+		readSize := int64(chunkSize)
+		if offset < readSize {
+			readSize = offset
+		}
+		offset -= readSize
+		buf := make([]byte, readSize)
+		if _, err := f.ReadAt(buf, offset); err != nil && err != io.EOF {
+			return nil, err
+		}
+		data := string(buf) + rem
+		lines := strings.Split(data, "\n")
+		if offset > 0 && len(lines) > 0 {
+			rem = lines[0]
+			lines = lines[1:]
+		} else {
+			rem = ""
+		}
+		for i := len(lines) - 1; i >= 0 && len(matched) < maxLines; i-- {
+			if strings.Contains(strings.ToLower(lines[i]), q) {
+				matched = append(matched, lines[i])
+			}
 		}
 	}
-	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
-		result[i], result[j] = result[j], result[i]
+	// reverse to chronological order
+	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
+		matched[i], matched[j] = matched[j], matched[i]
 	}
-	return result, nil
+	return matched, nil
+}
+
+func detectLogSource(cfg *core.Config) string {
+	source := strings.ToLower(strings.TrimSpace(cfg.LogSource))
+	if source == "" {
+		source = "journal"
+	}
+	if source != "journal" && source != "file" {
+		log.Printf("Unknown log_source %q, defaulting to journal", cfg.LogSource)
+		return "journal"
+	}
+	return source
 }

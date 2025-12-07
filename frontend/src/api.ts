@@ -31,6 +31,10 @@ export interface FeatureFlags {
     sampler_interval_sec?: number;
     sampler_paused?: boolean;
     active_threshold_bytes?: number;
+    log_source?: 'journal' | 'file';
+    access_log_path?: string;
+    systemctl_available?: boolean;
+    journalctl_available?: boolean;
 }
 
 const buildHeaders = (contentType?: string) => {
@@ -180,6 +184,14 @@ export const api = {
         });
         if (!res.ok) throw new Error('Failed to restart service');
     },
+    startService: async (service: string): Promise<void> => {
+        const res = await fetch('/api/service/start', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ service })
+        });
+        if (!res.ok) throw new Error('Failed to start service');
+    },
     stopService: async (service: string): Promise<void> => {
         const res = await fetch('/api/service/stop', {
             method: 'POST',
@@ -246,7 +258,7 @@ export const api = {
         if (!res.ok) throw new Error('Failed to fetch stats');
         return res.json();
     },
-    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; sampler_paused?: boolean }> => {
+    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> => {
         const res = await fetch('/api/status', { headers: buildHeaders() });
         if (!res.ok) throw new Error('Failed to fetch system status');
         return res.json();

@@ -85,12 +85,12 @@ if ($ForceBuild -or -not (Test-Path "vendor")) {
     Write-Host "    Skipping dependency check (vendor exists). Use -ForceBuild to update." -ForegroundColor Gray
 }
 
-# Always build the binary (it's fast), but we could skip if xpanel.exe exists
+# Always build the binary (it's fast), but we could skip if swg.exe exists
 Write-Host "    Building binary..."
-go build -mod=vendor -o xpanel.exe main.go
+go build -mod=vendor -o swg.exe main.go
 
-if (-not (Test-Path "xpanel.exe")) {
-    Write-Error "Build failed! xpanel.exe was not created."
+if (-not (Test-Path "swg.exe")) {
+    Write-Error "Build failed! swg.exe was not created."
 }
 
 Write-Host ">>> Step 2: Building Frontend (React)..." -ForegroundColor Green
@@ -114,10 +114,10 @@ Set-Location ..
 
 Write-Host ">>> Step 3: Preparing Environment..." -ForegroundColor Green
 
-# Kill existing xpanel process if running
-$ExistingProcess = Get-Process -Name "xpanel" -ErrorAction SilentlyContinue
+# Kill existing swg process if running
+$ExistingProcess = Get-Process -Name "swg" -ErrorAction SilentlyContinue
 if ($ExistingProcess) {
-    Write-Host "    Stopping existing xpanel process..." -ForegroundColor Yellow
+    Write-Host "    Stopping existing swg process..." -ForegroundColor Yellow
     Stop-Process -InputObject $ExistingProcess -Force
     Start-Sleep -Seconds 1
 }
@@ -134,10 +134,10 @@ if (-not (Test-Path $ACCESS_LOG)) {
     New-Item -ItemType File -Path $ACCESS_LOG -Force | Out-Null
 }
 
-Write-Host ">>> Step 4: Starting XPanel..." -ForegroundColor Green
+Write-Host ">>> Step 4: Starting SWG..." -ForegroundColor Green
 Write-Host "-----------------------------------------------------"
 Write-Host "App running at: http://localhost:8080"
 Write-Host "Press Ctrl+C to stop."
 Write-Host "-----------------------------------------------------"
 
-./xpanel.exe --config $XRAY_CONFIG --log $ACCESS_LOG --db $TEST_DB
+./swg.exe --config $XRAY_CONFIG --log $ACCESS_LOG --db $TEST_DB

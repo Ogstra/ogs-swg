@@ -106,7 +106,8 @@ export default function WireGuard() {
     const handleUpdatePeer = async () => {
         if (!editingPeer) return
         try {
-            await api.updateWireGuardPeer(editingPeer.public_key, editingPeer)
+            const { persistent_keepalive, ...rest } = editingPeer
+            await api.updateWireGuardPeer(editingPeer.public_key, rest)
             setEditingPeer(null)
             setShowPeerModal(false)
             fetchData()
@@ -326,14 +327,14 @@ PersistentKeepalive = ${peer.persistent_keepalive || 25}`
                                                         setEditingPeer(peer)
                                                         setShowPeerModal(true)
                                                     }}
-                                                    className="p-2 text-slate-500 hover:text-blue-400 transition-colors"
+                                                    className="p-2 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-800 transition-colors"
                                                     title="Edit Peer"
                                                 >
                                                     <Edit size={16} />
                                                 </button>
                                                 <button
                                                     onClick={() => handleDeletePeer(peer.public_key)}
-                                                    className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                                                    className="p-2 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-800 transition-colors"
                                                     title="Delete Peer"
                                                 >
                                                     <Trash2 size={16} />
@@ -373,14 +374,14 @@ PersistentKeepalive = ${peer.persistent_keepalive || 25}`
                                                 setEditingPeer(peer)
                                                 setShowPeerModal(true)
                                             }}
-                                            className="p-2 text-slate-500 hover:text-blue-400 transition-colors"
+                                            className="p-2 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-800 transition-colors"
                                             title="Edit Peer"
                                         >
                                             <Edit size={16} />
                                         </button>
                                         <button
                                             onClick={() => handleDeletePeer(peer.public_key)}
-                                            className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                                            className="p-2 rounded-lg bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-800 transition-colors"
                                             title="Delete Peer"
                                         >
                                             <Trash2 size={16} />
@@ -467,16 +468,6 @@ PersistentKeepalive = ${peer.persistent_keepalive || 25}`
                                         onChange={e => setEditingPeer({ ...editingPeer, preshared_key: e.target.value })}
                                         className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                                         placeholder="Base64 key"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">Persistent Keepalive (s)</label>
-                                    <input
-                                        type="number"
-                                        value={editingPeer.persistent_keepalive || 0}
-                                        onChange={e => setEditingPeer({ ...editingPeer, persistent_keepalive: parseInt(e.target.value) || 0 })}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                                        placeholder="25"
                                     />
                                 </div>
                                 <div className="flex justify-end gap-3 mt-6">

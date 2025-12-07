@@ -33,8 +33,8 @@ fi
 if [ "$SKIP_BACKEND" = false ]; then
   echo ">>> Backend tests (go test ./...)"
   go test $GO_MOD_FLAG ./...
-  echo ">>> Backend build (ogs-swg)"
-  go build $GO_MOD_FLAG -o ogs-swg main.go
+  echo ">>> Backend build (swg)"
+  go build $GO_MOD_FLAG -o swg main.go
 fi
 
 if [ "$SKIP_FRONTEND" = false ]; then
