@@ -7,6 +7,7 @@ export default function LogViewer() {
     const [loading, setLoading] = useState(true)
     const [refreshInterval, setRefreshInterval] = useState<number>(5000)
     const [query, setQuery] = useState<string>('')
+    const [logSource, setLogSource] = useState<'journal' | 'file'>('journal')
     const bottomRef = useRef<HTMLDivElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const [autoScroll, setAutoScroll] = useState(true)
@@ -14,26 +15,33 @@ export default function LogViewer() {
     const [searching, setSearching] = useState(false)
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
 
-    const fetchLogs = () => {
+    const fetchLogs = (forceTail = false) => {
         setLoading(true)
         api.getLogs(query || undefined).then(data => {
             setLines(data.logs)
-            setViewMode('tail')
+            if (forceTail) setViewMode('tail')
             setLoading(false)
         }).catch(err => {
             console.error(err)
             setLines(['Error loading logs: ' + err.message])
-            setViewMode('tail')
+            if (forceTail) setViewMode('tail')
             setLoading(false)
         })
     }
 
     useEffect(() => {
-        fetchLogs()
-        const interval = setInterval(() => {
-            if (viewMode === 'tail') {
-                fetchLogs()
+        api.getFeatures().then(f => {
+            if (f.log_source === 'journal' || f.log_source === 'file') {
+                setLogSource(f.log_source)
             }
+        }).catch(err => console.error('Failed to load features', err))
+    }, [])
+
+    useEffect(() => {
+        if (viewMode !== 'tail') return
+        fetchLogs(true)
+        const interval = setInterval(() => {
+            fetchLogs(true)
         }, refreshInterval)
         return () => clearInterval(interval)
     }, [refreshInterval, query, viewMode])
@@ -76,6 +84,7 @@ export default function LogViewer() {
                 <div>
                     <h1 className="text-2xl font-bold text-white">sing-box Logs</h1>
                     <p className="text-slate-400 text-sm mt-1">Tail from journal/file (latest lines)</p>
+                    <p className="text-slate-500 text-xs">Source: {logSource === 'journal' ? 'journalctl' : 'log file'}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 gap-2 min-w-[260px]">
@@ -89,7 +98,7 @@ export default function LogViewer() {
                         />
                     </div>
                     <button
-                        onClick={fetchLogs}
+                        onClick={() => fetchLogs(true)}
                         className="px-3 py-2 bg-slate-800 text-slate-200 rounded-lg hover:bg-slate-700"
                     >
                         Apply (tail)
@@ -128,7 +137,7 @@ export default function LogViewer() {
                         </select>
                     </div>
                     <button
-                        onClick={fetchLogs}
+                        onClick={() => fetchLogs(true)}
                         className={`p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all ${loading ? 'animate-spin' : ''}`}
                         title="Refresh Logs"
                     >

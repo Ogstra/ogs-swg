@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/Ogstra/ogs-swg/core"
@@ -178,6 +177,21 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
+	var req ServiceActionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := runSystemCtl("start", req.Service); err != nil {
+		http.Error(w, "Failed to start service: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -199,6 +213,10 @@ func runSystemCtl(action, service string) error {
 		return nil
 	}
 
+	if !hasSystemctl() {
+		return fmt.Errorf("systemctl not available in this environment")
+	}
+
 	unitName := service
 	if service == "wireguard" {
 		unitName = "wg-quick@wg0"
@@ -206,6 +224,22 @@ func runSystemCtl(action, service string) error {
 
 	cmd := exec.Command("systemctl", action, unitName)
 	return cmd.Run()
+}
+
+func hasSystemctl() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	_, err := exec.LookPath("systemctl")
+	return err == nil
+}
+
+func hasJournalctl() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	_, err := exec.LookPath("journalctl")
+	return err == nil
 }
 
 func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
@@ -504,6 +538,8 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"samples_count":               samplesCount,
 		"db_size_bytes":               dbSizeBytes,
 		"sampler_paused":              samplerPaused,
+		"systemctl_available":         hasSystemctl(),
+		"journalctl_available":        hasJournalctl(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -515,7 +551,7 @@ func checkService(service string) bool {
 		return true
 	}
 
-	if _, err := exec.LookPath("systemctl"); err != nil {
+	if !hasSystemctl() {
 		log.Printf("checkService: cannot verify %s (systemctl not present in container)", service)
 		return false
 	}
@@ -619,6 +655,10 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"sampler_interval_sec":   s.config.SamplerIntervalSec,
 		"sampler_paused":         s.sampler != nil && s.sampler.IsPaused(),
 		"active_threshold_bytes": s.config.ActiveThresholdBytes,
+		"log_source":             s.config.LogSource,
+		"access_log_path":        s.config.AccessLogPath,
+		"systemctl_available":    hasSystemctl(),
+		"journalctl_available":   hasJournalctl(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

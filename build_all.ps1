@@ -47,8 +47,8 @@ if (-not $SkipBackend) {
     Run-Step "Backend tests (go test ./...)" {
         go test $goModFlag ./...
     }
-    Run-Step "Backend build (ogs-swg.exe)" {
-        go build $goModFlag -o ogs-swg.exe .
+    Run-Step "Backend build (swg.exe)" {
+        go build $goModFlag -o swg.exe .
     }
 }
 

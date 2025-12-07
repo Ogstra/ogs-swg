@@ -17,6 +17,7 @@ export default function Settings() {
         active_threshold_bytes: 1024,
     })
     const [historyLimit, setHistoryLimit] = useState(5)
+    const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean; wireguard: boolean }>({ singbox: false, wireguard: false })
 
     useEffect(() => {
         loadAll()
@@ -49,6 +50,10 @@ export default function Settings() {
             if (status.sampler_paused !== undefined) {
                 setFeatures(f => ({ ...f, sampler_paused: status.sampler_paused }))
             }
+            setServiceStatus({
+                singbox: !!status.singbox,
+                wireguard: !!status.wireguard
+            })
         } catch (err) {
             console.error(err)
         }
@@ -116,14 +121,17 @@ export default function Settings() {
         }
     }
 
-    const handleServiceAction = async (service: string, action: 'restart' | 'stop') => {
+    const handleServiceAction = async (service: string, action: 'restart' | 'stop' | 'start') => {
         if (!confirm(`Are you sure you want to ${action} ${service}?`)) return
         try {
             if (action === 'restart') {
                 await api.restartService(service)
+            } else if (action === 'start') {
+                await api.startService(service)
             } else {
                 await api.stopService(service)
             }
+            await loadDbStats()
             alert(`${service} ${action}ed successfully`)
         } catch (err) {
             alert(`Failed to ${action} ${service}: ` + err)
@@ -271,18 +279,18 @@ export default function Settings() {
                         <button
                             onClick={() => handleServiceAction('sing-box', 'restart')}
                             className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
-                            disabled={!features.enable_singbox}
+                            disabled={!features.enable_singbox || features.systemctl_available === false}
                         >
                             <RefreshCw size={16} />
                             Restart
                         </button>
                         <button
-                            onClick={() => handleServiceAction('sing-box', 'stop')}
+                            onClick={() => handleServiceAction('sing-box', serviceStatus.singbox ? 'stop' : 'start')}
                             className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
-                            disabled={!features.enable_singbox}
+                            disabled={!features.enable_singbox || features.systemctl_available === false}
                         >
                             <Power size={16} />
-                            Stop
+                            {serviceStatus.singbox ? 'Stop' : 'Start'}
                         </button>
                     </div>
                 </div>
@@ -296,21 +304,26 @@ export default function Settings() {
                         <button
                             onClick={() => handleServiceAction('wireguard', 'restart')}
                             className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
-                            disabled={!features.enable_wireguard}
+                            disabled={!features.enable_wireguard || features.systemctl_available === false}
                         >
                             <RefreshCw size={16} />
                             Restart
                         </button>
                         <button
-                            onClick={() => handleServiceAction('wireguard', 'stop')}
+                            onClick={() => handleServiceAction('wireguard', serviceStatus.wireguard ? 'stop' : 'start')}
                             className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
-                            disabled={!features.enable_wireguard}
+                            disabled={!features.enable_wireguard || features.systemctl_available === false}
                         >
                             <Power size={16} />
-                            Stop
+                            {serviceStatus.wireguard ? 'Stop' : 'Start'}
                         </button>
                     </div>
                 </div>
+                {features.systemctl_available === false && (
+                    <div className="md:col-span-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-amber-400 text-sm">
+                        Service control is disabled in this environment (systemctl not available, typical in Docker). Use container orchestration to start/stop services.
+                    </div>
+                )}
             </div>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">

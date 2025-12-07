@@ -1,12 +1,16 @@
 services:
   ogs-swg:
-    build: .
+    build:
+      context: .
+      args:
+        ENABLE_WG_TOOLS: 1
     image: ogs-swg:latest
     container_name: ogs-swg
-    ports:
-      - "8080:8080"
-    # Use host networking if you need to access host services without port mapping:
-    # network_mode: "host"
+    network_mode: "host"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
     volumes:
       - ./local-data/logs/singbox.log:/var/log/singbox.log:ro
       - ./local-data/singbox/config.json:/etc/sing-box/config.json:ro
@@ -14,4 +18,4 @@ services:
       - ./config.json:/config/config.json # panel config
       - ./local-data/data:/var/lib/ogs-swg
     restart: unless-stopped
-    command: ["/usr/local/bin/ogs-swg", "--config", "/config/config.json", "--db", "/var/lib/ogs-swg/stats.db", "--log", "/var/log/singbox.log"]
+    command: ["/usr/local/bin/swg", "--config", "/config/config.json", "--db", "/var/lib/ogs-swg/stats.db", "--log", "/var/log/singbox.log"]

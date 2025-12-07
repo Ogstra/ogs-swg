@@ -172,6 +172,14 @@ export default function RawConfig() {
                     </button>
                 </div>
 
+                <div className="flex items-start gap-3 p-4 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-sm">
+                    <AlertTriangle size={20} className="shrink-0 mt-0.5" />
+                    <div>
+                        <p className="font-bold">Warning</p>
+                        <p className="opacity-90">Editing raw configurations can break your service. Validate JSON/WireGuard syntax before saving. Restart the service after applying changes.</p>
+                    </div>
+                </div>
+
                 {showDiff && (
                     <div className="bg-slate-950 border-b border-slate-800 p-3 text-sm text-slate-200 max-h-48 overflow-auto">
                         <p className="text-xs text-slate-400 mb-2">Diff (line-by-line) vs last load</p>
@@ -195,14 +203,6 @@ export default function RawConfig() {
                         textareaId="raw-config-editor"
                         className="raw-editor"
                     />
-                </div>
-            </div>
-
-            <div className="flex items-start gap-3 p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400 text-sm">
-                <AlertTriangle size={20} className="shrink-0 mt-0.5" />
-                <div>
-                    <p className="font-bold">Warning</p>
-                    <p className="opacity-90">Editing raw configurations can break your service. Validate JSON/WireGuard syntax before saving. Restart the service after applying changes.</p>
                 </div>
             </div>
         </div>

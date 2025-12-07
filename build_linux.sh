@@ -57,8 +57,8 @@ if [[ "$SKIP_BACKEND" != true ]]; then
     echo ">>> Backend tests skipped"
   fi
 
-  echo ">>> Backend build (ogs-swg)"
-  CGO_ENABLED=0 "$GO_BIN" build $GO_MOD_FLAG -o "$ROOT_DIR/ogs-swg" "$ROOT_DIR/main.go"
+  echo ">>> Backend build (swg)"
+  CGO_ENABLED=0 "$GO_BIN" build $GO_MOD_FLAG -o "$ROOT_DIR/swg" "$ROOT_DIR/main.go"
 fi
 
 if [[ "$SKIP_FRONTEND" != true ]]; then

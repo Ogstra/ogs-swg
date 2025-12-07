@@ -12,14 +12,13 @@ import (
 )
 
 type WireGuardPeer struct {
-	PublicKey  string `json:"public_key"`
-	PrivateKey string `json:"private_key,omitempty"`
-	AllowedIPs string `json:"allowed_ips"`
-	Endpoint   string `json:"endpoint,omitempty"`
-	Alias      string `json:"alias,omitempty"`
-	Email               string `json:"email,omitempty"`
-	PresharedKey        string `json:"preshared_key,omitempty"`
-	PersistentKeepalive int    `json:"persistent_keepalive,omitempty"`
+	PublicKey    string `json:"public_key"`
+	PrivateKey   string `json:"private_key,omitempty"`
+	AllowedIPs   string `json:"allowed_ips"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	Alias        string `json:"alias,omitempty"`
+	Email        string `json:"email,omitempty"`
+	PresharedKey string `json:"preshared_key,omitempty"`
 }
 
 type WireGuardInterface struct {
@@ -154,9 +153,6 @@ func LoadWireGuardConfig(path string) (*WireGuardConfig, error) {
 						currentPeer.Endpoint = value
 					case "presharedkey":
 						currentPeer.PresharedKey = value
-					case "persistentkeepalive":
-						pk, _ := strconv.Atoi(value)
-						currentPeer.PersistentKeepalive = pk
 					}
 				}
 			}
@@ -221,9 +217,6 @@ func (c *WireGuardConfig) Save() error {
 		}
 		if peer.PresharedKey != "" {
 			fmt.Fprintf(f, "PresharedKey = %s\n", peer.PresharedKey)
-		}
-		if peer.PersistentKeepalive != 0 {
-			fmt.Fprintf(f, "PersistentKeepalive = %d\n", peer.PersistentKeepalive)
 		}
 		fmt.Fprintln(f, "")
 	}
@@ -314,7 +307,6 @@ func (c *WireGuardConfig) UpdatePeer(publicKey string, updated WireGuardPeer) er
 			c.Peers[i].AllowedIPs = updated.AllowedIPs
 			c.Peers[i].Endpoint = updated.Endpoint
 			c.Peers[i].PresharedKey = updated.PresharedKey
-			c.Peers[i].PersistentKeepalive = updated.PersistentKeepalive
 			if updated.Alias != "" {
 				c.Peers[i].Alias = updated.Alias
 			}

@@ -181,7 +181,7 @@ export default function UserManagement() {
         setNewUser({
             name: user.name,
             uuid: user.uuid || '',
-            flow: user.flow || 'xtls-rprx-vision',
+            flow: user.flow || '',
             quota_limit: user.quota_limit,
             quota_period: user.quota_period,
             reset_day: user.reset_day
@@ -257,7 +257,8 @@ export default function UserManagement() {
     const generateVLESSLink = (user: UserStatus) => {
         // Prefer real UUID/flow coming from backend; fallback to placeholder if missing
         const uuid = user.uuid || "5e18b70f-bdaa-4b8a-8e50-67830e897bc5"
-        const flow = user.flow || "xtls-rprx-vision"
+        const flow = user.flow || ""
+        const flowParam = flow ? `&flow=${flow}` : ""
         const ip = "149.50.133.58"
         const port = "443"
         const pbk = "4aHK2h-F_LeS5FYsdUqipny0ae67oWcgmlcyfIofon8"
@@ -265,7 +266,7 @@ export default function UserManagement() {
         const sid = "0861c24f2c393938"
         const name = `VLESS-${user.name}`
 
-        return `vless://${uuid}@${ip}:${port}?security=reality&encryption=none&pbk=${pbk}&headerType=none&fp=chrome&type=tcp&flow=${flow}&sni=${sni}&sid=${sid}#${name}`
+        return `vless://${uuid}@${ip}:${port}?security=reality&encryption=none&pbk=${pbk}&headerType=none&fp=chrome&type=tcp${flowParam}&sni=${sni}&sid=${sid}#${name}`
     }
 
     return (

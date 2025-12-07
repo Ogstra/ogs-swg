@@ -42,7 +42,7 @@ OGS-XWG is a lightweight, modern web interface for managing sing-box and WireGua
 3.  **Build Backend:**
     ```bash
     go mod tidy
-    go build -o xpanel
+    go build -o swg
     ```
 
 4.  **Configuration:**
@@ -69,19 +69,21 @@ OGS-XWG is a lightweight, modern web interface for managing sing-box and WireGua
 
 5.  **Run:**
     ```bash
-    ./xpanel
+    ./swg
     ```
 
 ## Docker
 
-You can also run OGS-XWG using Docker:
+You can also run OGS-XWG using Docker. The image can include WireGuard tooling; if you don't need it, set the build arg `ENABLE_WG_TOOLS=0` when building.
 
 ```bash
 docker-compose up -d
 ```
 
 Notes:
-- In Docker, journalctl is not available; set `log_source` to `file` and bind-mount a log file (e.g. `/var/log/singbox.log`) as shown in `docker-compose.yml`.
+- In Docker, `systemctl`/`journalctl` are typically unavailable. The panel will hide service controls and use the log file path instead of journal when needed.
+- The default compose uses `network_mode: host`, `NET_ADMIN`, and `/dev/net/tun` so the panel can talk to WireGuard on the host. Adjust to your environment.
+- If using file logs, bind-mount your sing-box log (e.g. `/var/log/singbox.log`) and set `log_source` to `"file"`.
 
 ## License
 

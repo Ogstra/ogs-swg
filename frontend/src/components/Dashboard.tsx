@@ -12,10 +12,23 @@ function formatBytes(bytes: number, decimals = 2) {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
+type StatusState = {
+    singbox: boolean
+    wireguard: boolean
+    active_users_singbox: number
+    active_users_wireguard: number
+    active_users_singbox_list: string[]
+    active_users_wireguard_list: string[]
+    samples_count: number
+    db_size_bytes: number
+    systemctl_available?: boolean
+    journalctl_available?: boolean
+}
+
 export default function Dashboard() {
     const [users, setUsers] = useState<UserStatus[]>([])
     const [stats, setStats] = useState<any[]>([])
-    const [status, setStatus] = useState({
+    const [status, setStatus] = useState<StatusState>({
         singbox: false,
         wireguard: false,
         active_users_singbox: 0,
@@ -23,7 +36,9 @@ export default function Dashboard() {
         active_users_singbox_list: [] as string[],
         active_users_wireguard_list: [] as string[],
         samples_count: 0,
-        db_size_bytes: 0
+        db_size_bytes: 0,
+        systemctl_available: true,
+        journalctl_available: true,
     })
     const [loading, setLoading] = useState(true)
     const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
@@ -96,7 +111,9 @@ export default function Dashboard() {
                 active_users_singbox_list: statusData?.active_users_singbox_list ?? [],
                 active_users_wireguard_list: statusData?.active_users_wireguard_list ?? [],
                 samples_count: statusData?.samples_count ?? 0,
-                db_size_bytes: statusData?.db_size_bytes ?? 0
+                db_size_bytes: statusData?.db_size_bytes ?? 0,
+                systemctl_available: statusData?.systemctl_available ?? true,
+                journalctl_available: statusData?.journalctl_available ?? true,
             })
             setLastUpdated(new Date())
         } catch (err) {
@@ -190,55 +207,61 @@ export default function Dashboard() {
             </div>
 
             {/* Service Status Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className={`p-4 rounded-xl border flex flex-col gap-3 ${status.singbox ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
-                    <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-lg ${status.singbox ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                <Activity size={20} />
+            {status.systemctl_available ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className={`p-4 rounded-xl border flex flex-col gap-3 ${status.singbox ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${status.singbox ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                    <Activity size={20} />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-slate-200">sing-box</p>
+                                    <p className={`text-xs ${status.singbox ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {status.singbox ? 'Active' : 'Stopped'}
+                                    </p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-sm font-medium text-slate-200">sing-box</p>
-                                <p className={`text-xs ${status.singbox ? 'text-emerald-400' : 'text-red-400'}`}>
-                                    {status.singbox ? 'Active' : 'Stopped'}
-                                </p>
-                            </div>
+                            <div className={`w-3 h-3 rounded-full ${status.singbox ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
                         </div>
-                        <div className={`w-3 h-3 rounded-full ${status.singbox ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
+                        <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400">
+                            <span className="font-semibold text-slate-200">Activos:</span>
+                            <span>{status.active_users_singbox}</span>
+                            {status.active_users_singbox_list.slice(0, 6).map(u => (
+                                <span key={u} className="px-2 py-1 rounded bg-slate-800 text-slate-200 font-mono">{u}</span>
+                            ))}
+                            {status.active_users_singbox_list.length > 6 && (
+                                <span className="px-2 py-1 rounded bg-slate-800 text-slate-300">+{status.active_users_singbox_list.length - 6} más</span>
+                            )}
+                        </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap text-xs text-slate-400">
-                        <span className="font-semibold text-slate-200">Activos:</span>
-                        <span>{status.active_users_singbox}</span>
-                        {status.active_users_singbox_list.slice(0, 6).map(u => (
-                            <span key={u} className="px-2 py-1 rounded bg-slate-800 text-slate-200 font-mono">{u}</span>
-                        ))}
-                        {status.active_users_singbox_list.length > 6 && (
-                            <span className="px-2 py-1 rounded bg-slate-800 text-slate-300">+{status.active_users_singbox_list.length - 6} más</span>
-                        )}
-                    </div>
-                </div>
 
-                <div className={`p-4 rounded-xl border flex flex-col gap-3 ${status.wireguard ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
-                    <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                            <div className={`p-2 rounded-lg ${status.wireguard ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                <Shield size={20} />
+                    <div className={`p-4 rounded-xl border flex flex-col gap-3 ${status.wireguard ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20'}`}>
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${status.wireguard ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                                    <Shield size={20} />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-slate-200">WireGuard</p>
+                                    <p className={`text-xs ${status.wireguard ? 'text-emerald-400' : 'text-red-400'}`}>
+                                        {status.wireguard ? 'Active' : 'Stopped'}
+                                    </p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="text-sm font-medium text-slate-200">WireGuard</p>
-                                <p className={`text-xs ${status.wireguard ? 'text-emerald-400' : 'text-red-400'}`}>
-                                    {status.wireguard ? 'Active' : 'Stopped'}
-                                </p>
-                            </div>
+                            <div className={`w-3 h-3 rounded-full ${status.wireguard ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
                         </div>
-                        <div className={`w-3 h-3 rounded-full ${status.wireguard ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
-                    </div>
-                    <div className="text-xs text-slate-400">
-                        <span className="font-semibold text-slate-200">Activos:</span>{' '}
-                        <span>{status.active_users_wireguard}</span>
+                        <div className="text-xs text-slate-400">
+                            <span className="font-semibold text-slate-200">Activos:</span>{' '}
+                            <span>{status.active_users_wireguard}</span>
+                        </div>
                     </div>
                 </div>
-            </div>
+            ) : (
+                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-sm">
+                    Service status unavailable (systemctl not present in this environment, e.g., Docker). Use host/VM tooling to manage sing-box/WireGuard.
+                </div>
+            )}
 
             {/* Main Traffic Chart */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm">

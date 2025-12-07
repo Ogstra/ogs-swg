@@ -11,7 +11,7 @@ echo "    Vendoring dependencies..."
 go mod vendor
 # Build using local vendor directory
 echo "    Building binary..."
-go build -mod=vendor -o xpanel main.go
+go build -mod=vendor -o swg main.go
 
 echo -e "${GREEN}>>> Step 2: Building Frontend (React)...${NC}"
 cd frontend
@@ -42,7 +42,7 @@ echo "App running at: http://$(curl -s ifconfig.me):8080"
 echo "Press Ctrl+C to stop."
 echo "-----------------------------------------------------"
 
-./xpanel \
+./swg \
   --config "./config.json" \
   --singbox-config "$SINGBOX_CONFIG" \
   --log "$ACCESS_LOG" \
