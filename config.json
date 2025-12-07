@@ -1,0 +1,26 @@
+{
+  "singbox_config_path": "/etc/sing-box/config.json",
+  "singbox_api_addr": "127.0.0.1:8080",
+  "managed_inbounds": [
+    "in-reality"
+  ],
+  "stats_inbounds": [
+    "in-reality"
+  ],
+  "stats_outbounds": [
+    "direct"
+  ],
+  "access_log_path": "/var/log/singbox.log",
+  "log_source": "journal",
+  "database_path": "/var/lib/ogs-swg/stats.db",
+  "listen_addr": "0.0.0.0:8111",
+  "wireguard_config_path": "/etc/wireguard/wg0.conf",
+  "enable_wireguard": true,
+  "enable_singbox": true,
+  "use_stats_sampler": true,
+  "sampler_interval_sec": 60,
+  "retention_enabled": false,
+  "retention_days": 90,
+  "api_key": "",
+  "active_threshold_bytes": 2048
+}

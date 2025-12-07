@@ -1,0 +1,13 @@
+[Unit]
+Description=OGS-SWG stats sampler
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ogs-swg --config /etc/ogs-swg/config.json --sampler-only
+Restart=on-failure
+User=nobody
+Group=nobody
+
+[Install]
+WantedBy=multi-user.target
