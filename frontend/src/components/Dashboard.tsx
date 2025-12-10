@@ -49,6 +49,7 @@ export default function Dashboard() {
     const [wgTraffic, setWgTraffic] = useState<{ rx: number; tx: number }>({ rx: 0, tx: 0 })
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [chartData, setChartData] = useState<any[]>([])
+    const [chartDomain, setChartDomain] = useState<[number, number] | undefined>(undefined)
 
     const [wgPeers, setWgPeers] = useState<any[]>([])
     // consumerTab removed, using chartMode for both
@@ -106,6 +107,8 @@ export default function Dashboard() {
                 reportStartDate = startSec.toString()
                 reportEndDate = endSec.toString()
             }
+            // Set domain explicitly to force chart to cover full range
+            setChartDomain([startSec, endSec])
 
             const [reportData, statusData, wgTrafficRes, wgSeries, wgPeersData] = await Promise.all([
                 api.getReport(reportStartDate, reportEndDate),
@@ -292,13 +295,13 @@ export default function Dashboard() {
                     <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
-                                <ArrowUp size={12} /> Uplink
+                                <ArrowUp size={12} /> Received
                             </div>
                             <p className="text-lg font-mono text-white">{formatBytes(totalUp)}</p>
                         </div>
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
-                                <ArrowDown size={12} /> Downlink
+                                <ArrowDown size={12} /> Sent
                             </div>
                             <p className="text-lg font-mono text-white">{formatBytes(totalDown)}</p>
                         </div>
@@ -351,13 +354,13 @@ export default function Dashboard() {
                     <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
-                                <ArrowUp size={12} /> Uplink
+                                <ArrowUp size={12} /> Sent
                             </div>
                             <p className="text-lg font-mono text-white">{formatBytes(wgTraffic.tx)}</p>
                         </div>
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
-                                <ArrowDown size={12} /> Downlink
+                                <ArrowDown size={12} /> Received
                             </div>
                             <p className="text-lg font-mono text-white">{formatBytes(wgTraffic.rx)}</p>
                         </div>
@@ -437,6 +440,8 @@ export default function Dashboard() {
                                         tickMargin={10}
                                         axisLine={false}
                                         tickLine={false}
+                                        type="number"
+                                        domain={chartDomain}
                                     />
                                     <YAxis
                                         tickFormatter={(bytes) => formatBytes(bytes, 0)}
@@ -455,7 +460,7 @@ export default function Dashboard() {
                                     <Area
                                         type="monotone"
                                         dataKey="uplink"
-                                        name="Uplink"
+                                        name={chartMode === 'singbox' ? "Received" : "Sent"}
                                         stroke="#3b82f6"
                                         strokeWidth={2}
                                         fillOpacity={1}
@@ -464,7 +469,7 @@ export default function Dashboard() {
                                     <Area
                                         type="monotone"
                                         dataKey="downlink"
-                                        name="Downlink"
+                                        name={chartMode === 'singbox' ? "Sent" : "Received"}
                                         stroke="#10b981"
                                         strokeWidth={2}
                                         fillOpacity={1}
