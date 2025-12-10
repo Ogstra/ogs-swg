@@ -374,6 +374,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/wireguard/config", s.secure(s.handleGetWireGuardConfig))
 	protected.HandleFunc("PUT /api/wireguard/config", s.secure(s.handleUpdateWireGuardConfig))
 
+	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
 
