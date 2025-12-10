@@ -60,15 +60,30 @@ type UserMetadata struct {
 	Enabled     bool   `json:"enabled"`
 }
 
-// DailyUsage represents aggregated traffic data for a user on a specific day.
+// DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
 type DailyUsage struct {
-	User     string
-	Date     string // YYYY-MM-DD
-	Uplink   int64
-	Downlink int64
+	User      string
+	Timestamp int64 // Bucket start timestamp
+	Uplink    int64
+	Downlink  int64
+}
+
+// WGDailyUsage represents aggregated traffic data for a WG peer on a specific bucket (8h).
+type WGDailyUsage struct {
+	PublicKey string
+	Timestamp int64
+	Rx        int64
+	Tx        int64
 }
 
 func (s *Store) initSchema() error {
+	// Check for old daily_usage schema (migration)
+	var colName string
+	_ = s.db.QueryRow("SELECT name FROM pragma_table_info('daily_usage') WHERE name='date'").Scan(&colName)
+	if colName == "date" {
+		s.db.Exec("DROP TABLE daily_usage")
+	}
+
 	query := `
 	CREATE TABLE IF NOT EXISTS samples (
 		user TEXT NOT NULL,
@@ -113,10 +128,17 @@ func (s *Store) initSchema() error {
 	
 	CREATE TABLE IF NOT EXISTS daily_usage (
 		user TEXT NOT NULL,
-		date TEXT NOT NULL,
+		ts INTEGER NOT NULL,
 		uplink INTEGER NOT NULL,
 		downlink INTEGER NOT NULL,
-		PRIMARY KEY (user, date)
+		PRIMARY KEY (user, ts)
+	);
+	CREATE TABLE IF NOT EXISTS daily_wg_usage (
+		public_key TEXT NOT NULL,
+		ts INTEGER NOT NULL,
+		rx INTEGER NOT NULL,
+		tx INTEGER NOT NULL,
+		PRIMARY KEY (public_key, ts)
 	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
@@ -247,11 +269,12 @@ func (s *Store) PruneOlderThan(ts int64) (int64, error) {
 }
 
 func (s *Store) CountSamples() (int64, error) {
-	var count int64
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM samples").Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
+	var c1, c2, c3, c4 int64
+	s.db.QueryRow("SELECT COUNT(*) FROM samples").Scan(&c1)
+	s.db.QueryRow("SELECT COUNT(*) FROM wg_samples").Scan(&c2)
+	s.db.QueryRow("SELECT COUNT(*) FROM daily_usage").Scan(&c3)
+	s.db.QueryRow("SELECT COUNT(*) FROM daily_wg_usage").Scan(&c4)
+	return c1 + c2 + c3 + c4, nil
 }
 
 type SamplerRun struct {
@@ -666,20 +689,23 @@ func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	// 2. Aggregate data
+	// 2. Aggregate data into 8-hour buckets (28800 seconds)
+	// We use integer division to floor the timestamp to the nearest 8h bucket
+	bucketSize := int64(8 * 3600)
+
 	rows, err := tx.Query(`
-		SELECT user, date(ts, 'unixepoch'), SUM(uplink), SUM(downlink)
+		SELECT user, (ts / ?) * ? as bucket_ts, SUM(uplink), SUM(downlink)
 		FROM samples
 		WHERE ts < ?
-		GROUP BY user, date(ts, 'unixepoch')
-	`, olderThanTs)
+		GROUP BY user, bucket_ts
+	`, bucketSize, bucketSize, olderThanTs)
 	if err != nil {
 		return 0, fmt.Errorf("compress query failed: %v", err)
 	}
 
 	type aggRow struct {
 		u    string
-		d    string
+		ts   int64
 		up   int64
 		down int64
 	}
@@ -687,7 +713,7 @@ func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
 
 	for rows.Next() {
 		var r aggRow
-		if err := rows.Scan(&r.u, &r.d, &r.up, &r.down); err != nil {
+		if err := rows.Scan(&r.u, &r.ts, &r.up, &r.down); err != nil {
 			rows.Close()
 			return 0, err
 		}
@@ -702,12 +728,12 @@ func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
 	// 3. Upsert into daily_usage
 	for _, a := range agg {
 		_, err := tx.Exec(`
-			INSERT INTO daily_usage (user, date, uplink, downlink)
+			INSERT INTO daily_usage (user, ts, uplink, downlink)
 			VALUES (?, ?, ?, ?)
-			ON CONFLICT(user, date) DO UPDATE SET
+			ON CONFLICT(user, ts) DO UPDATE SET
 			uplink = uplink + excluded.uplink,
 			downlink = downlink + excluded.downlink
-		`, a.u, a.d, a.up, a.down)
+		`, a.u, a.ts, a.up, a.down)
 		if err != nil {
 			return 0, fmt.Errorf("compress insert failed: %v", err)
 		}
@@ -728,36 +754,100 @@ func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
 	return deleted, nil
 }
 
+func (s *Store) CompressOldWGSamples(olderThanTs int64) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// Aggregate into 8-hour buckets
+	bucketSize := int64(8 * 3600)
+
+	rows, err := tx.Query(`
+		SELECT public_key, (ts / ?) * ? as bucket_ts, SUM(rx), SUM(tx)
+		FROM wg_samples
+		WHERE ts < ?
+		GROUP BY public_key, bucket_ts
+	`, bucketSize, bucketSize, olderThanTs)
+	if err != nil {
+		return 0, fmt.Errorf("compress wg query failed: %v", err)
+	}
+
+	type aggRow struct {
+		pk string
+		ts int64
+		rx int64
+		tx int64
+	}
+	var agg []aggRow
+
+	for rows.Next() {
+		var r aggRow
+		if err := rows.Scan(&r.pk, &r.ts, &r.rx, &r.tx); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		agg = append(agg, r)
+	}
+	rows.Close()
+
+	if len(agg) == 0 {
+		return 0, nil
+	}
+
+	for _, a := range agg {
+		_, err := tx.Exec(`
+			INSERT INTO daily_wg_usage (public_key, ts, rx, tx)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(public_key, ts) DO UPDATE SET
+			rx = rx + excluded.rx,
+			tx = tx + excluded.tx
+		`, a.pk, a.ts, a.rx, a.tx)
+		if err != nil {
+			return 0, fmt.Errorf("compress wg insert failed: %v", err)
+		}
+	}
+
+	res, err := tx.Exec("DELETE FROM wg_samples WHERE ts < ?", olderThanTs)
+	if err != nil {
+		return 0, fmt.Errorf("compress wg delete failed: %v", err)
+	}
+
+	deleted, _ := res.RowsAffected()
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
 // GetCombinedReport queries both daily_usage and samples to build a comprehensive report.
 func (s *Store) GetCombinedReport(user string, start, end int64) ([]Sample, error) {
 	// 1. Get Aggregated Data in Range
-	startDate := time.Unix(start, 0).Format("2006-01-02")
-	endDate := time.Unix(end, 0).Format("2006-01-02")
 
 	// Adjust start date to include the day of 'start' timestamp
 	// Actually, if we want strict range, we should be careful.
 	// But usually reports are "Last 30 days".
 
 	rows, err := s.db.Query(`
-		SELECT user, date, uplink, downlink
+		SELECT user, ts, uplink, downlink
 		FROM daily_usage
-		WHERE user = ? AND date >= ? AND date <= ?
-	`, user, startDate, endDate)
+		WHERE user = ? AND ts >= ? AND ts <= ?
+	`, user, start, end)
 
 	var samples []Sample
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
-			var u, d string
+			var u string
+			var ts int64
 			var up, down int64
-			if err := rows.Scan(&u, &d, &up, &down); err == nil {
-				// Parse date to timestamp (UTC noon to allow some margin)
-				t, _ := time.Parse("2006-01-02", d)
-				// Add 12h to be in the middle of the day? Or just use midnight.
-				// Midnight is fine.
+			if err := rows.Scan(&u, &ts, &up, &down); err == nil {
 				samples = append(samples, Sample{
 					User:      u,
-					Timestamp: t.Unix(),
+					Timestamp: ts,
 					Uplink:    up,
 					Downlink:  down,
 				})

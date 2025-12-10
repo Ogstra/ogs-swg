@@ -131,8 +131,12 @@ func (s *Server) startWireGuardSampler() {
 					})
 				}
 				if len(samples) > 0 && s.store != nil {
+					start := time.Now()
 					if err := s.store.InsertWGSamples(samples); err != nil {
 						log.Printf("wg sampler: insert error: %v", err)
+						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), err.Error())
+					} else {
+						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), "")
 					}
 				}
 			case <-s.wgSamplerStop:
@@ -413,6 +417,14 @@ func StartServer(cfg *core.Config) {
 					log.Printf("Aggregation compression error: %v", err)
 				} else if compressed > 0 {
 					log.Printf("Aggregation: compressed %d samples older than %d", compressed, aggCutoff)
+					vacuumNeeded = true
+				}
+
+				wgCompressed, err := store.CompressOldWGSamples(aggCutoff)
+				if err != nil {
+					log.Printf("WG Aggregation compression error: %v", err)
+				} else if wgCompressed > 0 {
+					log.Printf("WG Aggregation: compressed %d samples older than %d", wgCompressed, aggCutoff)
 					vacuumNeeded = true
 				}
 			}

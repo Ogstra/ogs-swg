@@ -461,7 +461,7 @@ export default function Settings() {
                         <div className="space-y-4 mb-6 pt-4 border-t border-slate-800">
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
-                                    <label className="text-xs font-medium text-slate-400">Retention Days</label>
+                                    <label className="text-xs font-medium text-slate-400">Retention Days (Sing-Box)</label>
                                     <input
                                         type="number"
                                         min={1}
@@ -471,7 +471,7 @@ export default function Settings() {
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-medium text-slate-400">WG Retention</label>
+                                    <label className="text-xs font-medium text-slate-400">Retention Days (Wireguard)</label>
                                     <input
                                         type="number"
                                         min={1}

@@ -51,8 +51,22 @@ export default function RawConfig() {
             }
         }
         if (idx >= 0) {
+            textarea.blur()
             textarea.focus()
             textarea.setSelectionRange(idx, idx + searchTerm.length)
+
+            // Manual scroll calculation
+            // Estimate line height ~21px (1.5 * 14px) + 16px padding
+            const linesBefore = haystack.substring(0, idx).split('\n').length - 1
+            const lineHeight = 21
+            const padding = 16
+            const scrollValues = linesBefore * lineHeight + padding
+
+            const shell = document.querySelector('.raw-editor-shell')
+            if (shell) {
+                // Centering slightly
+                shell.scrollTop = Math.max(0, scrollValues - shell.clientHeight / 2)
+            }
         }
     }
 

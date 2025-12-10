@@ -50,7 +50,9 @@ export default function Dashboard() {
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [chartData, setChartData] = useState<any[]>([])
 
-    // Custom Date Range
+    const [wgPeers, setWgPeers] = useState<any[]>([])
+    const [consumerTab, setConsumerTab] = useState<'singbox' | 'wireguard'>('singbox')
+
     const now = new Date()
     const today = now.toISOString().split('T')[0]
     const [customStart, setCustomStart] = useState(today)
@@ -101,11 +103,12 @@ export default function Dashboard() {
                 reportEndDate = endSec.toString()
             }
 
-            const [reportData, statusData, wgTrafficRes, wgSeries] = await Promise.all([
+            const [reportData, statusData, wgTrafficRes, wgSeries, wgPeersData] = await Promise.all([
                 api.getReport(reportStartDate, reportEndDate),
                 api.getSystemStatus(),
                 api.getWireGuardTrafficRange(startSec, endSec).catch(() => ({})),
-                api.getWireGuardTrafficSeries(undefined, undefined, 2000, startSec, endSec).catch(() => ({}))
+                api.getWireGuardTrafficSeries(undefined, undefined, 2000, startSec, endSec).catch(() => ({})),
+                api.getWireGuardPeers().catch(() => [])
             ])
             let wgRx = 0
             let wgTx = 0
@@ -148,7 +151,20 @@ export default function Dashboard() {
                 journalctl_available: statusData?.journalctl_available ?? true,
             })
             setWgTraffic({ rx: wgRx, tx: wgTx })
-            setChartData(chartMode === 'singbox' ? statsData.map((p: any) => ({ ts: p.timestamp, uplink: p.uplink, downlink: p.downlink })) : wgChart)
+            setWgPeers(Array.isArray(wgPeersData) ? wgPeersData : [])
+
+            // Process Chart Data to be Cumulative
+            const rawChartData = chartMode === 'singbox' ? statsData.map((p: any) => ({ ts: p.timestamp, uplink: p.uplink, downlink: p.downlink })) : wgChart
+
+            let accUp = 0
+            let accDown = 0
+            const cumulativeData = rawChartData.map((p: any) => {
+                accUp += p.uplink || 0
+                accDown += p.downlink || 0
+                return { ...p, uplink: accUp, downlink: accDown }
+            })
+
+            setChartData(cumulativeData)
             setLastUpdated(new Date())
         } catch (err) {
             console.error(err)
@@ -167,7 +183,20 @@ export default function Dashboard() {
     const totalUp = stats.reduce((acc, p) => acc + p.uplink, 0)
     const totalDown = stats.reduce((acc, p) => acc + p.downlink, 0)
 
-    const topConsumers = [...users].sort((a, b) => b.total - a.total).slice(0, 5)
+    const topSingbox = [...users].sort((a, b) => b.total - a.total).slice(0, 5)
+    // For WG, we need to map RX/TX to total. RX (down relative to server) = Upload for User? 
+    // Usually: RX on Interface = Upload from User. TX on Interface = Download to User.
+    // However, typical terminology: "Uplink" = User Upload. 
+    // Let's assume RX=Uplink, TX=Downlink for VPN context relative to server.
+    const topWireGuard = [...wgPeers].map(p => ({
+        name: p.alias || p.public_key.substring(0, 8),
+        total: (p.rx || 0) + (p.tx || 0),
+        key: p.public_key,
+        flow: 'WireGuard',
+        quota_limit: 0
+    })).sort((a, b) => b.total - a.total).slice(0, 5)
+
+    const topConsumers = consumerTab === 'singbox' ? topSingbox : topWireGuard
 
     return (
         <div className="space-y-6">
@@ -440,7 +469,26 @@ export default function Dashboard() {
                 </div>
 
                 {/* Top Consumers */}
-                <Card title="Top Consumers" className="h-full">
+                <Card
+                    title="Top Consumers"
+                    className="h-full"
+                    action={
+                        <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                            <button
+                                onClick={() => setConsumerTab('singbox')}
+                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${consumerTab === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                            >
+                                Proxy
+                            </button>
+                            <button
+                                onClick={() => setConsumerTab('wireguard')}
+                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${consumerTab === 'wireguard' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                            >
+                                WireGuard
+                            </button>
+                        </div>
+                    }
+                >
                     <div className="space-y-4 mt-2">
                         {topConsumers.length === 0 ? (
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
