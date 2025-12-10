@@ -37,6 +37,10 @@ func (c *SingboxClient) ensureConn() (*grpc.ClientConn, error) {
 }
 
 func (c *SingboxClient) GetTraffic(inboundTag string) (int64, int64, error) {
+	return c.GetTrafficMulti([]string{inboundTag})
+}
+
+func (c *SingboxClient) GetTrafficMulti(tags []string) (int64, int64, error) {
 	conn, err := c.ensureConn()
 	if err != nil {
 		return 0, 0, err
@@ -45,27 +49,30 @@ func (c *SingboxClient) GetTraffic(inboundTag string) (int64, int64, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	upName := fmt.Sprintf("inbound>>>%s>>>traffic>>>uplink", inboundTag)
-	var upResp statsService.GetStatsResponse
-	if err := conn.Invoke(ctx, "/v2ray.core.app.stats.command.StatsService/GetStats", &statsService.GetStatsRequest{Name: upName}, &upResp); err != nil {
-		return 0, 0, err
-	}
-	var upVal int64
-	if err == nil && upResp.Stat != nil {
-		upVal = upResp.Stat.Value
+	var totalUp, totalDown int64
+	for _, inboundTag := range tags {
+		inboundTag = strings.TrimSpace(inboundTag)
+		if inboundTag == "" {
+			continue
+		}
+		upName := fmt.Sprintf("inbound>>>%s>>>traffic>>>uplink", inboundTag)
+		var upResp statsService.GetStatsResponse
+		if err := conn.Invoke(ctx, "/v2ray.core.app.stats.command.StatsService/GetStats", &statsService.GetStatsRequest{Name: upName}, &upResp); err == nil && upResp.Stat != nil {
+			totalUp += upResp.Stat.Value
+		}
+
+		downName := fmt.Sprintf("inbound>>>%s>>>traffic>>>downlink", inboundTag)
+		var downResp statsService.GetStatsResponse
+		if err := conn.Invoke(ctx, "/v2ray.core.app.stats.command.StatsService/GetStats", &statsService.GetStatsRequest{Name: downName}, &downResp); err == nil && downResp.Stat != nil {
+			totalDown += downResp.Stat.Value
+		}
 	}
 
-	downName := fmt.Sprintf("inbound>>>%s>>>traffic>>>downlink", inboundTag)
-	var downResp statsService.GetStatsResponse
-	if err := conn.Invoke(ctx, "/v2ray.core.app.stats.command.StatsService/GetStats", &statsService.GetStatsRequest{Name: downName}, &downResp); err != nil {
-		return upVal, 0, err
-	}
-	var downVal int64
-	if err == nil && downResp.Stat != nil {
-		downVal = downResp.Stat.Value
+	if totalUp == 0 && totalDown == 0 && len(tags) > 0 {
+		return 0, 0, fmt.Errorf("no inbound stats found for %+v", tags)
 	}
 
-	return upVal, downVal, nil
+	return totalUp, totalDown, nil
 }
 
 func (c *SingboxClient) GetUserTraffic(name string) (int64, int64, error) {

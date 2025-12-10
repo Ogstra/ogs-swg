@@ -31,6 +31,8 @@ export interface FeatureFlags {
     sampler_interval_sec?: number;
     sampler_paused?: boolean;
     active_threshold_bytes?: number;
+    wg_sampler_interval_sec?: number;
+    wg_retention_days?: number;
     log_source?: 'journal' | 'file';
     access_log_path?: string;
     systemctl_available?: boolean;
@@ -40,8 +42,8 @@ export interface FeatureFlags {
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
     if (contentType) headers['Content-Type'] = contentType;
-    const apiKey = localStorage.getItem('xpanel_api_key');
-    if (apiKey) headers['X-API-Key'] = apiKey;
+    const token = localStorage.getItem('token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
     return headers;
 };
 
@@ -58,6 +60,28 @@ export const api = {
     resumeSampler: async (): Promise<void> => {
         const res = await fetch('/api/sampler/resume', { method: 'POST', headers: buildHeaders() });
         if (!res.ok) throw new Error('Failed to resume sampler');
+    },
+    updatePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
+        const res = await fetch('/api/auth/password', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text || 'Failed to update password');
+        }
+    },
+    updateUsername: async (currentPassword: string, newUsername: string): Promise<void> => {
+        const res = await fetch('/api/auth/username', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ current_password: currentPassword, new_username: newUsername })
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text || 'Failed to update username');
+        }
     },
     createUser: async (user: CreateUserRequest): Promise<void> => {
         const res = await fetch('/api/users', {
@@ -118,9 +142,10 @@ export const api = {
         if (!res.ok) throw new Error('Failed to fetch logs');
         return res.json();
     },
-    searchLogs: async (query: string, limit?: number): Promise<{ logs: string[] }> => {
+    searchLogs: async (query: string, limit?: number, page?: number): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
         const params = new URLSearchParams({ q: query });
         if (limit) params.set('limit', String(limit));
+        if (page) params.set('page', String(page));
         const res = await fetch(`/api/logs/search?${params.toString()}`, { headers: buildHeaders() });
         const text = await res.text();
         if (!res.ok) throw new Error(text || 'Failed to search logs');
@@ -137,11 +162,11 @@ export const api = {
         if (!res.ok) throw new Error('Failed to fetch peers');
         return res.json();
     },
-    createWireGuardPeer: async (alias: string): Promise<any> => {
+    createWireGuardPeer: async (payload: { alias: string; ip: string; endpoint?: string }): Promise<any> => {
         const res = await fetch('/api/wireguard/peers', {
             method: 'POST',
             headers: buildHeaders('application/json'),
-            body: JSON.stringify({ alias })
+            body: JSON.stringify(payload)
         });
         if (!res.ok) throw new Error('Failed to create peer');
         return res.json();
@@ -173,6 +198,50 @@ export const api = {
             body: JSON.stringify(config)
         });
         if (!res.ok) throw new Error('Failed to update peer');
+    },
+    getWireGuardPeerConfig: async (publicKey: string, privateKey?: string): Promise<{ config: string }> => {
+        const params = new URLSearchParams({ public_key: publicKey })
+        if (privateKey) params.set('private_key', privateKey)
+        const res = await fetch(`/api/wireguard/peer/config?${params.toString()}`, {
+            headers: buildHeaders()
+        });
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(text || 'Failed to fetch peer config');
+        }
+        return res.json();
+    },
+    getWireGuardTraffic: async (range: string): Promise<Record<string, { rx: number; tx: number }>> => {
+        const params = new URLSearchParams({ range })
+        const res = await fetch(`/api/wireguard/traffic?${params.toString()}`, { headers: buildHeaders() })
+        if (!res.ok) {
+            const text = await res.text()
+            throw new Error(text || 'Failed to fetch WireGuard traffic')
+        }
+        return res.json()
+    },
+    getWireGuardTrafficRange: async (start: number, end: number): Promise<Record<string, { rx: number; tx: number }>> => {
+        const params = new URLSearchParams({ start: String(start), end: String(end) })
+        const res = await fetch(`/api/wireguard/traffic?${params.toString()}`, { headers: buildHeaders() })
+        if (!res.ok) {
+            const text = await res.text()
+            throw new Error(text || 'Failed to fetch WireGuard traffic')
+        }
+        return res.json()
+    },
+    getWireGuardTrafficSeries: async (range?: string, peer?: string, limit?: number, start?: number, end?: number): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
+        const params = new URLSearchParams()
+        if (range) params.append('range', range)
+        if (peer) params.append('peer', peer)
+        if (limit) params.append('limit', String(limit))
+        if (start) params.append('start', String(start))
+        if (end) params.append('end', String(end))
+        const res = await fetch(`/api/wireguard/traffic/series?${params.toString()}`, { headers: buildHeaders() })
+        if (!res.ok) {
+            const text = await res.text()
+            throw new Error(text || 'Failed to fetch WireGuard traffic series')
+        }
+        return res.json()
     },
 
     // Service Control
@@ -239,6 +308,11 @@ export const api = {
         if (!res.ok) throw new Error('Failed to restore WireGuard config');
         return res.text();
     },
+    getBackupMeta: async (): Promise<{ singbox_last_backup?: string; wireguard_last_backup?: string }> => {
+        const res = await fetch('/api/config/backup/meta', { headers: buildHeaders() });
+        if (!res.ok) throw new Error('Failed to load backup metadata');
+        return res.json();
+    },
     updateWireGuardConfig: async (config: string): Promise<void> => {
         const res = await fetch('/api/wireguard/config', {
             method: 'PUT',
@@ -258,7 +332,7 @@ export const api = {
         if (!res.ok) throw new Error('Failed to fetch stats');
         return res.json();
     },
-    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> => {
+    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; wireguard_pending_restart?: boolean; wg_sample_interval_sec?: number; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> => {
         const res = await fetch('/api/status', { headers: buildHeaders() });
         if (!res.ok) throw new Error('Failed to fetch system status');
         return res.json();

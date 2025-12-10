@@ -34,3 +34,12 @@ ogs-swg
 ogs-swg.exe
 ogs-swg.exe~
 *.tgz
+*.bak
+cookies.txt
+cookies_*.txt
+.env
+.DS_Store
+token.json
+token_new.json
+stats.db-shm
+stats.db-wal

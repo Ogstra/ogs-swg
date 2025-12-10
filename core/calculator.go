@@ -6,22 +6,22 @@ import (
 )
 
 type Calculator struct {
-	watcher    *Watcher
-	sbClient  *SingboxClient
-	store      *Store
-	inboundTag string
-	
+	watcher     *Watcher
+	sbClient    *SingboxClient
+	store       *Store
+	inboundTags []string
+
 	lastUplink   int64
 	lastDownlink int64
 	initialized  bool
 }
 
-func NewCalculator(w *Watcher, sb *SingboxClient, s *Store, inboundTag string) *Calculator {
+func NewCalculator(w *Watcher, sb *SingboxClient, s *Store, inboundTags []string) *Calculator {
 	return &Calculator{
-		watcher:    w,
-		sbClient:   sb,
-		store:      s,
-		inboundTag: inboundTag,
+		watcher:     w,
+		sbClient:    sb,
+		store:       s,
+		inboundTags: inboundTags,
 	}
 }
 
@@ -39,7 +39,7 @@ func (c *Calculator) loop() {
 }
 
 func (c *Calculator) process() {
-	up, down, err := c.sbClient.GetTraffic(c.inboundTag)
+	up, down, err := c.sbClient.GetTrafficMulti(c.inboundTags)
 	if err != nil {
 		log.Printf("Error getting sing-box stats: %v", err)
 		return
@@ -55,8 +55,12 @@ func (c *Calculator) process() {
 	deltaUp := up - c.lastUplink
 	deltaDown := down - c.lastDownlink
 
-	if deltaUp < 0 { deltaUp = up }
-	if deltaDown < 0 { deltaDown = down }
+	if deltaUp < 0 {
+		deltaUp = up
+	}
+	if deltaDown < 0 {
+		deltaDown = down
+	}
 
 	c.lastUplink = up
 	c.lastDownlink = down
@@ -90,6 +94,6 @@ func (c *Calculator) process() {
 			log.Printf("Error saving sample for %s: %v", user, err)
 		}
 	}
-	
+
 	log.Printf("Distributed %d up / %d down among %d users", deltaUp, deltaDown, count)
 }

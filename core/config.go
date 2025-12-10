@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 )
 
 type Config struct {
@@ -25,8 +26,13 @@ type Config struct {
 	ActiveThresholdBytes int64    `json:"active_threshold_bytes"`
 	RetentionEnabled     bool     `json:"retention_enabled"`
 	RetentionDays        int      `json:"retention_days"`
+	WGSamplerIntervalSec int      `json:"wg_sampler_interval_sec"`
+	WGRetentionDays      int      `json:"wg_retention_days"`
 	ConfigPath           string   `json:"-"`
 	APIKey               string   `json:"api_key"`
+
+	JWTSecret string `json:"jwt_secret"`
+	mu        sync.Mutex
 }
 
 type UserAccount struct {
@@ -55,6 +61,10 @@ func LoadConfig(path ...string) *Config {
 		ActiveThresholdBytes: 1024,
 		RetentionEnabled:     false,
 		RetentionDays:        90,
+		WGSamplerIntervalSec: 60,
+		WGRetentionDays:      30,
+
+		JWTSecret: "replace-me-with-a-secure-secret-please",
 	}
 
 	configPath := "config.json"
@@ -127,6 +137,9 @@ func LoadUsersFromSingboxConfig(path string, managed []string) ([]UserAccount, e
 }
 
 func (c *Config) AddUser(name, uuid, flow string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	flow = normalizeFlow(flow)
 
 	cfgMap, err := c.loadConfigMap()
@@ -162,6 +175,9 @@ func (c *Config) AddUser(name, uuid, flow string) error {
 }
 
 func (c *Config) RemoveUser(name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	cfgMap, err := c.loadConfigMap()
 	if err != nil {
 		return err
@@ -189,6 +205,9 @@ func (c *Config) RemoveUser(name string) error {
 }
 
 func (c *Config) UpdateUser(name, uuid, flow string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	flow = normalizeFlow(flow)
 
 	cfgMap, err := c.loadConfigMap()

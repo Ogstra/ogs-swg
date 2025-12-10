@@ -3,8 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Ogstra/ogs-swg/core"
-	"github.com/google/uuid"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -13,20 +12,44 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Ogstra/ogs-swg/core"
+	"github.com/google/uuid"
 )
 
 type Server struct {
-	store   *core.Store
-	config  *core.Config
-	sampler *core.StatsSampler
+	store            *core.Store
+	config           *core.Config
+	sampler          *core.StatsSampler
+	wgPendingRestart bool
+	wgQRCache        map[string]qrEntry
+	wgSamplerStop    chan struct{}
+	wgSamplerTicker  *time.Ticker
+	wgSampleInterval time.Duration
+	wgMux            sync.RWMutex
+}
+
+type qrEntry struct {
+	Config    string
+	ExpiresAt time.Time
 }
 
 func NewServer(store *core.Store, config *core.Config) *Server {
+	interval := 60 * time.Second
+	if config.WGSamplerIntervalSec > 0 {
+		interval = time.Duration(config.WGSamplerIntervalSec) * time.Second
+	}
 	return &Server{
-		store:   store,
-		config:  config,
-		sampler: nil,
+		store:            store,
+		config:           config,
+		sampler:          nil,
+		wgPendingRestart: false,
+		wgQRCache:        make(map[string]qrEntry),
+		wgSamplerStop:    make(chan struct{}),
+		wgSamplerTicker:  time.NewTicker(interval),
+		wgSampleInterval: interval,
 	}
 }
 
@@ -36,6 +59,13 @@ func (s *Server) secure(handler http.HandlerFunc) http.HandlerFunc {
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		// If authenticated via JWT (AuthMiddleware), allow
+		if r.Context().Value("user") != nil {
+			handler(w, r)
+			return
+		}
+
+		// Otherwise, enforce API Key
 		if r.Header.Get("X-API-Key") != s.config.APIKey {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -69,48 +99,239 @@ func (s *Server) reloadWireGuard() {
 	}
 }
 
+func (s *Server) markWireGuardPending() {
+	if s.config.EnableWireGuard {
+		s.wgPendingRestart = true
+	}
+}
+
+func (s *Server) clearWireGuardPending() {
+	s.wgPendingRestart = false
+}
+
+func (s *Server) startWireGuardSampler() {
+	go func() {
+		for {
+			select {
+			case <-s.wgSamplerTicker.C:
+				stats, err := core.GetWireGuardStats()
+				if err != nil {
+					log.Printf("wg sampler: failed to read stats: %v", err)
+					continue
+				}
+				var samples []core.WGSample
+				now := time.Now().Unix()
+				for _, st := range stats {
+					samples = append(samples, core.WGSample{
+						PublicKey: st.PublicKey,
+						Timestamp: now,
+						Rx:        st.TransferRx,
+						Tx:        st.TransferTx,
+						Endpoint:  st.Endpoint,
+					})
+				}
+				if len(samples) > 0 && s.store != nil {
+					if err := s.store.InsertWGSamples(samples); err != nil {
+						log.Printf("wg sampler: insert error: %v", err)
+					}
+				}
+			case <-s.wgSamplerStop:
+				if s.wgSamplerTicker != nil {
+					s.wgSamplerTicker.Stop()
+				}
+				return
+			}
+		}
+	}()
+}
+
+func (s *Server) syncWireGuardConfig(wgConfig *core.WireGuardConfig) bool {
+	if !s.config.EnableWireGuard {
+		return false
+	}
+	if _, err := exec.LookPath("wg"); err != nil {
+		log.Printf("wg syncconf skipped: wg binary not found (%v)", err)
+		return false
+	}
+
+	iface := strings.TrimSuffix(filepath.Base(s.config.WireGuardConfigPath), filepath.Ext(s.config.WireGuardConfigPath))
+	if iface == "" {
+		iface = "wg0"
+	}
+
+	syncPath, cleanup, err := s.writeSyncConf(wgConfig)
+	if err != nil {
+		log.Printf("wg syncconf prepare failed: %v", err)
+		return false
+	}
+	defer cleanup()
+
+	cmd := exec.Command("wg", "syncconf", iface, syncPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("wg syncconf failed (cmd: wg syncconf %s %s): %v - output: %s", iface, syncPath, err, strings.TrimSpace(string(out)))
+		return false
+	}
+
+	s.clearWireGuardPending()
+	return true
+}
+
+func (s *Server) writeSyncConf(wgConfig *core.WireGuardConfig) (string, func(), error) {
+	if wgConfig == nil {
+		cfg, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+		if err != nil {
+			return "", func() {}, err
+		}
+		wgConfig = cfg
+	}
+
+	tmpFile, err := os.CreateTemp("", "wg-sync-*.conf")
+	if err != nil {
+		return "", func() {}, err
+	}
+
+	cleanup := func() {
+		tmpFile.Close()
+		os.Remove(tmpFile.Name())
+	}
+
+	var b strings.Builder
+	b.WriteString("[Interface]\n")
+	if wgConfig.Interface.PrivateKey != "" {
+		fmt.Fprintf(&b, "PrivateKey = %s\n", wgConfig.Interface.PrivateKey)
+	}
+	if wgConfig.Interface.ListenPort != 0 {
+		fmt.Fprintf(&b, "ListenPort = %d\n", wgConfig.Interface.ListenPort)
+	}
+	if wgConfig.Interface.MTU != 0 {
+		fmt.Fprintf(&b, "MTU = %d\n", wgConfig.Interface.MTU)
+	}
+	b.WriteString("\n")
+
+	for _, p := range wgConfig.Peers {
+		fmt.Fprintf(&b, "[Peer]\n")
+		fmt.Fprintf(&b, "PublicKey = %s\n", p.PublicKey)
+		fmt.Fprintf(&b, "AllowedIPs = %s\n", p.AllowedIPs)
+		if p.Endpoint != "" {
+			fmt.Fprintf(&b, "Endpoint = %s\n", p.Endpoint)
+		}
+		if p.PresharedKey != "" {
+			fmt.Fprintf(&b, "PresharedKey = %s\n", p.PresharedKey)
+		}
+		fmt.Fprintf(&b, "\n")
+	}
+
+	if _, err := tmpFile.WriteString(b.String()); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+
+	return tmpFile.Name(), cleanup, nil
+}
+
+func (s *Server) storeQRConfig(pubKey, cfg string, ttl time.Duration) {
+	if pubKey == "" || cfg == "" {
+		return
+	}
+
+	s.wgMux.Lock()
+	defer s.wgMux.Unlock()
+	s.cleanupQRCache()
+	s.wgQRCache[pubKey] = qrEntry{
+		Config:    cfg,
+		ExpiresAt: time.Now().Add(ttl),
+	}
+}
+
+func (s *Server) fetchQRConfig(pubKey string) (string, bool) {
+	s.wgMux.Lock()
+	defer s.wgMux.Unlock()
+	s.cleanupQRCache()
+	if entry, ok := s.wgQRCache[pubKey]; ok {
+		if time.Now().Before(entry.ExpiresAt) {
+			return entry.Config, true
+		}
+		delete(s.wgQRCache, pubKey)
+	}
+	return "", false
+}
+
+func (s *Server) hasQRConfig(pubKey string) bool {
+	_, ok := s.fetchQRConfig(pubKey)
+	return ok
+}
+
+func (s *Server) cleanupQRCache() {
+	now := time.Now()
+	for k, v := range s.wgQRCache {
+		if now.After(v.ExpiresAt) {
+			delete(s.wgQRCache, k)
+		}
+	}
+}
+
 func (s *Server) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/users", s.secure(s.handleGetUsers))
-	mux.HandleFunc("GET /api/report", s.secure(s.handleGetReport))
-	mux.HandleFunc("GET /api/report/summary", s.secure(s.handleGetReportSummary))
-	mux.HandleFunc("GET /api/logs", s.secure(s.handleGetLogs))
-	mux.HandleFunc("GET /api/logs/search", s.secure(s.handleSearchLogs))
-	mux.HandleFunc("POST /api/users", s.secure(s.handleCreateUser))
-	mux.HandleFunc("PUT /api/users", s.secure(s.handleUpdateUser))
-	mux.HandleFunc("DELETE /api/users", s.secure(s.handleDeleteUser))
-	mux.HandleFunc("POST /api/users/bulk", s.secure(s.handleBulkCreateUsers))
+	// Public Login
+	mux.HandleFunc("POST /api/login", s.handleLogin)
 
-	mux.HandleFunc("GET /api/wireguard/peers", s.secure(s.handleGetWireGuardPeers))
-	mux.HandleFunc("POST /api/wireguard/peers", s.secure(s.handleCreateWireGuardPeer))
-	mux.HandleFunc("DELETE /api/wireguard/peers", s.secure(s.handleDeleteWireGuardPeer))
-	mux.HandleFunc("GET /api/wireguard/interface", s.secure(s.handleGetWireGuardInterface))
-	mux.HandleFunc("PUT /api/wireguard/interface", s.secure(s.handleUpdateWireGuardInterface))
-	mux.HandleFunc("PUT /api/wireguard/peer", s.secure(s.handleUpdateWireGuardPeer))
+	// Auth Management
+	protected := http.NewServeMux()
+	protected.HandleFunc("PUT /api/auth/password", s.secure(s.handleUpdatePassword))
+	protected.HandleFunc("PUT /api/auth/username", s.secure(s.handleUpdateUsername))
 
-	mux.HandleFunc("POST /api/service/restart", s.secure(s.handleRestartService))
-	mux.HandleFunc("POST /api/service/start", s.secure(s.handleStartService))
-	mux.HandleFunc("POST /api/service/stop", s.secure(s.handleStopService))
+	protected.HandleFunc("GET /api/users", s.secure(s.handleGetUsers))
+	protected.HandleFunc("GET /api/report", s.secure(s.handleGetReport))
+	protected.HandleFunc("GET /api/report/summary", s.secure(s.handleGetReportSummary))
+	protected.HandleFunc("GET /api/logs", s.secure(s.handleGetLogs))
+	protected.HandleFunc("GET /api/logs/search", s.secure(s.handleSearchLogs))
+	protected.HandleFunc("POST /api/users", s.secure(s.handleCreateUser))
+	protected.HandleFunc("PUT /api/users", s.secure(s.handleUpdateUser))
+	protected.HandleFunc("DELETE /api/users", s.secure(s.handleDeleteUser))
+	protected.HandleFunc("POST /api/users/bulk", s.secure(s.handleBulkCreateUsers))
 
-	mux.HandleFunc("GET /api/settings/features", s.secure(s.handleGetFeatures))
-	mux.HandleFunc("PUT /api/settings/features", s.secure(s.handleUpdateFeatures))
-	mux.HandleFunc("POST /api/sampler/run", s.secure(s.handleRunSampler))
-	mux.HandleFunc("GET /api/sampler/history", s.secure(s.handleSamplerHistory))
-	mux.HandleFunc("POST /api/sampler/pause", s.secure(s.handlePauseSampler))
-	mux.HandleFunc("POST /api/sampler/resume", s.secure(s.handleResumeSampler))
-	mux.HandleFunc("POST /api/retention/prune", s.secure(s.handlePruneNow))
-	mux.HandleFunc("POST /api/config/backup", s.secure(s.handleBackupConfig))
-	mux.HandleFunc("POST /api/config/restore", s.secure(s.handleRestoreConfig))
-	mux.HandleFunc("POST /api/wireguard/config/backup", s.secure(s.handleBackupWireGuardConfig))
-	mux.HandleFunc("POST /api/wireguard/config/restore", s.secure(s.handleRestoreWireGuardConfig))
+	protected.HandleFunc("GET /api/wireguard/peers", s.secure(s.handleGetWireGuardPeers))
+	protected.HandleFunc("POST /api/wireguard/peers", s.secure(s.handleCreateWireGuardPeer))
+	protected.HandleFunc("DELETE /api/wireguard/peers", s.secure(s.handleDeleteWireGuardPeer))
+	protected.HandleFunc("GET /api/wireguard/interface", s.secure(s.handleGetWireGuardInterface))
+	protected.HandleFunc("PUT /api/wireguard/interface", s.secure(s.handleUpdateWireGuardInterface))
+	protected.HandleFunc("PUT /api/wireguard/peer", s.secure(s.handleUpdateWireGuardPeer))
+	protected.HandleFunc("GET /api/wireguard/peer/config", s.secure(s.handleGetWireGuardPeerConfig))
 
-	mux.HandleFunc("GET /api/config", s.secure(s.handleGetConfig))
-	mux.HandleFunc("PUT /api/config", s.secure(s.handleUpdateConfig))
-	mux.HandleFunc("GET /api/wireguard/config", s.secure(s.handleGetWireGuardConfig))
-	mux.HandleFunc("PUT /api/wireguard/config", s.secure(s.handleUpdateWireGuardConfig))
+	protected.HandleFunc("POST /api/service/restart", s.secure(s.handleRestartService))
+	protected.HandleFunc("POST /api/service/start", s.secure(s.handleStartService))
+	protected.HandleFunc("POST /api/service/stop", s.secure(s.handleStopService))
 
-	mux.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
-	mux.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
+	protected.HandleFunc("GET /api/settings/features", s.secure(s.handleGetFeatures))
+	protected.HandleFunc("PUT /api/settings/features", s.secure(s.handleUpdateFeatures))
+	protected.HandleFunc("POST /api/sampler/run", s.secure(s.handleRunSampler))
+	protected.HandleFunc("GET /api/sampler/history", s.secure(s.handleSamplerHistory))
+	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.handlePauseSampler))
+	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.handleResumeSampler))
+	protected.HandleFunc("POST /api/retention/prune", s.secure(s.handlePruneNow))
+	protected.HandleFunc("POST /api/config/backup", s.secure(s.handleBackupConfig))
+	protected.HandleFunc("POST /api/config/restore", s.secure(s.handleRestoreConfig))
+	protected.HandleFunc("GET /api/config/backup/meta", s.secure(s.handleGetBackupMeta))
+	protected.HandleFunc("POST /api/wireguard/config/backup", s.secure(s.handleBackupWireGuardConfig))
+	protected.HandleFunc("POST /api/wireguard/config/restore", s.secure(s.handleRestoreWireGuardConfig))
+	protected.HandleFunc("GET /api/wireguard/traffic", s.secure(s.handleGetWireGuardTraffic))
+	protected.HandleFunc("GET /api/wireguard/traffic/series", s.secure(s.handleGetWireGuardTrafficSeries))
+
+	protected.HandleFunc("GET /api/config", s.secure(s.handleGetConfig))
+	protected.HandleFunc("PUT /api/config", s.secure(s.handleUpdateConfig))
+	protected.HandleFunc("GET /api/wireguard/config", s.secure(s.handleGetWireGuardConfig))
+	protected.HandleFunc("PUT /api/wireguard/config", s.secure(s.handleUpdateWireGuardConfig))
+
+	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
+	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
+
+	// Mount protected routes under /api/
+	mux.Handle("/api/", s.AuthMiddleware(protected))
 
 	return mux
 }
@@ -121,6 +342,10 @@ func StartServer(cfg *core.Config) {
 	store, err := core.NewStore(cfg.DatabasePath)
 	if err != nil {
 		panic("StartServer: failed to open database: " + err.Error())
+	}
+
+	if err := store.EnsureDefaultAdmin(); err != nil {
+		log.Printf("StartServer: failed to ensure default admin: %v", err)
 	}
 
 	server := NewServer(store, cfg)
@@ -134,15 +359,19 @@ func StartServer(cfg *core.Config) {
 		} else {
 			watcher := core.NewWatcher(cfg.AccessLogPath)
 			watcher.Start()
-			inboundTag := ""
-			if len(cfg.ManagedInbounds) > 0 {
-				inboundTag = cfg.ManagedInbounds[0]
+			inboundTags := cfg.StatsInbounds
+			if len(inboundTags) == 0 {
+				inboundTags = cfg.ManagedInbounds
 			}
-			calc := core.NewCalculator(watcher, sbClient, store, inboundTag)
+			calc := core.NewCalculator(watcher, sbClient, store, inboundTags)
 			calc.Start()
 		}
 	} else {
 		log.Printf("sing-box disabled via config; skipping watcher/sampler")
+	}
+
+	if cfg.EnableWireGuard {
+		server.startWireGuardSampler()
 	}
 
 	if cfg.RetentionEnabled && cfg.RetentionDays > 0 {
@@ -156,6 +385,23 @@ func StartServer(cfg *core.Config) {
 					log.Printf("Retention prune error: %v", err)
 				} else if deleted > 0 {
 					log.Printf("Retention prune: removed %d samples older than %d", deleted, cutoff)
+				}
+				<-ticker.C
+			}
+		}()
+	}
+
+	if cfg.WGRetentionDays > 0 {
+		go func() {
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for {
+				cutoff := time.Now().Add(-time.Duration(cfg.WGRetentionDays) * 24 * time.Hour).Unix()
+				deleted, err := store.PruneWGSamplesOlderThan(cutoff)
+				if err != nil {
+					log.Printf("WG retention prune error: %v", err)
+				} else if deleted > 0 {
+					log.Printf("WG retention prune: removed %d samples older than %d", deleted, cutoff)
 				}
 				<-ticker.C
 			}
@@ -200,27 +446,89 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
-	users, err := core.LoadUsersFromSingboxConfig(s.config.SingboxConfigPath, s.config.ManagedInbounds)
+	// 1. Load active users from Singbox Config
+	activeUsers, err := core.LoadUsersFromSingboxConfig(s.config.SingboxConfigPath, s.config.ManagedInbounds)
 	if err != nil {
 		http.Error(w, "Failed to load users: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// 2. Load all metadata (includes disabled users)
+	allMeta, err := s.store.GetAllUserMetadata()
+	if err != nil {
+		http.Error(w, "Failed to load metadata: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Map for quick lookup
+	activeMap := make(map[string]core.UserAccount)
+	for _, u := range activeUsers {
+		activeMap[u.Name] = u
+	}
+
+	metaMap := make(map[string]core.UserMetadata)
+	for _, m := range allMeta {
+		metaMap[m.Email] = m
+	}
+
+	// 4. Merge unique names
+	uniqueNames := make(map[string]bool)
+	for k := range activeMap {
+		uniqueNames[k] = true
+	}
+	for k := range metaMap {
+		uniqueNames[k] = true
+	}
+
 	result := []UserStatus{}
 
-	for _, user := range users {
-		meta, _ := s.store.GetUserMetadata(user.Name)
+	for name := range uniqueNames {
+		// Default values
+		uuid := ""
+		flow := ""
 		limit := int64(0)
 		period := "monthly"
 		resetDay := 1
-		enabled := true
-		if meta != nil {
+		enabled := false // Default to false, check below
+
+		// If in active list, they are definitely enabled (and have UUID/Flow)
+		if u, ok := activeMap[name]; ok {
+			uuid = u.UUID
+			flow = u.Flow
+			enabled = true
+		}
+
+		// Overlay metadata if available
+		if meta, ok := metaMap[name]; ok {
 			limit = meta.QuotaLimit
 			period = meta.QuotaPeriod
 			resetDay = meta.ResetDay
-			enabled = meta.Enabled
+			// If user is NOT in activeMap, we trust metadata's 'Enabled' flag,
+			// but since they are not active, they are effectively disabled.
+			// However, to show the correct UI state, if metadata says Enabled=true but they are missing from config,
+			// something is wrong. But mostly, we expect:
+			// - In Config: Enabled=true
+			// - Not in Config: Enabled=false (usually)
+			// We'll use the presence in activeMap as the source of truth for "Enabled",
+			// UNLESS we want to show "Disabled" users.
+			// If not in activeMap, enabled stays false (or we can use meta.Enabled if we want to show intended state).
+			// Let's rely on presence in activeMap for the reported 'enabled' status to be safe,
+			// OR we can trust meta.Enabled if we want to show "User thinks they are enabled but system broken".
+			// For now: "Enabled" means "Is currently in Singbox config".
+			// UPDATE: User wants toggle. If I toggle OFF, I remove from config. meta.Enabled = false.
+			// If I toggle ON, I add to config. meta.Enabled = true.
+			// So relying on activeMap presence is correct for "Is Actually Running".
+			// But for UI state, if I manually removed them from config file, UI should show disabled.
+
+			// If I strictly use activeMap, then disabled users show as disabled. Perfect.
+			if !enabled && meta.Enabled {
+				// Edge case: In DB as enabled, but not in Config.
+				// Treat as disabled or error? Let's just treat as disabled.
+				enabled = false
+			}
 		}
 
+		// Stats calculation
 		now := time.Now()
 		var startOfPeriod time.Time
 
@@ -238,30 +546,29 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			startOfPeriod = time.Date(now.Year(), now.Month(), resetDay, 0, 0, 0, 0, now.Location())
 		}
 
-		samples, err := s.store.GetSamples(user.Name, startOfPeriod.Unix(), now.Unix())
-		if err != nil {
-			continue
-		}
-
+		samples, err := s.store.GetSamples(name, startOfPeriod.Unix(), now.Unix())
 		var up, down int64
 		lastSeen := int64(0)
-		for _, smp := range samples {
-			up += smp.Uplink
-			down += smp.Downlink
-			if (smp.Uplink+smp.Downlink) >= s.config.ActiveThresholdBytes && smp.Timestamp > lastSeen {
-				lastSeen = smp.Timestamp
+		if err == nil {
+			for _, smp := range samples {
+				up += smp.Uplink
+				down += smp.Downlink
+				if (smp.Uplink+smp.Downlink) >= s.config.ActiveThresholdBytes && smp.Timestamp > lastSeen {
+					lastSeen = smp.Timestamp
+				}
 			}
 		}
+
 		if lastSeen == 0 {
-			if ts, err := s.store.GetLastSeenWithThreshold(user.Name, s.config.ActiveThresholdBytes); err == nil && ts > 0 {
+			if ts, err := s.store.GetLastSeenWithThreshold(name, s.config.ActiveThresholdBytes); err == nil && ts > 0 {
 				lastSeen = ts
 			}
 		}
 
 		result = append(result, UserStatus{
-			Name:        user.Name,
-			UUID:        user.UUID,
-			Flow:        user.Flow,
+			Name:        name,
+			UUID:        uuid,
+			Flow:        flow,
 			Uplink:      up,
 			Downlink:    down,
 			Total:       up + down,
@@ -669,22 +976,37 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "q is required", http.StatusBadRequest)
 		return
 	}
-	limit := 200
+	pageSize := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 2000 {
-			limit = v
+			pageSize = v
 		}
+	}
+	if ps := r.URL.Query().Get("page_size"); ps != "" {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 2000 {
+			pageSize = v
+		}
+	}
+	page := 1
+	if p := r.URL.Query().Get("page"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 && v <= 1000 {
+			page = v
+		}
+	}
+	effectiveLimit := page * pageSize
+	if effectiveLimit > 5000 {
+		effectiveLimit = 5000
 	}
 
 	var lines []string
 	var err error
 	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		lines, err = searchJournalLines("sing-box", q, limit)
+		lines, err = searchJournalLines("sing-box", q, effectiveLimit)
 	} else {
-		lines, err = searchFileLines(s.config.AccessLogPath, q, limit)
+		lines, err = searchFileLines(s.config.AccessLogPath, q, effectiveLimit)
 		if (err != nil || len(lines) == 0) && s.config.LogSource == "file" {
 			// Fallback to journal if file missing/unreadable or no matches
-			if linesJ, jErr := searchJournalLines("sing-box", q, limit); jErr == nil {
+			if linesJ, jErr := searchJournalLines("sing-box", q, effectiveLimit); jErr == nil {
 				lines = linesJ
 				err = nil
 			}
@@ -698,9 +1020,23 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	start := (page - 1) * pageSize
+	end := start + pageSize
+	if start > len(lines) {
+		start = len(lines)
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	paged := lines[start:end]
+	hasMore := len(lines) == effectiveLimit && end == len(lines)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"logs": lines,
+		"logs":      paged,
+		"page":      page,
+		"page_size": pageSize,
+		"has_more":  hasMore,
 	})
 }
 
