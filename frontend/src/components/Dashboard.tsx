@@ -52,6 +52,7 @@ export default function Dashboard() {
     const [chartDomain, setChartDomain] = useState<[number, number] | undefined>(undefined)
 
     const [wgPeers, setWgPeers] = useState<any[]>([])
+    const [wgUsage, setWgUsage] = useState<Record<string, number>>({})
     // consumerTab removed, using chartMode for both
 
     const now = new Date()
@@ -139,6 +140,21 @@ export default function Dashboard() {
                     wgChartAccumulator[ts].downlink += dr
                 }
             })
+
+            // Calculate per-peer usage from Series (Windowed)
+            const wgUsageMap: Record<string, number> = {}
+            Object.entries(wgSeries || {}).forEach(([pubKey, samples]: [string, any]) => {
+                const arr = Array.isArray(samples) ? samples : []
+                if (arr.length < 1) return
+                const sorted = [...arr].sort((a: any, b: any) => (a.ts || a.timestamp) - (b.ts || b.timestamp))
+                const first = sorted[0]
+                const last = sorted[sorted.length - 1]
+                const rx = Math.max(0, (last.rx || 0) - (first.rx || 0))
+                const tx = Math.max(0, (last.tx || 0) - (first.tx || 0))
+                wgUsageMap[pubKey] = rx + tx
+            })
+            setWgUsage(wgUsageMap)
+
             const wgChart = Object.entries(wgChartAccumulator)
                 .map(([k, v]) => ({ ts: Number(k), uplink: v.uplink, downlink: v.downlink }))
                 .sort((a, b) => a.ts - b.ts)
@@ -195,13 +211,17 @@ export default function Dashboard() {
     // Usually: RX on Interface = Upload from User. TX on Interface = Download to User.
     // However, typical terminology: "Uplink" = User Upload. 
     // Let's assume RX=Uplink, TX=Downlink for VPN context relative to server.
+    // Calculate WG usage from Series (Windowed) instead of Total Stats
+    // Now utilizing the wgUsage state calculated in fetchData from the time-series
     const topWireGuard = [...wgPeers].map(p => ({
         name: p.alias || p.public_key.substring(0, 8),
-        total: (p.stats?.transfer_rx || 0) + (p.stats?.transfer_tx || 0),
+        total: wgUsage[p.public_key] || 0,
         key: p.public_key,
         flow: 'WireGuard',
         quota_limit: 0
-    })).sort((a, b) => b.total - a.total).slice(0, 5)
+    }))
+        .filter(p => p.total > 0) // Optional: filter out zero usage
+        .sort((a, b) => b.total - a.total).slice(0, 5)
 
     const topConsumers = chartMode === 'singbox' ? topSingbox : topWireGuard
 
