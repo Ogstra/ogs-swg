@@ -574,7 +574,12 @@ export default function Settings() {
                                 samplerHistory.map((run, idx) => (
                                     <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
                                         <div>
-                                            <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
+                                                    {run.source === 'wireguard' ? 'WG' : 'Proxy'}
+                                                </span>
+                                            </div>
                                             {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
                                         </div>
                                         <div className="text-right">

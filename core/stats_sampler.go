@@ -2,8 +2,8 @@ package core
 
 import (
 	"log"
-	"time"
 	"sync"
+	"time"
 )
 
 type StatsSampler struct {
@@ -126,19 +126,19 @@ func (s *StatsSampler) sampleOnce() {
 	if len(batch) == 0 {
 		log.Printf("StatsSampler: no deltas to insert (users=%d)", len(users))
 		if s.store != nil {
-			s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), 0, "")
+			s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), 0, "", "sing-box")
 		}
 		return
 	}
 	if err := s.store.BulkInsert(batch); err != nil {
 		log.Printf("StatsSampler: bulk insert error: %v", err)
 		if s.store != nil {
-			s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(batch)), err.Error())
+			s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(batch)), err.Error(), "sing-box")
 		}
 		return
 	}
 	if s.store != nil {
-		s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(batch)), "")
+		s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(batch)), "", "sing-box")
 	}
 	log.Printf("StatsSampler: inserted %d samples", len(batch))
 }
