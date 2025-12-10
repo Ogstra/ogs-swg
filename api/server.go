@@ -134,9 +134,9 @@ func (s *Server) startWireGuardSampler() {
 					start := time.Now()
 					if err := s.store.InsertWGSamples(samples); err != nil {
 						log.Printf("wg sampler: insert error: %v", err)
-						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), err.Error())
+						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), err.Error(), "wireguard")
 					} else {
-						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), "")
+						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), "", "wireguard")
 					}
 				}
 			case <-s.wgSamplerStop:

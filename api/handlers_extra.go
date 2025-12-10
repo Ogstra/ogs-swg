@@ -1269,6 +1269,8 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"wg_sampler_interval_sec": s.config.WGSamplerIntervalSec,
 		"sampler_paused":          s.sampler != nil && s.sampler.IsPaused(),
 		"active_threshold_bytes":  s.config.ActiveThresholdBytes,
+		"aggregation_enabled":     s.config.AggregationEnabled,
+		"aggregation_days":        s.config.AggregationDays,
 		"log_source":              s.config.LogSource,
 		"access_log_path":         s.config.AccessLogPath,
 		"systemctl_available":     hasSystemctl(),

@@ -110,7 +110,8 @@ func (s *Store) initSchema() error {
 		ts INTEGER NOT NULL,
 		duration_ms INTEGER NOT NULL,
 		inserted INTEGER NOT NULL,
-		error TEXT
+		error TEXT,
+		source TEXT DEFAULT 'sing-box'
 	);
 	CREATE TABLE IF NOT EXISTS wg_samples (
 		public_key TEXT NOT NULL,
@@ -146,6 +147,12 @@ func (s *Store) initSchema() error {
 	}
 	s.db.Exec("ALTER TABLE users ADD COLUMN enabled INTEGER DEFAULT 1;")
 	s.db.Exec("ALTER TABLE wg_samples ADD COLUMN endpoint TEXT DEFAULT ''")
+	// Migration for sampler_runs source column
+	var colCheck string
+	_ = s.db.QueryRow("SELECT name FROM pragma_table_info('sampler_runs') WHERE name='source'").Scan(&colCheck)
+	if colCheck == "" {
+		s.db.Exec("ALTER TABLE sampler_runs ADD COLUMN source TEXT DEFAULT 'sing-box'")
+	}
 	return nil
 }
 
@@ -282,17 +289,18 @@ type SamplerRun struct {
 	DurationMs int64  `json:"duration_ms"`
 	Inserted   int64  `json:"inserted"`
 	Error      string `json:"error"`
+	Source     string `json:"source"`
 }
 
-func (s *Store) LogSamplerRun(ts int64, durationMs int64, inserted int64, errStr string) {
-	_, _ = s.db.Exec("INSERT INTO sampler_runs (ts, duration_ms, inserted, error) VALUES (?, ?, ?, ?)", ts, durationMs, inserted, errStr)
+func (s *Store) LogSamplerRun(ts int64, durationMs int64, inserted int64, errStr string, source string) {
+	_, _ = s.db.Exec("INSERT INTO sampler_runs (ts, duration_ms, inserted, error, source) VALUES (?, ?, ?, ?, ?)", ts, durationMs, inserted, errStr, source)
 }
 
 func (s *Store) GetSamplerRuns(limit int) ([]SamplerRun, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.Query("SELECT ts, duration_ms, inserted, COALESCE(error,'') FROM sampler_runs ORDER BY ts DESC LIMIT ?", limit)
+	rows, err := s.db.Query("SELECT ts, duration_ms, inserted, COALESCE(error,''), COALESCE(source, 'sing-box') FROM sampler_runs ORDER BY ts DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -300,7 +308,7 @@ func (s *Store) GetSamplerRuns(limit int) ([]SamplerRun, error) {
 	var res []SamplerRun
 	for rows.Next() {
 		var r SamplerRun
-		if err := rows.Scan(&r.Timestamp, &r.DurationMs, &r.Inserted, &r.Error); err != nil {
+		if err := rows.Scan(&r.Timestamp, &r.DurationMs, &r.Inserted, &r.Error, &r.Source); err != nil {
 			return nil, err
 		}
 		res = append(res, r)

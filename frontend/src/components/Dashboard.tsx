@@ -51,10 +51,14 @@ export default function Dashboard() {
     const [chartData, setChartData] = useState<any[]>([])
 
     const [wgPeers, setWgPeers] = useState<any[]>([])
-    const [consumerTab, setConsumerTab] = useState<'singbox' | 'wireguard'>('singbox')
+    // consumerTab removed, using chartMode for both
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
+
+    // ... (lines 58-197 skipped for brevity in prompt, but in Apply I will just do the replacements)
+
+
     const [customStart, setCustomStart] = useState(today)
     const [customEnd, setCustomEnd] = useState(today)
 
@@ -190,13 +194,13 @@ export default function Dashboard() {
     // Let's assume RX=Uplink, TX=Downlink for VPN context relative to server.
     const topWireGuard = [...wgPeers].map(p => ({
         name: p.alias || p.public_key.substring(0, 8),
-        total: (p.rx || 0) + (p.tx || 0),
+        total: (p.stats?.transfer_rx || 0) + (p.stats?.transfer_tx || 0),
         key: p.public_key,
         flow: 'WireGuard',
         quota_limit: 0
     })).sort((a, b) => b.total - a.total).slice(0, 5)
 
-    const topConsumers = consumerTab === 'singbox' ? topSingbox : topWireGuard
+    const topConsumers = chartMode === 'singbox' ? topSingbox : topWireGuard
 
     return (
         <div className="space-y-6">
@@ -253,12 +257,10 @@ export default function Dashboard() {
                     <Button
                         onClick={fetchData}
                         isLoading={loading}
-                        variant="secondary"
-                        size="sm"
-                        icon={<RefreshCw size={14} />}
-                    >
-                        Refresh
-                    </Button>
+                        variant="icon"
+                        size="icon"
+                        icon={<RefreshCw size={16} />}
+                    />
                 </div>
             </div>
 
@@ -396,7 +398,7 @@ export default function Dashboard() {
                                     onClick={() => setChartMode('singbox')}
                                     className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
                                 >
-                                    sing-box
+                                    Sing-Box
                                 </button>
                                 <button
                                     onClick={() => setChartMode('wireguard')}
@@ -475,14 +477,14 @@ export default function Dashboard() {
                     action={
                         <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
                             <button
-                                onClick={() => setConsumerTab('singbox')}
-                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${consumerTab === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                onClick={() => setChartMode('singbox')}
+                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
                             >
-                                Proxy
+                                Sing-Box
                             </button>
                             <button
-                                onClick={() => setConsumerTab('wireguard')}
-                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${consumerTab === 'wireguard' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                onClick={() => setChartMode('wireguard')}
+                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'wireguard' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
                             >
                                 WireGuard
                             </button>
