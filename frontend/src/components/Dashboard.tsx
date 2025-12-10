@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, DashboardData, UnifiedChartPoint, Consumer, TrafficStats } from '../api'
+import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, Zap } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from './ui/Card'
