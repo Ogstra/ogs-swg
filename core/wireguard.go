@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -22,14 +23,15 @@ type WireGuardPeer struct {
 }
 
 type WireGuardInterface struct {
-	Address    string `json:"address"`
-	PrivateKey string `json:"private_key"`
-	ListenPort int    `json:"listen_port"`
-	PostUp     string `json:"post_up,omitempty"`
-	PostDown   string `json:"post_down,omitempty"`
-	MTU        int    `json:"mtu,omitempty"`
-	DNS        string `json:"dns,omitempty"`
-	PublicKey  string `json:"public_key,omitempty"`
+	Address     string `json:"address"`
+	BindAddress string `json:"bind_address,omitempty"`
+	PrivateKey  string `json:"private_key"`
+	ListenPort  int    `json:"listen_port"`
+	PostUp      string `json:"post_up,omitempty"`
+	PostDown    string `json:"post_down,omitempty"`
+	MTU         int    `json:"mtu,omitempty"`
+	DNS         string `json:"dns,omitempty"`
+	PublicKey   string `json:"public_key,omitempty"`
 }
 
 type WireGuardConfig struct {
@@ -54,6 +56,21 @@ func applyPeerMetadata(comment string, peer *WireGuardPeer) {
 	case "email":
 		peer.Alias = value
 		peer.Email = value
+	}
+}
+
+func applyInterfaceMetadata(comment string, iface *WireGuardInterface) {
+	if iface == nil {
+		return
+	}
+	parts := strings.SplitN(comment, "=", 2)
+	if len(parts) != 2 {
+		return
+	}
+	key := strings.ToLower(strings.TrimSpace(parts[0]))
+	value := strings.TrimSpace(parts[1])
+	if key == "address" {
+		iface.Address = value
 	}
 }
 
@@ -92,6 +109,10 @@ func LoadWireGuardConfig(path string) (*WireGuardConfig, error) {
 				comment := strings.TrimSpace(line[1:])
 				applyPeerMetadata(comment, currentPeer)
 			}
+			if currentSection == "interface" {
+				comment := strings.TrimSpace(line[1:])
+				applyInterfaceMetadata(comment, &config.Interface)
+			}
 			continue
 		}
 
@@ -127,6 +148,8 @@ func LoadWireGuardConfig(path string) (*WireGuardConfig, error) {
 				switch strings.ToLower(key) {
 				case "address":
 					config.Interface.Address = value
+				case "bindaddress":
+					config.Interface.BindAddress = value
 				case "privatekey":
 					config.Interface.PrivateKey = value
 				case "listenport":
@@ -173,6 +196,9 @@ func LoadWireGuardConfig(path string) (*WireGuardConfig, error) {
 }
 
 func (c *WireGuardConfig) Save() error {
+	if c.Path == "" {
+		return errors.New("config path not set")
+	}
 	f, err := os.Create(c.Path)
 	if err != nil {
 		return err
@@ -200,6 +226,9 @@ func (c *WireGuardConfig) Save() error {
 	}
 	if c.Interface.DNS != "" {
 		fmt.Fprintf(f, "DNS = %s\n", c.Interface.DNS)
+	}
+	if c.Interface.BindAddress != "" {
+		fmt.Fprintf(f, "# BindAddress = %s\n", c.Interface.BindAddress)
 	}
 	fmt.Fprintln(f, "")
 
@@ -297,6 +326,15 @@ func GetWireGuardStats() (map[string]PeerStats, error) {
 }
 
 func (c *WireGuardConfig) UpdateInterface(updated WireGuardInterface) error {
+	if updated.Address == "" {
+		return fmt.Errorf("interface address is required")
+	}
+	if !strings.Contains(updated.Address, "/") {
+		return fmt.Errorf("interface address must include CIDR, e.g., 10.10.10.1/24")
+	}
+	if updated.ListenPort <= 0 || updated.ListenPort > 65535 {
+		updated.ListenPort = 51820
+	}
 	c.Interface = updated
 	return c.Save()
 }
@@ -309,6 +347,9 @@ func (c *WireGuardConfig) UpdatePeer(publicKey string, updated WireGuardPeer) er
 			c.Peers[i].PresharedKey = updated.PresharedKey
 			if updated.Alias != "" {
 				c.Peers[i].Alias = updated.Alias
+			}
+			if updated.Email != "" {
+				c.Peers[i].Email = updated.Email
 			}
 			return c.Save()
 		}

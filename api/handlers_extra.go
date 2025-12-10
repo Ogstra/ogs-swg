@@ -3,9 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Ogstra/ogs-swg/core"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,12 +15,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ogstra/ogs-swg/core"
+
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
 type PeerWithStats struct {
 	core.WireGuardPeer
-	Stats core.PeerStats `json:"stats"`
+	Stats       core.PeerStats `json:"stats"`
+	QRAvailable bool           `json:"qr_available"`
 }
 
 func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +43,10 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 		if p.Alias == "" && p.Email != "" {
 			p.Alias = p.Email
 		}
-		ps := PeerWithStats{WireGuardPeer: p}
+		ps := PeerWithStats{
+			WireGuardPeer: p,
+			QRAvailable:   s.hasQRConfig(p.PublicKey),
+		}
 		if s, ok := stats[p.PublicKey]; ok {
 			ps.Stats = s
 		}
@@ -55,8 +61,128 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 }
 
 type CreatePeerRequest struct {
-	Alias string `json:"alias"`
-	Email string `json:"email,omitempty"`
+	Alias    string `json:"alias"`
+	Email    string `json:"email,omitempty"`
+	IP       string `json:"ip"`
+	Endpoint string `json:"endpoint,omitempty"`
+	Private  string `json:"private_key,omitempty"`
+}
+
+func normalizeAllowedIPs(raw string) ([]string, string, error) {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	var primary string
+
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+
+		// If no mask provided, default to /32 for IPv4 or /128 for IPv6
+		if !strings.Contains(p, "/") {
+			if ip := net.ParseIP(p); ip != nil {
+				if ip.To4() != nil {
+					p = fmt.Sprintf("%s/32", ip.String())
+				} else {
+					p = fmt.Sprintf("%s/128", ip.String())
+				}
+			} else {
+				return nil, "", fmt.Errorf("invalid IP: %s", p)
+			}
+		}
+
+		_, ipNet, err := net.ParseCIDR(p)
+		if err != nil || ipNet == nil {
+			return nil, "", fmt.Errorf("invalid CIDR: %s", p)
+		}
+
+		out = append(out, ipNet.String())
+		if primary == "" {
+			primary = ipNet.String()
+		}
+	}
+
+	if len(out) == 0 {
+		return nil, "", fmt.Errorf("no valid IPs provided")
+	}
+
+	return out, primary, nil
+}
+
+func firstInterfaceCIDR(cfg *core.WireGuardConfig) (*net.IPNet, error) {
+	addr := strings.TrimSpace(cfg.Interface.Address)
+	if addr == "" {
+		addr = strings.TrimSpace(cfg.Interface.BindAddress)
+	}
+	if addr == "" {
+		return nil, fmt.Errorf("interface address not set")
+	}
+	first := strings.TrimSpace(strings.Split(addr, ",")[0])
+	if first == "" {
+		return nil, fmt.Errorf("interface address not set")
+	}
+	if !strings.Contains(first, "/") {
+		return nil, fmt.Errorf("interface address missing mask")
+	}
+	_, ipNet, err := net.ParseCIDR(first)
+	if err != nil {
+		return nil, err
+	}
+	return ipNet, nil
+}
+
+func addUsedIP(used map[string]bool, cidr string) {
+	if cidr == "" {
+		return
+	}
+	cidr = strings.TrimSpace(cidr)
+	host := cidr
+	if idx := strings.Index(host, "/"); idx != -1 {
+		host = strings.TrimSpace(host[:idx])
+	}
+	// Track the exact host IP to avoid assigning it.
+	if ip := net.ParseIP(host); ip != nil {
+		used[ip.String()] = true
+	}
+	// Also track the network address if a CIDR is provided.
+	if strings.Contains(cidr, "/") {
+		if _, netblock, err := net.ParseCIDR(cidr); err == nil && netblock != nil {
+			used[netblock.IP.String()] = true
+		}
+	}
+}
+
+func findAvailableIP(ipNet *net.IPNet, used map[string]bool) (string, error) {
+	base := ipNet.IP.To4()
+	if base == nil {
+		return "", fmt.Errorf("auto-assign only supports IPv4")
+	}
+
+	// network and broadcast
+	broadcast := make(net.IP, len(base))
+	for i := 0; i < 4; i++ {
+		broadcast[i] = base[i] | ^ipNet.Mask[i]
+	}
+
+	for i := 1; i < 255; i++ { // skip network (.0) and avoid overflow
+		candidate := make(net.IP, len(base))
+		copy(candidate, base)
+		candidate[3] = candidate[3] + byte(i)
+
+		if !ipNet.Contains(candidate) {
+			continue
+		}
+		if candidate.Equal(base) || candidate.Equal(broadcast) {
+			continue
+		}
+		if used[candidate.String()] {
+			continue
+		}
+		return fmt.Sprintf("%s/32", candidate.String()), nil
+	}
+
+	return "", fmt.Errorf("no IP addresses available")
 }
 
 func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Request) {
@@ -82,35 +208,67 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	priv, pub, err := core.GenerateWireGuardKeys()
-	if err != nil {
-		http.Error(w, "Failed to generate keys: "+err.Error(), http.StatusInternalServerError)
+	if wgConfig.Interface.Address == "" {
+		http.Error(w, "Interface address is required before adding peers", http.StatusBadRequest)
 		return
 	}
 
-	baseIP := "10.100.0."
-	usedIPs := make(map[int]bool)
-	for _, p := range wgConfig.Peers {
-		parts := strings.Split(p.AllowedIPs, "/")
-		if len(parts) > 0 {
-			ipParts := strings.Split(parts[0], ".")
-			if len(ipParts) == 4 {
-				if last, err := strconv.Atoi(ipParts[3]); err == nil {
-					usedIPs[last] = true
-				}
-			}
+	priv := strings.TrimSpace(req.Private)
+	var pub string
+	var pk wgtypes.Key
+	if priv == "" {
+		priv, pub, err = core.GenerateWireGuardKeys()
+		if err != nil {
+			http.Error(w, "Failed to generate keys: "+err.Error(), http.StatusInternalServerError)
+			return
 		}
+	} else {
+		pk, err = wgtypes.ParseKey(priv)
+		if err != nil {
+			http.Error(w, "Invalid private key", http.StatusBadRequest)
+			return
+		}
+		pub = pk.PublicKey().String()
 	}
 
-	nextIP := 2
-	for {
-		if !usedIPs[nextIP] {
-			break
+	usedIPs := make(map[string]bool)
+	// Reserve interface IP
+	addUsedIP(usedIPs, strings.TrimSpace(strings.Split(wgConfig.Interface.Address, ",")[0]))
+
+	for _, p := range wgConfig.Peers {
+		existing := strings.TrimSpace(strings.Split(p.AllowedIPs, ",")[0])
+		addUsedIP(usedIPs, existing)
+	}
+
+	var normalizedIPs []string
+	var primaryIP string
+	if strings.TrimSpace(req.IP) == "" {
+		ipNet, err := firstInterfaceCIDR(wgConfig)
+		if err != nil {
+			if _, fallbackNet, perr := net.ParseCIDR("10.100.0.0/24"); perr == nil {
+				ipNet = fallbackNet
+				addUsedIP(usedIPs, "10.100.0.1/32")
+			}
 		}
-		nextIP++
-		if nextIP > 254 {
+		if ipNet == nil {
+			http.Error(w, "Cannot auto-assign IP: interface address missing", http.StatusBadRequest)
+			return
+		}
+		autoIP, err := findAvailableIP(ipNet, usedIPs)
+		if err != nil {
 			http.Error(w, "No IP addresses available", http.StatusInternalServerError)
+			return
+		}
+		normalizedIPs = []string{autoIP}
+		primaryIP = autoIP
+	} else {
+		normalizedIPs, primaryIP, err = normalizeAllowedIPs(req.IP)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, netblock, err := net.ParseCIDR(primaryIP); err == nil && netblock != nil && usedIPs[netblock.IP.String()] {
+			http.Error(w, "IP already assigned to another peer", http.StatusBadRequest)
 			return
 		}
 	}
@@ -118,8 +276,9 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	peer := core.WireGuardPeer{
 		PublicKey:  pub,
 		PrivateKey: priv,
-		AllowedIPs: fmt.Sprintf("%s%d/32", baseIP, nextIP),
+		AllowedIPs: strings.Join(normalizedIPs, ", "),
 		Alias:      req.Alias,
+		Endpoint:   strings.TrimSpace(req.Endpoint),
 	}
 
 	if err := wgConfig.AddPeer(peer); err != nil {
@@ -127,7 +286,13 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.reloadWireGuard()
+	if cfgText, err := buildPeerConfig(*wgConfig, peer, priv); err == nil {
+		s.storeQRConfig(pub, cfgText, time.Hour)
+	}
+
+	if !s.syncWireGuardConfig(wgConfig) {
+		s.markWireGuardPending()
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(peer)
@@ -154,7 +319,9 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.reloadWireGuard()
+	if !s.syncWireGuardConfig(wgConfig) {
+		s.markWireGuardPending()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -169,9 +336,18 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateService(req.Service); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	if err := runSystemCtl("restart", req.Service); err != nil {
 		http.Error(w, "Failed to restart service: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if req.Service == "wireguard" {
+		s.clearWireGuardPending()
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -180,6 +356,11 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := validateService(req.Service); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -195,6 +376,11 @@ func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := validateService(req.Service); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -299,7 +485,9 @@ func (s *Server) handleUpdateWireGuardConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	s.reloadWireGuard()
+	if !s.syncWireGuardConfig(nil) {
+		s.markWireGuardPending()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -344,7 +532,9 @@ func (s *Server) handleUpdateWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	s.reloadWireGuard()
+	if !s.syncWireGuardConfig(wgConfig) {
+		s.markWireGuardPending()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -370,13 +560,375 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	normalizedIPs, primaryIP, err := normalizeAllowedIPs(req.AllowedIPs)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	usedIPs := make(map[string]string) // ip -> publicKey
+	addUsedIPStr := func(ip string, owner string) {
+		if ip == "" {
+			return
+		}
+		if !strings.Contains(ip, "/") {
+			ip += "/32"
+		}
+		if _, netblock, err := net.ParseCIDR(ip); err == nil && netblock != nil {
+			usedIPs[netblock.IP.String()] = owner
+		}
+	}
+
+	addUsedIPStr(strings.TrimSpace(strings.Split(wgConfig.Interface.Address, ",")[0]), "interface")
+	for _, p := range wgConfig.Peers {
+		existing := strings.TrimSpace(strings.Split(p.AllowedIPs, ",")[0])
+		addUsedIPStr(existing, p.PublicKey)
+	}
+
+	if _, netblock, err := net.ParseCIDR(primaryIP); err == nil && netblock != nil {
+		if owner, ok := usedIPs[netblock.IP.String()]; ok && owner != pubKey {
+			http.Error(w, "IP already assigned to another peer", http.StatusBadRequest)
+			return
+		}
+	}
+
+	req.AllowedIPs = strings.Join(normalizedIPs, ", ")
+	req.Endpoint = strings.TrimSpace(req.Endpoint)
+
+	// Refresh QR cache if a private key was supplied
+	if req.PrivateKey != "" {
+		updatedPeer := req
+		updatedPeer.PublicKey = pubKey
+		if cfgText, err := buildPeerConfig(*wgConfig, updatedPeer, req.PrivateKey); err == nil {
+			s.storeQRConfig(pubKey, cfgText, time.Hour)
+		}
+	}
+
 	if err := wgConfig.UpdatePeer(pubKey, req); err != nil {
 		http.Error(w, "Failed to update peer: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	s.reloadWireGuard()
+	if !s.syncWireGuardConfig(wgConfig) {
+		s.markWireGuardPending()
+	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	pubKey := r.URL.Query().Get("public_key")
+	if pubKey == "" {
+		http.Error(w, "public_key is required", http.StatusBadRequest)
+		return
+	}
+
+	if cfgText, ok := s.fetchQRConfig(pubKey); ok {
+		response := map[string]string{
+			"config": cfgText,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+
+	// Allow on-demand generation if a private key is provided (not stored).
+	priv := strings.TrimSpace(r.URL.Query().Get("private_key"))
+	if priv != "" {
+		wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+		if err != nil {
+			http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var peer *core.WireGuardPeer
+		for i := range wgConfig.Peers {
+			if wgConfig.Peers[i].PublicKey == pubKey {
+				peer = &wgConfig.Peers[i]
+				break
+			}
+		}
+		if peer == nil {
+			http.Error(w, "Peer not found", http.StatusNotFound)
+			return
+		}
+		cfgText, err := buildPeerConfig(*wgConfig, *peer, priv)
+		if err != nil {
+			http.Error(w, "Failed to build peer config: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		s.storeQRConfig(pubKey, cfgText, time.Hour)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"config": cfgText})
+		return
+	}
+
+	http.Error(w, "QR/config not available for this peer", http.StatusNotFound)
+}
+
+func (s *Server) handleGetWireGuardTraffic(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	rangeStr := r.URL.Query().Get("range")
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+
+	var start, end int64
+	now := time.Now().Unix()
+	if startStr != "" && endStr != "" {
+		if s, err := strconv.ParseInt(startStr, 10, 64); err == nil {
+			start = s
+		}
+		if e, err := strconv.ParseInt(endStr, 10, 64); err == nil {
+			end = e
+		}
+	}
+	if start == 0 || end == 0 {
+		var duration time.Duration
+		switch rangeStr {
+		case "30m":
+			duration = 30 * time.Minute
+		case "30d":
+			duration = 30 * 24 * time.Hour
+		case "6h":
+			duration = 6 * time.Hour
+		case "24h":
+			duration = 24 * time.Hour
+		default:
+			duration = time.Hour
+		}
+		end = now
+		start = time.Now().Add(-duration).Unix()
+	}
+
+	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	if err != nil {
+		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := make(map[string]map[string]int64)
+	for _, p := range wgConfig.Peers {
+		rx, tx, err := s.store.GetWGTrafficDelta(p.PublicKey, start, end)
+		if err != nil {
+			http.Error(w, "Failed to read traffic: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result[p.PublicKey] = map[string]int64{
+			"rx": rx,
+			"tx": tx,
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	rangeStr := r.URL.Query().Get("range")
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+	filterKey := strings.TrimSpace(r.URL.Query().Get("peer"))
+	limit := 500
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 5000 {
+			limit = v
+		}
+	}
+
+	var start, end int64
+	now := time.Now().Unix()
+	if startStr != "" && endStr != "" {
+		if s, err := strconv.ParseInt(startStr, 10, 64); err == nil {
+			start = s
+		}
+		if e, err := strconv.ParseInt(endStr, 10, 64); err == nil {
+			end = e
+		}
+	}
+	if start == 0 || end == 0 {
+		var duration time.Duration
+		switch rangeStr {
+		case "30m":
+			duration = 30 * time.Minute
+		case "30d":
+			duration = 30 * 24 * time.Hour
+		case "6h":
+			duration = 6 * time.Hour
+		case "24h":
+			duration = 24 * time.Hour
+		default:
+			duration = time.Hour
+		}
+		end = now
+		start = time.Now().Add(-duration).Unix()
+	}
+
+	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	if err != nil {
+		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	result := make(map[string][]core.WGSample)
+	for _, p := range wgConfig.Peers {
+		if filterKey != "" && p.PublicKey != filterKey {
+			continue
+		}
+		series, err := s.store.GetWGTrafficSeries(p.PublicKey, start, end, limit)
+		if err != nil {
+			http.Error(w, "Failed to read traffic series: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result[p.PublicKey] = series
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPrivateKey string) (string, error) {
+	if clientPrivateKey == "" {
+		return "", fmt.Errorf("peer missing private key")
+	}
+
+	serverPub := cfg.Interface.PublicKey
+	if serverPub == "" {
+		if cfg.Interface.PrivateKey == "" {
+			return "", fmt.Errorf("interface private key not set")
+		}
+		pk, err := wgtypes.ParseKey(cfg.Interface.PrivateKey)
+		if err != nil {
+			return "", fmt.Errorf("invalid interface private key")
+		}
+		serverPub = pk.PublicKey().String()
+	}
+
+	firstAllowed := strings.TrimSpace(strings.Split(peer.AllowedIPs, ",")[0])
+	if firstAllowed == "" {
+		return "", fmt.Errorf("peer allowed IPs missing")
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "[Interface]\n")
+	fmt.Fprintf(&b, "PrivateKey = %s\n", clientPrivateKey)
+	fmt.Fprintf(&b, "Address = %s\n", firstAllowed)
+	dns := cfg.Interface.DNS
+	if strings.TrimSpace(dns) == "" {
+		dns = "1.1.1.1, 8.8.8.8"
+	}
+	fmt.Fprintf(&b, "DNS = %s\n", dns)
+	if cfg.Interface.MTU != 0 {
+		fmt.Fprintf(&b, "MTU = %d\n", cfg.Interface.MTU)
+	}
+	fmt.Fprintf(&b, "\n[Peer]\n")
+	fmt.Fprintf(&b, "PublicKey = %s\n", serverPub)
+	if peer.PresharedKey != "" {
+		fmt.Fprintf(&b, "PresharedKey = %s\n", peer.PresharedKey)
+	}
+	if ep := detectWireGuardEndpoint(cfg); ep != "" {
+		fmt.Fprintf(&b, "Endpoint = %s\n", ep)
+	}
+	fmt.Fprintf(&b, "AllowedIPs = 0.0.0.0/0, ::/0\n")
+	fmt.Fprintf(&b, "PersistentKeepalive = 25\n")
+
+	return b.String(), nil
+}
+
+func detectWireGuardEndpoint(cfg core.WireGuardConfig) string {
+	port := cfg.Interface.ListenPort
+	if port == 0 {
+		port = 51820
+	}
+	// Prefer the IP from the interface Address (host part).
+	addr := strings.TrimSpace(cfg.Interface.Address)
+	if cfg.Interface.BindAddress != "" {
+		addr = cfg.Interface.BindAddress
+	}
+	if addr != "" {
+		host := strings.TrimSpace(strings.Split(addr, "/")[0])
+		if host != "" {
+			return fmt.Sprintf("%s:%d", host, port)
+		}
+	}
+	ip := firstIPv4ForInterface("eth0")
+	if ip == "" {
+		ip = firstUsableIPv4()
+	}
+	if ip == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", ip, port)
+}
+
+func firstIPv4ForInterface(name string) string {
+	if name == "" {
+		return ""
+	}
+	ifi, err := net.InterfaceByName(name)
+	if err != nil {
+		return ""
+	}
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		return ""
+	}
+	for _, a := range addrs {
+		var ip net.IP
+		switch v := a.(type) {
+		case *net.IPNet:
+			ip = v.IP
+		case *net.IPAddr:
+			ip = v.IP
+		}
+		if ip == nil {
+			continue
+		}
+		if v4 := ip.To4(); v4 != nil {
+			return v4.String()
+		}
+	}
+	return ""
+}
+
+func firstUsableIPv4() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		if strings.HasPrefix(iface.Name, "docker") || strings.HasPrefix(iface.Name, "br-") || strings.HasPrefix(iface.Name, "veth") {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil {
+				continue
+			}
+			if v4 := ip.To4(); v4 != nil {
+				return v4.String()
+			}
+		}
+	}
+	return ""
 }
 
 func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
@@ -435,23 +987,55 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 		history = []core.TrafficPoint{}
 	}
 
-	// Ensure chart updates even if no new inserts: append a zero point at the end of the range when last sample is older than end.
-	if end > 0 {
-		var lastTs int64
-		if n := len(history); n > 0 {
-			lastTs = history[n-1].Timestamp
+	// Determine aggregation interval based on range duration
+	diff := end - start
+	var interval int64
+	if diff <= 1800 { // <= 30m
+		interval = 60 // 1m
+	} else if diff <= 3600 { // <= 1h
+		interval = 120 // 2m
+	} else if diff <= 21600 { // <= 6h
+		interval = 900 // 15m
+	} else if diff <= 86400 { // <= 24h
+		interval = 3600 // 1h
+	} else if diff <= 604800 { // <= 1w
+		interval = 21600 // 6h
+	} else {
+		interval = 86400 // 1d
+	}
+
+	// Resample/Bucket the data
+	// Create buckets from start to end
+	var result []core.TrafficPoint
+	inputIdx := 0
+
+	for t := start; t < end; t += interval {
+		bucketEnd := t + interval
+		var up, down int64
+
+		// Sum up all points within strictly [t, bucketEnd)
+		// Assuming history is sorted ASC by GetGlobalTraffic
+		for inputIdx < len(history) {
+			p := history[inputIdx]
+			if p.Timestamp >= bucketEnd {
+				break
+			}
+			if p.Timestamp >= t {
+				up += p.Uplink
+				down += p.Downlink
+			}
+			inputIdx++
 		}
-		if lastTs < end {
-			history = append(history, core.TrafficPoint{
-				Timestamp: end,
-				Uplink:    0,
-				Downlink:  0,
-			})
-		}
+
+		result = append(result, core.TrafficPoint{
+			Timestamp: t, // Or t + interval/2 for midpoint
+			Uplink:    up,
+			Downlink:  down,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+	json.NewEncoder(w).Encode(result)
 }
 
 func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
@@ -528,6 +1112,8 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
 		"singbox":                     singboxStatus,
 		"wireguard":                   wireguardStatus,
+		"wireguard_pending_restart":   s.wgPendingRestart,
+		"wg_sample_interval_sec":      int(s.wgSampleInterval.Seconds()),
 		"active_users_singbox":        activeUsersSB,
 		"active_users_wireguard":      activeUsersWG,
 		"active_users_singbox_list":   activeUsersList,
@@ -648,17 +1234,19 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
-		"enable_singbox":         s.config.EnableSingbox,
-		"enable_wireguard":       s.config.EnableWireGuard,
-		"retention_enabled":      s.config.RetentionEnabled,
-		"retention_days":         s.config.RetentionDays,
-		"sampler_interval_sec":   s.config.SamplerIntervalSec,
-		"sampler_paused":         s.sampler != nil && s.sampler.IsPaused(),
-		"active_threshold_bytes": s.config.ActiveThresholdBytes,
-		"log_source":             s.config.LogSource,
-		"access_log_path":        s.config.AccessLogPath,
-		"systemctl_available":    hasSystemctl(),
-		"journalctl_available":   hasJournalctl(),
+		"enable_singbox":          s.config.EnableSingbox,
+		"enable_wireguard":        s.config.EnableWireGuard,
+		"retention_enabled":       s.config.RetentionEnabled,
+		"retention_days":          s.config.RetentionDays,
+		"wg_retention_days":       s.config.WGRetentionDays,
+		"sampler_interval_sec":    s.config.SamplerIntervalSec,
+		"wg_sampler_interval_sec": s.config.WGSamplerIntervalSec,
+		"sampler_paused":          s.sampler != nil && s.sampler.IsPaused(),
+		"active_threshold_bytes":  s.config.ActiveThresholdBytes,
+		"log_source":              s.config.LogSource,
+		"access_log_path":         s.config.AccessLogPath,
+		"systemctl_available":     hasSystemctl(),
+		"journalctl_available":    hasJournalctl(),
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -704,6 +1292,17 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.RetentionDays = 1
 		}
 	}
+	if v, ok := payload["wg_retention_days"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.WGRetentionDays = int(t)
+		case int:
+			s.config.WGRetentionDays = t
+		}
+		if s.config.WGRetentionDays < 1 {
+			s.config.WGRetentionDays = 1
+		}
+	}
 	if v, ok := payload["sampler_interval_sec"]; ok {
 		switch t := v.(type) {
 		case float64:
@@ -713,6 +1312,17 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.config.SamplerIntervalSec < 30 {
 			s.config.SamplerIntervalSec = 30
+		}
+	}
+	if v, ok := payload["wg_sampler_interval_sec"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.WGSamplerIntervalSec = int(t)
+		case int:
+			s.config.WGSamplerIntervalSec = t
+		}
+		if s.config.WGSamplerIntervalSec < 15 {
+			s.config.WGSamplerIntervalSec = 15
 		}
 	}
 
@@ -787,6 +1397,24 @@ func (s *Server) handleRestoreWireGuardConfig(w http.ResponseWriter, r *http.Req
 	w.Write(content)
 }
 
+func (s *Server) handleGetBackupMeta(w http.ResponseWriter, r *http.Request) {
+	singboxBak := s.config.SingboxConfigPath + ".bak"
+	wgBak := s.config.WireGuardConfigPath + ".bak"
+
+	info := map[string]*time.Time{}
+	if st, err := os.Stat(singboxBak); err == nil {
+		t := st.ModTime()
+		info["singbox_last_backup"] = &t
+	}
+	if st, err := os.Stat(wgBak); err == nil {
+		t := st.ModTime()
+		info["wireguard_last_backup"] = &t
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(info)
+}
+
 func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 		return err
@@ -807,4 +1435,14 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Sync()
+}
+
+func validateService(service string) error {
+	allowed := []string{"sing-box", "wireguard", "cron"}
+	for _, s := range allowed {
+		if s == service {
+			return nil
+		}
+	}
+	return fmt.Errorf("service '%s' is not allowed", service)
 }

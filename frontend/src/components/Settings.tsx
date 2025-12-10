@@ -1,8 +1,17 @@
 import { useState, useEffect } from 'react'
 import { api, FeatureFlags } from '../api'
-import { Save, RefreshCw, Power } from 'lucide-react'
+import { Save, RefreshCw, Lock, User } from 'lucide-react'
+import { useToast } from '../context/ToastContext'
+import { Card } from './ui/Card'
+import { Button } from './ui/Button'
+import { Badge } from './ui/Badge'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
 
 export default function Settings() {
+    const { success, error: toastError } = useToast()
+    const { logout } = useAuth()
+    const navigate = useNavigate()
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<{ rows: number; sizeMB: number }>({ rows: 0, sizeMB: 0 })
@@ -15,9 +24,13 @@ export default function Settings() {
         sampler_interval_sec: 120,
         sampler_paused: false,
         active_threshold_bytes: 1024,
+        wg_sampler_interval_sec: 60,
+        wg_retention_days: 30,
     })
     const [historyLimit, setHistoryLimit] = useState(5)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean; wireguard: boolean }>({ singbox: false, wireguard: false })
+    const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' })
+    const [usernameData, setUsernameData] = useState({ password: '', newUsername: '' })
 
     useEffect(() => {
         loadAll()
@@ -50,6 +63,9 @@ export default function Settings() {
             if (status.sampler_paused !== undefined) {
                 setFeatures(f => ({ ...f, sampler_paused: status.sampler_paused }))
             }
+            if (status.wg_sample_interval_sec) {
+                setFeatures(f => ({ ...f, wg_sampler_interval_sec: status.wg_sample_interval_sec }))
+            }
             setServiceStatus({
                 singbox: !!status.singbox,
                 wireguard: !!status.wireguard
@@ -72,9 +88,9 @@ export default function Settings() {
     const handleSaveFeatures = async () => {
         try {
             await api.updateFeatures(features)
-            alert('Feature toggles saved. Restart services if needed.')
+            success('Feature toggles saved successfully')
         } catch (err) {
-            alert('Failed to save feature toggles: ' + err)
+            toastError('Failed to save feature toggles: ' + err)
         }
     }
 
@@ -84,9 +100,9 @@ export default function Settings() {
             await api.runSampler()
             await loadDbStats()
             await loadSamplerHistory()
-            alert('Sampler run triggered.')
+            success('Sampler run triggered successfully')
         } catch (err) {
-            alert('Failed to run sampler: ' + err)
+            toastError('Failed to run sampler: ' + err)
         } finally {
             setSamplerRunning(false)
         }
@@ -97,27 +113,29 @@ export default function Settings() {
             if (features.sampler_paused) {
                 await api.resumeSampler()
                 setFeatures(f => ({ ...f, sampler_paused: false }))
+                success('Sampler resumed')
             } else {
                 await api.pauseSampler()
                 setFeatures(f => ({ ...f, sampler_paused: true }))
+                success('Sampler paused')
             }
         } catch (err) {
-            alert('Failed to toggle sampler: ' + err)
+            toastError('Failed to toggle sampler: ' + err)
         }
     }
 
     const handlePruneNow = async () => {
         if (!features.retention_enabled) {
-            alert('Retention is disabled')
+            toastError('Retention is disabled')
             return
         }
         if (!confirm('Prune old samples now?')) return
         try {
             const res = await api.pruneNow()
-            alert(`Pruned ${res.deleted} samples (cutoff ${new Date(res.cutoff * 1000).toLocaleString()})`)
+            success(`Pruned ${res.deleted} samples`)
             await loadDbStats()
         } catch (err) {
-            alert('Prune failed: ' + err)
+            toastError('Prune failed: ' + err)
         }
     }
 
@@ -132,9 +150,48 @@ export default function Settings() {
                 await api.stopService(service)
             }
             await loadDbStats()
-            alert(`${service} ${action}ed successfully`)
+            success(`${service} ${action}ed successfully`)
         } catch (err) {
-            alert(`Failed to ${action} ${service}: ` + err)
+            toastError(`Failed to ${action} ${service}: ` + err)
+        }
+    }
+
+    const handleChangeUsername = async () => {
+        if (!usernameData.password || !usernameData.newUsername) {
+            toastError("All fields are required")
+            return
+        }
+        try {
+            await api.updateUsername(usernameData.password, usernameData.newUsername)
+            success('Username updated successfully. Please login again.')
+            setUsernameData({ password: '', newUsername: '' })
+            // Logout and redirect to login
+            logout()
+            navigate('/login')
+        } catch (err) {
+            toastError('Failed to update username: ' + err)
+        }
+    }
+
+    const handleChangePassword = async () => {
+        if (!passwordData.current || !passwordData.new || !passwordData.confirm) {
+            toastError("All fields are required")
+            return
+        }
+        if (passwordData.new !== passwordData.confirm) {
+            toastError("New passwords do not match")
+            return
+        }
+        if (passwordData.new.length < 8) {
+            toastError("New password must be at least 8 characters")
+            return
+        }
+        try {
+            await api.updatePassword(passwordData.current, passwordData.new)
+            success('Password updated successfully')
+            setPasswordData({ current: '', new: '', confirm: '' })
+        } catch (err) {
+            toastError('Failed to update password: ' + err)
         }
     }
 
@@ -146,273 +203,365 @@ export default function Settings() {
                     <p className="text-slate-400 text-sm mt-1">System configuration and service control</p>
                 </div>
                 <div className="flex gap-3">
-                    <button
+                    <Button
                         onClick={loadAll}
-                        className="px-3 py-2 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700"
+                        variant="secondary"
+                        isLoading={loading && !samplerRunning}
+                        icon={<RefreshCw size={16} />}
                     >
                         Refresh
-                    </button>
-                    <button
-                        className={`p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all ${loading ? 'animate-spin' : ''}`}
+                    </Button>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                <div className="lg:col-span-2 space-y-6">
+                    {/* Features & Configuration */}
+                    <Card
+                        title="System Features"
+                        action={
+                            <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />}>
+                                Save Changes
+                            </Button>
+                        }
                     >
-                        <RefreshCw size={18} />
-                    </button>
-                </div>
-            </div>
+                        <div className="space-y-6">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={features.enable_singbox}
+                                        onChange={e => setFeatures({ ...features, enable_singbox: e.target.checked })}
+                                        className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                    />
+                                    <div>
+                                        <div className="font-semibold text-white">Enable sing-box</div>
+                                        <div className="text-xs text-slate-400 mt-1">Core VLESS/Trojan proxy service</div>
+                                    </div>
+                                </label>
+                                <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={features.enable_wireguard}
+                                        onChange={e => setFeatures({ ...features, enable_wireguard: e.target.checked })}
+                                        className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                    />
+                                    <div>
+                                        <div className="font-semibold text-white">Enable WireGuard</div>
+                                        <div className="text-xs text-slate-400 mt-1">VPN tunnel interface</div>
+                                    </div>
+                                </label>
+                                <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!features.retention_enabled}
+                                        onChange={e => setFeatures({ ...features, retention_enabled: e.target.checked })}
+                                        className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                    />
+                                    <div>
+                                        <div className="font-semibold text-white">Data Retention</div>
+                                        <div className="text-xs text-slate-400 mt-1">Auto-prune old stats</div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </Card>
 
-            {/* Feature toggles */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
-                <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div>
-                        <h2 className="text-lg font-bold text-white">Features</h2>
-                        <p className="text-slate-400 text-sm">Enable/disable endpoints, retention and sampler</p>
-                    </div>
-                    <button
-                        onClick={handleSaveFeatures}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg flex items-center gap-2"
+                    {/* Account Security */}
+                    <Card
+                        title="Account Security"
                     >
-                        <Save size={16} />
-                        Save
-                    </button>
+                        <div className="space-y-6">
+                            {/* Change Password */}
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-sm font-medium text-white">Change Password</h3>
+                                    <Button onClick={handleChangePassword} size="sm" icon={<Lock size={16} />}>
+                                        Update Password
+                                    </Button>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-400">Current Password</label>
+                                    <input
+                                        type="password"
+                                        value={passwordData.current}
+                                        onChange={e => setPasswordData({ ...passwordData, current: e.target.value })}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                        placeholder="Enter current password"
+                                    />
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-400">New Password</label>
+                                        <input
+                                            type="password"
+                                            value={passwordData.new}
+                                            onChange={e => setPasswordData({ ...passwordData, new: e.target.value })}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                            placeholder="Min 8 characters"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-400">Confirm New Password</label>
+                                        <input
+                                            type="password"
+                                            value={passwordData.confirm}
+                                            onChange={e => setPasswordData({ ...passwordData, confirm: e.target.value })}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                            placeholder="Confirm new password"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="w-full h-px bg-slate-800/50" />
+
+                            {/* Change Username */}
+                            <div className="space-y-4">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-sm font-medium text-white">Change Username</h3>
+                                    <Button onClick={handleChangeUsername} size="sm" icon={<User size={16} />}>
+                                        Update Username
+                                    </Button>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-400">Current Password</label>
+                                        <input
+                                            type="password"
+                                            value={usernameData.password}
+                                            onChange={e => setUsernameData({ ...usernameData, password: e.target.value })}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                            placeholder="Required to change username"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-400">New Username</label>
+                                        <input
+                                            type="text"
+                                            value={usernameData.newUsername}
+                                            onChange={e => setUsernameData({ ...usernameData, newUsername: e.target.value })}
+                                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                            placeholder="Enter new username"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </Card>
+
+                    {/* Service Control */}
+                    <Card title="Service Control">
+                        {features.systemctl_available === false ? (
+                            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4 text-amber-400 text-sm">
+                                Service control is disabled (systemctl unavailable).
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {/* Singbox Control */}
+                                <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_singbox ? 'opacity-50' : ''}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="font-semibold text-white">sing-box</div>
+                                        <Badge variant={serviceStatus.singbox ? 'success' : 'error'}>
+                                            <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.singbox ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                            {serviceStatus.singbox ? 'Running' : 'Stopped'}
+                                        </Badge>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            onClick={() => handleServiceAction('sing-box', 'restart')}
+                                            disabled={!features.enable_singbox}
+                                            variant="secondary"
+                                            size="sm"
+                                            className="flex-1"
+                                        >
+                                            Restart
+                                        </Button>
+                                        <Button
+                                            onClick={() => handleServiceAction('sing-box', serviceStatus.singbox ? 'stop' : 'start')}
+                                            disabled={!features.enable_singbox}
+                                            variant={serviceStatus.singbox ? 'danger' : 'primary'}
+                                            size="sm"
+                                            className="flex-1"
+                                        >
+                                            {serviceStatus.singbox ? 'Stop' : 'Start'}
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {/* WireGuard Control */}
+                                <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_wireguard ? 'opacity-50' : ''}`}>
+                                    <div className="flex items-center justify-between">
+                                        <div className="font-semibold text-white">WireGuard</div>
+                                        <Badge variant={serviceStatus.wireguard ? 'success' : 'error'}>
+                                            <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.wireguard ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                            {serviceStatus.wireguard ? 'Running' : 'Stopped'}
+                                        </Badge>
+                                    </div>
+                                    <div className="flex gap-2">
+                                        <Button
+                                            onClick={() => handleServiceAction('wireguard', 'restart')}
+                                            disabled={!features.enable_wireguard}
+                                            variant="secondary"
+                                            size="sm"
+                                            className="flex-1"
+                                        >
+                                            Restart
+                                        </Button>
+                                        <Button
+                                            onClick={() => handleServiceAction('wireguard', serviceStatus.wireguard ? 'stop' : 'start')}
+                                            disabled={!features.enable_wireguard}
+                                            variant={serviceStatus.wireguard ? 'danger' : 'primary'}
+                                            size="sm"
+                                            className="flex-1"
+                                        >
+                                            {serviceStatus.wireguard ? 'Stop' : 'Start'}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </Card>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 auto-rows-fr">
-                    <label className="flex items-start gap-3 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer h-full">
-                        <input
-                            type="checkbox"
-                            checked={features.enable_singbox}
-                            onChange={e => setFeatures({ ...features, enable_singbox: e.target.checked })}
-                            className="mt-1 h-4 w-4"
-                        />
-                        <div>
-                            <p className="text-white font-semibold">Enable sing-box</p>
-                            <p className="text-xs text-slate-400">Disable if you only run WireGuard</p>
+                {/* Sidebar: Database & Sampling Status */}
+                <div className="space-y-6">
+                    <Card
+                        title="Database & Retention"
+                        action={
+                            <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
+                        }
+                    >
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
+                                <p className="text-[10px] uppercase text-slate-500 font-bold">Total Rows</p>
+                                <p className="text-xl font-mono text-white mt-1">{dbInfo.rows.toLocaleString()}</p>
+                            </div>
+                            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
+                                <p className="text-[10px] uppercase text-slate-500 font-bold">Size (MB)</p>
+                                <p className="text-xl font-mono text-white mt-1">{dbInfo.sizeMB}</p>
+                            </div>
                         </div>
-                    </label>
-                    <label className="flex items-start gap-3 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer h-full">
-                        <input
-                            type="checkbox"
-                            checked={features.enable_wireguard}
-                            onChange={e => setFeatures({ ...features, enable_wireguard: e.target.checked })}
-                            className="mt-1 h-4 w-4"
-                        />
-                        <div>
-                            <p className="text-white font-semibold">Enable WireGuard</p>
-                            <p className="text-xs text-slate-400">Disable if you only run WireGuard</p>
-                        </div>
-                    </label>
-                    <label className="flex items-start gap-3 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer h-full">
-                        <input
-                            type="checkbox"
-                            checked={!!features.retention_enabled}
-                            onChange={e => setFeatures({ ...features, retention_enabled: e.target.checked })}
-                            className="mt-1 h-4 w-4"
-                        />
-                        <div>
-                            <p className="text-white font-semibold">Retention (prune samples)</p>
-                            <p className="text-xs text-slate-400">Prune traffic older than N days</p>
-                        </div>
-                    </label>
 
-                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl h-full flex flex-col justify-between">
-                        <p className="text-white font-semibold">Retention days</p>
-                        <p className="text-xs text-slate-400 mb-2">Only applies when retention is enabled</p>
-                        <input
-                            type="number"
-                            min={1}
-                            value={features.retention_days ?? 90}
-                            onChange={e => setFeatures({ ...features, retention_days: parseInt(e.target.value) })}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
-                        />
-                    </div>
-                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl h-full flex flex-col justify-between">
-                        <p className="text-white font-semibold">Active threshold (bytes)</p>
-                        <p className="text-xs text-slate-400 mb-2">Min bytes in last 5m to count as active</p>
-                        <input
-                            type="number"
-                            min={0}
-                            value={features.active_threshold_bytes ?? 1024}
-                            onChange={e => setFeatures({ ...features, active_threshold_bytes: parseInt(e.target.value) })}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
-                        />
-                    </div>
-                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl md:col-span-2 xl:col-span-1 flex flex-col gap-3">
-                        <div>
-                            <p className="text-white font-semibold">Sampler interval (sec)</p>
-                            <p className="text-xs text-slate-400 mb-2">Sampling via StatsService</p>
-                            <input
-                                type="number"
-                                min={15}
-                                value={features.sampler_interval_sec ?? 120}
-                                onChange={e => setFeatures({ ...features, sampler_interval_sec: parseInt(e.target.value) })}
-                                className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white"
-                            />
+                        {/* Database Configuration Inputs */}
+                        <div className="space-y-4 mb-6 pt-4 border-t border-slate-800">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-400">Retention Days</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={features.retention_days ?? 90}
+                                        onChange={e => setFeatures({ ...features, retention_days: parseInt(e.target.value) })}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-400">WG Retention</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={features.wg_retention_days ?? 30}
+                                        onChange={e => setFeatures({ ...features, wg_retention_days: parseInt(e.target.value) })}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-400">SB Interval (s)</label>
+                                    <input
+                                        type="number"
+                                        min={15}
+                                        value={features.sampler_interval_sec ?? 120}
+                                        onChange={e => setFeatures({ ...features, sampler_interval_sec: parseInt(e.target.value) })}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-400">WG Interval (s)</label>
+                                    <input
+                                        type="number"
+                                        min={15}
+                                        value={features.wg_sampler_interval_sec ?? 60}
+                                        onChange={e => setFeatures({ ...features, wg_sampler_interval_sec: parseInt(e.target.value) })}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                    />
+                                </div>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Active Threshold (Bytes)</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    value={features.active_threshold_bytes ?? 1024}
+                                    onChange={e => setFeatures({ ...features, active_threshold_bytes: parseInt(e.target.value) })}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                            <button
-                                onClick={handleRunSampler}
-                                className="flex-1 min-w-[140px] px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
-                                disabled={samplerRunning}
-                            >
-                                <RefreshCw size={16} className={samplerRunning ? 'animate-spin' : ''} />
-                                Run sampler now
-                            </button>
-                            <button
-                                onClick={handleTogglePause}
-                                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg disabled:opacity-50"
-                            >
-                                {features.sampler_paused ? 'Resume' : 'Pause'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            {/* Service Control */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm ${!features.enable_singbox ? 'opacity-60' : ''}`}>
-                    <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-                        sing-box
-                    </h2>
-                    <div className="flex gap-3">
-                        <button
-                            onClick={() => handleServiceAction('sing-box', 'restart')}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
-                            disabled={!features.enable_singbox || features.systemctl_available === false}
-                        >
-                            <RefreshCw size={16} />
-                            Restart
-                        </button>
-                        <button
-                            onClick={() => handleServiceAction('sing-box', serviceStatus.singbox ? 'stop' : 'start')}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
-                            disabled={!features.enable_singbox || features.systemctl_available === false}
-                        >
-                            <Power size={16} />
-                            {serviceStatus.singbox ? 'Stop' : 'Start'}
-                        </button>
-                    </div>
-                </div>
-
-                <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm ${!features.enable_wireguard ? 'opacity-60' : ''}`}>
-                    <h2 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-                        WireGuard
-                    </h2>
-                    <div className="flex gap-3">
-                        <button
-                            onClick={() => handleServiceAction('wireguard', 'restart')}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg transition-colors"
-                            disabled={!features.enable_wireguard || features.systemctl_available === false}
-                        >
-                            <RefreshCw size={16} />
-                            Restart
-                        </button>
-                        <button
-                            onClick={() => handleServiceAction('wireguard', serviceStatus.wireguard ? 'stop' : 'start')}
-                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
-                            disabled={!features.enable_wireguard || features.systemctl_available === false}
-                        >
-                            <Power size={16} />
-                            {serviceStatus.wireguard ? 'Stop' : 'Start'}
-                        </button>
-                    </div>
-                </div>
-                {features.systemctl_available === false && (
-                    <div className="md:col-span-2 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-amber-400 text-sm">
-                        Service control is disabled in this environment (systemctl not available, typical in Docker). Use container orchestration to start/stop services.
-                    </div>
-                )}
-            </div>
-
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-                {/* DB Info */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm h-full">
-                    <div className="flex items-center justify-between gap-3">
-                        <div>
-                            <h2 className="text-lg font-bold text-white">Database</h2>
-                            <p className="text-slate-400 text-sm">Traffic stored by sampler</p>
-                        </div>
-                        <div className="flex gap-2">
-                            <button
-                                onClick={loadDbStats}
-                                className={`p-2 rounded-lg bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition-all ${loading ? 'animate-spin' : ''}`}
-                                title="Refresh DB stats"
-                            >
-                                <RefreshCw size={18} />
-                            </button>
-                            <button
+                        <div className="space-y-3">
+                            <Button
                                 onClick={handlePruneNow}
-                                className="px-3 py-2 bg-red-500/20 text-red-300 rounded-lg hover:bg-red-500/30 disabled:opacity-50"
                                 disabled={!features.retention_enabled}
+                                variant="secondary"
+                                className="w-full"
                             >
-                                Prune now
-                            </button>
+                                Prune Database Now
+                            </Button>
+                            <div className="flex gap-2">
+                                <Button
+                                    onClick={handleRunSampler}
+                                    disabled={samplerRunning}
+                                    className="flex-1"
+                                    isLoading={samplerRunning}
+                                    variant="primary"
+                                >
+                                    Run Sampler
+                                </Button>
+                                <Button
+                                    onClick={handleTogglePause}
+                                    variant="secondary"
+                                    className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
+                                >
+                                    {features.sampler_paused ? 'Resume' : 'Pause'}
+                                </Button>
+                            </div>
                         </div>
-                    </div>
-                    <div className="mt-4 grid grid-cols-2 gap-4 text-slate-200">
-                        <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg">
-                            <p className="text-xs uppercase text-slate-500">Rows</p>
-                            <p className="text-2xl font-semibold mt-1">{dbInfo.rows.toLocaleString()}</p>
-                        </div>
-                        <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg">
-                            <p className="text-xs uppercase text-slate-500">Size (MB)</p>
-                            <p className="text-2xl font-semibold mt-1">{dbInfo.sizeMB}</p>
-                        </div>
-                    </div>
-                </div>
+                    </Card>
 
-                {/* Sampler History */}
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-3 h-full">
-                    <div className="flex items-center justify-between gap-3 flex-wrap">
-                        <div>
-                            <h2 className="text-lg font-bold text-white">Sampler history</h2>
-                            <p className="text-slate-400 text-sm">Latest executions</p>
-                        </div>
-                        <div className="flex gap-2 items-center">
+                    <Card
+                        title="Sampler History"
+                        action={
                             <select
                                 value={historyLimit}
                                 onChange={e => setHistoryLimit(parseInt(e.target.value))}
-                                className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-slate-200 text-sm"
+                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
                             >
-                                <option value={5}>5</option>
-                                <option value={10}>10</option>
-                                <option value={20}>20</option>
+                                <option value={5}>Last 5</option>
+                                <option value={10}>Last 10</option>
+                                <option value={20}>Last 20</option>
                             </select>
-                            <button
-                                onClick={loadSamplerHistory}
-                                className="px-3 py-2 bg-slate-800 text-slate-200 rounded-lg hover:bg-slate-700"
-                            >
-                                Refresh
-                            </button>
+                        }
+                    >
+                        <div className="space-y-0 text-sm">
+                            {samplerHistory.length === 0 ? (
+                                <p className="text-slate-500 text-xs italic">No history available</p>
+                            ) : (
+                                samplerHistory.map((run, idx) => (
+                                    <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
+                                        <div>
+                                            <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
+                                            {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
+                                        </div>
+                                        <div className="text-right">
+                                            <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
+                                            <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm text-slate-200">
-                            <thead className="text-xs text-slate-400">
-                                <tr>
-                                    <th className="text-left py-2 pr-4">Time</th>
-                                    <th className="text-left py-2 pr-4">Inserted</th>
-                                    <th className="text-left py-2 pr-4">Duration</th>
-                                    <th className="text-left py-2 pr-4">Error</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {samplerHistory.map((run, idx) => (
-                                    <tr key={idx} className="border-t border-slate-800">
-                                        <td className="py-2 pr-4">{new Date(run.timestamp * 1000).toLocaleString()}</td>
-                                        <td className="py-2 pr-4">{run.inserted}</td>
-                                        <td className="py-2 pr-4">{run.duration_ms} ms</td>
-                                        <td className="py-2 pr-4 text-red-300 text-xs">{run.error}</td>
-                                    </tr>
-                                ))}
-                                {samplerHistory.length === 0 && (
-                                    <tr><td className="py-2 text-slate-500" colSpan={4}>No history</td></tr>
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
+                    </Card>
                 </div>
             </div>
         </div>

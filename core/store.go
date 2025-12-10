@@ -2,8 +2,10 @@ package core
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
 
@@ -12,6 +14,14 @@ type Sample struct {
 	Timestamp int64
 	Uplink    int64
 	Downlink  int64
+}
+
+type WGSample struct {
+	PublicKey string `json:"public_key"`
+	Timestamp int64  `json:"timestamp"`
+	Rx        int64  `json:"rx"`
+	Tx        int64  `json:"tx"`
+	Endpoint  string `json:"endpoint"`
 }
 
 type Store struct {
@@ -79,11 +89,100 @@ func (s *Store) initSchema() error {
 		inserted INTEGER NOT NULL,
 		error TEXT
 	);
+	CREATE TABLE IF NOT EXISTS wg_samples (
+		public_key TEXT NOT NULL,
+		ts INTEGER NOT NULL,
+		rx INTEGER NOT NULL,
+		tx INTEGER NOT NULL,
+		endpoint TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_wg_samples_pub_ts ON wg_samples(public_key, ts);
+
+	CREATE TABLE IF NOT EXISTS admins (
+		username TEXT PRIMARY KEY,
+		password_hash TEXT NOT NULL
+	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
 	}
 	s.db.Exec("ALTER TABLE users ADD COLUMN enabled INTEGER DEFAULT 1;")
+	s.db.Exec("ALTER TABLE wg_samples ADD COLUMN endpoint TEXT DEFAULT ''")
+	return nil
+}
+
+// Admin Management
+
+func (s *Store) CreateAdmin(username, password string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("INSERT INTO admins (username, password_hash) VALUES (?, ?)", username, string(hash))
+	return err
+}
+
+func (s *Store) VerifyAdmin(username, password string) (bool, error) {
+	var hash string
+	err := s.db.QueryRow("SELECT password_hash FROM admins WHERE username = ?", username).Scan(&hash)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	err = bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	if err != nil {
+		return false, nil // Invalid password
+	}
+	return true, nil
+}
+
+func (s *Store) UpdateAdminPassword(username, newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.Exec("UPDATE admins SET password_hash = ? WHERE username = ?", string(hash), username)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) UpdateAdminUsername(oldUsername, newUsername string) error {
+	// Check if new username already exists
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM admins WHERE username = ?", newUsername).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("username %s already exists", newUsername)
+	}
+
+	res, err := s.db.Exec("UPDATE admins SET username = ? WHERE username = ?", newUsername, oldUsername)
+	if err != nil {
+		return err
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *Store) EnsureDefaultAdmin() error {
+	var count int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM admins").Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		return s.CreateAdmin("admin", "admin")
+	}
 	return nil
 }
 
@@ -207,6 +306,26 @@ func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
 func (s *Store) DeleteUserMetadata(email string) error {
 	_, err := s.db.Exec("DELETE FROM users WHERE email = ?", email)
 	return err
+}
+
+func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
+	rows, err := s.db.Query("SELECT email, quota_limit, quota_period, reset_day, enabled FROM users")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []UserMetadata
+	for rows.Next() {
+		var meta UserMetadata
+		var enabled int
+		if err := rows.Scan(&meta.Email, &meta.QuotaLimit, &meta.QuotaPeriod, &meta.ResetDay, &enabled); err != nil {
+			return nil, err
+		}
+		meta.Enabled = enabled != 0
+		result = append(result, meta)
+	}
+	return result, nil
 }
 
 func (s *Store) GetLastSeenMap() (map[string]int64, error) {
@@ -422,4 +541,103 @@ func (s *Store) GetActiveUserCountWithThreshold(duration time.Duration, threshol
 
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+// WireGuard traffic samples
+
+func (s *Store) InsertWGSamples(samples []WGSample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+	if len(samples) > 5000 {
+		samples = samples[:5000]
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare("INSERT INTO wg_samples (public_key, ts, rx, tx, endpoint) VALUES (?, ?, ?, ?, ?)")
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+	defer stmt.Close()
+
+	for _, smp := range samples {
+		if _, err := stmt.Exec(smp.PublicKey, smp.Timestamp, smp.Rx, smp.Tx, smp.Endpoint); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetWGTrafficDelta returns rx/tx delta between first and last sample in the range.
+func (s *Store) GetWGTrafficDelta(publicKey string, start, end int64) (int64, int64, error) {
+	if publicKey == "" {
+		return 0, 0, nil
+	}
+	var firstRx, firstTx, lastRx, lastTx sql.NullInt64
+
+	err := s.db.QueryRow(`SELECT rx, tx FROM wg_samples WHERE public_key = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC LIMIT 1`,
+		publicKey, start, end).Scan(&firstRx, &firstTx)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, 0, err
+	}
+	err = s.db.QueryRow(`SELECT rx, tx FROM wg_samples WHERE public_key = ? AND ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT 1`,
+		publicKey, start, end).Scan(&lastRx, &lastTx)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, 0, err
+	}
+
+	if !firstRx.Valid || !lastRx.Valid {
+		return 0, 0, nil
+	}
+
+	deltaRx := lastRx.Int64 - firstRx.Int64
+	deltaTx := lastTx.Int64 - firstTx.Int64
+	if deltaRx < 0 {
+		deltaRx = 0
+	}
+	if deltaTx < 0 {
+		deltaTx = 0
+	}
+	return deltaRx, deltaTx, nil
+}
+
+func (s *Store) GetWGTrafficSeries(publicKey string, start, end int64, limit int) ([]WGSample, error) {
+	if publicKey == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 5000 {
+		limit = 5000
+	}
+	rows, err := s.db.Query(`SELECT public_key, ts, rx, tx, COALESCE(endpoint, '') 
+		FROM wg_samples 
+		WHERE public_key = ? AND ts >= ? AND ts <= ? 
+		ORDER BY ts ASC 
+		LIMIT ?`, publicKey, start, end, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var series []WGSample
+	for rows.Next() {
+		var smp WGSample
+		if err := rows.Scan(&smp.PublicKey, &smp.Timestamp, &smp.Rx, &smp.Tx, &smp.Endpoint); err != nil {
+			return nil, err
+		}
+		series = append(series, smp)
+	}
+	return series, nil
+}
+
+func (s *Store) PruneWGSamplesOlderThan(ts int64) (int64, error) {
+	res, err := s.db.Exec("DELETE FROM wg_samples WHERE ts < ?", ts)
+	if err != nil {
+		return 0, err
+	}
+	affected, _ := res.RowsAffected()
+	return affected, nil
 }
