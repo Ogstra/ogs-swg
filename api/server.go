@@ -29,6 +29,8 @@ type Server struct {
 	wgSamplerTicker  *time.Ticker
 	wgSampleInterval time.Duration
 	wgMux            sync.RWMutex
+	wgLast           map[string]core.WGSample
+	wgSamplerPaused  bool
 }
 
 type qrEntry struct {
@@ -50,6 +52,8 @@ func NewServer(store *core.Store, config *core.Config) *Server {
 		wgSamplerStop:    make(chan struct{}),
 		wgSamplerTicker:  time.NewTicker(interval),
 		wgSampleInterval: interval,
+		wgLast:           make(map[string]core.WGSample),
+		wgSamplerPaused:  false,
 	}
 }
 
@@ -114,30 +118,8 @@ func (s *Server) startWireGuardSampler() {
 		for {
 			select {
 			case <-s.wgSamplerTicker.C:
-				stats, err := core.GetWireGuardStats()
-				if err != nil {
-					log.Printf("wg sampler: failed to read stats: %v", err)
-					continue
-				}
-				var samples []core.WGSample
-				now := time.Now().Unix()
-				for _, st := range stats {
-					samples = append(samples, core.WGSample{
-						PublicKey: st.PublicKey,
-						Timestamp: now,
-						Rx:        st.TransferRx,
-						Tx:        st.TransferTx,
-						Endpoint:  st.Endpoint,
-					})
-				}
-				if len(samples) > 0 && s.store != nil {
-					start := time.Now()
-					if err := s.store.InsertWGSamples(samples); err != nil {
-						log.Printf("wg sampler: insert error: %v", err)
-						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), err.Error(), "wireguard")
-					} else {
-						s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), "", "wireguard")
-					}
+				if !s.wgSamplerPaused {
+					s.runWireGuardSample()
 				}
 			case <-s.wgSamplerStop:
 				if s.wgSamplerTicker != nil {
@@ -147,6 +129,67 @@ func (s *Server) startWireGuardSampler() {
 			}
 		}
 	}()
+}
+
+func (s *Server) runWireGuardSample() {
+	s.wgMux.Lock()
+	defer s.wgMux.Unlock()
+
+	stats, err := core.GetWireGuardStats()
+	if err != nil {
+		log.Printf("wg sampler: failed to read stats: %v", err)
+		return
+	}
+	var samples []core.WGSample
+	now := time.Now().Unix()
+	for _, st := range stats {
+		prev, ok := s.wgLast[st.PublicKey]
+
+		// If we have previous stats, check if they changed
+		hasChanged := false
+		if !ok {
+			// First run for this peer: treat as changed so we establish a baseline
+			// Actually, if we want to be strict about "dedup", we need to decide if the first point is needed.
+			// Yes, we need at least one point.
+			hasChanged = true
+		} else {
+			if st.TransferRx != prev.Rx || st.TransferTx != prev.Tx {
+				hasChanged = true
+			}
+		}
+
+		if hasChanged {
+			samples = append(samples, core.WGSample{
+				PublicKey: st.PublicKey,
+				Timestamp: now,
+				Rx:        st.TransferRx,
+				Tx:        st.TransferTx,
+				Endpoint:  st.Endpoint,
+			})
+		}
+
+		// Update cache with current absolute values
+		s.wgLast[st.PublicKey] = core.WGSample{
+			PublicKey: st.PublicKey,
+			Rx:        st.TransferRx,
+			Tx:        st.TransferTx,
+		}
+	}
+
+	if s.store != nil {
+		start := time.Now()
+		if len(samples) > 0 {
+			if err := s.store.InsertWGSamples(samples); err != nil {
+				log.Printf("wg sampler: insert error: %v", err)
+				s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), err.Error(), "wireguard")
+			} else {
+				s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), "", "wireguard")
+			}
+		} else {
+			// Log empty run for visibility
+			s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), 0, "", "wireguard")
+		}
+	}
 }
 
 func (s *Server) syncWireGuardConfig(wgConfig *core.WireGuardConfig) bool {

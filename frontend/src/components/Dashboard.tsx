@@ -425,7 +425,13 @@ export default function Dashboard() {
                                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                                     <XAxis
                                         dataKey="ts"
-                                        tickFormatter={(ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        tickFormatter={(ts) => {
+                                            const date = new Date(ts * 1000)
+                                            if (['30m', '1h', '6h', '24h'].includes(timeRange)) {
+                                                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                                            }
+                                            return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                                        }}
                                         stroke="#64748b"
                                         fontSize={12}
                                         tickMargin={10}

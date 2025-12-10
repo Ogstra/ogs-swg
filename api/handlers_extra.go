@@ -1155,39 +1155,55 @@ func checkService(service string) bool {
 	return true
 }
 
+func (s *Server) requireAnyService(w http.ResponseWriter) bool {
+	if !s.config.EnableSingbox && !s.config.EnableWireGuard {
+		http.Error(w, "No services enabled", http.StatusServiceUnavailable)
+		return false
+	}
+	return true
+}
+
 func (s *Server) handleRunSampler(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSingbox(w) {
+	if !s.requireAnyService(w) {
 		return
 	}
-	if s.sampler == nil {
-		http.Error(w, "Sampler not running", http.StatusServiceUnavailable)
-		return
+	if s.sampler != nil {
+		s.sampler.TriggerOnce()
 	}
-	s.sampler.TriggerOnce()
+	// Also trigger WireGuard sampler
+	if s.config.EnableWireGuard {
+		go s.runWireGuardSample()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handlePauseSampler(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSingbox(w) {
+	if !s.requireAnyService(w) {
 		return
 	}
-	if s.sampler == nil {
-		http.Error(w, "Sampler not running", http.StatusServiceUnavailable)
-		return
+	if s.sampler != nil {
+		s.sampler.SetPaused(true)
 	}
-	s.sampler.SetPaused(true)
+	if s.config.EnableWireGuard {
+		s.wgMux.Lock()
+		s.wgSamplerPaused = true
+		s.wgMux.Unlock()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleResumeSampler(w http.ResponseWriter, r *http.Request) {
-	if !s.requireSingbox(w) {
+	if !s.requireAnyService(w) {
 		return
 	}
-	if s.sampler == nil {
-		http.Error(w, "Sampler not running", http.StatusServiceUnavailable)
-		return
+	if s.sampler != nil {
+		s.sampler.SetPaused(false)
 	}
-	s.sampler.SetPaused(false)
+	if s.config.EnableWireGuard {
+		s.wgMux.Lock()
+		s.wgSamplerPaused = false
+		s.wgMux.Unlock()
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
