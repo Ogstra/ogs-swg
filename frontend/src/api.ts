@@ -33,6 +33,8 @@ export interface FeatureFlags {
     active_threshold_bytes?: number;
     wg_sampler_interval_sec?: number;
     wg_retention_days?: number;
+    aggregation_enabled?: boolean;
+    aggregation_days?: number;
     log_source?: 'journal' | 'file';
     access_log_path?: string;
     systemctl_available?: boolean;

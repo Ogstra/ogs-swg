@@ -26,6 +26,8 @@ export default function Settings() {
         active_threshold_bytes: 1024,
         wg_sampler_interval_sec: 60,
         wg_retention_days: 30,
+        aggregation_enabled: false,
+        aggregation_days: 7,
     })
     const [historyLimit, setHistoryLimit] = useState(5)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean; wireguard: boolean }>({ singbox: false, wireguard: false })
@@ -263,6 +265,18 @@ export default function Settings() {
                                         <div className="text-xs text-slate-400 mt-1">Auto-prune old stats</div>
                                     </div>
                                 </label>
+                                <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!features.aggregation_enabled}
+                                        onChange={e => setFeatures({ ...features, aggregation_enabled: e.target.checked })}
+                                        className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                    />
+                                    <div>
+                                        <div className="font-semibold text-white">Data Aggregation</div>
+                                        <div className="text-xs text-slate-400 mt-1">Compress old history</div>
+                                    </div>
+                                </label>
                             </div>
                         </div>
                     </Card>
@@ -483,6 +497,16 @@ export default function Settings() {
                                         min={15}
                                         value={features.wg_sampler_interval_sec ?? 60}
                                         onChange={e => setFeatures({ ...features, wg_sampler_interval_sec: parseInt(e.target.value) })}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                    />
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-400">Aggregation Days</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={features.aggregation_days ?? 7}
+                                        onChange={e => setFeatures({ ...features, aggregation_days: parseInt(e.target.value) })}
                                         className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                     />
                                 </div>
