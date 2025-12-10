@@ -1351,6 +1351,20 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.WGSamplerIntervalSec = 15
 		}
 	}
+	if val, ok := payload["aggregation_enabled"].(bool); ok {
+		s.config.AggregationEnabled = val
+	}
+	if v, ok := payload["aggregation_days"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.AggregationDays = int(t)
+		case int:
+			s.config.AggregationDays = t
+		}
+		if s.config.AggregationDays < 1 {
+			s.config.AggregationDays = 1
+		}
+	}
 
 	if err := s.config.SaveAppConfig(); err != nil {
 		log.Printf("Failed to persist config toggles: %v", err)
