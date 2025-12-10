@@ -216,6 +216,15 @@ export default function Dashboard() {
                                 {status.active_users_singbox} clients
                             </span>
                         </div>
+                        {status.active_users_singbox_list && status.active_users_singbox_list.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                                {status.active_users_singbox_list.map((user: string, idx: number) => (
+                                    <span key={idx} className="text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+                                        {user}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </Card>
 
@@ -264,6 +273,15 @@ export default function Dashboard() {
                                 {status.active_users_wireguard} peers
                             </span>
                         </div>
+                        {status.active_users_wireguard_list && status.active_users_wireguard_list.length > 0 && (
+                            <div className="flex flex-wrap gap-2 mt-2">
+                                {status.active_users_wireguard_list.map((peer: string, idx: number) => (
+                                    <span key={idx} className="text-[10px] font-medium bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
+                                        {peer}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </Card>
             </div>
