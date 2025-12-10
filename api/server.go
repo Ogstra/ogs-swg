@@ -1,6 +1,7 @@
 package api
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,6 +56,29 @@ func NewServer(store *core.Store, config *core.Config) *Server {
 		wgLast:           make(map[string]core.WGSample),
 		wgSamplerPaused:  false,
 	}
+}
+
+type gzipResponseWriter struct {
+	io.Writer
+	http.ResponseWriter
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+func (s *Server) GzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		gzr := gzipResponseWriter{Writer: gz, ResponseWriter: w}
+		next.ServeHTTP(gzr, r)
+	})
 }
 
 func (s *Server) secure(handler http.HandlerFunc) http.HandlerFunc {
@@ -379,7 +403,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
 
 	// Mount protected routes under /api/
-	mux.Handle("/api/", s.AuthMiddleware(protected))
+	mux.Handle("/api/", s.GzipMiddleware(s.AuthMiddleware(protected)))
 
 	return mux
 }

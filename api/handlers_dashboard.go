@@ -182,7 +182,9 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	var chartData []UnifiedChartPoint
 	var accUpSB, accDownSB, accUpWG, accDownWG int64
 
-	for t := start; t < end; t += interval {
+	// Align start to interval grid to match bucket keys
+	gridStart := (start / interval) * interval
+	for t := gridStart; t <= end; t += interval {
 		sbStat := sbBuckets[t]
 		wgStat := wgBuckets[t]
 
