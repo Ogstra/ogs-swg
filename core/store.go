@@ -619,6 +619,71 @@ func (s *Store) InsertWGSamples(samples []WGSample) error {
 	return tx.Commit()
 }
 
+type TrafficStats struct {
+	Uplink   int64
+	Downlink int64
+}
+
+type User struct {
+	Uuid        string
+	Username    string
+	DataLimit   int64
+	QuotaPeriod string
+	ResetDay    int
+	Enabled     bool
+}
+
+// GetUsers returns all users.
+func (s *Store) GetUsers() ([]User, error) {
+	query := `SELECT uuid, username, data_limit, quota_period, reset_day, enabled FROM users`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []User
+	for rows.Next() {
+		var u User
+		var enabled int
+		if err := rows.Scan(&u.Uuid, &u.Username, &u.DataLimit, &u.QuotaPeriod, &u.ResetDay, &enabled); err != nil {
+			return nil, err
+		}
+		u.Enabled = enabled == 1
+		users = append(users, u)
+	}
+	return users, nil
+}
+
+// GetTrafficPerUser returns aggregated usage per user for the given time range.
+func (s *Store) GetTrafficPerUser(start, end int64) (map[string]TrafficStats, error) {
+	query := `
+	SELECT user, SUM(uplink), SUM(downlink)
+	FROM samples
+	WHERE ts >= ? AND ts <= ?
+	GROUP BY user`
+
+	rows, err := s.db.Query(query, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]TrafficStats)
+	for rows.Next() {
+		var user string
+		var up, down sql.NullInt64
+		if err := rows.Scan(&user, &up, &down); err != nil {
+			return nil, err
+		}
+		result[user] = TrafficStats{
+			Uplink:   up.Int64,
+			Downlink: down.Int64,
+		}
+	}
+	return result, nil
+}
+
 // GetWGTrafficDelta returns rx/tx delta between first and last sample in the range.
 func (s *Store) GetWGTrafficDelta(publicKey string, start, end int64) (int64, int64, error) {
 	if publicKey == "" {

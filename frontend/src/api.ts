@@ -41,6 +41,34 @@ export interface FeatureFlags {
     journalctl_available?: boolean;
 }
 
+export interface UnifiedChartPoint {
+    ts: number;
+    up_sb: number;
+    down_sb: number;
+    up_wg: number;
+    down_wg: number;
+}
+
+export interface Consumer {
+    name: string;
+    total: number;
+    flow: string;
+    quota_limit: number;
+    key: string;
+}
+
+export interface TrafficStats {
+    uplink: number;
+    downlink: number;
+}
+
+export interface DashboardData {
+    status: FeatureFlags & { [key: string]: any }; // Allow generic access but enforce basic flags
+    stats_cards: { [key: string]: TrafficStats }; // "singbox", "wireguard"
+    chart_data: UnifiedChartPoint[];
+    top_consumers: { [key: string]: Consumer[] };
+}
+
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
     if (contentType) headers['Content-Type'] = contentType;
@@ -366,6 +394,14 @@ export const api = {
     restoreConfig: async (): Promise<any> => {
         const res = await fetch('/api/config/restore', { method: 'POST', headers: buildHeaders() });
         if (!res.ok) throw new Error('Failed to restore config');
+        return res.json();
+    },
+    getDashboardData: async (range: string = '24h', start?: string, end?: string): Promise<DashboardData> => {
+        const params = new URLSearchParams({ range });
+        if (start) params.append('start', start);
+        if (end) params.append('end', end);
+        const res = await fetch(`/api/dashboard?${params.toString()}`, { headers: buildHeaders() });
+        if (!res.ok) throw new Error('Failed to fetch dashboard data');
         return res.json();
     }
 };

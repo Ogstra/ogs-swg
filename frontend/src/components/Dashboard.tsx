@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, UserStatus } from '../api'
+import { api, DashboardData, UnifiedChartPoint, Consumer, TrafficStats } from '../api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, Zap } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from './ui/Card'
@@ -15,52 +15,34 @@ function formatBytes(bytes: number, decimals = 2) {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
-type StatusState = {
-    singbox: boolean
-    wireguard: boolean
-    active_users_singbox: number
-    active_users_wireguard: number
-    active_users_singbox_list: string[]
-    active_users_wireguard_list: string[]
-    samples_count: number
-    db_size_bytes: number
-    systemctl_available?: boolean
-    journalctl_available?: boolean
-}
-
 export default function Dashboard() {
-    const [users, setUsers] = useState<UserStatus[]>([])
-    const [stats, setStats] = useState<any[]>([])
-    const [status, setStatus] = useState<StatusState>({
+    const [loading, setLoading] = useState(true)
+    const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
+    const [timeRange, setTimeRange] = useState('24h')
+    const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
+
+    // Data States
+    const [chartData, setChartData] = useState<UnifiedChartPoint[]>([])
+    const [chartDomain, setChartDomain] = useState<[number, number] | undefined>(undefined)
+    const [statsCards, setStatsCards] = useState<Record<string, TrafficStats>>({
+        singbox: { uplink: 0, downlink: 0 },
+        wireguard: { uplink: 0, downlink: 0 }
+    })
+    const [topConsumersMap, setTopConsumersMap] = useState<Record<string, Consumer[]>>({
+        singbox: [],
+        wireguard: []
+    })
+    const [status, setStatus] = useState<any>({
         singbox: false,
         wireguard: false,
         active_users_singbox: 0,
         active_users_wireguard: 0,
-        active_users_singbox_list: [] as string[],
-        active_users_wireguard_list: [] as string[],
-        samples_count: 0,
-        db_size_bytes: 0,
-        systemctl_available: true,
-        journalctl_available: true,
+        active_users_singbox_list: [],
+        active_users_wireguard_list: []
     })
-    const [loading, setLoading] = useState(true)
-    const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
-    const [timeRange, setTimeRange] = useState('24h')
-    const [wgTraffic, setWgTraffic] = useState<{ rx: number; tx: number }>({ rx: 0, tx: 0 })
-    const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
-    const [chartData, setChartData] = useState<any[]>([])
-    const [chartDomain, setChartDomain] = useState<[number, number] | undefined>(undefined)
-
-    const [wgPeers, setWgPeers] = useState<any[]>([])
-    const [wgUsage, setWgUsage] = useState<Record<string, number>>({})
-    // consumerTab removed, using chartMode for both
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
-
-    // ... (lines 58-197 skipped for brevity in prompt, but in Apply I will just do the replacements)
-
-
     const [customStart, setCustomStart] = useState(today)
     const [customEnd, setCustomEnd] = useState(today)
 
@@ -68,126 +50,46 @@ export default function Dashboard() {
         const nowSec = Math.floor(Date.now() / 1000)
         const day = 24 * 60 * 60
         switch (range) {
-            case '30m':
-                return { start: nowSec - 30 * 60, end: nowSec }
-            case '1h':
-                return { start: nowSec - 60 * 60, end: nowSec }
-            case '6h':
-                return { start: nowSec - 6 * 60 * 60, end: nowSec }
-            case '24h':
-                return { start: nowSec - day, end: nowSec }
-            case '1w':
-                return { start: nowSec - 7 * day, end: nowSec }
-            case '1m':
-                return { start: nowSec - 30 * day, end: nowSec }
-            default:
-                return { start: nowSec - day, end: nowSec }
+            case '30m': return { start: nowSec - 30 * 60, end: nowSec }
+            case '1h': return { start: nowSec - 60 * 60, end: nowSec }
+            case '6h': return { start: nowSec - 6 * 60 * 60, end: nowSec }
+            case '24h': return { start: nowSec - day, end: nowSec }
+            case '1w': return { start: nowSec - 7 * day, end: nowSec }
+            case '1m': return { start: nowSec - 30 * day, end: nowSec }
+            default: return { start: nowSec - day, end: nowSec }
         }
     }
 
     const fetchData = async () => {
         setLoading(true)
         try {
-            let startSec: number
-            let endSec: number
-            let statsData = []
-            let reportStartDate = today
-            let reportEndDate = today
+            let start: string | undefined
+            let end: string | undefined
+            let domainStart: number
+            let domainEnd: number
+
             if (timeRange === 'custom') {
-                startSec = Math.floor(new Date(customStart).getTime() / 1000)
-                endSec = Math.floor(new Date(customEnd).getTime() / 1000) + 24 * 60 * 60 // include full end day
-                statsData = await api.getStats('custom', startSec.toString(), endSec.toString())
-                reportStartDate = startSec.toString()
-                reportEndDate = endSec.toString()
+                domainStart = Math.floor(new Date(customStart).getTime() / 1000)
+                domainEnd = Math.floor(new Date(customEnd).getTime() / 1000) + 24 * 60 * 60
+                start = domainStart.toString()
+                end = domainEnd.toString()
             } else {
-                // Force explicit start/end to ensure backend pulls the right window
                 const range = computeRangeSeconds(timeRange)
-                startSec = range.start
-                endSec = range.end
-                statsData = await api.getStats('custom', startSec.toString(), endSec.toString())
-                reportStartDate = startSec.toString()
-                reportEndDate = endSec.toString()
+                domainStart = range.start
+                domainEnd = range.end
+                start = domainStart.toString()
+                end = domainEnd.toString()
             }
-            // Set domain explicitly to force chart to cover full range
-            setChartDomain([startSec, endSec])
 
-            const [reportData, statusData, wgTrafficRes, wgSeries, wgPeersData] = await Promise.all([
-                api.getReport(reportStartDate, reportEndDate),
-                api.getSystemStatus(),
-                api.getWireGuardTrafficRange(startSec, endSec).catch(() => ({})),
-                api.getWireGuardTrafficSeries(undefined, undefined, 2000, startSec, endSec).catch(() => ({})),
-                api.getWireGuardPeers().catch(() => [])
-            ])
-            let wgRx = 0
-            let wgTx = 0
-            Object.values(wgTrafficRes || {}).forEach((v: any) => {
-                wgRx += v?.rx || 0
-                wgTx += v?.tx || 0
-            })
-            // Build WG chart data (delta per timestamp summed across peers)
-            const wgChartAccumulator: Record<number, { uplink: number; downlink: number }> = {}
-            Object.values(wgSeries || {}).forEach((arr: any) => {
-                const series = Array.isArray(arr) ? arr : []
-                for (let i = 1; i < series.length; i++) {
-                    const prev = series[i - 1]
-                    const curr = series[i]
-                    const dx = Math.max(0, (curr.tx || 0) - (prev.tx || 0))
-                    const dr = Math.max(0, (curr.rx || 0) - (prev.rx || 0))
-                    const ts = curr.timestamp || curr.ts || 0
-                    if (!ts) continue
-                    if (!wgChartAccumulator[ts]) wgChartAccumulator[ts] = { uplink: 0, downlink: 0 }
-                    wgChartAccumulator[ts].uplink += dx
-                    wgChartAccumulator[ts].downlink += dr
-                }
-            })
+            setChartDomain([domainStart, domainEnd])
 
-            // Calculate per-peer usage from Series (Windowed)
-            const wgUsageMap: Record<string, number> = {}
-            Object.entries(wgSeries || {}).forEach(([pubKey, samples]: [string, any]) => {
-                const arr = Array.isArray(samples) ? samples : []
-                if (arr.length < 1) return
-                const sorted = [...arr].sort((a: any, b: any) => (a.ts || a.timestamp) - (b.ts || b.timestamp))
-                const first = sorted[0]
-                const last = sorted[sorted.length - 1]
-                const rx = Math.max(0, (last.rx || 0) - (first.rx || 0))
-                const tx = Math.max(0, (last.tx || 0) - (first.tx || 0))
-                wgUsageMap[pubKey] = rx + tx
-            })
-            setWgUsage(wgUsageMap)
+            const data = await api.getDashboardData(timeRange === 'custom' ? 'custom' : timeRange, start, end)
 
-            const wgChart = Object.entries(wgChartAccumulator)
-                .map(([k, v]) => ({ ts: Number(k), uplink: v.uplink, downlink: v.downlink }))
-                .sort((a, b) => a.ts - b.ts)
+            setChartData(data.chart_data || [])
+            setStatsCards(data.stats_cards || { singbox: { uplink: 0, downlink: 0 }, wireguard: { uplink: 0, downlink: 0 } })
+            setTopConsumersMap(data.top_consumers || { singbox: [], wireguard: [] })
+            setStatus(data.status || {})
 
-            setUsers(Array.isArray(reportData) ? reportData : [])
-            setStats(Array.isArray(statsData) ? statsData : [])
-            setStatus({
-                singbox: statusData?.singbox ?? false,
-                wireguard: statusData?.wireguard ?? false,
-                active_users_singbox: statusData?.active_users_singbox ?? 0,
-                active_users_wireguard: statusData?.active_users_wireguard ?? 0,
-                active_users_singbox_list: statusData?.active_users_singbox_list ?? [],
-                active_users_wireguard_list: statusData?.active_users_wireguard_list ?? [],
-                samples_count: statusData?.samples_count ?? 0,
-                db_size_bytes: statusData?.db_size_bytes ?? 0,
-                systemctl_available: statusData?.systemctl_available ?? true,
-                journalctl_available: statusData?.journalctl_available ?? true,
-            })
-            setWgTraffic({ rx: wgRx, tx: wgTx })
-            setWgPeers(Array.isArray(wgPeersData) ? wgPeersData : [])
-
-            // Process Chart Data to be Cumulative
-            const rawChartData = chartMode === 'singbox' ? statsData.map((p: any) => ({ ts: p.timestamp, uplink: p.uplink, downlink: p.downlink })) : wgChart
-
-            let accUp = 0
-            let accDown = 0
-            const cumulativeData = rawChartData.map((p: any) => {
-                accUp += p.uplink || 0
-                accDown += p.downlink || 0
-                return { ...p, uplink: accUp, downlink: accDown }
-            })
-
-            setChartData(cumulativeData)
             setLastUpdated(new Date())
         } catch (err) {
             console.error(err)
@@ -200,30 +102,10 @@ export default function Dashboard() {
         fetchData()
         const interval = setInterval(fetchData, 10000)
         return () => clearInterval(interval)
-    }, [timeRange, customStart, customEnd, chartMode])
+    }, [timeRange, customStart, customEnd])
 
-    // Calculate Total Traffic from Graph Data (Stats)
-    const totalUp = stats.reduce((acc, p) => acc + p.uplink, 0)
-    const totalDown = stats.reduce((acc, p) => acc + p.downlink, 0)
-
-    const topSingbox = [...users].sort((a, b) => b.total - a.total).slice(0, 5)
-    // For WG, we need to map RX/TX to total. RX (down relative to server) = Upload for User? 
-    // Usually: RX on Interface = Upload from User. TX on Interface = Download to User.
-    // However, typical terminology: "Uplink" = User Upload. 
-    // Let's assume RX=Uplink, TX=Downlink for VPN context relative to server.
-    // Calculate WG usage from Series (Windowed) instead of Total Stats
-    // Now utilizing the wgUsage state calculated in fetchData from the time-series
-    const topWireGuard = [...wgPeers].map(p => ({
-        name: p.alias || p.public_key.substring(0, 8),
-        total: wgUsage[p.public_key] || 0,
-        key: p.public_key,
-        flow: 'WireGuard',
-        quota_limit: 0
-    }))
-        .filter(p => p.total > 0) // Optional: filter out zero usage
-        .sort((a, b) => b.total - a.total).slice(0, 5)
-
-    const topConsumers = chartMode === 'singbox' ? topSingbox : topWireGuard
+    // Derived values for UI
+    const topConsumers = topConsumersMap[chartMode] || []
 
     return (
         <div className="space-y-6">
@@ -308,7 +190,7 @@ export default function Dashboard() {
                         </div>
                         <div className="text-right">
                             <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Traffic</p>
-                            <p className="text-2xl font-bold text-white mt-1">{formatBytes(totalUp + totalDown)}</p>
+                            <p className="text-2xl font-bold text-white mt-1">{formatBytes(statsCards.singbox.uplink + statsCards.singbox.downlink)}</p>
                         </div>
                     </div>
 
@@ -317,13 +199,13 @@ export default function Dashboard() {
                             <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
                                 <ArrowUp size={12} /> Received
                             </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(totalUp)}</p>
+                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.uplink)}</p>
                         </div>
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
                                 <ArrowDown size={12} /> Sent
                             </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(totalDown)}</p>
+                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.downlink)}</p>
                         </div>
                     </div>
 
@@ -333,17 +215,6 @@ export default function Dashboard() {
                             <span className="text-xs font-mono bg-slate-800 text-white px-2 py-0.5 rounded-md border border-slate-700">
                                 {status.active_users_singbox} clients
                             </span>
-                        </div>
-                        <div className="flex flex-wrap gap-2 max-h-[100px] overflow-y-auto custom-scrollbar">
-                            {status.active_users_singbox_list.length > 0 ? (
-                                status.active_users_singbox_list.map(u => (
-                                    <span key={u} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono border border-slate-700">
-                                        {u}
-                                    </span>
-                                ))
-                            ) : (
-                                <span className="text-xs text-slate-500 italic">No active sessions</span>
-                            )}
                         </div>
                     </div>
                 </Card>
@@ -367,7 +238,7 @@ export default function Dashboard() {
                         </div>
                         <div className="text-right">
                             <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Traffic</p>
-                            <p className="text-2xl font-bold text-white mt-1">{formatBytes(wgTraffic.rx + wgTraffic.tx)}</p>
+                            <p className="text-2xl font-bold text-white mt-1">{formatBytes(statsCards.wireguard.uplink + statsCards.wireguard.downlink)}</p>
                         </div>
                     </div>
 
@@ -376,13 +247,13 @@ export default function Dashboard() {
                             <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
                                 <ArrowUp size={12} /> Sent
                             </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(wgTraffic.tx)}</p>
+                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.wireguard.uplink)}</p>
                         </div>
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
                                 <ArrowDown size={12} /> Received
                             </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(wgTraffic.rx)}</p>
+                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.wireguard.downlink)}</p>
                         </div>
                     </div>
 
@@ -392,17 +263,6 @@ export default function Dashboard() {
                             <span className="text-xs font-mono bg-slate-800 text-white px-2 py-0.5 rounded-md border border-slate-700">
                                 {status.active_users_wireguard} peers
                             </span>
-                        </div>
-                        <div className="flex flex-wrap gap-2 max-h-[100px] overflow-y-auto custom-scrollbar">
-                            {status.active_users_wireguard_list.length > 0 ? (
-                                status.active_users_wireguard_list.map(u => (
-                                    <span key={u} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs font-mono border border-slate-700">
-                                        {u}
-                                    </span>
-                                ))
-                            ) : (
-                                <span className="text-xs text-slate-500 italic">No active peers</span>
-                            )}
                         </div>
                     </div>
                 </Card>
@@ -479,7 +339,7 @@ export default function Dashboard() {
                                     />
                                     <Area
                                         type="monotone"
-                                        dataKey="uplink"
+                                        dataKey={chartMode === 'singbox' ? "up_sb" : "up_wg"}
                                         name={chartMode === 'singbox' ? "Received" : "Sent"}
                                         stroke="#3b82f6"
                                         strokeWidth={2}
@@ -488,7 +348,7 @@ export default function Dashboard() {
                                     />
                                     <Area
                                         type="monotone"
-                                        dataKey="downlink"
+                                        dataKey={chartMode === 'singbox' ? "down_sb" : "down_wg"}
                                         name={chartMode === 'singbox' ? "Sent" : "Received"}
                                         stroke="#10b981"
                                         strokeWidth={2}
@@ -527,7 +387,7 @@ export default function Dashboard() {
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
                         ) : (
                             topConsumers.map((u, i) => (
-                                <div key={u.name} className="flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-slate-800/50 hover:border-slate-800 transition-colors">
+                                <div key={u.key || u.name} className="flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-slate-800/50 hover:border-slate-800 transition-colors">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
                                             {i + 1}
@@ -549,8 +409,6 @@ export default function Dashboard() {
                     </div>
                 </Card>
             </div>
-
-
         </div >
     )
 }
