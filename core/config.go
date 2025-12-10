@@ -28,6 +28,8 @@ type Config struct {
 	RetentionDays        int      `json:"retention_days"`
 	WGSamplerIntervalSec int      `json:"wg_sampler_interval_sec"`
 	WGRetentionDays      int      `json:"wg_retention_days"`
+	AggregationEnabled   bool     `json:"aggregation_enabled"`
+	AggregationDays      int      `json:"aggregation_days"`
 	ConfigPath           string   `json:"-"`
 	APIKey               string   `json:"api_key"`
 
@@ -61,6 +63,8 @@ func LoadConfig(path ...string) *Config {
 		ActiveThresholdBytes: 1024,
 		RetentionEnabled:     false,
 		RetentionDays:        90,
+		AggregationEnabled:   false,
+		AggregationDays:      7,
 		WGSamplerIntervalSec: 60,
 		WGRetentionDays:      30,
 

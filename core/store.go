@@ -60,6 +60,14 @@ type UserMetadata struct {
 	Enabled     bool   `json:"enabled"`
 }
 
+// DailyUsage represents aggregated traffic data for a user on a specific day.
+type DailyUsage struct {
+	User     string
+	Date     string // YYYY-MM-DD
+	Uplink   int64
+	Downlink int64
+}
+
 func (s *Store) initSchema() error {
 	query := `
 	CREATE TABLE IF NOT EXISTS samples (
@@ -101,6 +109,14 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS admins (
 		username TEXT PRIMARY KEY,
 		password_hash TEXT NOT NULL
+	);
+	
+	CREATE TABLE IF NOT EXISTS daily_usage (
+		user TEXT NOT NULL,
+		date TEXT NOT NULL,
+		uplink INTEGER NOT NULL,
+		downlink INTEGER NOT NULL,
+		PRIMARY KEY (user, date)
 	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
@@ -640,4 +656,138 @@ func (s *Store) PruneWGSamplesOlderThan(ts int64) (int64, error) {
 	}
 	affected, _ := res.RowsAffected()
 	return affected, nil
+}
+
+func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
+	// 1. Transaction start
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	// 2. Aggregate data
+	rows, err := tx.Query(`
+		SELECT user, date(ts, 'unixepoch'), SUM(uplink), SUM(downlink)
+		FROM samples
+		WHERE ts < ?
+		GROUP BY user, date(ts, 'unixepoch')
+	`, olderThanTs)
+	if err != nil {
+		return 0, fmt.Errorf("compress query failed: %v", err)
+	}
+
+	type aggRow struct {
+		u    string
+		d    string
+		up   int64
+		down int64
+	}
+	var agg []aggRow
+
+	for rows.Next() {
+		var r aggRow
+		if err := rows.Scan(&r.u, &r.d, &r.up, &r.down); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		agg = append(agg, r)
+	}
+	rows.Close()
+
+	if len(agg) == 0 {
+		return 0, nil // Nothing to compress
+	}
+
+	// 3. Upsert into daily_usage
+	for _, a := range agg {
+		_, err := tx.Exec(`
+			INSERT INTO daily_usage (user, date, uplink, downlink)
+			VALUES (?, ?, ?, ?)
+			ON CONFLICT(user, date) DO UPDATE SET
+			uplink = uplink + excluded.uplink,
+			downlink = downlink + excluded.downlink
+		`, a.u, a.d, a.up, a.down)
+		if err != nil {
+			return 0, fmt.Errorf("compress insert failed: %v", err)
+		}
+	}
+
+	// 4. Delete old samples
+	res, err := tx.Exec("DELETE FROM samples WHERE ts < ?", olderThanTs)
+	if err != nil {
+		return 0, fmt.Errorf("compress delete failed: %v", err)
+	}
+
+	deleted, _ := res.RowsAffected()
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return deleted, nil
+}
+
+// GetCombinedReport queries both daily_usage and samples to build a comprehensive report.
+func (s *Store) GetCombinedReport(user string, start, end int64) ([]Sample, error) {
+	// 1. Get Aggregated Data in Range
+	startDate := time.Unix(start, 0).Format("2006-01-02")
+	endDate := time.Unix(end, 0).Format("2006-01-02")
+
+	// Adjust start date to include the day of 'start' timestamp
+	// Actually, if we want strict range, we should be careful.
+	// But usually reports are "Last 30 days".
+
+	rows, err := s.db.Query(`
+		SELECT user, date, uplink, downlink
+		FROM daily_usage
+		WHERE user = ? AND date >= ? AND date <= ?
+	`, user, startDate, endDate)
+
+	var samples []Sample
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var u, d string
+			var up, down int64
+			if err := rows.Scan(&u, &d, &up, &down); err == nil {
+				// Parse date to timestamp (UTC noon to allow some margin)
+				t, _ := time.Parse("2006-01-02", d)
+				// Add 12h to be in the middle of the day? Or just use midnight.
+				// Midnight is fine.
+				samples = append(samples, Sample{
+					User:      u,
+					Timestamp: t.Unix(),
+					Uplink:    up,
+					Downlink:  down,
+				})
+			}
+		}
+	}
+
+	// 2. Get Raw Samples in Range
+	// We might have overlap if compression ran recently.
+	// Ideally we only query raw samples > configured compression cut-off?
+	// But simplest is just union all for now.
+	rawRows, err := s.db.Query(`
+		SELECT user, ts, uplink, downlink
+		FROM samples
+		WHERE user = ? AND ts >= ? AND ts <= ?
+	`, user, start, end)
+	if err == nil {
+		defer rawRows.Close()
+		for rawRows.Next() {
+			var smp Sample
+			if err := rawRows.Scan(&smp.User, &smp.Timestamp, &smp.Uplink, &smp.Downlink); err == nil {
+				samples = append(samples, smp)
+			}
+		}
+	}
+
+	return samples, nil
+}
+
+func (s *Store) Vacuum() error {
+	_, err := s.db.Exec("VACUUM;")
+	return err
 }

@@ -1208,25 +1208,51 @@ func (s *Server) handleSamplerHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
+	// Respect config values primarily, but prioritize retention settings
 	days := s.config.RetentionDays
 	if days <= 0 {
 		days = 90
 	}
+	wgDays := s.config.WGRetentionDays
+	if wgDays <= 0 {
+		wgDays = 30
+	}
+
 	var payload map[string]int
 	if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
 		if v, ok := payload["days"]; ok && v > 0 {
 			days = v
 		}
 	}
+
+	var totalDeleted int64
+
+	// Prune main samples
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	deleted, err := s.store.PruneOlderThan(cutoff)
-	if err != nil {
-		http.Error(w, "Prune failed: "+err.Error(), http.StatusInternalServerError)
-		return
+	if n, err := s.store.PruneOlderThan(cutoff); err == nil {
+		totalDeleted += n
+	} else {
+		log.Printf("PruneNow: samples prune failed: %v", err)
 	}
+
+	// Prune WG samples
+	if s.config.WGRetentionDays > 0 {
+		wgCutoff := time.Now().Add(-time.Duration(wgDays) * 24 * time.Hour).Unix()
+		if n, err := s.store.PruneWGSamplesOlderThan(wgCutoff); err == nil {
+			totalDeleted += n
+		} else {
+			log.Printf("PruneNow: WG prune failed: %v", err)
+		}
+	}
+
+	// Optimize DB
+	if err := s.store.Vacuum(); err != nil {
+		log.Printf("PruneNow: Vacuum failed: %v", err)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"deleted": deleted,
+		"deleted": totalDeleted,
 		"cutoff":  cutoff,
 		"days":    days,
 	})

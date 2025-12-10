@@ -374,39 +374,67 @@ func StartServer(cfg *core.Config) {
 		server.startWireGuardSampler()
 	}
 
-	if cfg.RetentionEnabled && cfg.RetentionDays > 0 {
-		go func() {
-			ticker := time.NewTicker(24 * time.Hour)
-			defer ticker.Stop()
-			for {
+	// Start background maintenance (Retention & Vacuum)
+	go func() {
+		// Run initial check after 1 minute, then daily
+		time.Sleep(1 * time.Minute)
+		maintenance := func() {
+			vacuumNeeded := false
+
+			// Main Stats Retention
+			if cfg.RetentionEnabled && cfg.RetentionDays > 0 {
 				cutoff := time.Now().Add(-time.Duration(cfg.RetentionDays) * 24 * time.Hour).Unix()
 				deleted, err := store.PruneOlderThan(cutoff)
 				if err != nil {
 					log.Printf("Retention prune error: %v", err)
 				} else if deleted > 0 {
 					log.Printf("Retention prune: removed %d samples older than %d", deleted, cutoff)
+					vacuumNeeded = true
 				}
-				<-ticker.C
 			}
-		}()
-	}
 
-	if cfg.WGRetentionDays > 0 {
-		go func() {
-			ticker := time.NewTicker(24 * time.Hour)
-			defer ticker.Stop()
-			for {
+			// WireGuard Stats Retention
+			if cfg.WGRetentionDays > 0 {
 				cutoff := time.Now().Add(-time.Duration(cfg.WGRetentionDays) * 24 * time.Hour).Unix()
 				deleted, err := store.PruneWGSamplesOlderThan(cutoff)
 				if err != nil {
 					log.Printf("WG retention prune error: %v", err)
 				} else if deleted > 0 {
 					log.Printf("WG retention prune: removed %d samples older than %d", deleted, cutoff)
+					vacuumNeeded = true
 				}
-				<-ticker.C
 			}
-		}()
-	}
+
+			// Aggregation / Rollup
+			if cfg.AggregationEnabled && cfg.AggregationDays > 0 {
+				aggCutoff := time.Now().Add(-time.Duration(cfg.AggregationDays) * 24 * time.Hour).Unix()
+				compressed, err := store.CompressOldSamples(aggCutoff)
+				if err != nil {
+					log.Printf("Aggregation compression error: %v", err)
+				} else if compressed > 0 {
+					log.Printf("Aggregation: compressed %d samples older than %d", compressed, aggCutoff)
+					vacuumNeeded = true
+				}
+			}
+
+			if vacuumNeeded {
+				if err := store.Vacuum(); err != nil {
+					log.Printf("DB Maintenance: Vacuum failed: %v", err)
+				} else {
+					log.Printf("DB Maintenance: Vacuum completed")
+				}
+			}
+		}
+
+		// Run once on startup (after delay)
+		maintenance()
+
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			maintenance()
+		}
+	}()
 
 	router := server.Routes()
 
@@ -807,7 +835,7 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 
 	result := []UserStatus{}
 	for _, user := range users {
-		samples, err := s.store.GetSamples(user.Name, start, end)
+		samples, err := s.store.GetCombinedReport(user.Name, start, end)
 		if err != nil {
 			continue
 		}
@@ -879,7 +907,7 @@ func (s *Server) handleGetReportSummary(w http.ResponseWriter, r *http.Request) 
 	}
 	result := []Row{}
 	for _, user := range users {
-		samples, err := s.store.GetSamples(user.Name, start, end)
+		samples, err := s.store.GetCombinedReport(user.Name, start, end)
 		if err != nil {
 			continue
 		}
