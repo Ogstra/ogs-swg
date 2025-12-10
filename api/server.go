@@ -173,11 +173,11 @@ func (s *Server) runWireGuardSample() {
 		hasChanged := false
 		if !ok {
 			// First run for this peer: treat as changed so we establish a baseline
-			// Actually, if we want to be strict about "dedup", we need to decide if the first point is needed.
-			// Yes, we need at least one point.
+			log.Printf("DEBUG: Peer %s new/reset. Init sample.", st.PublicKey[:8])
 			hasChanged = true
 		} else {
 			if st.TransferRx != prev.Rx || st.TransferTx != prev.Tx {
+				log.Printf("DEBUG: Peer %s changed. Rx: %d->%d, Tx: %d->%d", st.PublicKey[:8], prev.Rx, st.TransferRx, prev.Tx, st.TransferTx)
 				hasChanged = true
 			}
 		}
