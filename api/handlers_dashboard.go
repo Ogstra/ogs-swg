@@ -319,30 +319,52 @@ func (s *Server) collectSystemStatus() map[string]interface{} {
 	activeUsersWG := 0
 	// We don't need lists for Dashboard main view, just counts
 
+	var activeUsersSBList []string
+	var activeUsersWGList []string
+
 	if s.config.EnableSingbox {
 		singboxStatus = checkService("sing-box")
-		activeUsersSB, _ = s.store.GetActiveUserCountWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes)
+		// Fetch active users list (previously we only fetched count)
+		// We use the same threshold mechanism
+		if users, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
+			activeUsersSBList = users
+			activeUsersSB = int64(len(users))
+		}
 	}
 
 	if s.config.EnableWireGuard {
 		wireguardStatus = checkService("wireguard")
 		if stats, err := core.GetWireGuardStats(); err == nil {
 			threshold := time.Now().Add(-3 * time.Minute).Unix()
+			wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+			peerAliases := make(map[string]string)
+			if wgCfg != nil {
+				for _, p := range wgCfg.Peers {
+					peerAliases[p.PublicKey] = p.Alias
+				}
+			}
+
 			for _, peer := range stats {
 				if peer.LatestHandshake >= threshold {
 					activeUsersWG++
+					name := peerAliases[peer.PublicKey]
+					if name == "" {
+						name = peer.PublicKey[0:8]
+					}
+					activeUsersWGList = append(activeUsersWGList, name)
 				}
 			}
 		}
 	}
 
 	return map[string]interface{}{
-		"singbox":                singboxStatus,
-		"wireguard":              wireguardStatus,
-		"active_users_singbox":   activeUsersSB,
-		"active_users_wireguard": activeUsersWG,
-		// Add other fields if Dashboard expects them
-		"enable_singbox":   s.config.EnableSingbox,
-		"enable_wireguard": s.config.EnableWireGuard,
+		"singbox":                     singboxStatus,
+		"wireguard":                   wireguardStatus,
+		"active_users_singbox":        activeUsersSB,
+		"active_users_wireguard":      activeUsersWG,
+		"active_users_singbox_list":   activeUsersSBList,
+		"active_users_wireguard_list": activeUsersWGList,
+		"enable_singbox":              s.config.EnableSingbox,
+		"enable_wireguard":            s.config.EnableWireGuard,
 	}
 }
