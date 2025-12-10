@@ -37,6 +37,7 @@ func NewStore(dbPath string) (*Store, error) {
 	db.Exec("PRAGMA journal_mode=WAL;")
 	db.Exec("PRAGMA synchronous=NORMAL;")
 	db.Exec("PRAGMA busy_timeout=5000;")
+	db.Exec("PRAGMA auto_vacuum = INCREMENTAL;")
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
