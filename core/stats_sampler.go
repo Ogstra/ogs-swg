@@ -2,19 +2,22 @@ package core
 
 import (
 	"log"
+	"os"
 	"sync"
 	"time"
 )
 
 type StatsSampler struct {
-	sb       *SingboxClient
-	store    *Store
-	cfg      *Config
-	last     map[string]UserCounter
-	interval time.Duration
-	stopCh   chan struct{}
-	mu       sync.Mutex
-	paused   bool
+	sb                *SingboxClient
+	store             *Store
+	cfg               *Config
+	last              map[string]UserCounter
+	interval          time.Duration
+	stopCh            chan struct{}
+	mu                sync.Mutex
+	paused            bool
+	cachedUsers       []UserAccount
+	lastConfigModTime time.Time
 }
 
 func NewStatsSampler(sb *SingboxClient, store *Store, cfg *Config) *StatsSampler {
@@ -71,6 +74,28 @@ func (s *StatsSampler) IsPaused() bool {
 	return s.paused
 }
 
+func (s *StatsSampler) loadUsersIfNeeded() ([]UserAccount, error) {
+	info, err := os.Stat(s.cfg.SingboxConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	modTime := info.ModTime()
+
+	if modTime.Equal(s.lastConfigModTime) && s.cachedUsers != nil {
+		return s.cachedUsers, nil
+	}
+
+	users, err := LoadUsersFromSingboxConfig(s.cfg.SingboxConfigPath, s.cfg.ManagedInbounds)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cachedUsers = users
+	s.lastConfigModTime = modTime
+	// log.Printf("StatsSampler: reloaded users from config (modTime: %v)", modTime)
+	return users, nil
+}
+
 func (s *StatsSampler) sampleOnce() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -83,13 +108,13 @@ func (s *StatsSampler) sampleOnce() {
 	now := time.Now().Unix()
 	var batch []Sample
 
-	users, err := LoadUsersFromSingboxConfig(s.cfg.SingboxConfigPath, s.cfg.ManagedInbounds)
+	users, err := s.loadUsersIfNeeded()
 	if err != nil {
 		log.Printf("StatsSampler: cannot load users: %v", err)
 		return
 	}
 	if len(users) == 0 {
-		log.Printf("StatsSampler: no users found in sing-box config")
+		// log.Printf("StatsSampler: no users found in sing-box config")
 		return
 	}
 
@@ -99,7 +124,10 @@ func (s *StatsSampler) sampleOnce() {
 		return
 	}
 
+	// 1. Calculate Deltas
+	activeUserNames := make(map[string]bool)
 	for _, u := range users {
+		activeUserNames[u.Name] = true
 		cur := stats[u.Name]
 		prev, ok := s.last[u.Name]
 		if ok {
@@ -123,8 +151,16 @@ func (s *StatsSampler) sampleOnce() {
 		s.last[u.Name] = UserCounter{Uplink: cur.Uplink, Downlink: cur.Downlink}
 	}
 
+	// 2. Prune 'last' map (Fix Memory Leak)
+	// Remove users that are no longer in the active user list
+	for name := range s.last {
+		if !activeUserNames[name] {
+			delete(s.last, name)
+		}
+	}
+
 	if len(batch) == 0 {
-		log.Printf("StatsSampler: no deltas to insert (users=%d)", len(users))
+		// log.Printf("StatsSampler: no deltas to insert (users=%d)", len(users))
 		if s.store != nil {
 			s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), 0, "", "sing-box")
 		}
