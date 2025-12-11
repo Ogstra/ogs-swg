@@ -310,6 +310,49 @@ export const api = {
         await handleResponse(res, 'Failed to update features');
     },
 
+    // Sing-box Configuration
+    getSingboxConfig: async (): Promise<string> => {
+        const res = await fetch('/api/singbox/config', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch Sing-box config');
+        return res.text();
+    },
+    updateSingboxConfig: async (config: string): Promise<void> => {
+        const res = await fetch('/api/singbox/config', {
+            method: 'PUT',
+            headers: buildHeaders('text/plain'),
+            body: config
+        });
+        await handleResponse(res, 'Failed to update Sing-box config');
+    },
+    getSingboxInbounds: async (): Promise<any[]> => {
+        const res = await fetch('/api/singbox/inbounds', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch Sing-box inbounds');
+        return res.json();
+    },
+    addSingboxInbound: async (inbound: any): Promise<void> => {
+        const res = await fetch('/api/singbox/inbound', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(inbound)
+        });
+        await handleResponse(res, 'Failed to add Sing-box inbound');
+    },
+    updateSingboxInbound: async (tag: string, inbound: any): Promise<void> => {
+        const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(inbound)
+        });
+        await handleResponse(res, 'Failed to update Sing-box inbound');
+    },
+    deleteSingboxInbound: async (tag: string): Promise<void> => {
+        const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
+            method: 'DELETE',
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to delete Sing-box inbound');
+    },
+
     // Raw Config
     updateConfig: async (configText: string): Promise<void> => {
         const res = await fetch('/api/config', {
