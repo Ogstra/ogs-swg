@@ -402,6 +402,14 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
 
+	// Sing-box Configuration & Inbounds
+	protected.HandleFunc("GET /api/singbox/config", s.secure(s.handleGetSingboxConfig))
+	protected.HandleFunc("PUT /api/singbox/config", s.secure(s.handleUpdateSingboxConfig))
+	protected.HandleFunc("GET /api/singbox/inbounds", s.secure(s.handleGetSingboxInbounds))
+	protected.HandleFunc("POST /api/singbox/inbound", s.secure(s.handleAddSingboxInbound))
+	protected.HandleFunc("PUT /api/singbox/inbound", s.secure(s.handleUpdateSingboxInbound))
+	protected.HandleFunc("DELETE /api/singbox/inbound", s.secure(s.handleDeleteSingboxInbound))
+
 	// Mount protected routes under /api/
 	mux.Handle("/api/", s.GzipMiddleware(s.AuthMiddleware(protected)))
 
