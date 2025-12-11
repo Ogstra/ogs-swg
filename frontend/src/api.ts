@@ -77,6 +77,19 @@ const buildHeaders = (contentType?: string) => {
     return headers;
 };
 
+const handleResponse = async (res: Response, errorMsg: string = 'Request failed') => {
+    if (res.status === 401) {
+        window.dispatchEvent(new Event('auth:unauthorized'));
+        throw new Error('Unauthorized');
+    }
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || errorMsg);
+    }
+    return res;
+};
+
+
 export const api = {
     getUsers: async (): Promise<UserStatus[]> => {
         const res = await fetch('/api/users', { headers: buildHeaders() });
