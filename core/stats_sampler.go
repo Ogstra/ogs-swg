@@ -85,7 +85,7 @@ func (s *StatsSampler) loadUsersIfNeeded() ([]UserAccount, error) {
 		return s.cachedUsers, nil
 	}
 
-	users, err := LoadUsersFromSingboxConfig(s.cfg.SingboxConfigPath, s.cfg.ManagedInbounds)
+	users, err := s.cfg.GetActiveUsers()
 	if err != nil {
 		return nil, err
 	}

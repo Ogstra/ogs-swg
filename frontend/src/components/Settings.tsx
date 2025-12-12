@@ -36,6 +36,7 @@ export default function Settings() {
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean; wireguard: boolean }>({ singbox: false, wireguard: false })
     const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' })
     const [usernameData, setUsernameData] = useState({ password: '', newUsername: '' })
+    const [publicIP, setPublicIP] = useState<string>('')
 
     useEffect(() => {
         loadAll()
@@ -43,11 +44,17 @@ export default function Settings() {
 
     const loadAll = async () => {
         setLoading(true)
+        await Promise.all([loadFeatures(), loadDbStats(), loadSamplerHistory()])
+
+        // Load public IP
         try {
-            await Promise.all([loadFeatures(), loadDbStats(), loadSamplerHistory()])
-        } finally {
-            setLoading(false)
+            const dashData = await api.getDashboardData()
+            setPublicIP(dashData.public_ip || '')
+        } catch (err) {
+            console.error('Failed to load public IP:', err)
         }
+
+        setLoading(false)
     }
 
     const loadFeatures = async () => {
@@ -261,6 +268,35 @@ export default function Settings() {
                                 <div className="text-xs text-slate-400 mt-1">Compress old history</div>
                             </div>
                         </label>
+                    </div>
+                </div>
+            </Card>
+
+            {/* Server Configuration */}
+            <Card title="Server Configuration">
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                            Public IP Address
+                        </label>
+                        <input
+                            type="text"
+                            value={publicIP}
+                            onChange={e => setPublicIP(e.target.value)}
+                            placeholder="Auto-detected or enter manually"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                            This IP will be used in QR codes and connection links. Leave empty for auto-detection.
+                        </p>
+                    </div>
+                    <div className="flex justify-end">
+                        <Button onClick={() => {
+                            // TODO: Create endpoint to save public_ip
+                            success('Public IP saved (endpoint pending)')
+                        }} size="sm" icon={<Save size={16} />}>
+                            Save Public IP
+                        </Button>
                     </div>
                 </div>
             </Card>

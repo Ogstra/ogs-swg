@@ -89,7 +89,7 @@ func (c *SingboxClient) GetUserTraffic(name string) (int64, int64, error) {
 		return 0, 0, err
 	}
 	var upVal int64
-	if err == nil && upResp.Stat != nil {
+	if upResp.Stat != nil {
 		upVal = upResp.Stat.Value
 	}
 	var downResp statsService.GetStatsResponse
@@ -97,7 +97,7 @@ func (c *SingboxClient) GetUserTraffic(name string) (int64, int64, error) {
 		return upVal, 0, err
 	}
 	var downVal int64
-	if err == nil && downResp.Stat != nil {
+	if downResp.Stat != nil {
 		downVal = downResp.Stat.Value
 	}
 	return upVal, downVal, nil

@@ -12,10 +12,12 @@ import (
 
 // DashboardData Structs
 type DashboardData struct {
-	Status       map[string]interface{}  `json:"status"`
-	StatsCards   map[string]TrafficStats `json:"stats_cards"`
-	ChartData    []UnifiedChartPoint     `json:"chart_data"`
-	TopConsumers map[string][]Consumer   `json:"top_consumers"`
+	Status                map[string]interface{}  `json:"status"`
+	StatsCards            map[string]TrafficStats `json:"stats_cards"`
+	ChartData             []UnifiedChartPoint     `json:"chart_data"`
+	TopConsumers          map[string][]Consumer   `json:"top_consumers"`
+	SingboxPendingChanges bool                    `json:"singbox_pending_changes"`
+	PublicIP              string                  `json:"public_ip"`
 }
 
 type TrafficStats struct {
@@ -304,6 +306,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 			"wireguard": topWG,
 			"singbox":   topSB,
 		},
+		SingboxPendingChanges: s.config.SingboxPendingChanges,
+		PublicIP:              getPublicIP(s.config),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -367,4 +371,12 @@ func (s *Server) collectSystemStatus() map[string]interface{} {
 		"enable_singbox":              s.config.EnableSingbox,
 		"enable_wireguard":            s.config.EnableWireGuard,
 	}
+}
+
+
+func getPublicIP(cfg *core.Config) string {
+	if cfg.PublicIP != "" {
+		return cfg.PublicIP
+	}
+	return core.DetectPublicIP()
 }

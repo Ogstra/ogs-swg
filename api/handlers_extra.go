@@ -443,8 +443,8 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.WriteFile(s.config.SingboxConfigPath, content, 0644); err != nil {
-		http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
+	if err := s.config.UpdateSingboxConfig(string(content)); err != nil {
+		http.Error(w, "Failed to update config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

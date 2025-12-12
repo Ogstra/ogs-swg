@@ -10,6 +10,7 @@ export interface UserStatus {
     reset_day: number;
     enabled?: boolean;
     last_seen?: number;
+    inbound_tags?: string[];
 }
 
 export interface CreateUserRequest {
@@ -21,6 +22,7 @@ export interface CreateUserRequest {
     quota_period: string;
     reset_day: number;
     enabled?: boolean;
+    inbound_tag?: string;
 }
 
 export interface FeatureFlags {
@@ -63,10 +65,12 @@ export interface TrafficStats {
 }
 
 export interface DashboardData {
-    status: FeatureFlags & { [key: string]: any }; // Allow generic access but enforce basic flags
-    stats_cards: { [key: string]: TrafficStats }; // "singbox", "wireguard"
+    status: { [key: string]: any };
+    stats_cards: { [key: string]: TrafficStats };
     chart_data: UnifiedChartPoint[];
     top_consumers: { [key: string]: Consumer[] };
+    singbox_pending_changes: boolean;
+    public_ip: string;
 }
 
 const buildHeaders = (contentType?: string) => {
@@ -440,6 +444,19 @@ export const api = {
         if (end) params.append('end', end);
         const res = await fetch(`/api/dashboard?${params.toString()}`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch dashboard data');
+        return res.json();
+    },
+    generateRealityKeys: async (): Promise<{ private_key: string; public_key: string; short_id: string[] }> => {
+        const res = await fetch('/api/tools/reality-keys', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to generate Reality keys');
+        return res.json();
+    },
+    applySingboxChanges: async (): Promise<{ success: boolean; message: string }> => {
+        const res = await fetch('/api/singbox/apply', {
+            method: 'POST',
+            headers: buildHeaders('application/json')
+        });
+        await handleResponse(res, 'Failed to apply Sing-box changes');
         return res.json();
     }
 };

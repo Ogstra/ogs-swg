@@ -40,6 +40,7 @@ export default function Dashboard() {
         active_users_singbox_list: [],
         active_users_wireguard_list: []
     })
+    const [singboxPendingChanges, setSingboxPendingChanges] = useState(false)
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
@@ -89,6 +90,7 @@ export default function Dashboard() {
             setStatsCards(data.stats_cards || { singbox: { uplink: 0, downlink: 0 }, wireguard: { uplink: 0, downlink: 0 } })
             setTopConsumersMap(data.top_consumers || { singbox: [], wireguard: [] })
             setStatus(data.status || {})
+            setSingboxPendingChanges(data.singbox_pending_changes || false)
 
             setLastUpdated(new Date())
         } catch (err) {
@@ -104,11 +106,44 @@ export default function Dashboard() {
         return () => clearInterval(interval)
     }, [timeRange, customStart, customEnd])
 
+    const handleApplySingboxChanges = async () => {
+        try {
+            await api.applySingboxChanges()
+            setSingboxPendingChanges(false)
+            // Refresh data to reflect changes
+            fetchData()
+        } catch (err) {
+            console.error('Failed to apply Sing-box changes:', err)
+            alert('Failed to apply changes. Please try again.')
+        }
+    }
+
     // Derived values for UI
     const topConsumers = topConsumersMap[chartMode] || []
 
     return (
         <div className="space-y-6">
+            {/* Pending Changes Banner */}
+            {singboxPendingChanges && (
+                <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <Shield className="text-yellow-500" size={20} />
+                        <div>
+                            <p className="text-sm font-medium text-yellow-200">Sing-box Configuration Changes Pending</p>
+                            <p className="text-xs text-yellow-300/70 mt-0.5">Changes have been saved but not yet applied. Click "Apply Changes" to restart the service.</p>
+                        </div>
+                    </div>
+                    <Button
+                        onClick={handleApplySingboxChanges}
+                        variant="primary"
+                        size="sm"
+                        className="whitespace-nowrap bg-yellow-600 hover:bg-yellow-700 text-white"
+                    >
+                        Apply Changes
+                    </Button>
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
