@@ -52,9 +52,10 @@ export default function UserManagement() {
 
     // Modals state
     const [modalState, setModalState] = useState<{
-        type: 'create' | 'bulk' | 'qr' | 'usage' | 'delete_confirm' | null,
+        type: 'create' | 'bulk' | 'qr' | 'usage' | 'delete_confirm' | 'select_inbounds' | null,
         data?: any
     }>({ type: null })
+    const [selectedInboundsToRemove, setSelectedInboundsToRemove] = useState<Set<string>>(new Set())
 
     const [isEditing, setIsEditing] = useState(false)
     const [sortKey, setSortKey] = useState<'user' | 'quota' | 'usage' | 'status' | 'last_seen'>('user')
@@ -248,6 +249,18 @@ export default function UserManagement() {
     }
 
     const confirmDeleteSelected = async () => {
+        // Check if any selected user is in multiple inbounds
+        const multiInboundUsers = Array.from(selectedUsers).filter(name => {
+            const user = users.find(u => u.name === name)
+            return user && user.inbound_tags && user.inbound_tags.length > 1
+        })
+
+        if (multiInboundUsers.length > 0) {
+            setModalState({ type: null })
+            toastError(`User "${multiInboundUsers[0]}" exists in multiple inbounds. Please delete manually.`)
+            return
+        }
+
         setModalState({ type: null })
         let failed = 0;
         for (const name of selectedUsers) {
@@ -265,6 +278,33 @@ export default function UserManagement() {
         }
         setSelectedUsers(new Set())
         fetchUsers()
+    }
+
+    const handleRemoveFromSelectedInbounds = async () => {
+        if (!modalState.data) return
+
+        const user = modalState.data as UserStatus
+        const inboundsToRemove = Array.from(selectedInboundsToRemove)
+
+        setModalState({ type: null })
+        setSelectedInboundsToRemove(new Set())
+
+        try {
+            // If all inbounds selected, delete user completely
+            if (inboundsToRemove.length === (user.inbound_tags?.length || 0)) {
+                await api.deleteUser(user.name)
+                success('User deleted successfully')
+            } else {
+                // Remove from selected inbounds only
+                for (const tag of inboundsToRemove) {
+                    await api.removeUserFromInbound(user.name, tag)
+                }
+                success(`User removed from ${inboundsToRemove.length} inbound(s)`)
+            }
+            fetchUsers()
+        } catch (err) {
+            toastError('Failed to remove user: ' + err)
+        }
     }
 
     const handleEditClick = (user: UserStatus) => {
@@ -684,13 +724,21 @@ export default function UserManagement() {
                                                         <QrCode size={16} />
                                                     </button>
                                                     <button
-                                                        onClick={async () => {
-                                                            if (confirm(`Delete user ${user.name}?`)) {
-                                                                try {
-                                                                    await api.deleteUser(user.name)
-                                                                    success('User deleted')
-                                                                    fetchUsers()
-                                                                } catch (e) { toastError(String(e)) }
+                                                        onClick={() => {
+                                                            if (user.inbound_tags && user.inbound_tags.length > 1) {
+                                                                // Show inbound selection modal
+                                                                setSelectedInboundsToRemove(new Set(user.inbound_tags))
+                                                                setModalState({ type: 'select_inbounds', data: user })
+                                                            } else {
+                                                                // Delete immediately
+                                                                if (confirm(`Delete user "${user.name}"?`)) {
+                                                                    api.deleteUser(user.name)
+                                                                        .then(() => {
+                                                                            success('User deleted')
+                                                                            fetchUsers()
+                                                                        })
+                                                                        .catch(err => toastError('Failed to delete: ' + err))
+                                                                }
                                                             }
                                                         }}
                                                         className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all"
@@ -879,12 +927,21 @@ export default function UserManagement() {
                                     type="text"
                                     value={newUser.uuid || ''}
                                     onChange={e => setNewUser({ ...newUser, uuid: e.target.value })}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600 text-xs font-mono"
+                                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600 text-xs font-mono"
                                     placeholder="Auto-generated if empty"
                                 />
                                 <button
-                                    onClick={() => setNewUser({ ...newUser, uuid: crypto.randomUUID() })}
-                                    className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors text-xs whitespace-nowrap"
+                                    type="button"
+                                    onClick={() => {
+                                        const uuid = crypto.randomUUID ? crypto.randomUUID() :
+                                            'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+                                                const r = Math.random() * 16 | 0
+                                                const v = c === 'x' ? r : (r & 0x3 | 0x8)
+                                                return v.toString(16)
+                                            })
+                                        setNewUser({ ...newUser, uuid })
+                                    }}
+                                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors text-xs whitespace-nowrap font-medium"
                                     title="Generate Random UUID"
                                 >
                                     Generate
@@ -1267,6 +1324,64 @@ export default function UserManagement() {
                     </p>
                 </div>
             </Modal >
+
+            {/* Inbound Selection Modal */}
+            <Modal
+                isOpen={modalState.type === 'select_inbounds'}
+                onClose={() => {
+                    setModalState({ type: null })
+                    setSelectedInboundsToRemove(new Set())
+                }}
+                title="Remove User from Inbounds"
+                size="sm"
+                footer={
+                    <>
+                        <Button variant="ghost" onClick={() => {
+                            setModalState({ type: null })
+                            setSelectedInboundsToRemove(new Set())
+                        }}>Cancel</Button>
+                        <Button
+                            variant="danger"
+                            onClick={handleRemoveFromSelectedInbounds}
+                            disabled={selectedInboundsToRemove.size === 0}
+                        >
+                            Remove from {selectedInboundsToRemove.size} Inbound(s)
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4">
+                    <p className="text-slate-400 text-sm">
+                        Select which inbound(s) to remove user <span className="text-white font-mono">{modalState.data?.name}</span> from:
+                    </p>
+                    <div className="space-y-2">
+                        {modalState.data?.inbound_tags?.map((tag: string) => (
+                            <label key={tag} className="flex items-center gap-3 p-3 bg-slate-950 border border-slate-800 rounded-lg cursor-pointer hover:border-slate-700 transition-colors">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedInboundsToRemove.has(tag)}
+                                    onChange={e => {
+                                        const newSet = new Set(selectedInboundsToRemove)
+                                        if (e.target.checked) {
+                                            newSet.add(tag)
+                                        } else {
+                                            newSet.delete(tag)
+                                        }
+                                        setSelectedInboundsToRemove(newSet)
+                                    }}
+                                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                />
+                                <span className="text-white font-mono text-sm">{tag}</span>
+                            </label>
+                        ))}
+                    </div>
+                    {selectedInboundsToRemove.size === modalState.data?.inbound_tags?.length && (
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 text-amber-400 text-xs">
+                            ⚠️ All inbounds selected. User will be completely deleted.
+                        </div>
+                    )}
+                </div>
+            </Modal>
         </div >
     )
 }
