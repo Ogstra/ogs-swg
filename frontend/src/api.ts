@@ -147,6 +147,13 @@ export const api = {
         });
         await handleResponse(res, 'Failed to delete user');
     },
+    removeUserFromInbound: async (name: string, inboundTag: string): Promise<void> => {
+        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
+            method: 'DELETE',
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to remove user from inbound');
+    },
     bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> => {
         const res = await fetch('/api/users/bulk', {
             method: 'POST',

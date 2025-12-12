@@ -364,6 +364,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/users", s.secure(s.handleCreateUser))
 	protected.HandleFunc("PUT /api/users", s.secure(s.handleUpdateUser))
 	protected.HandleFunc("DELETE /api/users", s.secure(s.handleDeleteUser))
+	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.handleRemoveUserFromInbound))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.handleBulkCreateUsers))
 
 	protected.HandleFunc("GET /api/wireguard/peers", s.secure(s.handleGetWireGuardPeers))
@@ -884,6 +885,28 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	name := r.PathValue("name")
+	tag := r.PathValue("tag")
+
+	if name == "" || tag == "" {
+		http.Error(w, "Name and tag are required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.config.RemoveUserFromInbound(name, tag); err != nil {
+		http.Error(w, "Failed to remove user from inbound: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Note: We don't delete metadata here since user might still exist in other inbounds
 	w.WriteHeader(http.StatusOK)
 }
 
