@@ -43,3 +43,5 @@ token.json
 token_new.json
 stats.db-shm
 stats.db-wal
+singbox_config.json
+ogstra

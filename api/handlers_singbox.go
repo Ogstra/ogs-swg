@@ -117,3 +117,21 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	w.WriteHeader(http.StatusOK)
 }
+
+// handleApplySingboxChanges applies pending Sing-box configuration changes
+func (s *Server) handleApplySingboxChanges(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	if err := s.config.ApplySingboxChanges(); err != nil {
+		http.Error(w, "Failed to apply changes: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": "Sing-box configuration applied successfully",
+	})
+}
