@@ -45,12 +45,7 @@ export const Layout: React.FC = () => {
                 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
             `}>
                 <div className="h-16 flex items-center px-6 border-b border-slate-800 shrink-0">
-                    <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-                            <Shield className="text-white" size={18} />
-                        </div>
-                        <span className="font-bold text-xl tracking-tight text-white">OGS-SWG</span>
-                    </div>
+                    <span className="font-bold text-xl tracking-tight text-white">OGS-SWG</span>
                 </div>
 
                 <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
