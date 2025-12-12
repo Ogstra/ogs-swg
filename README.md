@@ -2,6 +2,9 @@
 
 Web dashboard for managing sing-box and WireGuard VPN services.
 
+<img width="1500" height="852" alt="image" src="https://github.com/user-attachments/assets/72a3c6ae-6ba6-4306-8ff6-23441ee8d890" />
+
+
 ## Features
 
 - Real-time traffic monitoring
