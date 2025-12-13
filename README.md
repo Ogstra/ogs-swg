@@ -19,10 +19,10 @@ Web dashboard for managing sing-box and WireGuard VPN services.
 
 ### Requirements
 
-- Go 1.21+
+- Go 1.24+
 - Node.js 18+
-- sing-box (with API enabled)
-- WireGuard tools
+- sing-box with V2Ray API support, build with tags `with_v2ray_api`, `with_quic`, `with_dhcp`, `with_wireguard`, `with_utls`, `with_acme`, `with_clash_api`, `with_gvisor`
+- WireGuard tools (`wg`, `wg-quick`) 
 
 ### Build
 
