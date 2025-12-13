@@ -249,15 +249,15 @@ export default function Dashboard() {
                     <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
-                                <ArrowDown size={12} /> Received
+                                <ArrowUp size={12} /> Received
                             </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.downlink)}</p>
+                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.uplink)}</p>
                         </div>
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
-                                <ArrowUp size={12} /> Sent
+                                <ArrowDown size={12} /> Sent
                             </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.uplink)}</p>
+                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.downlink)}</p>
                         </div>
                     </div>
 
