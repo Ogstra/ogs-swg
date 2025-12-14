@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import type { Dispatch, SetStateAction } from 'react'
 import { api, FeatureFlags } from '../api'
 import { Save, RefreshCw, Lock, User } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
@@ -10,6 +11,12 @@ import { useAuth } from '../context/AuthContext'
 import SingboxConfigEditor from './SingboxConfigEditor'
 import { Tabs } from './ui/Tabs'
 import { Database, Shield, Settings as SettingsIcon, Server } from 'lucide-react'
+
+type ServiceStatus = { singbox: boolean; wireguard: boolean }
+type DbInfo = { rows: number; sizeMB: number }
+type PasswordData = { current: string; new: string; confirm: string }
+type UsernameData = { password: string; newUsername: string }
+type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string }
 
 export default function Settings() {
     const { success, error: toastError } = useToast()
@@ -37,9 +44,27 @@ export default function Settings() {
     const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' })
     const [usernameData, setUsernameData] = useState({ password: '', newUsername: '' })
     const [publicIP, setPublicIP] = useState<string>('')
+    const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>({
+        defaultService: 'singbox',
+        refreshMs: 10000,
+        defaultRange: '24h'
+    })
 
     useEffect(() => {
         loadAll()
+        const savedPrefs = localStorage.getItem('dashboard_prefs')
+        if (savedPrefs) {
+            try {
+                const parsed = JSON.parse(savedPrefs)
+                setDashboardPrefs({
+                    defaultService: parsed.defaultService === 'wireguard' ? 'wireguard' : 'singbox',
+                    refreshMs: parsed.refreshMs && parsed.refreshMs >= 1000 ? parsed.refreshMs : 10000,
+                    defaultRange: parsed.defaultRange || '24h'
+                })
+            } catch {
+                // ignore parse errors
+            }
+        }
     }, [historyLimit])
 
     const loadAll = async () => {
@@ -207,7 +232,185 @@ export default function Settings() {
         }
     }
 
-    const GeneralTab = () => (
+
+    const tabs = [
+        {
+            id: 'general',
+            label: <span className="flex items-center gap-2"><SettingsIcon size={16} /> General</span>,
+            content: (
+                <GeneralTab
+                    features={features}
+                    setFeatures={setFeatures}
+                    handleSaveFeatures={handleSaveFeatures}
+                    handleServiceAction={handleServiceAction}
+                    serviceStatus={serviceStatus}
+                    publicIP={publicIP}
+                    setPublicIP={setPublicIP}
+                    success={success}
+                />
+            )
+        },
+        { id: 'singbox', label: <span className="flex items-center gap-2"><Server size={16} /> Sing-box</span>, content: <SingboxConfigEditor /> },
+        {
+            id: 'dashboard',
+            label: <span className="flex items-center gap-2"><SettingsIcon size={16} /> Dashboard</span>,
+            content: (
+                <DashboardTab
+                    dashboardPrefs={dashboardPrefs}
+                    setDashboardPrefs={setDashboardPrefs}
+                    success={success}
+                />
+            )
+        },
+        {
+            id: 'security',
+            label: <span className="flex items-center gap-2"><Shield size={16} /> Security</span>,
+            content: (
+                <SecurityTab
+                    passwordData={passwordData}
+                    setPasswordData={setPasswordData}
+                    usernameData={usernameData}
+                    setUsernameData={setUsernameData}
+                    handleChangePassword={handleChangePassword}
+                    handleChangeUsername={handleChangeUsername}
+                />
+            )
+        },
+        {
+            id: 'database',
+            label: <span className="flex items-center gap-2"><Database size={16} /> Database</span>,
+            content: (
+                <DatabaseTab
+                    features={features}
+                    setFeatures={setFeatures}
+                    dbInfo={dbInfo}
+                    handlePruneNow={handlePruneNow}
+                    handleRunSampler={handleRunSampler}
+                    handleTogglePause={handleTogglePause}
+                    samplerRunning={samplerRunning}
+                    handleSaveFeatures={handleSaveFeatures}
+                    loadDbStats={loadDbStats}
+                    historyLimit={historyLimit}
+                    setHistoryLimit={setHistoryLimit}
+                    samplerHistory={samplerHistory}
+                />
+            )
+        },
+    ]
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold text-white">Settings</h1>
+                </div>
+                <div className="flex gap-3">
+                    <Button
+                        onClick={loadAll}
+                        variant="secondary"
+                        isLoading={loading && !samplerRunning}
+                        icon={<RefreshCw size={16} />}
+                    >
+                        Refresh
+                    </Button>
+                </div>
+            </div>
+
+            <Tabs tabs={tabs} />
+        </div>
+    )
+}
+
+function DashboardTab({
+    dashboardPrefs,
+    setDashboardPrefs,
+    success,
+}: {
+    dashboardPrefs: DashboardPrefs
+    setDashboardPrefs: Dispatch<SetStateAction<DashboardPrefs>>
+    success: (msg: string) => void
+}) {
+    const handleSave = () => {
+        const normalized = {
+            defaultService: dashboardPrefs.defaultService || 'singbox',
+            refreshMs: Math.max(1000, Number(dashboardPrefs.refreshMs) || 10000),
+            defaultRange: dashboardPrefs.defaultRange || '24h'
+        }
+        setDashboardPrefs(normalized)
+        localStorage.setItem('dashboard_prefs', JSON.stringify(normalized))
+        success('Dashboard preferences saved')
+    }
+
+    return (
+        <div className="space-y-6">
+            <Card title="Dashboard Preferences">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-400">Default Service</label>
+                        <select
+                            value={dashboardPrefs.defaultService}
+                            onChange={e => setDashboardPrefs(prev => ({ ...prev, defaultService: e.target.value as 'singbox' | 'wireguard' }))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                        >
+                            <option value="singbox">Sing-box</option>
+                            <option value="wireguard">WireGuard</option>
+                        </select>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-400">Refresh Interval (seconds)</label>
+                        <input
+                            type="number"
+                            min={1}
+                            value={Math.floor(dashboardPrefs.refreshMs / 1000)}
+                            onChange={e => setDashboardPrefs(prev => ({ ...prev, refreshMs: Math.max(1000, (Number(e.target.value) || 10) * 1000) }))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                        />
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-400">Default Time Range</label>
+                        <select
+                            value={dashboardPrefs.defaultRange}
+                            onChange={e => setDashboardPrefs(prev => ({ ...prev, defaultRange: e.target.value }))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                        >
+                            <option value="30m">Last 30 Minutes</option>
+                            <option value="1h">Last Hour</option>
+                            <option value="6h">Last 6 Hours</option>
+                            <option value="24h">Last 24 Hours</option>
+                            <option value="1w">Last Week</option>
+                            <option value="1m">Last Month</option>
+                        </select>
+                    </div>
+                </div>
+                <div className="flex justify-end mt-4">
+                    <Button onClick={handleSave} size="sm" icon={<Save size={16} />}>
+                        Save Preferences
+                    </Button>
+                </div>
+            </Card>
+        </div>
+    )
+}
+function GeneralTab({
+    features,
+    setFeatures,
+    handleSaveFeatures,
+    handleServiceAction,
+    serviceStatus,
+    publicIP,
+    setPublicIP,
+    success,
+}: {
+    features: FeatureFlags
+    setFeatures: Dispatch<SetStateAction<FeatureFlags>>
+    handleSaveFeatures: () => void
+    handleServiceAction: (service: string, action: 'restart' | 'stop' | 'start') => void
+    serviceStatus: ServiceStatus
+    publicIP: string
+    setPublicIP: Dispatch<SetStateAction<string>>
+    success: (msg: string) => void
+}) {
+    return (
         <div className="space-y-6">
             {/* Features & Configuration */}
             <Card
@@ -224,7 +427,7 @@ export default function Settings() {
                             <input
                                 type="checkbox"
                                 checked={features.enable_singbox}
-                                onChange={e => setFeatures({ ...features, enable_singbox: e.target.checked })}
+                                onChange={e => setFeatures(prev => ({ ...prev, enable_singbox: e.target.checked }))}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -236,7 +439,7 @@ export default function Settings() {
                             <input
                                 type="checkbox"
                                 checked={features.enable_wireguard}
-                                onChange={e => setFeatures({ ...features, enable_wireguard: e.target.checked })}
+                                onChange={e => setFeatures(prev => ({ ...prev, enable_wireguard: e.target.checked }))}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -248,7 +451,7 @@ export default function Settings() {
                             <input
                                 type="checkbox"
                                 checked={!!features.retention_enabled}
-                                onChange={e => setFeatures({ ...features, retention_enabled: e.target.checked })}
+                                onChange={e => setFeatures(prev => ({ ...prev, retention_enabled: e.target.checked }))}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -260,7 +463,7 @@ export default function Settings() {
                             <input
                                 type="checkbox"
                                 checked={!!features.aggregation_enabled}
-                                onChange={e => setFeatures({ ...features, aggregation_enabled: e.target.checked })}
+                                onChange={e => setFeatures(prev => ({ ...prev, aggregation_enabled: e.target.checked }))}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -375,8 +578,24 @@ export default function Settings() {
             </Card>
         </div>
     )
+}
 
-    const SecurityTab = () => (
+function SecurityTab({
+    handleChangePassword,
+    passwordData,
+    setPasswordData,
+    handleChangeUsername,
+    usernameData,
+    setUsernameData,
+}: {
+    handleChangePassword: () => void
+    passwordData: PasswordData
+    setPasswordData: Dispatch<SetStateAction<PasswordData>>
+    handleChangeUsername: () => void
+    usernameData: UsernameData
+    setUsernameData: Dispatch<SetStateAction<UsernameData>>
+}) {
+    return (
         <div className="space-y-6">
             <Card title="Account Security">
                 <div className="space-y-6">
@@ -393,7 +612,7 @@ export default function Settings() {
                             <input
                                 type="password"
                                 value={passwordData.current}
-                                onChange={e => setPasswordData({ ...passwordData, current: e.target.value })}
+                                onChange={e => setPasswordData(prev => ({ ...prev, current: e.target.value }))}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 placeholder="Enter current password"
                             />
@@ -404,7 +623,7 @@ export default function Settings() {
                                 <input
                                     type="password"
                                     value={passwordData.new}
-                                    onChange={e => setPasswordData({ ...passwordData, new: e.target.value })}
+                                    onChange={e => setPasswordData(prev => ({ ...prev, new: e.target.value }))}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                     placeholder="Min 8 characters"
                                 />
@@ -414,7 +633,7 @@ export default function Settings() {
                                 <input
                                     type="password"
                                     value={passwordData.confirm}
-                                    onChange={e => setPasswordData({ ...passwordData, confirm: e.target.value })}
+                                    onChange={e => setPasswordData(prev => ({ ...prev, confirm: e.target.value }))}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                     placeholder="Confirm new password"
                                 />
@@ -438,7 +657,7 @@ export default function Settings() {
                                 <input
                                     type="password"
                                     value={usernameData.password}
-                                    onChange={e => setUsernameData({ ...usernameData, password: e.target.value })}
+                                    onChange={e => setUsernameData(prev => ({ ...prev, password: e.target.value }))}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                     placeholder="Required to change username"
                                 />
@@ -448,7 +667,7 @@ export default function Settings() {
                                 <input
                                     type="text"
                                     value={usernameData.newUsername}
-                                    onChange={e => setUsernameData({ ...usernameData, newUsername: e.target.value })}
+                                    onChange={e => setUsernameData(prev => ({ ...prev, newUsername: e.target.value }))}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                     placeholder="Enter new username"
                                 />
@@ -459,13 +678,46 @@ export default function Settings() {
             </Card>
         </div>
     )
+}
 
-    const DatabaseTab = () => (
+function DatabaseTab({
+    features,
+    setFeatures,
+    dbInfo,
+    handlePruneNow,
+    handleRunSampler,
+    handleTogglePause,
+    samplerRunning,
+    handleSaveFeatures,
+    loadDbStats,
+    historyLimit,
+    setHistoryLimit,
+    samplerHistory,
+}: {
+    features: FeatureFlags
+    setFeatures: Dispatch<SetStateAction<FeatureFlags>>
+    dbInfo: DbInfo
+    handlePruneNow: () => void
+    handleRunSampler: () => void
+    handleTogglePause: () => void
+    samplerRunning: boolean
+    handleSaveFeatures: () => void
+    loadDbStats: () => Promise<void>
+    historyLimit: number
+    setHistoryLimit: Dispatch<SetStateAction<number>>
+    samplerHistory: any[]
+}) {
+    return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
             <Card
                 title="Database & Retention"
                 action={
-                    <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
+                    <div className="flex gap-2">
+                        <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />}>
+                            Save Changes
+                        </Button>
+                        <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
+                    </div>
                 }
             >
                 <div className="grid grid-cols-2 gap-4 mb-6">
@@ -488,7 +740,7 @@ export default function Settings() {
                                 type="number"
                                 min={1}
                                 value={features.retention_days ?? 90}
-                                onChange={e => setFeatures({ ...features, retention_days: parseInt(e.target.value) })}
+                                onChange={e => setFeatures(prev => ({ ...prev, retention_days: parseInt(e.target.value) }))}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                             />
                         </div>
@@ -498,7 +750,7 @@ export default function Settings() {
                                 type="number"
                                 min={1}
                                 value={features.wg_retention_days ?? 30}
-                                onChange={e => setFeatures({ ...features, wg_retention_days: parseInt(e.target.value) })}
+                                onChange={e => setFeatures(prev => ({ ...prev, wg_retention_days: parseInt(e.target.value) }))}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                             />
                         </div>
@@ -508,7 +760,7 @@ export default function Settings() {
                                 type="number"
                                 min={15}
                                 value={features.sampler_interval_sec ?? 120}
-                                onChange={e => setFeatures({ ...features, sampler_interval_sec: parseInt(e.target.value) })}
+                                onChange={e => setFeatures(prev => ({ ...prev, sampler_interval_sec: parseInt(e.target.value) }))}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                             />
                         </div>
@@ -518,7 +770,7 @@ export default function Settings() {
                                 type="number"
                                 min={15}
                                 value={features.wg_sampler_interval_sec ?? 60}
-                                onChange={e => setFeatures({ ...features, wg_sampler_interval_sec: parseInt(e.target.value) })}
+                                onChange={e => setFeatures(prev => ({ ...prev, wg_sampler_interval_sec: parseInt(e.target.value) }))}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                             />
                         </div>
@@ -528,7 +780,7 @@ export default function Settings() {
                                 type="number"
                                 min={1}
                                 value={features.aggregation_days ?? 7}
-                                onChange={e => setFeatures({ ...features, aggregation_days: parseInt(e.target.value) })}
+                                onChange={e => setFeatures(prev => ({ ...prev, aggregation_days: parseInt(e.target.value) }))}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                             />
                         </div>
@@ -539,7 +791,7 @@ export default function Settings() {
                             type="number"
                             min={0}
                             value={features.active_threshold_bytes ?? 1024}
-                            onChange={e => setFeatures({ ...features, active_threshold_bytes: parseInt(e.target.value) })}
+                            onChange={e => setFeatures(prev => ({ ...prev, active_threshold_bytes: parseInt(e.target.value) }))}
                             className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                         />
                     </div>
@@ -613,36 +865,6 @@ export default function Settings() {
                     )}
                 </div>
             </Card>
-        </div>
-    )
-
-    const tabs = [
-        { id: 'general', label: <span className="flex items-center gap-2"><SettingsIcon size={16} /> General</span>, content: <GeneralTab /> },
-        { id: 'singbox', label: <span className="flex items-center gap-2"><Server size={16} /> Sing-box</span>, content: <SingboxConfigEditor /> },
-        { id: 'security', label: <span className="flex items-center gap-2"><Shield size={16} /> Security</span>, content: <SecurityTab /> },
-        { id: 'database', label: <span className="flex items-center gap-2"><Database size={16} /> Database</span>, content: <DatabaseTab /> },
-    ]
-
-    return (
-        <div className="space-y-6">
-            <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-white">Settings</h1>
-                    <p className="text-slate-400 text-sm mt-1">System configuration and service control</p>
-                </div>
-                <div className="flex gap-3">
-                    <Button
-                        onClick={loadAll}
-                        variant="secondary"
-                        isLoading={loading && !samplerRunning}
-                        icon={<RefreshCw size={16} />}
-                    >
-                        Refresh
-                    </Button>
-                </div>
-            </div>
-
-            <Tabs tabs={tabs} />
         </div>
     )
 }

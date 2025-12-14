@@ -17,10 +17,11 @@ export default function LogViewer() {
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [searchPage, setSearchPage] = useState(1)
     const [searchHasMore, setSearchHasMore] = useState(false)
+    const [tailLimit, setTailLimit] = useState<number>(50)
 
     const fetchLogs = (forceTail = false) => {
         setLoading(true)
-        api.getLogs(query || undefined).then(data => {
+        api.getLogs({ user: query || undefined, limit: tailLimit }).then(data => {
             setLines(data.logs)
             if (forceTail) setViewMode('tail')
             setLoading(false)
@@ -47,7 +48,7 @@ export default function LogViewer() {
             fetchLogs(true)
         }, refreshInterval)
         return () => clearInterval(interval)
-    }, [refreshInterval, query, viewMode])
+    }, [refreshInterval, query, viewMode, tailLimit])
 
     useEffect(() => {
         if (autoScroll && bottomRef.current) {
@@ -93,8 +94,6 @@ export default function LogViewer() {
                 <div>
                     <h1 className="text-2xl font-bold text-white">sing-box Logs</h1>
                     <div className="flex items-center gap-2 mt-1">
-                        <p className="text-slate-400 text-sm">System and Service Logs</p>
-                        <span className="text-slate-600">•</span>
                         <span className={`text-xs px-2 py-0.5 rounded border ${logSource === 'journal' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
                             {logSource === 'journal' ? 'journalctl' : 'File'}
                         </span>
@@ -132,6 +131,19 @@ export default function LogViewer() {
                         </div>
 
                         <div className="flex items-center gap-3 border-l border-slate-800 pl-4">
+                            <div className="flex items-center gap-2">
+                                <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Lines</span>
+                                <select
+                                    value={tailLimit}
+                                    onChange={e => setTailLimit(parseInt(e.target.value))}
+                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                >
+                                    <option value={50}>50</option>
+                                    <option value={100}>100</option>
+                                    <option value={200}>200</option>
+                                </select>
+                            </div>
+
                             <div className="flex items-center gap-2">
                                 <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Poll</span>
                                 <select

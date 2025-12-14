@@ -184,8 +184,11 @@ export const api = {
         await handleResponse(res, 'Failed to fetch config');
         return res.json();
     },
-    getLogs: async (user?: string): Promise<{ logs: string[] }> => {
-        const url = user ? `/api/logs?user=${encodeURIComponent(user)}` : '/api/logs';
+    getLogs: async (params?: { user?: string; limit?: number }): Promise<{ logs: string[] }> => {
+        const query = new URLSearchParams();
+        if (params?.user) query.set('user', params.user);
+        if (params?.limit) query.set('limit', String(params.limit));
+        const url = query.toString() ? `/api/logs?${query.toString()}` : '/api/logs';
         const res = await fetch(url, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch logs');
         return res.json();

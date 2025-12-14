@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Save, RefreshCw, AlertTriangle, FileJson, List } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Save, RefreshCw, FileJson, List } from 'lucide-react'
 import Editor from 'react-simple-code-editor'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
@@ -10,16 +10,22 @@ import InboundList from './singbox/InboundList'
 type TabId = 'inbounds' | 'raw'
 
 export default function SingboxConfigEditor() {
-    const [activeTab, setActiveTab] = useState<TabId>('raw') // Default to Raw for now until Inbounds is ready
+    const [activeTab, setActiveTab] = useState<TabId>('inbounds')
     const [config, setConfig] = useState('')
     const [originalConfig, setOriginalConfig] = useState('')
     const [loading, setLoading] = useState(false)
     const [saving, setSaving] = useState(false)
+    const [searchTerm, setSearchTerm] = useState('')
+    const [searchCursor, setSearchCursor] = useState(0)
+    const searchInputRef = useRef<HTMLInputElement>(null)
+    const [showDiff, setShowDiff] = useState(false)
+    const [lastBackup, setLastBackup] = useState<string>('')
 
     // Load Config
     useEffect(() => {
         if (activeTab === 'raw') {
             loadConfig()
+            loadBackupMeta()
         }
     }, [activeTab])
 
@@ -43,6 +49,88 @@ export default function SingboxConfigEditor() {
             // alert('Failed to load config') // Don't block UI with alerts on load
         } finally {
             setLoading(false)
+        }
+    }
+
+    const loadBackupMeta = async () => {
+        try {
+            const meta = await api.getBackupMeta()
+            if (meta.singbox_last_backup) {
+                setLastBackup(new Date(meta.singbox_last_backup).toLocaleString())
+            } else {
+                setLastBackup('')
+            }
+        } catch (err) {
+            console.error('Failed to load backup meta', err)
+        }
+    }
+
+    const handleBackup = async () => {
+        try {
+            await api.backupConfig()
+            alert('Backup created (.bak)')
+            loadBackupMeta()
+        } catch (err: any) {
+            alert('Backup failed: ' + err.message || err)
+        }
+    }
+
+    const handleRestore = async () => {
+        if (!confirm('Restore from backup? This will overwrite current config.')) return
+        try {
+            const cfg = await api.restoreConfig()
+            const formatted = JSON.stringify(cfg, null, 2)
+            setConfig(formatted)
+            setOriginalConfig(formatted)
+            alert('Restored from backup')
+            loadBackupMeta()
+        } catch (err: any) {
+            alert('Restore failed: ' + err.message || err)
+        }
+    }
+
+    const performFind = (direction: 'next' | 'prev' = 'next', refocusSearch = false) => {
+        if (!searchTerm) return
+        const textarea = document.getElementById('singbox-raw-editor') as HTMLTextAreaElement | null
+        if (!textarea) return
+        const haystack = textarea.value
+        let idx = -1
+        if (direction === 'next') {
+            const from = searchCursor || textarea.selectionEnd || 0
+            idx = haystack.indexOf(searchTerm, from)
+            if (idx < 0) {
+                idx = haystack.indexOf(searchTerm, 0)
+            }
+            if (idx >= 0) {
+                setSearchCursor(idx + searchTerm.length)
+            }
+        } else {
+            const from = searchCursor ? Math.max(0, searchCursor - searchTerm.length - 1) : Math.max(0, textarea.selectionStart - 1)
+            idx = haystack.lastIndexOf(searchTerm, from)
+            if (idx < 0) {
+                idx = haystack.lastIndexOf(searchTerm)
+            }
+            if (idx >= 0) {
+                setSearchCursor(idx)
+            }
+        }
+        if (idx >= 0) {
+            textarea.blur()
+            textarea.focus()
+            textarea.setSelectionRange(idx, idx + searchTerm.length)
+
+            // Center scroll
+            const linesBefore = haystack.substring(0, idx).split('\n').length - 1
+            const lineHeight = 21
+            const padding = 16
+            const scrollValues = linesBefore * lineHeight + padding
+            const shell = document.querySelector('.raw-editor-shell')
+            if (shell) {
+                shell.scrollTop = Math.max(0, scrollValues - shell.clientHeight / 2)
+            }
+        }
+        if (refocusSearch) {
+            setTimeout(() => searchInputRef.current?.focus({ preventScroll: true }), 0)
         }
     }
 
@@ -73,6 +161,16 @@ export default function SingboxConfigEditor() {
     }
 
     const hasChanges = config !== originalConfig
+    const diffLines = useMemo(() => {
+        const o = (originalConfig || '').split('\n')
+        const c = (config || '').split('\n')
+        const maxLen = Math.max(o.length, c.length)
+        const rows: { line: number; original: string; current: string }[] = []
+        for (let i = 0; i < maxLen; i++) {
+            if ((o[i] ?? '') !== (c[i] ?? '')) rows.push({ line: i + 1, original: o[i] ?? '', current: c[i] ?? '' })
+        }
+        return rows
+    }, [config, originalConfig])
 
     return (
         <div className="space-y-4">
@@ -82,7 +180,6 @@ export default function SingboxConfigEditor() {
                     <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         Sing-box Configuration
                     </h2>
-                    <p className="text-slate-400 text-sm mt-1">Manage Inbounds and edit raw JSON configuration</p>
                 </div>
                 <div className="flex gap-2">
                     {activeTab === 'raw' && (
@@ -134,13 +231,89 @@ export default function SingboxConfigEditor() {
                 <div className="flex-1 bg-slate-950 overflow-hidden flex flex-col">
                     {activeTab === 'raw' ? (
                         <>
-                            {/* Toolbar */}
-                            <div className="flex items-center justify-between p-2 border-b border-slate-800 bg-slate-900">
-                                <div className="flex items-start gap-2 text-amber-400/80 text-xs px-2">
-                                    <AlertTriangle size={14} className="mt-0.5" />
-                                    <span>Editing raw JSON. Ensure syntax is correct.</span>
+                            {/* Search Bar */}
+                            <div className="flex items-center gap-2 p-2 bg-slate-900 border-b border-slate-800">
+                                <div className="relative flex-1 max-w-sm">
+                                    <input
+                                        type="text"
+                                        value={searchTerm}
+                                        onChange={e => {
+                                            setSearchTerm(e.target.value)
+                                            setSearchCursor(0)
+                                        }}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault()
+                                                performFind(e.shiftKey ? 'prev' : 'next', true)
+                                            }
+                                        }}
+                                        placeholder="Find in config..."
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-3 pr-20 py-1.5 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                                        ref={searchInputRef}
+                                    />
+                                    <div className="absolute right-1 top-1 flex gap-0.5">
+                                        <button
+                                            onClick={() => performFind('prev')}
+                                            className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                                            title="Previous (Shift+Enter)"
+                                        >
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+                                        </button>
+                                        <button
+                                            onClick={() => performFind('next')}
+                                            className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                                            title="Next (Enter)"
+                                        >
+                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
+
+                            {/* Actions Bar */}
+                            <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-900">
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={() => setShowDiff(d => !d)}
+                                        className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
+                                    >
+                                        Compare Changes
+                                    </button>
+                                    <button
+                                        onClick={handleBackup}
+                                        className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
+                                    >
+                                        Backup Now
+                                    </button>
+                                    <button
+                                        onClick={handleRestore}
+                                        className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
+                                    >
+                                        Restore
+                                    </button>
+                                </div>
+                                <div className="text-xs text-slate-500 font-mono">
+                                    {lastBackup ? `Last Backup: ${lastBackup}` : 'No backups yet'}
+                                </div>
+                            </div>
+
+                            {showDiff && (
+                                <div className="bg-slate-950 border-b border-slate-800 p-4 text-xs font-mono overflow-auto max-h-48 custom-scrollbar">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <p className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Unsaved Changes</p>
+                                        {diffLines.length === 0 && <span className="text-emerald-500">No changes detected</span>}
+                                    </div>
+                                    {diffLines.map(d => (
+                                        <div key={d.line} className="grid grid-cols-[40px_1fr] gap-4 mb-1 hover:bg-white/5 p-0.5 rounded">
+                                            <span className="text-slate-600 text-right select-none">{d.line}</span>
+                                            <div>
+                                                <div className="text-red-400/70 line-through decoration-red-400/30">{d.original || <span className="italic opacity-50">empty</span>}</div>
+                                                <div className="text-emerald-400">{d.current}</div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
 
                             <div className="flex-1 overflow-auto custom-scrollbar relative">
                                 <Editor
@@ -153,6 +326,7 @@ export default function SingboxConfigEditor() {
                                         fontFamily: '"Fira Code", "Fira Mono", monospace',
                                         fontSize: 13,
                                     }}
+                                    textareaId="singbox-raw-editor"
                                 />
                             </div>
                         </>

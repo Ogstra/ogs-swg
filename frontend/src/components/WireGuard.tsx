@@ -629,26 +629,14 @@ export default function WireGuard() {
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">IP / Allowed IPs (opcional)</label>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">IP / Allowed IPs (optional)</label>
                                     <input
                                         type="text"
                                         value={newIp}
                                         onChange={e => setNewIp(e.target.value)}
                                         className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                                        placeholder="10.100.0.2/32, 10.0.0.0/24 (auto-assign si vacío)"
+                                        placeholder="10.100.0.2/32, 10.0.0.0/24 (auto-assign if empty)"
                                     />
-                                    <p className="text-xs text-slate-500 mt-1">Si lo dejas vacío se asigna la próxima IP libre de la subred de la interfaz.</p>
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">IP / Allowed IPs</label>
-                                    <input
-                                        type="text"
-                                        value={newIp}
-                                        onChange={e => setNewIp(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                                        placeholder="10.100.0.2/32, 10.0.0.0/24"
-                                    />
-                                    <p className="text-xs text-slate-500 mt-1">Acepta varias entradas separadas por coma.</p>
                                 </div>
                                 <div>
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Endpoint (Optional, server public host:port)</label>
@@ -855,13 +843,13 @@ export default function WireGuard() {
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Bind Address (opcional)</label>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Bind Address (optional)</label>
                                 <input
                                     type="text"
                                     value={editInterface.bind_address || ''}
                                     onChange={e => setEditInterface({ ...editInterface, bind_address: e.target.value })}
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                                    placeholder="149.50.133.58 (IP pública para Endpoint)"
+                                    placeholder="149.50.133.58 (public IP for Endpoint)"
                                 />
                             </div>
                             <div>

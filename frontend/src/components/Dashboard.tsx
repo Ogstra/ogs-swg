@@ -6,6 +6,24 @@ import { Card } from './ui/Card'
 import { Button } from './ui/Button'
 import { Badge } from './ui/Badge'
 
+const DASHBOARD_PREF_KEY = 'dashboard_prefs'
+
+type DashboardPrefs = {
+    defaultService?: 'singbox' | 'wireguard'
+    refreshMs?: number
+    defaultRange?: string
+}
+
+const loadDashboardPrefs = (): DashboardPrefs => {
+    try {
+        const raw = localStorage.getItem(DASHBOARD_PREF_KEY)
+        if (!raw) return {}
+        return JSON.parse(raw)
+    } catch {
+        return {}
+    }
+}
+
 // Custom SVG Icons
 const SingBoxIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
     <svg viewBox="0 0 1027 1109" className={className} fill="currentColor">
@@ -40,6 +58,7 @@ export default function Dashboard() {
     const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
     const [timeRange, setTimeRange] = useState('24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
+    const [refreshInterval, setRefreshInterval] = useState<number>(10000)
 
     // Data States
     const [chartData, setChartData] = useState<UnifiedChartPoint[]>([])
@@ -121,10 +140,17 @@ export default function Dashboard() {
     }
 
     useEffect(() => {
+        const prefs = loadDashboardPrefs()
+        if (prefs.defaultService === 'wireguard') setChartMode('wireguard')
+        if (prefs.defaultRange) setTimeRange(prefs.defaultRange)
+        if (prefs.refreshMs && prefs.refreshMs >= 1000) setRefreshInterval(prefs.refreshMs)
+    }, [])
+
+    useEffect(() => {
         fetchData()
-        const interval = setInterval(fetchData, 10000)
+        const interval = setInterval(fetchData, refreshInterval)
         return () => clearInterval(interval)
-    }, [timeRange, customStart, customEnd])
+    }, [timeRange, customStart, customEnd, refreshInterval])
 
     const handleApplySingboxChanges = async () => {
         try {
@@ -249,13 +275,13 @@ export default function Dashboard() {
                     <div className="grid grid-cols-2 gap-4 mb-6">
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
-                                <ArrowUp size={12} /> Received
+                                <ArrowDown size={12} /> Received
                             </div>
                             <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.uplink)}</p>
                         </div>
                         <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
                             <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
-                                <ArrowDown size={12} /> Sent
+                                <ArrowUp size={12} /> Sent
                             </div>
                             <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.downlink)}</p>
                         </div>

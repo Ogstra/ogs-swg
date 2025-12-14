@@ -81,6 +81,8 @@ export default function UserManagement() {
         inbound_tag: ''
     })
     const [quotaInput, setQuotaInput] = useState<string>('')
+    const [editingInboundCount, setEditingInboundCount] = useState<number>(0)
+    const [editingOriginalInboundTag, setEditingOriginalInboundTag] = useState<string>('')
 
     // Bulk Form State
     const [bulkConfig, setBulkConfig] = useState({
@@ -318,6 +320,8 @@ export default function UserManagement() {
             enabled: user.enabled,
             inbound_tag: user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags[0] : ''
         })
+        setEditingInboundCount(user.inbound_tags?.length || 0)
+        setEditingOriginalInboundTag(user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags[0] : '')
         setQuotaInput(bytesToGbString(user.quota_limit))
         setOriginalName(user.name)
         setIsEditing(true)
@@ -329,6 +333,17 @@ export default function UserManagement() {
             if (isEditing) {
                 const payload = { ...newUser, original_name: originalName || newUser.name }
                 if (!payload.uuid) payload.uuid = uuidv4()
+
+                const inboundChanged = editingOriginalInboundTag && newUser.inbound_tag && newUser.inbound_tag !== editingOriginalInboundTag
+                if (inboundChanged && editingInboundCount >= 2) {
+                    toastError('Cannot change inbound: user is attached to multiple inbounds')
+                    return
+                }
+
+                if (inboundChanged && editingOriginalInboundTag) {
+                    await api.removeUserFromInbound(originalName || newUser.name, editingOriginalInboundTag)
+                }
+
                 await api.updateUser(payload)
                 success(`User updated successfully`)
             } else {
@@ -351,6 +366,8 @@ export default function UserManagement() {
             setQuotaInput('')
             setOriginalName('')
             setIsEditing(false)
+            setEditingInboundCount(0)
+            setEditingOriginalInboundTag('')
             fetchUsers()
         } catch (err) {
             toastError('Failed to save user: ' + err)
@@ -494,6 +511,8 @@ export default function UserManagement() {
                     <Button
                         onClick={() => {
                             setIsEditing(false)
+                            setEditingInboundCount(0)
+                            setEditingOriginalInboundTag('')
                             setNewUser({
                                 name: '',
                                 uuid: '',
@@ -927,11 +946,14 @@ export default function UserManagement() {
                                     type="text"
                                     value={newUser.uuid || ''}
                                     onChange={e => setNewUser({ ...newUser, uuid: e.target.value })}
-                                    className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600 text-xs font-mono"
+                                    className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
                                     placeholder="Auto-generated if empty"
                                 />
-                                <button
+                                <Button
                                     type="button"
+                                    variant="icon"
+                                    size="icon"
+                                    className="aspect-square"
                                     onClick={() => {
                                         const uuid = crypto.randomUUID ? crypto.randomUUID() :
                                             'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -941,29 +963,30 @@ export default function UserManagement() {
                                             })
                                         setNewUser({ ...newUser, uuid })
                                     }}
-                                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-colors text-xs whitespace-nowrap font-medium"
                                     title="Generate Random UUID"
                                 >
-                                    Generate
-                                </button>
+                                    <RefreshCw size={16} />
+                                </Button>
                             </div>
                         </div>
                     </div>
                     {/* Inbound Selection */}
                     <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Inbound (Required)</label>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Inbound</label>
                         <select
                             value={newUser.inbound_tag}
                             onChange={e => setNewUser({ ...newUser, inbound_tag: e.target.value })}
                             className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors"
-                            disabled={isEditing} // Disable editing inbound for existing user as it's complex (remove/add)
+                            disabled={isEditing && editingInboundCount >= 2}
                         >
                             <option value="" disabled>Select an Inbound</option>
                             {inbounds.map(inb => (
                                 <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
                             ))}
                         </select>
-                        {isEditing && <p className="text-xs text-slate-500 mt-1">Changing inbound is not supported yet. Delete and recreate to move.</p>}
+                        {isEditing && editingInboundCount >= 2 && (
+                            <p className="text-xs text-slate-500 mt-1">Inbound change disabled: user is linked to multiple inbounds.</p>
+                        )}
                     </div>
 
                     {isEditing && (

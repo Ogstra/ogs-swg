@@ -25,7 +25,7 @@ export default function RawConfig() {
     const [searchCursor, setSearchCursor] = useState(0)
     const searchInputRef = useRef<HTMLInputElement>(null)
 
-    const performFind = (direction: 'next' | 'prev' = 'next') => {
+    const performFind = (direction: 'next' | 'prev' = 'next', refocusSearch = false) => {
         if (!searchTerm) return
         const textarea = document.getElementById('raw-config-editor') as HTMLTextAreaElement | null
         if (!textarea) return
@@ -67,6 +67,10 @@ export default function RawConfig() {
                 // Centering slightly
                 shell.scrollTop = Math.max(0, scrollValues - shell.clientHeight / 2)
             }
+        }
+        if (refocusSearch) {
+            // Wait a tick so the selection stays highlighted before returning focus
+            setTimeout(() => searchInputRef.current?.focus({ preventScroll: true }), 0)
         }
     }
 
@@ -188,7 +192,6 @@ export default function RawConfig() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white">Raw Config</h1>
-                    <p className="text-slate-400 text-sm mt-1">Edit raw JSON/text for sing-box and WireGuard</p>
                 </div>
                 <div className="flex flex-wrap gap-3">
                     <button
@@ -293,7 +296,7 @@ export default function RawConfig() {
                             onKeyDown={e => {
                                 if (e.key === 'Enter') {
                                     e.preventDefault()
-                                    performFind(e.shiftKey ? 'prev' : 'next')
+                                    performFind(e.shiftKey ? 'prev' : 'next', true)
                                 }
                             }}
                             placeholder="Find in config..."
