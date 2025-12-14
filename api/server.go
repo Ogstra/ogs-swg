@@ -1099,15 +1099,26 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filterUser := strings.TrimSpace(r.URL.Query().Get("user"))
+	limit := 200
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil {
+			if v < 20 {
+				v = 20
+			} else if v > 1000 {
+				v = 1000
+			}
+			limit = v
+		}
+	}
 	var lines []string
 	var err error
 	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		lines, err = readJournalLines("sing-box", 200)
+		lines, err = readJournalLines("sing-box", limit)
 	} else {
-		lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, 200)
+		lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, limit)
 		if err != nil && s.config.LogSource == "file" {
 			// Fallback to journal if file missing or unreadable
-			if linesJ, jErr := readJournalLines("sing-box", 200); jErr == nil {
+			if linesJ, jErr := readJournalLines("sing-box", limit); jErr == nil {
 				lines = linesJ
 				err = nil
 			}

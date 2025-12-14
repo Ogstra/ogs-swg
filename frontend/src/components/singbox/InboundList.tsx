@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Edit2, Trash2, Shield, Radio } from 'lucide-react'
+import { Plus, Edit, Trash2, Shield, Radio } from 'lucide-react'
 import { api } from '../../api'
 import { useToast } from '../../context/ToastContext'
 import { Button } from '../ui/Button'
@@ -85,27 +85,27 @@ export default function InboundList() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {inbounds.map((inbound, idx) => (
-                        <div key={idx} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col justify-between gap-4 group hover:border-slate-700 transition-colors">
+                        <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-4 group shadow-sm hover:border-slate-700 hover:shadow-md transition-all">
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <Badge variant="neutral" className="font-mono text-xs">
+                                    <Badge variant="neutral" className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 bg-slate-800 text-slate-200">
                                         {inbound.type?.toUpperCase()}
                                     </Badge>
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex gap-2">
 
                                         <button
                                             onClick={() => handleEdit(inbound)}
-                                            className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors"
                                             title="Edit"
                                         >
-                                            <Edit2 size={16} />
+                                            <Edit size={17} strokeWidth={1.6} />
                                         </button>
                                         <button
                                             onClick={() => handleDelete(inbound.tag)}
-                                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors"
                                             title="Delete"
                                         >
-                                            <Trash2 size={16} />
+                                            <Trash2 size={17} strokeWidth={1.6} />
                                         </button>
                                     </div>
                                 </div>
@@ -120,7 +120,7 @@ export default function InboundList() {
                             </div>
 
                             {/* Quick Stats / Info */}
-                            <div className="pt-4 border-t border-slate-800/50 flex gap-4 text-xs text-slate-400">
+                            <div className="pt-4 border-t border-slate-800/50 flex gap-4 text-xs text-slate-400 items-center">
                                 <div className="flex items-center gap-1.5">
                                     <Shield size={12} className={inbound.tls?.enabled ? 'text-emerald-400' : 'text-slate-600'} />
                                     <span>TLS {inbound.tls?.enabled ? 'On' : 'Off'}</span>

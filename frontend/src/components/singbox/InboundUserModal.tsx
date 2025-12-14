@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
+import { RefreshCw } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 
 interface InboundUserModalProps {
@@ -69,14 +70,16 @@ export default function InboundUserModal({ isOpen, onClose, initialData, onSave 
                             type="text"
                             value={formData.uuid}
                             onChange={e => setFormData({ ...formData, uuid: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white font-mono outline-none focus:border-blue-500/50 transition-colors"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
                         />
                         <Button
-                            variant="secondary"
+                            variant="icon"
+                            size="icon"
+                            className="aspect-square"
                             onClick={() => setFormData({ ...formData, uuid: uuidv4() })}
                             title="Generate New UUID"
                         >
-                            ↻
+                            <RefreshCw size={16} />
                         </Button>
                     </div>
                 </div>
