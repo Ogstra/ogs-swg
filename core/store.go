@@ -63,6 +63,11 @@ type UserMetadata struct {
 	VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
 }
 
+type InboundMeta struct {
+	Tag          string `json:"tag"`
+	ExternalPort int    `json:"external_port"`
+}
+
 // DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
 type DailyUsage struct {
 	User      string
@@ -130,6 +135,11 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS admins (
 		username TEXT PRIMARY KEY,
 		password_hash TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS inbound_meta (
+		tag TEXT PRIMARY KEY,
+		external_port INTEGER DEFAULT 0
 	);
 	
 	CREATE TABLE IF NOT EXISTS daily_usage (
@@ -225,6 +235,69 @@ func (s *Store) UpdateAdminUsername(oldUsername, newUsername string) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *Store) SaveInboundMeta(tag string, externalPort int) error {
+	if tag == "" {
+		return fmt.Errorf("inbound tag required")
+	}
+	if externalPort <= 0 {
+		return s.DeleteInboundMeta(tag)
+	}
+	_, err := s.db.Exec("INSERT INTO inbound_meta (tag, external_port) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port", tag, externalPort)
+	return err
+}
+
+func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
+	if tag == "" {
+		return nil, nil
+	}
+	var meta InboundMeta
+	err := s.db.QueryRow("SELECT tag, external_port FROM inbound_meta WHERE tag = ?", tag).Scan(&meta.Tag, &meta.ExternalPort)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
+	rows, err := s.db.Query("SELECT tag, external_port FROM inbound_meta")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	meta := make(map[string]InboundMeta)
+	for rows.Next() {
+		var entry InboundMeta
+		if err := rows.Scan(&entry.Tag, &entry.ExternalPort); err != nil {
+			return nil, err
+		}
+		meta[entry.Tag] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
+func (s *Store) DeleteInboundMeta(tag string) error {
+	if tag == "" {
+		return nil
+	}
+	_, err := s.db.Exec("DELETE FROM inbound_meta WHERE tag = ?", tag)
+	return err
+}
+
+func (s *Store) RenameInboundMeta(oldTag, newTag string) error {
+	if oldTag == "" || newTag == "" || oldTag == newTag {
+		return nil
+	}
+	_, err := s.db.Exec("UPDATE inbound_meta SET tag = ? WHERE tag = ?", newTag, oldTag)
+	return err
 }
 
 func (s *Store) EnsureDefaultAdmin() error {
