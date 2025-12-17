@@ -140,6 +140,46 @@ func (c *Config) GetSingboxInbounds() ([]map[string]interface{}, error) {
 	return result, nil
 }
 
+type UserInboundInfo struct {
+	Tag  string `json:"tag"`
+	UUID string `json:"uuid"`
+	Flow string `json:"flow,omitempty"`
+}
+
+// GetUserInbounds returns inbound tags with per-inbound flow/uuid for a user.
+func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
+	inbounds, err := c.GetSingboxInbounds()
+	if err != nil {
+		return nil, err
+	}
+
+	result := []UserInboundInfo{}
+	for _, inbound := range inbounds {
+		tag, _ := inbound["tag"].(string)
+		if tag == "" {
+			continue
+		}
+		users, ok := inbound["users"].([]interface{})
+		if !ok || len(users) == 0 {
+			continue
+		}
+		for _, u := range users {
+			if um, ok := u.(map[string]interface{}); ok {
+				if um["name"] == name {
+					uuid, _ := um["uuid"].(string)
+					flow, _ := um["flow"].(string)
+					result = append(result, UserInboundInfo{
+						Tag:  tag,
+						UUID: uuid,
+						Flow: flow,
+					})
+				}
+			}
+		}
+	}
+	return result, nil
+}
+
 // AddSingboxInbound appends a new inbound block
 func (c *Config) AddSingboxInbound(newInbound map[string]interface{}) error {
 	err := c.ModifySingboxConfig(func(rawConfig SingboxConfigRaw) error {

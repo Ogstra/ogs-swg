@@ -364,7 +364,9 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/users", s.secure(s.handleCreateUser))
 	protected.HandleFunc("PUT /api/users", s.secure(s.handleUpdateUser))
 	protected.HandleFunc("DELETE /api/users", s.secure(s.handleDeleteUser))
+	protected.HandleFunc("GET /api/users/{name}/inbounds", s.secure(s.handleGetUserInbounds))
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.handleRemoveUserFromInbound))
+	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.handleUpdateUserInInbound))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.handleBulkCreateUsers))
 
 	protected.HandleFunc("GET /api/wireguard/peers", s.secure(s.handleGetWireGuardPeers))
@@ -907,6 +909,39 @@ func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Note: We don't delete metadata here since user might still exist in other inbounds
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	name := r.PathValue("name")
+	tag := r.PathValue("tag")
+	if name == "" || tag == "" {
+		http.Error(w, "Name and tag are required", http.StatusBadRequest)
+		return
+	}
+
+	var req struct {
+		UUID string `json:"uuid"`
+		Flow string `json:"flow"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.UUID == "" {
+		http.Error(w, "UUID is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.config.UpdateUserInInbound(name, req.UUID, req.Flow, tag); err != nil {
+		http.Error(w, "Failed to update user in inbound: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
 }
 
