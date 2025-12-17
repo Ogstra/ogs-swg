@@ -48,6 +48,9 @@ export default function UserManagement() {
     const [users, setUsers] = useState<UserStatus[]>([])
     const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
     const [inbounds, setInbounds] = useState<any[]>([])
+    type UserType = 'vless' | 'vmess' | 'trojan'
+    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan']
+    const [userType, setUserType] = useState<UserType>('vless')
     const [singboxPendingChanges, setSingboxPendingChanges] = useState(false)
 
     // Modals state
@@ -75,6 +78,8 @@ export default function UserManagement() {
         name: '',
         uuid: '',
         flow: 'xtls-rprx-vision',
+        vmess_security: 'auto',
+        vmess_alter_id: 0,
         quota_limit: 0,
         quota_period: 'monthly',
         reset_day: 1,
@@ -125,10 +130,28 @@ export default function UserManagement() {
     const fetchInbounds = () => {
         api.getSingboxInbounds()
             .then(data => {
-                // Filter only VLESS inbounds usually, but API returns all.
+                // API returns all inbounds; user type selection filters later.
                 setInbounds(data)
             })
             .catch(err => toastError(`Failed to fetch inbounds: ${err}`))
+    }
+
+    const inboundTypeByTag = new Map(
+        inbounds.map(inb => [inb.tag, String(inb.type || '').toLowerCase()])
+    )
+
+    const getInboundType = (tag: string) => inboundTypeByTag.get(tag) as UserType | undefined
+
+    const getFirstInboundTagForType = (type: UserType) => {
+        const match = inbounds.find(inb => String(inb.type || '').toLowerCase() === type)
+        return match?.tag || ''
+    }
+
+    const getDefaultUserType = () => {
+        for (const type of supportedUserTypes) {
+            if (getFirstInboundTagForType(type)) return type
+        }
+        return supportedUserTypes[0] || 'vless'
     }
 
     useEffect(() => {
@@ -175,14 +198,14 @@ export default function UserManagement() {
         }
         setQrLoading(true)
         setQrError('')
-        api.getUserVlessLink(modalState.data.name, selectedQrInbound)
+        api.getUserLink(modalState.data.name, selectedQrInbound)
             .then(res => {
                 setQrLink(res.link || '')
                 setQrLinkCache(prev => ({ ...prev, [selectedQrInbound]: res.link }))
             })
             .catch(err => {
                 setQrLink('')
-                setQrError(err?.message || 'Failed to load VLESS link')
+                setQrError(err?.message || 'Failed to load link')
             })
             .finally(() => setQrLoading(false))
     }, [modalState.type, modalState.data, selectedQrInbound, qrLinkCache])
@@ -336,10 +359,18 @@ export default function UserManagement() {
 
     const handleEditClick = (user: UserStatus) => {
         const inboundTags = user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags : []
+        const detectedTypes = inboundTags
+            .map(tag => getInboundType(tag))
+            .filter(Boolean) as UserType[]
+        const uniqueTypes = Array.from(new Set(detectedTypes))
+        const nextType = (uniqueTypes[0] as UserType) || getDefaultUserType()
+        setUserType(nextType)
         setNewUser({
             name: user.name,
             uuid: user.uuid || '',
             flow: user.flow || '',
+            vmess_security: user.vmess_security || 'auto',
+            vmess_alter_id: user.vmess_alter_id ?? 0,
             quota_limit: user.quota_limit,
             quota_period: user.quota_period,
             reset_day: user.reset_day,
@@ -350,7 +381,7 @@ export default function UserManagement() {
         setInboundRows(
             inboundTags.length > 0
                 ? inboundTags.map(tag => ({ tag, flow: '' }))
-                : [{ tag: inbounds[0]?.tag || '', flow: 'xtls-rprx-vision' }]
+                : [{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }]
         )
         setQuotaInput(bytesToGbString(user.quota_limit))
         setOriginalName(user.name)
@@ -359,11 +390,25 @@ export default function UserManagement() {
         api.getUserInbounds(user.name)
             .then(list => {
                 if (!Array.isArray(list) || list.length === 0) return
-                setInboundRows(prev => prev.map(row => {
-                    const match = list.find(i => i.tag === row.tag)
-                    if (!match) return row
-                    return { ...row, flow: match.flow || '' }
-                }))
+                if (nextType === 'vless') {
+                    setInboundRows(prev => prev.map(row => {
+                        const match = list.find(i => i.tag === row.tag)
+                        if (!match) return row
+                        return { ...row, flow: match.flow || '' }
+                    }))
+                }
+                if (nextType === 'vmess') {
+                    const first = list[0]
+                    if (first) {
+                        setNewUser(prev => ({
+                            ...prev,
+                            vmess_security: first.vmess_security || prev.vmess_security || 'auto',
+                            vmess_alter_id: typeof first.vmess_alter_id === 'number' && first.vmess_alter_id !== 0
+                                ? first.vmess_alter_id
+                                : prev.vmess_alter_id || 0
+                        }))
+                    }
+                }
             })
             .catch(err => {
                 console.error('Failed to load user inbounds', err)
@@ -374,7 +419,7 @@ export default function UserManagement() {
         try {
             const normalizedRows = inboundRows.map(row => ({
                 tag: row.tag.trim(),
-                flow: row.flow
+                flow: userType === 'vless' ? row.flow : ''
             }))
             const emptyInbound = normalizedRows.some(row => !row.tag)
             const inboundTags = normalizedRows.map(row => row.tag)
@@ -392,11 +437,16 @@ export default function UserManagement() {
                     return
                 }
 
+                const vmessSecurity = userType === 'vmess' ? newUser.vmess_security || '' : ''
+                const vmessAlterID = userType === 'vmess' ? (newUser.vmess_alter_id || 0) : 0
+
                 const payload = {
                     ...newUser,
                     original_name: originalName || newUser.name,
                     inbound_tag: normalizedRows[0].tag,
-                    flow: nameChanged && normalizedRows.length === 1 ? normalizedRows[0].flow : '',
+                    flow: userType === 'vless' && nameChanged && normalizedRows.length === 1 ? normalizedRows[0].flow : '',
+                    vmess_security: vmessSecurity,
+                    vmess_alter_id: vmessAlterID,
                 }
                 if (!payload.uuid) payload.uuid = uuidv4()
 
@@ -419,14 +469,18 @@ export default function UserManagement() {
                         if (originalSet.has(row.tag)) {
                             await api.updateUserInbound(newUser.name, row.tag, {
                                 uuid: payload.uuid,
-                                flow: row.flow,
+                                flow: userType === 'vless' ? row.flow : '',
+                                vmess_security: vmessSecurity,
+                                vmess_alter_id: vmessAlterID,
                             })
                         } else {
                             await api.createUser({
                                 ...newUser,
                                 uuid: payload.uuid,
                                 inbound_tag: row.tag,
-                                flow: row.flow,
+                                flow: userType === 'vless' ? row.flow : '',
+                                vmess_security: vmessSecurity,
+                                vmess_alter_id: vmessAlterID,
                             })
                         }
                     }
@@ -434,13 +488,17 @@ export default function UserManagement() {
 
                 success(`User updated successfully`)
             } else {
-                const payload = { ...newUser }
+                const payload = {
+                    ...newUser,
+                    vmess_security: userType === 'vmess' ? newUser.vmess_security || '' : '',
+                    vmess_alter_id: userType === 'vmess' ? (newUser.vmess_alter_id || 0) : 0,
+                }
                 if (!payload.uuid) payload.uuid = uuidv4()
                 for (const row of normalizedRows) {
                     await api.createUser({
                         ...payload,
                         inbound_tag: row.tag,
-                        flow: row.flow,
+                        flow: userType === 'vless' ? row.flow : '',
                     })
                 }
                 success(`User created successfully`)
@@ -451,10 +509,12 @@ export default function UserManagement() {
                 name: '',
                 uuid: '',
                 flow: 'xtls-rprx-vision',
+                vmess_security: 'auto',
+                vmess_alter_id: 0,
                 quota_limit: 0,
                 quota_period: 'monthly',
                 reset_day: 1,
-                inbound_tag: inbounds.length > 0 ? inbounds[0].tag : ''
+                inbound_tag: getFirstInboundTagForType(getDefaultUserType())
             })
             setQuotaInput('')
             setOriginalName('')
@@ -470,11 +530,20 @@ export default function UserManagement() {
     const inboundTags = inboundRows.map(row => row.tag.trim()).filter(Boolean)
     const hasEmptyInbound = inboundRows.some(row => !row.tag.trim())
     const hasDuplicateInbound = new Set(inboundTags).size !== inboundTags.length
-    const inboundValid = inboundRows.length > 0 && !hasEmptyInbound && !hasDuplicateInbound
+    const inboundTypeMismatch = inboundRows.some(row => {
+        const type = getInboundType(row.tag)
+        return type && type !== userType
+    })
+    const unsupportedUserType = !supportedUserTypes.includes(userType)
+    const hasTypeInbounds = inbounds.some(inb => String(inb.type || '').toLowerCase() === userType)
+    const inboundValid = inboundRows.length > 0 && !hasEmptyInbound && !hasDuplicateInbound && !inboundTypeMismatch && !unsupportedUserType && hasTypeInbounds
 
     const handleBulkCreate = async () => {
         try {
             const usersToCreate: CreateUserRequest[] = []
+            const bulkInboundType = getInboundType(bulkConfig.inbound_tag || '')
+            const bulkVmessSecurity = bulkInboundType === 'vmess' ? 'auto' : ''
+            const bulkVmessAlterID = bulkInboundType === 'vmess' ? 0 : 0
 
             for (let i = 0; i < bulkConfig.count; i++) {
                 let username = ''
@@ -490,7 +559,9 @@ export default function UserManagement() {
                 usersToCreate.push({
                     name: fullName,
                     uuid: uuidv4(),
-                    flow: bulkConfig.flow,
+                    flow: bulkInboundType === 'vless' ? bulkConfig.flow : '',
+                    vmess_security: bulkVmessSecurity,
+                    vmess_alter_id: bulkVmessAlterID,
                     quota_limit: bulkConfig.quota_limit,
                     quota_period: bulkConfig.quota_period,
                     reset_day: bulkConfig.reset_day,
@@ -510,7 +581,20 @@ export default function UserManagement() {
 
     const handleCopyLink = async (link: string) => {
         try {
-            await navigator.clipboard.writeText(link)
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(link)
+            } else {
+                const textarea = document.createElement('textarea')
+                textarea.value = link
+                textarea.setAttribute('readonly', '')
+                textarea.style.position = 'absolute'
+                textarea.style.left = '-9999px'
+                document.body.appendChild(textarea)
+                textarea.select()
+                const ok = document.execCommand('copy')
+                document.body.removeChild(textarea)
+                if (!ok) throw new Error('Copy failed')
+            }
             setCopied(true)
             setTimeout(() => setCopied(false), 2000)
             success('Link copied to clipboard')
@@ -557,7 +641,7 @@ export default function UserManagement() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white">User Management</h1>
-                    <p className="text-slate-400 text-sm mt-1">Manage VLESS users and quotas</p>
+                    <p className="text-slate-400 text-sm mt-1">Manage proxy users and quotas</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     {selectedUsers.size > 0 && (
@@ -572,17 +656,21 @@ export default function UserManagement() {
                     <Button
                         onClick={() => {
                             setIsEditing(false)
-                            setInboundRows([{ tag: inbounds.length > 0 ? inbounds[0].tag : '', flow: 'xtls-rprx-vision' }])
+                            const nextType = getDefaultUserType()
+                            setUserType(nextType)
+                            setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
                             setOriginalInboundTags([])
                             setNewUser({
                                 name: '',
                                 uuid: '',
                                 flow: 'xtls-rprx-vision',
+                                vmess_security: 'auto',
+                                vmess_alter_id: 0,
                                 quota_limit: 0,
                                 quota_period: 'monthly',
                                 reset_day: 1,
                                 enabled: true,
-                                inbound_tag: inbounds.length > 0 ? inbounds[0].tag : ''
+                                inbound_tag: getFirstInboundTagForType(getDefaultUserType())
                             })
                             setQuotaInput('')
                             setModalState({ type: 'create' })
@@ -1007,14 +1095,14 @@ export default function UserManagement() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">UUID (shared across inbounds)</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{userType === 'trojan' ? 'Password' : 'UUID'} (shared across inbounds)</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
                                     value={newUser.uuid || ''}
                                     onChange={e => setNewUser({ ...newUser, uuid: e.target.value })}
                                     className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
-                                    placeholder="Auto-generated if empty"
+                                    placeholder={userType === 'trojan' ? 'Enter password' : 'Auto-generated if empty'}
                                 />
                                 <Button
                                     type="button"
@@ -1037,13 +1125,68 @@ export default function UserManagement() {
                             </div>
                         </div>
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">User Type</label>
+                            <select
+                                value={userType}
+                                onChange={e => {
+                                    const nextType = e.target.value as UserType
+                                    setUserType(nextType)
+                                    setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
+                                }}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                            >
+                                {(['vless', 'vmess', 'trojan'] as UserType[]).map(type => {
+                                    const hasType = inbounds.some(inb => String(inb.type || '').toLowerCase() === type)
+                                    const supported = supportedUserTypes.includes(type)
+                                    return (
+                                        <option key={type} value={type} disabled={!hasType || !supported}>
+                                            {type.toUpperCase()}
+                                        </option>
+                                    )
+                                })}
+                            </select>
+                            {!hasTypeInbounds && (
+                                <p className="text-xs text-amber-400 mt-1">No inbounds available for this type.</p>
+                            )}
+                        </div>
+                    </div>
+                    {userType === 'vmess' && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">VMess Security</label>
+                                <select
+                                    value={newUser.vmess_security || 'auto'}
+                                    onChange={e => setNewUser({ ...newUser, vmess_security: e.target.value })}
+                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                >
+                                    <option value="auto">auto</option>
+                                    <option value="aes-128-gcm">aes-128-gcm</option>
+                                    <option value="chacha20-poly1305">chacha20-poly1305</option>
+                                    <option value="none">none</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Alter ID</label>
+                                <input
+                                    type="number"
+                                    min="0"
+                                    value={newUser.vmess_alter_id ?? 0}
+                                    onChange={e => setNewUser({ ...newUser, vmess_alter_id: Number(e.target.value) || 0 })}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
+                        </div>
+                    )}
                     {/* Inbound List */}
                     <div className="space-y-3">
                         <div className="space-y-2">
                             {inboundRows.map((row, idx) => {
                                 const tagValue = row.tag
+                                const showFlow = userType === 'vless'
                                 return (
-                                    <div key={`${tagValue}-${idx}`} className="grid grid-cols-[1fr_1fr_auto] gap-3 items-end">
+                                    <div key={`${tagValue}-${idx}`} className={`grid gap-3 items-end ${showFlow ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]'}`}>
                                         <div className="space-y-1">
                                             <label className="block text-sm font-medium text-slate-400">Inbound</label>
                                             <select
@@ -1055,25 +1198,29 @@ export default function UserManagement() {
                                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                                             >
                                                 <option value="" disabled>Select an Inbound</option>
-                                                {inbounds.map(inb => (
-                                                    <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
-                                                ))}
+                                                {inbounds
+                                                    .filter(inb => String(inb.type || '').toLowerCase() === userType)
+                                                    .map(inb => (
+                                                        <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
+                                                    ))}
                                             </select>
                                         </div>
-                                        <div className="space-y-1">
-                                            <label className="block text-sm font-medium text-slate-400">Flow</label>
-                                            <select
-                                                value={row.flow}
-                                                onChange={e => {
-                                                    const value = e.target.value
-                                                    setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, flow: value } : r))
-                                                }}
-                                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
-                                            >
-                                                <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                                                <option value="">none</option>
-                                            </select>
-                                        </div>
+                                        {showFlow && (
+                                            <div className="space-y-1">
+                                                <label className="block text-sm font-medium text-slate-400">Flow</label>
+                                                <select
+                                                    value={row.flow}
+                                                    onChange={e => {
+                                                        const value = e.target.value
+                                                        setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, flow: value } : r))
+                                                    }}
+                                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                                >
+                                                    <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                                                    <option value="">none</option>
+                                                </select>
+                                            </div>
+                                        )}
                                         <div className="flex justify-end">
                                             <button
                                                 type="button"
@@ -1095,7 +1242,7 @@ export default function UserManagement() {
                         <div className="flex justify-start">
                             <button
                                 type="button"
-                                onClick={() => setInboundRows(prev => [...prev, { tag: '', flow: 'xtls-rprx-vision' }])}
+                                onClick={() => setInboundRows(prev => [...prev, { tag: '', flow: userType === 'vless' ? 'xtls-rprx-vision' : '' }])}
                                 className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 hover:text-white text-sm"
                             >
                                 Add Inbound
@@ -1106,6 +1253,9 @@ export default function UserManagement() {
                         )}
                         {hasDuplicateInbound && (
                             <p className="text-xs text-amber-400">Duplicate inbounds are not allowed.</p>
+                        )}
+                        {inboundTypeMismatch && (
+                            <p className="text-xs text-amber-400">All inbounds must match the selected user type.</p>
                         )}
                     </div>
 
@@ -1393,7 +1543,7 @@ export default function UserManagement() {
             < Modal
                 isOpen={modalState.type === 'qr'}
                 onClose={() => setModalState({ type: null })}
-                title="VLESS Configuration"
+                title="User Configuration"
                 size="sm"
                 footer={
                     < Button variant="ghost" className="w-full" onClick={() => setModalState({ type: null })}> Close</Button >
@@ -1452,7 +1602,7 @@ export default function UserManagement() {
                                     </Button>
                                 </div>
                                 {qrLoading && (
-                                    <div className="text-[10px] text-slate-500">Loading VLESS link...</div>
+                                    <div className="text-[10px] text-slate-500">Loading link...</div>
                                 )}
                             </div>
                         </>

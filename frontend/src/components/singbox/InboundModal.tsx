@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Save } from 'lucide-react'
+import { api } from '../../api'
 
 interface InboundModalProps {
     isOpen: boolean
@@ -39,25 +40,126 @@ const DEFAULT_VLESS = {
     }
 }
 
+const DEFAULT_VMESS = {
+    type: 'vmess',
+    tag: 'vmess-in',
+    listen: '0.0.0.0',
+    listen_port: 443,
+    tls: {
+        enabled: false,
+        server_name: '',
+        alpn: ['h2', 'http/1.1'],
+        certificate_path: '',
+        key_path: ''
+    },
+    transport: {
+        enabled: false,
+        type: 'ws',
+        path: '/',
+        service_name: 'grpc-service'
+    }
+}
+
+const DEFAULT_TROJAN = {
+    type: 'trojan',
+    tag: 'trojan-in',
+    listen: '0.0.0.0',
+    listen_port: 443,
+    tls: {
+        enabled: false,
+        server_name: '',
+        alpn: ['h2', 'http/1.1'],
+        certificate_path: '',
+        key_path: ''
+    },
+    transport: {
+        enabled: false,
+        type: 'ws',
+        path: '/',
+        service_name: 'grpc-service'
+    }
+}
+
+const DEFAULT_BY_TYPE: Record<string, any> = {
+    vless: DEFAULT_VLESS,
+    vmess: DEFAULT_VMESS,
+    trojan: DEFAULT_TROJAN
+}
+
 export default function InboundModal({ isOpen, onClose, initialData, onSave }: InboundModalProps) {
     const [formData, setFormData] = useState<any>(DEFAULT_VLESS)
+    const [validationError, setValidationError] = useState<string>('')
+    const [certLoading, setCertLoading] = useState(false)
+    const [certError, setCertError] = useState('')
 
     useEffect(() => {
         if (initialData) {
             // Deep copy to avoid mutating prop
             const data = JSON.parse(JSON.stringify(initialData))
             // Ensure nested objects exist
-            if (!data.transport) data.transport = { ...DEFAULT_VLESS.transport }
-            if (!data.tls) data.tls = { ...DEFAULT_VLESS.tls }
-            if (!data.tls.reality) data.tls.reality = { ...DEFAULT_VLESS.tls.reality }
-            if (!data.tls.alpn) data.tls.alpn = [...DEFAULT_VLESS.tls.alpn]
+            const fallback = DEFAULT_BY_TYPE[data.type] || DEFAULT_VLESS
+            if (!data.transport) data.transport = { ...fallback.transport }
+            if (!data.tls) data.tls = { ...fallback.tls }
+            if (!data.tls.reality && data.type === 'vless') data.tls.reality = { ...DEFAULT_VLESS.tls.reality }
+            if (!data.tls.alpn) data.tls.alpn = [...fallback.tls.alpn]
             setFormData(data)
         } else {
             setFormData(JSON.parse(JSON.stringify(DEFAULT_VLESS)))
         }
+        setValidationError('')
+        setCertError('')
     }, [initialData, isOpen])
 
+    useEffect(() => {
+        if (validationError) {
+            setValidationError('')
+        }
+        if (certError) {
+            setCertError('')
+        }
+    }, [formData])
+
+    const handleGenerateCert = async () => {
+        setCertLoading(true)
+        setCertError('')
+        try {
+            const commonName = (formData.tls?.server_name || formData.tag || '').trim()
+            const res = await api.generateSelfSignedCert({
+                tag: formData.tag || '',
+                common_name: commonName || 'localhost'
+            })
+            setFormData((prev: any) => ({
+                ...prev,
+                tls: {
+                    ...(prev.tls || {}),
+                    certificate_path: res.cert_path,
+                    key_path: res.key_path
+                }
+            }))
+        } catch (err: any) {
+            setCertError(err?.message || 'Failed to generate certificate')
+        } finally {
+            setCertLoading(false)
+        }
+    }
+
     const handleSubmit = () => {
+        const tlsEnabled = !!formData.tls?.enabled
+        const realityEnabled = !!formData.tls?.reality?.enabled
+        const hasCert = !!formData.tls?.certificate_path && !!formData.tls?.key_path
+        const requiresCert = tlsEnabled && !(formData.type === 'vless' && realityEnabled)
+        if (requiresCert && !hasCert) {
+            setValidationError('TLS is enabled but certificate/key paths are missing.')
+            return
+        }
+        if (formData.type === 'vless' && realityEnabled) {
+            const handshake = formData.tls?.reality?.handshake || {}
+            if (!handshake.server || !formData.tls?.reality?.private_key || !formData.tls?.reality?.short_id?.[0]) {
+                setValidationError('Reality is enabled but server, private key, or short ID is missing.')
+                return
+            }
+        }
+        setValidationError('')
         // Basic validation
         if (!formData.tag || !formData.listen_port) {
             alert('Tag and Port are required')
@@ -93,6 +195,11 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
             delete submission.transport
         }
 
+        // Ensure Reality is only present for VLESS
+        if (submission.type !== 'vless' && submission.tls && submission.tls.reality) {
+            delete submission.tls.reality
+        }
+
         onSave(submission)
     }
 
@@ -112,6 +219,11 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
             }
         >
             <div className="space-y-6">
+                {validationError && (
+                    <div className="bg-red-900/30 border border-red-700/60 text-red-200 text-xs rounded-lg px-3 py-2">
+                        {validationError}
+                    </div>
+                )}
                 {/* Basic Info */}
                 <div className="space-y-4">
                     <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider">Basic Settings</h3>
@@ -131,9 +243,17 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                             <label className="text-xs font-medium text-slate-300">Protocol</label>
                             <select
                                 value={formData.type}
-                                onChange={e => setFormData({ ...formData, type: e.target.value })}
-                                disabled // Start with only VLESS support
-                                className="select-field w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
+                                onChange={e => {
+                                    const nextType = e.target.value
+                                    const nextDefaults = DEFAULT_BY_TYPE[nextType] || DEFAULT_VLESS
+                                    setFormData((prev: any) => ({
+                                        ...JSON.parse(JSON.stringify(nextDefaults)),
+                                        tag: prev.tag || nextDefaults.tag,
+                                        listen: prev.listen || nextDefaults.listen,
+                                        listen_port: prev.listen_port || nextDefaults.listen_port
+                                    }))
+                                }}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
                             >
                                 <option value="vless">VLESS</option>
                                 <option value="vmess">VMess</option>
@@ -200,104 +320,108 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                 />
                             </div>
 
-                            {/* Reality Toggle */}
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="checkbox"
-                                    checked={formData.tls?.reality?.enabled}
-                                    onChange={e => setFormData({
-                                        ...formData,
-                                        tls: {
-                                            ...formData.tls,
-                                            reality: { ...(formData.tls?.reality || {}), enabled: e.target.checked }
-                                        }
-                                    })}
-                                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
-                                />
-                                <label className="text-xs font-medium text-white">Enable Reality</label>
-                            </div>
+                            {formData.type === 'vless' && (
+                                <>
+                                    {/* Reality Toggle */}
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="checkbox"
+                                            checked={formData.tls?.reality?.enabled}
+                                            onChange={e => setFormData({
+                                                ...formData,
+                                                tls: {
+                                                    ...formData.tls,
+                                                    reality: { ...(formData.tls?.reality || {}), enabled: e.target.checked }
+                                                }
+                                            })}
+                                            className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                        />
+                                        <label className="text-xs font-medium text-white">Enable Reality</label>
+                                    </div>
 
-                            {/* Reality Configuration */}
-                            {formData.tls?.reality?.enabled && (
-                                <div className="space-y-3 p-3 bg-slate-900/50 rounded border border-slate-700">
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div className="space-y-1">
-                                            <label className="text-xs font-medium text-slate-300">Server Name (SNI)</label>
-                                            <input
-                                                type="text"
-                                                value={formData.tls?.reality?.handshake?.server || ''}
-                                                onChange={e => setFormData({
-                                                    ...formData,
-                                                    tls: {
-                                                        ...formData.tls,
-                                                        reality: {
-                                                            ...formData.tls.reality,
-                                                            handshake: {
-                                                                ...(formData.tls.reality.handshake || {}),
-                                                                server: e.target.value
+                                    {/* Reality Configuration */}
+                                    {formData.tls?.reality?.enabled && (
+                                        <div className="space-y-3 p-3 bg-slate-900/50 rounded border border-slate-700">
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1">
+                                                    <label className="text-xs font-medium text-slate-300">Server Name (SNI)</label>
+                                                    <input
+                                                        type="text"
+                                                        value={formData.tls?.reality?.handshake?.server || ''}
+                                                        onChange={e => setFormData({
+                                                            ...formData,
+                                                            tls: {
+                                                                ...formData.tls,
+                                                                reality: {
+                                                                    ...formData.tls.reality,
+                                                                    handshake: {
+                                                                        ...(formData.tls.reality.handshake || {}),
+                                                                        server: e.target.value
+                                                                    }
+                                                                }
                                                             }
-                                                        }
-                                                    }
-                                                })}
-                                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                                placeholder="www.cloudflare.com"
-                                            />
-                                        </div>
-                                        <div className="space-y-1">
-                                            <label className="text-xs font-medium text-slate-300">Handshake Port</label>
-                                            <input
-                                                type="number"
-                                                value={formData.tls?.reality?.handshake?.server_port || 443}
-                                                onChange={e => setFormData({
-                                                    ...formData,
-                                                    tls: {
-                                                        ...formData.tls,
-                                                        reality: {
-                                                            ...formData.tls.reality,
-                                                            handshake: {
-                                                                ...(formData.tls.reality.handshake || {}),
-                                                                server_port: parseInt(e.target.value)
+                                                        })}
+                                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                        placeholder="www.cloudflare.com"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <label className="text-xs font-medium text-slate-300">Handshake Port</label>
+                                                    <input
+                                                        type="number"
+                                                        value={formData.tls?.reality?.handshake?.server_port || 443}
+                                                        onChange={e => setFormData({
+                                                            ...formData,
+                                                            tls: {
+                                                                ...formData.tls,
+                                                                reality: {
+                                                                    ...formData.tls.reality,
+                                                                    handshake: {
+                                                                        ...(formData.tls.reality.handshake || {}),
+                                                                        server_port: parseInt(e.target.value)
+                                                                    }
+                                                                }
                                                             }
+                                                        })}
+                                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                    />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-slate-300">Private Key</label>
+                                                <input
+                                                    type="text"
+                                                    value={formData.tls?.reality?.private_key || ''}
+                                                    onChange={e => setFormData({
+                                                        ...formData,
+                                                        tls: {
+                                                            ...formData.tls,
+                                                            reality: { ...formData.tls.reality, private_key: e.target.value }
                                                         }
-                                                    }
-                                                })}
-                                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                            />
+                                                    })}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+                                                    placeholder="Base64 encoded private key"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-slate-300">Short ID</label>
+                                                <input
+                                                    type="text"
+                                                    value={Array.isArray(formData.tls?.reality?.short_id) ? formData.tls.reality.short_id[0] || '' : formData.tls?.reality?.short_id || ''}
+                                                    onChange={e => setFormData({
+                                                        ...formData,
+                                                        tls: {
+                                                            ...formData.tls,
+                                                            reality: { ...formData.tls.reality, short_id: [e.target.value] }
+                                                        }
+                                                    })}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
+                                                    placeholder="Hex string"
+                                                />
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-slate-300">Private Key</label>
-                                        <input
-                                            type="text"
-                                            value={formData.tls?.reality?.private_key || ''}
-                                            onChange={e => setFormData({
-                                                ...formData,
-                                                tls: {
-                                                    ...formData.tls,
-                                                    reality: { ...formData.tls.reality, private_key: e.target.value }
-                                                }
-                                            })}
-                                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
-                                            placeholder="Base64 encoded private key"
-                                        />
-                                    </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-slate-300">Short ID</label>
-                                        <input
-                                            type="text"
-                                            value={Array.isArray(formData.tls?.reality?.short_id) ? formData.tls.reality.short_id[0] || '' : formData.tls?.reality?.short_id || ''}
-                                            onChange={e => setFormData({
-                                                ...formData,
-                                                tls: {
-                                                    ...formData.tls,
-                                                    reality: { ...formData.tls.reality, short_id: [e.target.value] }
-                                                }
-                                            })}
-                                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500 font-mono"
-                                            placeholder="Hex string"
-                                        />
-                                    </div>
-                                </div>
+                                    )}
+                                </>
                             )}
 
                             <div className="grid grid-cols-2 gap-4">
@@ -322,6 +446,23 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                     />
                                 </div>
                             </div>
+                            {formData.type !== 'vless' || !formData.tls?.reality?.enabled ? (
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={handleGenerateCert}
+                                        disabled={certLoading}
+                                    >
+                                        {certLoading ? 'Generating...' : 'Generate Self-Signed'}
+                                    </Button>
+                                    <span className="text-[10px] text-slate-400">Writes cert/key next to the sing-box config.</span>
+                                    {certError && (
+                                        <span className="text-[10px] text-red-400">{certError}</span>
+                                    )}
+                                </div>
+                            ) : null}
                         </div>
                     )}
                 </div>

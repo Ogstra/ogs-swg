@@ -73,8 +73,8 @@ export default function Settings() {
 
         // Load public IP
         try {
-            const dashData = await api.getDashboardData()
-            setPublicIP(dashData.public_ip || '')
+            const ip = await api.getPublicIP()
+            setPublicIP(ip || '')
         } catch (err) {
             console.error('Failed to load public IP:', err)
         }
@@ -128,6 +128,15 @@ export default function Settings() {
             success('Feature toggles saved successfully')
         } catch (err) {
             toastError('Failed to save feature toggles: ' + err)
+        }
+    }
+
+    const handleSavePublicIP = async () => {
+        try {
+            await api.updatePublicIP(publicIP.trim())
+            success('Public IP saved')
+        } catch (err) {
+            toastError('Failed to save public IP: ' + err)
         }
     }
 
@@ -242,11 +251,11 @@ export default function Settings() {
                     features={features}
                     setFeatures={setFeatures}
                     handleSaveFeatures={handleSaveFeatures}
+                    handleSavePublicIP={handleSavePublicIP}
                     handleServiceAction={handleServiceAction}
                     serviceStatus={serviceStatus}
                     publicIP={publicIP}
                     setPublicIP={setPublicIP}
-                    success={success}
                 />
             )
         },
@@ -395,20 +404,20 @@ function GeneralTab({
     features,
     setFeatures,
     handleSaveFeatures,
+    handleSavePublicIP,
     handleServiceAction,
     serviceStatus,
     publicIP,
     setPublicIP,
-    success,
 }: {
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
     handleSaveFeatures: () => void
+    handleSavePublicIP: () => void
     handleServiceAction: (service: string, action: 'restart' | 'stop' | 'start') => void
     serviceStatus: ServiceStatus
     publicIP: string
     setPublicIP: Dispatch<SetStateAction<string>>
-    success: (msg: string) => void
 }) {
     return (
         <div className="space-y-6">
@@ -494,10 +503,7 @@ function GeneralTab({
                         </p>
                     </div>
                     <div className="flex justify-end">
-                        <Button onClick={() => {
-                            // TODO: Create endpoint to save public_ip
-                            success('Public IP saved (endpoint pending)')
-                        }} size="sm" icon={<Save size={16} />}>
+                        <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />}>
                             Save Public IP
                         </Button>
                     </div>

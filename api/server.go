@@ -366,6 +366,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("DELETE /api/users", s.secure(s.handleDeleteUser))
 	protected.HandleFunc("GET /api/users/{name}/inbounds", s.secure(s.handleGetUserInbounds))
 	protected.HandleFunc("GET /api/users/{name}/vless", s.secure(s.handleGetUserVLESSLink))
+	protected.HandleFunc("GET /api/users/{name}/link", s.secure(s.handleGetUserLink))
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.handleRemoveUserFromInbound))
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.handleUpdateUserInInbound))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.handleBulkCreateUsers))
@@ -384,6 +385,8 @@ func (s *Server) Routes() *http.ServeMux {
 
 	protected.HandleFunc("GET /api/settings/features", s.secure(s.handleGetFeatures))
 	protected.HandleFunc("PUT /api/settings/features", s.secure(s.handleUpdateFeatures))
+	protected.HandleFunc("GET /api/settings/public-ip", s.secure(s.handleGetPublicIP))
+	protected.HandleFunc("PUT /api/settings/public-ip", s.secure(s.handleUpdatePublicIP))
 	protected.HandleFunc("POST /api/sampler/run", s.secure(s.handleRunSampler))
 	protected.HandleFunc("GET /api/sampler/history", s.secure(s.handleSamplerHistory))
 	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.handlePauseSampler))
@@ -417,6 +420,7 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Tools
 	protected.HandleFunc("GET /api/tools/reality-keys", s.secure(s.handleGenerateRealityKeys))
+	protected.HandleFunc("POST /api/tools/self-signed-cert", s.secure(s.handleGenerateSelfSignedCert))
 
 	// Mount protected routes under /api/
 	mux.Handle("/api/", s.GzipMiddleware(protected)) // Auth middleware commented out for testing
@@ -559,18 +563,20 @@ func StartServer(cfg *core.Config) {
 }
 
 type UserStatus struct {
-	Name        string   `json:"name"`
-	UUID        string   `json:"uuid"`
-	Flow        string   `json:"flow"`
-	Uplink      int64    `json:"uplink"`
-	Downlink    int64    `json:"downlink"`
-	Total       int64    `json:"total"`
-	QuotaLimit  int64    `json:"quota_limit"`
-	QuotaPeriod string   `json:"quota_period"`
-	ResetDay    int      `json:"reset_day"`
-	Enabled     bool     `json:"enabled"`
-	LastSeen    int64    `json:"last_seen"`
-	InboundTags []string `json:"inbound_tags"`
+	Name          string   `json:"name"`
+	UUID          string   `json:"uuid"`
+	Flow          string   `json:"flow"`
+	VmessSecurity string   `json:"vmess_security,omitempty"`
+	VmessAlterID  int      `json:"vmess_alter_id,omitempty"`
+	Uplink        int64    `json:"uplink"`
+	Downlink      int64    `json:"downlink"`
+	Total         int64    `json:"total"`
+	QuotaLimit    int64    `json:"quota_limit"`
+	QuotaPeriod   string   `json:"quota_period"`
+	ResetDay      int      `json:"reset_day"`
+	Enabled       bool     `json:"enabled"`
+	LastSeen      int64    `json:"last_seen"`
+	InboundTags   []string `json:"inbound_tags"`
 }
 
 func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
@@ -622,6 +628,8 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 
 		// Defaults
 		var uuid, flow string
+		var vmessSecurity string
+		var vmessAlterID int
 		var inboundTags []string
 		var limit int64
 		var period string = "monthly"
@@ -631,6 +639,8 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		if isActive {
 			uuid = user.UUID
 			flow = user.Flow
+			vmessSecurity = user.VmessSecurity
+			vmessAlterID = user.VmessAlterID
 			inboundTags = user.InboundTags
 		}
 
@@ -639,6 +649,12 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			period = meta.QuotaPeriod
 			resetDay = meta.ResetDay
 			enabled = meta.Enabled
+			if vmessSecurity == "" && meta.VmessSecurity != "" {
+				vmessSecurity = meta.VmessSecurity
+			}
+			if vmessAlterID == 0 && meta.VmessAlterID != 0 {
+				vmessAlterID = meta.VmessAlterID
+			}
 
 			// If active, we trust config for existence.
 			// But if config says active, and meta says disabled,
@@ -702,18 +718,20 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		}
 
 		result = append(result, UserStatus{
-			Name:        name,
-			UUID:        uuid,
-			Flow:        flow,
-			Uplink:      up,
-			Downlink:    down,
-			Total:       up + down,
-			QuotaLimit:  limit,
-			QuotaPeriod: period,
-			ResetDay:    resetDay,
-			Enabled:     enabled,
-			LastSeen:    lastSeen,
-			InboundTags: inboundTags,
+			Name:          name,
+			UUID:          uuid,
+			Flow:          flow,
+			VmessSecurity: vmessSecurity,
+			VmessAlterID:  vmessAlterID,
+			Uplink:        up,
+			Downlink:      down,
+			Total:         up + down,
+			QuotaLimit:    limit,
+			QuotaPeriod:   period,
+			ResetDay:      resetDay,
+			Enabled:       enabled,
+			LastSeen:      lastSeen,
+			InboundTags:   inboundTags,
 		})
 	}
 
@@ -722,15 +740,17 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateUserRequest struct {
-	Name         string `json:"name"`
-	OriginalName string `json:"original_name,omitempty"`
-	UUID         string `json:"uuid"`
-	Flow         string `json:"flow"`
-	QuotaLimit   int64  `json:"quota_limit"`
-	QuotaPeriod  string `json:"quota_period"`
-	ResetDay     int    `json:"reset_day"`
-	Enabled      *bool  `json:"enabled,omitempty"`
-	InboundTag   string `json:"inbound_tag,omitempty"`
+	Name          string `json:"name"`
+	OriginalName  string `json:"original_name,omitempty"`
+	UUID          string `json:"uuid"`
+	Flow          string `json:"flow"`
+	VmessSecurity string `json:"vmess_security,omitempty"`
+	VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
+	QuotaLimit    int64  `json:"quota_limit"`
+	QuotaPeriod   string `json:"quota_period"`
+	ResetDay      int    `json:"reset_day"`
+	Enabled       *bool  `json:"enabled,omitempty"`
+	InboundTag    string `json:"inbound_tag,omitempty"`
 }
 
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -763,7 +783,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if enabled {
-		if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag); err != nil {
+		if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 			if errors.Is(err, os.ErrInvalid) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -774,11 +794,13 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meta := core.UserMetadata{
-		Email:       req.Name,
-		QuotaLimit:  req.QuotaLimit,
-		QuotaPeriod: req.QuotaPeriod,
-		ResetDay:    req.ResetDay,
-		Enabled:     enabled,
+		Email:         req.Name,
+		QuotaLimit:    req.QuotaLimit,
+		QuotaPeriod:   req.QuotaPeriod,
+		ResetDay:      req.ResetDay,
+		Enabled:       enabled,
+		VmessSecurity: req.VmessSecurity,
+		VmessAlterID:  req.VmessAlterID,
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
 		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
@@ -824,21 +846,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if enabled {
 		if originalName != req.Name {
 			s.config.RemoveUser(originalName)
-		} else {
-			// If name is same, we might need to update user properties or move Inbound.
-			// Current UpdateUser implementation doesn't support changing InboundTag directly.
-			// To support changing inbound, we would need to Remove then Add.
-			// However, relying on UpdateUser is better for just changing flow/uuid.
-			// For now, if InboundTag is provided and different from current, we should Remove/Add.
-			// BUT, to keep it simple and fix the compilation error first:
-			// We will just try UpdateUser. If it fails (e.g. not found because we want to add to new inbound?), we try AddUser.
-			// Wait, the logic below was: if UpdateUser fails, try AddUser.
-			// This covers the case where user might have been manually deleted or we are "re-enabling" effectively.
-			// Use req.InboundTag for the AddUser fallback.
 		}
-		if err := s.config.UpdateUser(req.Name, req.UUID, req.Flow); err != nil {
+		if err := s.config.UpdateUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 			// Fallback to AddUser if Update failed (e.g. user didn't exist in config)
-			if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag); err != nil {
+			if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 				http.Error(w, "Failed to update user in config: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -851,11 +862,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	meta := core.UserMetadata{
-		Email:       req.Name,
-		QuotaLimit:  req.QuotaLimit,
-		QuotaPeriod: req.QuotaPeriod,
-		ResetDay:    req.ResetDay,
-		Enabled:     enabled,
+		Email:         req.Name,
+		QuotaLimit:    req.QuotaLimit,
+		QuotaPeriod:   req.QuotaPeriod,
+		ResetDay:      req.ResetDay,
+		Enabled:       enabled,
+		VmessSecurity: req.VmessSecurity,
+		VmessAlterID:  req.VmessAlterID,
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
 		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
@@ -926,8 +939,10 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		UUID string `json:"uuid"`
-		Flow string `json:"flow"`
+		UUID          string `json:"uuid"`
+		Flow          string `json:"flow"`
+		VmessSecurity string `json:"vmess_security,omitempty"`
+		VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -938,9 +953,21 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := s.config.UpdateUserInInbound(name, req.UUID, req.Flow, tag); err != nil {
+	if err := s.config.UpdateUserInInbound(name, req.UUID, req.Flow, tag, req.VmessSecurity, req.VmessAlterID); err != nil {
 		http.Error(w, "Failed to update user in inbound: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if req.VmessSecurity != "" || req.VmessAlterID != 0 {
+		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+			if req.VmessSecurity != "" {
+				meta.VmessSecurity = req.VmessSecurity
+			}
+			if req.VmessAlterID != 0 {
+				meta.VmessAlterID = req.VmessAlterID
+			}
+			_ = s.store.SaveUserMetadata(*meta)
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -964,18 +991,20 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 			req.UUID = uuid.NewString()
 		}
 		// InboundTag might be in req if we update bulk UI, otherwise empty (all managed)
-		if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag); err != nil {
+		if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 			log.Printf("Bulk create failed for %s: %v", req.Name, err)
 			// Continue with others
 		}
 
 		enabled := true
 		meta := core.UserMetadata{
-			Email:       req.Name,
-			QuotaLimit:  req.QuotaLimit,
-			QuotaPeriod: req.QuotaPeriod,
-			ResetDay:    req.ResetDay,
-			Enabled:     enabled,
+			Email:         req.Name,
+			QuotaLimit:    req.QuotaLimit,
+			QuotaPeriod:   req.QuotaPeriod,
+			ResetDay:      req.ResetDay,
+			Enabled:       enabled,
+			VmessSecurity: req.VmessSecurity,
+			VmessAlterID:  req.VmessAlterID,
 		}
 		s.store.SaveUserMetadata(meta)
 	}

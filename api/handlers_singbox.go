@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/Ogstra/ogs-swg/core"
@@ -79,6 +81,33 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(inbounds) > 0 {
+		tagTypes := map[string]string{}
+		if allInbounds, err := s.config.GetSingboxInbounds(); err == nil {
+			for _, inbound := range allInbounds {
+				tag, _ := inbound["tag"].(string)
+				if tag == "" {
+					continue
+				}
+				if t, ok := inbound["type"].(string); ok {
+					tagTypes[tag] = strings.ToLower(strings.TrimSpace(t))
+				}
+			}
+		}
+		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+			for i := range inbounds {
+				if tagTypes[inbounds[i].Tag] == "vmess" {
+					if inbounds[i].VmessSecurity == "" && meta.VmessSecurity != "" {
+						inbounds[i].VmessSecurity = meta.VmessSecurity
+					}
+					if inbounds[i].VmessAlterID == 0 && meta.VmessAlterID != 0 {
+						inbounds[i].VmessAlterID = meta.VmessAlterID
+					}
+				}
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inbounds)
 }
@@ -88,17 +117,45 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	link, linkType, err := s.buildUserLink(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if linkType != "vless" {
+		http.Error(w, "Inbound type is not VLESS", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"link": link})
+}
+
+func (s *Server) handleGetUserLink(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	link, linkType, err := s.buildUserLink(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"link": link, "type": linkType})
+}
+
+func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 	name := r.PathValue("name")
 	tag := strings.TrimSpace(r.URL.Query().Get("inbound"))
 	if name == "" || tag == "" {
-		http.Error(w, "Name and inbound tag are required", http.StatusBadRequest)
-		return
+		return "", "", fmt.Errorf("Name and inbound tag are required")
 	}
 
 	userInbounds, err := s.config.GetUserInbounds(name)
 	if err != nil {
-		http.Error(w, "Failed to get user inbounds: "+err.Error(), http.StatusInternalServerError)
-		return
+		return "", "", fmt.Errorf("Failed to get user inbounds: %w", err)
 	}
 
 	var userInfo *core.UserInboundInfo
@@ -109,18 +166,15 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if userInfo == nil {
-		http.Error(w, "User not found in selected inbound", http.StatusNotFound)
-		return
+		return "", "", fmt.Errorf("User not found in selected inbound")
 	}
 	if userInfo.UUID == "" {
-		http.Error(w, "User UUID missing for inbound", http.StatusBadRequest)
-		return
+		return "", "", fmt.Errorf("User credential missing for inbound")
 	}
 
 	inbounds, err := s.config.GetSingboxInbounds()
 	if err != nil {
-		http.Error(w, "Failed to get inbounds: "+err.Error(), http.StatusInternalServerError)
-		return
+		return "", "", fmt.Errorf("Failed to get inbounds: %w", err)
 	}
 
 	var inbound map[string]interface{}
@@ -131,70 +185,199 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if inbound == nil {
-		http.Error(w, "Inbound config not found", http.StatusNotFound)
-		return
+		return "", "", fmt.Errorf("Inbound config not found")
 	}
 
-	if inbType, _ := inbound["type"].(string); inbType != "" && inbType != "vless" {
-		http.Error(w, "Inbound type is not VLESS", http.StatusBadRequest)
-		return
+	inbType := ""
+	if rawType, ok := inbound["type"].(string); ok {
+		inbType = strings.ToLower(strings.TrimSpace(rawType))
+	}
+	if inbType == "" {
+		inbType = "vless"
 	}
 
-	port := ""
+	port, err := extractInboundPort(inbound)
+	if err != nil {
+		return "", "", err
+	}
+
+	host := s.resolvePublicHost(r)
+	if host == "" {
+		return "", "", fmt.Errorf("Public IP not configured")
+	}
+
+	switch inbType {
+	case "vless":
+		link, err := buildVlessLink(name, userInfo, inbound, host, port)
+		return link, inbType, err
+	case "vmess":
+		userCopy := *userInfo
+		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+			if meta.VmessSecurity != "" {
+				userCopy.VmessSecurity = meta.VmessSecurity
+			}
+			if userCopy.VmessAlterID == 0 && meta.VmessAlterID != 0 {
+				userCopy.VmessAlterID = meta.VmessAlterID
+			}
+		}
+		link, err := buildVmessLink(name, &userCopy, inbound, host, port)
+		return link, inbType, err
+	case "trojan":
+		link, err := buildTrojanLink(name, userInfo, inbound, host, port)
+		return link, inbType, err
+	default:
+		return "", "", fmt.Errorf("Inbound type is not supported")
+	}
+}
+
+func (s *Server) resolvePublicHost(r *http.Request) string {
+	ip := strings.TrimSpace(s.config.PublicIP)
+	if ip != "" {
+		return ip
+	}
+	if isTrustedProxy(r.RemoteAddr) {
+		if host := firstHeaderToken(r.Header.Get("X-Forwarded-Host")); host != "" {
+			return stripPort(host)
+		}
+		if host := firstHeaderToken(r.Header.Get("X-Real-IP")); host != "" {
+			return stripPort(host)
+		}
+		if host := firstHeaderToken(r.Header.Get("X-Forwarded-For")); host != "" {
+			return stripPort(host)
+		}
+	}
+	return stripPort(r.Host)
+}
+
+func isTrustedProxy(remoteAddr string) bool {
+	host := strings.TrimSpace(remoteAddr)
+	if host == "" {
+		return false
+	}
+	if splitHost, _, err := net.SplitHostPort(host); err == nil {
+		host = splitHost
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return true
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+	return false
+}
+
+func stripPort(host string) string {
+	if strings.Contains(host, ":") {
+		return strings.Split(host, ":")[0]
+	}
+	return host
+}
+
+func firstHeaderToken(value string) string {
+	if value == "" {
+		return ""
+	}
+	parts := strings.Split(value, ",")
+	if len(parts) == 0 {
+		return strings.TrimSpace(value)
+	}
+	return strings.TrimSpace(parts[0])
+}
+
+func extractInboundPort(inbound map[string]interface{}) (string, error) {
 	switch v := inbound["listen_port"].(type) {
 	case float64:
-		port = fmt.Sprintf("%.0f", v)
+		return fmt.Sprintf("%.0f", v), nil
 	case int:
-		port = fmt.Sprintf("%d", v)
+		return fmt.Sprintf("%d", v), nil
 	case int64:
-		port = fmt.Sprintf("%d", v)
+		return fmt.Sprintf("%d", v), nil
 	case string:
-		port = v
-	}
-	if port == "" {
-		http.Error(w, "Inbound listen_port missing", http.StatusBadRequest)
-		return
-	}
-
-	ip := strings.TrimSpace(s.config.PublicIP)
-	if ip == "" {
-		host := r.Host
-		if strings.Contains(host, ":") {
-			host = strings.Split(host, ":")[0]
+		if strings.TrimSpace(v) != "" {
+			return v, nil
 		}
-		ip = host
 	}
-	if ip == "" {
-		http.Error(w, "Public IP not configured", http.StatusBadRequest)
-		return
+	return "", fmt.Errorf("Inbound listen_port missing")
+}
+
+type transportInfo struct {
+	Type        string
+	Path        string
+	Host        string
+	ServiceName string
+}
+
+func extractTransportInfo(inbound map[string]interface{}) transportInfo {
+	info := transportInfo{Type: "tcp"}
+	transport, ok := inbound["transport"].(map[string]interface{})
+	if !ok || transport == nil {
+		return info
 	}
 
+	if t, ok := transport["type"].(string); ok && t != "" {
+		info.Type = t
+	}
+	if path, ok := transport["path"].(string); ok {
+		info.Path = path
+	}
+	if host, ok := transport["host"].(string); ok {
+		info.Host = host
+	}
+	if headers, ok := transport["headers"].(map[string]interface{}); ok {
+		if host, ok := headers["Host"].(string); ok && host != "" {
+			info.Host = host
+		}
+	}
+	if svc, ok := transport["service_name"].(string); ok {
+		info.ServiceName = svc
+	}
+	return info
+}
+
+type tlsInfo struct {
+	Enabled    bool
+	ServerName string
+	CertPath   string
+}
+
+func extractTLSInfo(inbound map[string]interface{}) tlsInfo {
+	tls, ok := inbound["tls"].(map[string]interface{})
+	if !ok || tls == nil {
+		return tlsInfo{}
+	}
+	enabled, _ := tls["enabled"].(bool)
+	serverName, _ := tls["server_name"].(string)
+	certPath, _ := tls["certificate_path"].(string)
+	return tlsInfo{Enabled: enabled, ServerName: serverName, CertPath: certPath}
+}
+
+func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
 	tls, _ := inbound["tls"].(map[string]interface{})
 	reality, _ := tls["reality"].(map[string]interface{})
 	if reality == nil {
-		http.Error(w, "Inbound is missing Reality configuration", http.StatusBadRequest)
-		return
+		return "", fmt.Errorf("Inbound is missing Reality configuration")
 	}
 	pbk, _ := reality["public_key"].(string)
 	if pbk == "" {
 		if priv, _ := reality["private_key"].(string); strings.TrimSpace(priv) != "" {
 			derived, err := deriveRealityPublicKey(priv)
 			if err != nil {
-				http.Error(w, "Reality private_key invalid: "+err.Error(), http.StatusBadRequest)
-				return
+				return "", fmt.Errorf("Reality private_key invalid: %w", err)
 			}
 			pbk = derived
 		}
 	}
 	if pbk == "" {
-		http.Error(w, "Reality public_key missing", http.StatusBadRequest)
-		return
+		return "", fmt.Errorf("Reality public_key missing")
 	}
 	handshake, _ := reality["handshake"].(map[string]interface{})
 	sni, _ := handshake["server"].(string)
 	if sni == "" {
-		http.Error(w, "Reality handshake server missing", http.StatusBadRequest)
-		return
+		return "", fmt.Errorf("Reality handshake server missing")
 	}
 
 	var sid string
@@ -213,17 +396,10 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 		sid = v
 	}
 	if sid == "" {
-		http.Error(w, "Reality short_id missing", http.StatusBadRequest)
-		return
+		return "", fmt.Errorf("Reality short_id missing")
 	}
 
-	transportType := "tcp"
-	if transport, ok := inbound["transport"].(map[string]interface{}); ok {
-		if t, ok := transport["type"].(string); ok && t != "" {
-			transportType = t
-		}
-	}
-
+	transport := extractTransportInfo(inbound)
 	flowParam := ""
 	if userInfo.Flow != "" {
 		flowParam = "&flow=" + url.QueryEscape(userInfo.Flow)
@@ -232,18 +408,123 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 	nameTag := url.QueryEscape("VLESS-" + name)
 	link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s#%s",
 		url.QueryEscape(userInfo.UUID),
-		ip,
+		host,
 		port,
 		url.QueryEscape(pbk),
-		url.QueryEscape(transportType),
+		url.QueryEscape(transport.Type),
 		flowParam,
 		url.QueryEscape(sni),
 		url.QueryEscape(sid),
 		nameTag,
 	)
+	return link, nil
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"link": link})
+func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
+	if strings.TrimSpace(userInfo.UUID) == "" {
+		return "", fmt.Errorf("User password missing for inbound")
+	}
+	transport := extractTransportInfo(inbound)
+	tls := extractTLSInfo(inbound)
+
+	params := url.Values{}
+	if tls.Enabled {
+		params.Set("security", "tls")
+	}
+	if tls.ServerName != "" {
+		params.Set("sni", tls.ServerName)
+	}
+	if shouldAllowInsecure(tls) {
+		params.Set("allowInsecure", "1")
+	}
+	if transport.Type != "" && transport.Type != "tcp" {
+		params.Set("type", transport.Type)
+		if transport.Type == "ws" || transport.Type == "http" || transport.Type == "httpupgrade" {
+			if transport.Path != "" {
+				params.Set("path", transport.Path)
+			}
+			if transport.Host != "" {
+				params.Set("host", transport.Host)
+			}
+		}
+		if transport.Type == "grpc" && transport.ServiceName != "" {
+			params.Set("serviceName", transport.ServiceName)
+		}
+	}
+
+	nameTag := url.QueryEscape("TROJAN-" + name)
+	base := fmt.Sprintf("trojan://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
+	if encoded := params.Encode(); encoded != "" {
+		base += "?" + encoded
+	}
+	base += "#" + nameTag
+	return base, nil
+}
+
+func buildVmessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
+	if strings.TrimSpace(userInfo.UUID) == "" {
+		return "", fmt.Errorf("User UUID missing for inbound")
+	}
+	transport := extractTransportInfo(inbound)
+	tls := extractTLSInfo(inbound)
+
+	alterID := userInfo.VmessAlterID
+	security := strings.TrimSpace(userInfo.VmessSecurity)
+	if security == "" {
+		security = "auto"
+	}
+
+	payload := map[string]string{
+		"v":    "2",
+		"ps":   "VMESS-" + name,
+		"add":  host,
+		"port": port,
+		"id":   userInfo.UUID,
+		"aid":  strconv.Itoa(alterID),
+		"net":  transport.Type,
+		"type": "none",
+	}
+	if security != "" {
+		payload["scy"] = security
+	}
+	if transport.Type == "ws" || transport.Type == "http" || transport.Type == "httpupgrade" {
+		if transport.Path != "" {
+			payload["path"] = transport.Path
+		}
+		if transport.Host != "" {
+			payload["host"] = transport.Host
+		}
+	}
+	if transport.Type == "grpc" && transport.ServiceName != "" {
+		payload["path"] = transport.ServiceName
+	}
+	if tls.Enabled {
+		payload["tls"] = "tls"
+		if tls.ServerName != "" {
+			payload["sni"] = tls.ServerName
+		}
+		if shouldAllowInsecure(tls) {
+			payload["allowInsecure"] = "1"
+		}
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	return "vmess://" + encoded, nil
+}
+
+func shouldAllowInsecure(tls tlsInfo) bool {
+	if !tls.Enabled {
+		return false
+	}
+	if strings.TrimSpace(tls.ServerName) == "" {
+		return true
+	}
+	cert := strings.ToLower(tls.CertPath)
+	return strings.Contains(cert, "selfsigned") || strings.Contains(cert, "self-signed")
 }
 
 func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request) {

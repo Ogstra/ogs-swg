@@ -1391,6 +1391,33 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleGetPublicIP(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"public_ip": s.config.PublicIP})
+}
+
+func (s *Server) handleUpdatePublicIP(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+	var payload struct {
+		PublicIP string `json:"public_ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	s.config.PublicIP = strings.TrimSpace(payload.PublicIP)
+	if err := s.config.SaveAppConfig(); err != nil {
+		http.Error(w, "Failed to save public IP: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleBackupConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
