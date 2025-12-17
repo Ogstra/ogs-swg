@@ -133,7 +133,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                 value={formData.type}
                                 onChange={e => setFormData({ ...formData, type: e.target.value })}
                                 disabled // Start with only VLESS support
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
                             >
                                 <option value="vless">VLESS</option>
                                 <option value="vmess">VMess</option>
@@ -351,7 +351,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                 <select
                                     value={formData.transport?.type || 'http'}
                                     onChange={e => setFormData({ ...formData, transport: { ...formData.transport, type: e.target.value } })}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
                                 >
                                     <option value="http">HTTP</option>
                                     <option value="ws">WebSocket</option>

@@ -136,7 +136,7 @@ export default function LogViewer() {
                                 <select
                                     value={tailLimit}
                                     onChange={e => setTailLimit(parseInt(e.target.value))}
-                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 >
                                     <option value={50}>50</option>
                                     <option value={100}>100</option>
@@ -149,7 +149,7 @@ export default function LogViewer() {
                                 <select
                                     value={refreshInterval}
                                     onChange={e => setRefreshInterval(parseInt(e.target.value))}
-                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 >
                                     <option value={2000}>2s</option>
                                     <option value={5000}>5s</option>
@@ -200,7 +200,7 @@ export default function LogViewer() {
                                         setSearchLimit(parseInt(e.target.value))
                                         setSearchPage(1)
                                     }}
-                                    className="bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 >
                                     <option value={100}>100</option>
                                     <option value={500}>500</option>

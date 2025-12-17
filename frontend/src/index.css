@@ -16,7 +16,7 @@ body {
 }
 
 /* Normalize select arrow spacing across the app */
-select {
+select.select-field {
     -webkit-appearance: none;
     -moz-appearance: none;
     appearance: none;
@@ -26,7 +26,7 @@ select {
     background-position: right 0.6rem center;
     background-size: 0.85rem;
 }
-select:focus {
+select.select-field:focus {
     outline: none;
 }
 

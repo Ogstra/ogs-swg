@@ -210,7 +210,7 @@ export default function Dashboard() {
                         <select
                             value={timeRange}
                             onChange={(e) => setTimeRange(e.target.value)}
-                            className="bg-transparent text-xs text-slate-300 border-none focus:ring-0 p-1 outline-none w-28 font-medium cursor-pointer"
+                            className="select-field bg-transparent text-xs text-slate-300 border-none focus:ring-0 p-1 outline-none w-28 font-medium cursor-pointer"
                         >
                             <option value="30m">Last 30 Minutes</option>
                             <option value="1h">Last Hour</option>

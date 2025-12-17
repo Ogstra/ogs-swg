@@ -365,6 +365,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/users", s.secure(s.handleUpdateUser))
 	protected.HandleFunc("DELETE /api/users", s.secure(s.handleDeleteUser))
 	protected.HandleFunc("GET /api/users/{name}/inbounds", s.secure(s.handleGetUserInbounds))
+	protected.HandleFunc("GET /api/users/{name}/vless", s.secure(s.handleGetUserVLESSLink))
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.handleRemoveUserFromInbound))
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.handleUpdateUserInInbound))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.handleBulkCreateUsers))

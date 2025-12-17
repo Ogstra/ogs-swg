@@ -99,9 +99,11 @@ export default function UserManagement() {
     })
     const [bulkQuotaInput, setBulkQuotaInput] = useState<string>('')
     const [copied, setCopied] = useState(false)
-    const [publicIP, setPublicIP] = useState<string>('')
-    const [inboundConfigs, setInboundConfigs] = useState<Map<string, any>>(new Map())
     const [selectedQrInbound, setSelectedQrInbound] = useState<string>('')
+    const [qrLink, setQrLink] = useState<string>('')
+    const [qrLoading, setQrLoading] = useState(false)
+    const [qrError, setQrError] = useState<string>('')
+    const [qrLinkCache, setQrLinkCache] = useState<Record<string, string>>({})
 
     const fetchUsers = () => {
         api.getUsers()
@@ -125,14 +127,6 @@ export default function UserManagement() {
             .then(data => {
                 // Filter only VLESS inbounds usually, but API returns all.
                 setInbounds(data)
-                // Build a map of inbound configs by tag
-                const configMap = new Map()
-                data.forEach((inb: any) => {
-                    if (inb.tag) {
-                        configMap.set(inb.tag, inb)
-                    }
-                })
-                setInboundConfigs(configMap)
             })
             .catch(err => toastError(`Failed to fetch inbounds: ${err}`))
     }
@@ -140,13 +134,6 @@ export default function UserManagement() {
     useEffect(() => {
         fetchUsers()
         fetchInbounds()
-
-        // Fetch public IP from dashboard
-        api.getDashboardData().then(data => {
-            if (data.public_ip) {
-                setPublicIP(data.public_ip)
-            }
-        }).catch(err => console.error('Failed to fetch public IP:', err))
 
         // Fetch singbox_pending_changes status
         api.getDashboardData().then(data => {
@@ -166,8 +153,39 @@ export default function UserManagement() {
     useEffect(() => {
         if (modalState.type === 'qr' && modalState.data?.inbound_tags?.length > 0) {
             setSelectedQrInbound(modalState.data.inbound_tags[0])
+            setQrLink('')
+            setQrError('')
+            setQrLinkCache({})
+        }
+        if (modalState.type !== 'qr') {
+            setSelectedQrInbound('')
+            setQrLink('')
+            setQrError('')
+            setQrLinkCache({})
         }
     }, [modalState.type, modalState.data])
+
+    useEffect(() => {
+        if (modalState.type !== 'qr' || !modalState.data || !selectedQrInbound) return
+        const cached = qrLinkCache[selectedQrInbound]
+        if (cached) {
+            setQrLink(cached)
+            setQrError('')
+            return
+        }
+        setQrLoading(true)
+        setQrError('')
+        api.getUserVlessLink(modalState.data.name, selectedQrInbound)
+            .then(res => {
+                setQrLink(res.link || '')
+                setQrLinkCache(prev => ({ ...prev, [selectedQrInbound]: res.link }))
+            })
+            .catch(err => {
+                setQrLink('')
+                setQrError(err?.message || 'Failed to load VLESS link')
+            })
+            .finally(() => setQrLoading(false))
+    }, [modalState.type, modalState.data, selectedQrInbound, qrLinkCache])
 
     const sortedUsers = users
         .filter(u => !filterInbound || (u.inbound_tags && u.inbound_tags.includes(filterInbound)) || (!u.inbound_tags && !filterInbound))
@@ -489,44 +507,6 @@ export default function UserManagement() {
         }
     }
 
-    const generateVLESSLink = (user: UserStatus, inboundTagOverride?: string) => {
-        const uuid = user.uuid || "5e18b70f-bdaa-4b8a-8e50-67830e897bc5"
-        const inboundTag = inboundTagOverride || (user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags[0] : '')
-        const inboundConfig = inboundConfigs.get(inboundTag)
-        const inboundUsers = inboundConfig?.users || inboundConfig?.["users"]
-        const inboundUser = Array.isArray(inboundUsers) ? inboundUsers.find((u: any) => u && u.name === user.name) : null
-        const flow = typeof inboundUser?.flow === 'string' ? inboundUser.flow : (inboundUser?.flow ? String(inboundUser.flow) : '')
-        const flowParam = flow ? `&flow=${flow}` : ""
-
-        // Get IP from config or fallback
-        const ip = publicIP || window.location.hostname || "127.0.0.1"
-
-        // Get inbound config for the first inbound tag
-        // Extract port from inbound config
-        const port = inboundConfig?.listen_port || "443"
-
-        // Extract Reality config if available
-        const reality = inboundConfig?.tls?.reality
-        console.log('Reality config:', reality)
-        console.log('Short ID:', reality?.short_id)
-
-        const pbk = reality?.public_key || "4aHK2h-F_LeS5FYsdUqipny0ae67oWcgmlcyfIofon8"
-        const sni = reality?.handshake?.server || "www.cloudflare.com"
-
-        // Handle short_id as both array and string
-        let sid = "0861c24f2c393938"
-        if (reality?.short_id) {
-            if (Array.isArray(reality.short_id) && reality.short_id.length > 0) {
-                sid = reality.short_id[0]
-            } else if (typeof reality.short_id === 'string') {
-                sid = reality.short_id
-            }
-        }
-
-        const name = `VLESS-${user.name}`
-
-        return `vless://${uuid}@${ip}:${port}?security=reality&encryption=none&pbk=${pbk}&headerType=none&fp=chrome&type=tcp${flowParam}&sni=${sni}&sid=${sid}#${name}`
-    }
 
     const handleCopyLink = async (link: string) => {
         try {
@@ -623,7 +603,7 @@ export default function UserManagement() {
                         <select
                             value={filterInbound}
                             onChange={(e) => setFilterInbound(e.target.value)}
-                            className="bg-transparent text-slate-300 text-sm px-3 py-1 outline-none"
+                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none"
                         >
                             <option value="">All Inbounds</option>
                             {inbounds.map((inb) => (
@@ -1072,7 +1052,7 @@ export default function UserManagement() {
                                                     const value = e.target.value
                                                     setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, tag: value } : r))
                                                 }}
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                                             >
                                                 <option value="" disabled>Select an Inbound</option>
                                                 {inbounds.map(inb => (
@@ -1088,7 +1068,7 @@ export default function UserManagement() {
                                                     const value = e.target.value
                                                     setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, flow: value } : r))
                                                 }}
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                                             >
                                                 <option value="xtls-rprx-vision">xtls-rprx-vision</option>
                                                 <option value="">none</option>
@@ -1149,7 +1129,7 @@ export default function UserManagement() {
                             <select
                                 value={newUser.quota_period}
                                 onChange={e => setNewUser({ ...newUser, quota_period: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                             >
                                 <option value="monthly">Monthly</option>
                                 <option value="total">Total (One-time)</option>
@@ -1208,7 +1188,7 @@ export default function UserManagement() {
                                 <select
                                     value={bulkConfig.inbound_tag || ''}
                                     onChange={e => setBulkConfig({ ...bulkConfig, inbound_tag: e.target.value })}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                                 >
                                     <option value="">Select Inbound</option>
                                     {inbounds.map((inb: any) => (
@@ -1266,7 +1246,7 @@ export default function UserManagement() {
                                 <select
                                     value={bulkConfig.mode}
                                     onChange={e => setBulkConfig({ ...bulkConfig, mode: e.target.value })}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                                 >
                                     <option value="sequential">Sequential (prefix-1...)</option>
                                     <option value="random">Random Suffix (prefix-xyz...)</option>
@@ -1281,7 +1261,7 @@ export default function UserManagement() {
                                 <select
                                     value={bulkConfig.flow}
                                     onChange={e => setBulkConfig({ ...bulkConfig, flow: e.target.value })}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                                 >
                                     <option value="xtls-rprx-vision">xtls-rprx-vision</option>
                                     <option value="">none</option>
@@ -1439,31 +1419,41 @@ export default function UserManagement() {
                                     ))}
                                 </div>
                             )}
-                            <div className="p-4 bg-white rounded-xl shadow-lg w-full">
-                                <QRCode
-                                    size={256}
-                                    style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                    value={generateVLESSLink(modalState.data, selectedQrInbound)}
-                                    viewBox={`0 0 256 256`}
-                                />
-                            </div>
+                            {qrError ? (
+                                <div className="w-full bg-red-900/20 border border-red-700/40 rounded-lg p-3 text-xs text-red-300">
+                                    {qrError}
+                                </div>
+                            ) : (
+                                <div className="p-4 bg-white rounded-xl shadow-lg w-full">
+                                    <QRCode
+                                        size={256}
+                                        style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                        value={qrLink || ' '}
+                                        viewBox={`0 0 256 256`}
+                                    />
+                                </div>
+                            )}
                             <div className="w-full space-y-2">
                                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Link</label>
                                 <div className="flex gap-2">
                                     <input
                                         readOnly
-                                        value={generateVLESSLink(modalState.data, selectedQrInbound)}
+                                        value={qrLink}
                                         className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-400 font-mono focus:outline-none"
                                     />
                                     <Button
                                         size="sm"
                                         variant="secondary"
-                                        onClick={() => handleCopyLink(generateVLESSLink(modalState.data, selectedQrInbound))}
+                                        onClick={() => qrLink && handleCopyLink(qrLink)}
                                         icon={copied ? <Check size={14} /> : <Copy size={14} />}
+                                        disabled={!qrLink}
                                     >
                                         {copied ? 'Copied' : 'Copy'}
                                     </Button>
                                 </div>
+                                {qrLoading && (
+                                    <div className="text-[10px] text-slate-500">Loading VLESS link...</div>
+                                )}
                             </div>
                         </>
                     )}

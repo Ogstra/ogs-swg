@@ -89,7 +89,7 @@ export default function InboundUserModal({ isOpen, onClose, initialData, onSave 
                     <select
                         value={formData.flow}
                         onChange={e => setFormData({ ...formData, flow: e.target.value })}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                        className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                     >
                         <option value="xtls-rprx-vision">xtls-rprx-vision</option>
                         <option value="">none</option>

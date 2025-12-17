@@ -167,6 +167,13 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update user inbound');
     },
+    getUserVlessLink: async (name: string, inboundTag: string): Promise<{ link: string }> => {
+        const res = await fetch(`/api/users/${encodeURIComponent(name)}/vless?inbound=${encodeURIComponent(inboundTag)}`, {
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to fetch VLESS link');
+        return res.json();
+    },
     bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> => {
         const res = await fetch('/api/users/bulk', {
             method: 'POST',
