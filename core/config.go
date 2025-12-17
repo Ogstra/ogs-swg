@@ -274,6 +274,49 @@ func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
 	})
 }
 
+// UpdateUserInInbound updates uuid/flow for a user in a specific inbound.
+func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag string) error {
+	flow = normalizeFlow(flow)
+
+	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
+		inbounds := c.findManagedInbounds(cfgMap)
+		if len(inbounds) == 0 {
+			return os.ErrInvalid
+		}
+
+		found := false
+		for _, inbound := range inbounds {
+			tag, _ := inbound["tag"].(string)
+			if tag != inboundTag {
+				continue
+			}
+
+			users := ensureUsers(inbound)
+			for _, u := range users {
+				if um, ok := u.(map[string]interface{}); ok {
+					if um["name"] == name {
+						um["uuid"] = uuid
+						if flow != "" {
+							um["flow"] = flow
+						} else {
+							delete(um, "flow")
+						}
+						found = true
+						break
+					}
+				}
+			}
+		}
+
+		if !found {
+			return fmt.Errorf("user %s not found in inbound %s", name, inboundTag)
+		}
+
+		c.syncStatsUsers(cfgMap)
+		return nil
+	})
+}
+
 func (c *Config) UpdateUser(name, uuid, flow string) error {
 	flow = normalizeFlow(flow)
 

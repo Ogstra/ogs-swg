@@ -55,6 +55,27 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(inbounds)
 }
 
+func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+
+	inbounds, err := s.config.GetUserInbounds(name)
+	if err != nil {
+		http.Error(w, "Failed to get user inbounds: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(inbounds)
+}
+
 func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return

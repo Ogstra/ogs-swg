@@ -103,17 +103,6 @@ export default function UserManagement() {
     const [inboundConfigs, setInboundConfigs] = useState<Map<string, any>>(new Map())
     const [selectedQrInbound, setSelectedQrInbound] = useState<string>('')
 
-    const getInboundUserFlow = (tag: string, userName: string) => {
-        const inbound = inboundConfigs.get(tag)
-        if (!inbound) return ''
-        const users = inbound.users || inbound["users"]
-        if (!Array.isArray(users)) return ''
-        const match = users.find((u: any) => u && u.name === userName)
-        if (!match) return ''
-        if (typeof match.flow === 'string') return match.flow
-        return match.flow ? String(match.flow) : ''
-    }
-
     const fetchUsers = () => {
         api.getUsers()
             .then(data => {
@@ -340,19 +329,27 @@ export default function UserManagement() {
             inbound_tag: inboundTags[0] || ''
         })
         setOriginalInboundTags(inboundTags)
-        const fallbackFlow = user.flow || ''
         setInboundRows(
             inboundTags.length > 0
-                ? inboundTags.map(tag => ({
-                    tag,
-                    flow: inboundConfigs.size > 0 ? getInboundUserFlow(tag, user.name) : fallbackFlow
-                }))
+                ? inboundTags.map(tag => ({ tag, flow: '' }))
                 : [{ tag: inbounds[0]?.tag || '', flow: 'xtls-rprx-vision' }]
         )
         setQuotaInput(bytesToGbString(user.quota_limit))
         setOriginalName(user.name)
         setIsEditing(true)
         setModalState({ type: 'create' })
+        api.getUserInbounds(user.name)
+            .then(list => {
+                if (!Array.isArray(list) || list.length === 0) return
+                setInboundRows(prev => prev.map(row => {
+                    const match = list.find(i => i.tag === row.tag)
+                    if (!match) return row
+                    return { ...row, flow: match.flow || '' }
+                }))
+            })
+            .catch(err => {
+                console.error('Failed to load user inbounds', err)
+            })
     }
 
     const handleSaveUser = async () => {
@@ -402,14 +399,18 @@ export default function UserManagement() {
 
                     for (const row of normalizedRows) {
                         if (originalSet.has(row.tag)) {
-                            await api.removeUserFromInbound(newUser.name, row.tag)
+                            await api.updateUserInbound(newUser.name, row.tag, {
+                                uuid: payload.uuid,
+                                flow: row.flow,
+                            })
+                        } else {
+                            await api.createUser({
+                                ...newUser,
+                                uuid: payload.uuid,
+                                inbound_tag: row.tag,
+                                flow: row.flow,
+                            })
                         }
-                        await api.createUser({
-                            ...newUser,
-                            uuid: payload.uuid,
-                            inbound_tag: row.tag,
-                            flow: row.flow,
-                        })
                     }
                 }
 

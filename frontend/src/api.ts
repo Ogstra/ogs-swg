@@ -147,12 +147,25 @@ export const api = {
         });
         await handleResponse(res, 'Failed to delete user');
     },
+    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; flow?: string }[]> => {
+        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch user inbounds');
+        return res.json();
+    },
     removeUserFromInbound: async (name: string, inboundTag: string): Promise<void> => {
         const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
             method: 'DELETE',
             headers: buildHeaders()
         });
         await handleResponse(res, 'Failed to remove user from inbound');
+    },
+    updateUserInbound: async (name: string, inboundTag: string, payload: { uuid: string; flow?: string }): Promise<void> => {
+        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload)
+        });
+        await handleResponse(res, 'Failed to update user inbound');
     },
     bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> => {
         const res = await fetch('/api/users/bulk', {
