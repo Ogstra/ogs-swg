@@ -54,11 +54,13 @@ func NewStore(dbPath string) (*Store, error) {
 }
 
 type UserMetadata struct {
-	Email       string `json:"email"`
-	QuotaLimit  int64  `json:"quota_limit"`
-	QuotaPeriod string `json:"quota_period"`
-	ResetDay    int    `json:"reset_day"`
-	Enabled     bool   `json:"enabled"`
+	Email         string `json:"email"`
+	QuotaLimit    int64  `json:"quota_limit"`
+	QuotaPeriod   string `json:"quota_period"`
+	ResetDay      int    `json:"reset_day"`
+	Enabled       bool   `json:"enabled"`
+	VmessSecurity string `json:"vmess_security,omitempty"`
+	VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
 }
 
 // DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
@@ -100,7 +102,9 @@ func (s *Store) initSchema() error {
 		quota_limit INTEGER DEFAULT 0,
 		quota_period TEXT DEFAULT 'monthly',
 		reset_day INTEGER DEFAULT 1,
-		enabled INTEGER DEFAULT 1
+		enabled INTEGER DEFAULT 1,
+		vmess_security TEXT DEFAULT '',
+		vmess_alter_id INTEGER DEFAULT 0
 	);
 	CREATE TABLE IF NOT EXISTS import_state (
 		key TEXT PRIMARY KEY,
@@ -147,6 +151,8 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	s.db.Exec("ALTER TABLE users ADD COLUMN enabled INTEGER DEFAULT 1;")
+	s.db.Exec("ALTER TABLE users ADD COLUMN vmess_security TEXT DEFAULT '';")
+	s.db.Exec("ALTER TABLE users ADD COLUMN vmess_alter_id INTEGER DEFAULT 0;")
 	s.db.Exec("ALTER TABLE wg_samples ADD COLUMN endpoint TEXT DEFAULT ''")
 	// Migration for sampler_runs source column
 	var colCheck string
@@ -319,29 +325,31 @@ func (s *Store) GetSamplerRuns(limit int) ([]SamplerRun, error) {
 
 func (s *Store) SaveUserMetadata(meta UserMetadata) error {
 	query := `
-	INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled) 
-	VALUES (?, ?, ?, ?, ?)
+	INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id) 
+	VALUES (?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(email) DO UPDATE SET
 		quota_limit = excluded.quota_limit,
 		quota_period = excluded.quota_period,
 		reset_day = excluded.reset_day,
-		enabled = excluded.enabled;
+		enabled = excluded.enabled,
+		vmess_security = excluded.vmess_security,
+		vmess_alter_id = excluded.vmess_alter_id;
 	`
 	enabled := 0
 	if meta.Enabled {
 		enabled = 1
 	}
-	_, err := s.db.Exec(query, meta.Email, meta.QuotaLimit, meta.QuotaPeriod, meta.ResetDay, enabled)
+	_, err := s.db.Exec(query, meta.Email, meta.QuotaLimit, meta.QuotaPeriod, meta.ResetDay, enabled, meta.VmessSecurity, meta.VmessAlterID)
 	return err
 }
 
 func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
-	query := "SELECT email, quota_limit, quota_period, reset_day, enabled FROM users WHERE email = ?"
+	query := "SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users WHERE email = ?"
 	row := s.db.QueryRow(query, email)
 
 	var meta UserMetadata
 	var enabled int
-	if err := row.Scan(&meta.Email, &meta.QuotaLimit, &meta.QuotaPeriod, &meta.ResetDay, &enabled); err != nil {
+	if err := row.Scan(&meta.Email, &meta.QuotaLimit, &meta.QuotaPeriod, &meta.ResetDay, &enabled, &meta.VmessSecurity, &meta.VmessAlterID); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -357,7 +365,7 @@ func (s *Store) DeleteUserMetadata(email string) error {
 }
 
 func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
-	rows, err := s.db.Query("SELECT email, quota_limit, quota_period, reset_day, enabled FROM users")
+	rows, err := s.db.Query("SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users")
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +375,7 @@ func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
 	for rows.Next() {
 		var meta UserMetadata
 		var enabled int
-		if err := rows.Scan(&meta.Email, &meta.QuotaLimit, &meta.QuotaPeriod, &meta.ResetDay, &enabled); err != nil {
+		if err := rows.Scan(&meta.Email, &meta.QuotaLimit, &meta.QuotaPeriod, &meta.ResetDay, &enabled, &meta.VmessSecurity, &meta.VmessAlterID); err != nil {
 			return nil, err
 		}
 		meta.Enabled = enabled != 0

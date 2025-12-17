@@ -2,6 +2,8 @@ export interface UserStatus {
     name: string;
     uuid?: string;
     flow?: string;
+    vmess_security?: string;
+    vmess_alter_id?: number;
     uplink: number;
     downlink: number;
     total: number;
@@ -18,6 +20,8 @@ export interface CreateUserRequest {
     original_name?: string;
     uuid: string;
     flow: string;
+    vmess_security?: string;
+    vmess_alter_id?: number;
     quota_limit: number;
     quota_period: string;
     reset_day: number;
@@ -147,7 +151,7 @@ export const api = {
         });
         await handleResponse(res, 'Failed to delete user');
     },
-    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; flow?: string }[]> => {
+    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
         const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch user inbounds');
         return res.json();
@@ -159,13 +163,20 @@ export const api = {
         });
         await handleResponse(res, 'Failed to remove user from inbound');
     },
-    updateUserInbound: async (name: string, inboundTag: string, payload: { uuid: string; flow?: string }): Promise<void> => {
+    updateUserInbound: async (name: string, inboundTag: string, payload: { uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }): Promise<void> => {
         const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
             method: 'PUT',
             headers: buildHeaders('application/json'),
             body: JSON.stringify(payload)
         });
         await handleResponse(res, 'Failed to update user inbound');
+    },
+    getUserLink: async (name: string, inboundTag: string): Promise<{ link: string; type?: string }> => {
+        const res = await fetch(`/api/users/${encodeURIComponent(name)}/link?inbound=${encodeURIComponent(inboundTag)}`, {
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to fetch link');
+        return res.json();
     },
     getUserVlessLink: async (name: string, inboundTag: string): Promise<{ link: string }> => {
         const res = await fetch(`/api/users/${encodeURIComponent(name)}/vless?inbound=${encodeURIComponent(inboundTag)}`, {
@@ -343,6 +354,20 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update features');
     },
+    getPublicIP: async (): Promise<string> => {
+        const res = await fetch('/api/settings/public-ip', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch public IP');
+        const data = await res.json();
+        return data.public_ip || '';
+    },
+    updatePublicIP: async (publicIP: string): Promise<void> => {
+        const res = await fetch('/api/settings/public-ip', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ public_ip: publicIP })
+        });
+        await handleResponse(res, 'Failed to update public IP');
+    },
 
     // Sing-box Configuration
     getSingboxConfig: async (): Promise<string> => {
@@ -479,6 +504,15 @@ export const api = {
     generateRealityKeys: async (): Promise<{ private_key: string; public_key: string; short_id: string[] }> => {
         const res = await fetch('/api/tools/reality-keys', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to generate Reality keys');
+        return res.json();
+    },
+    generateSelfSignedCert: async (payload: { tag?: string; common_name?: string }): Promise<{ cert_path: string; key_path: string }> => {
+        const res = await fetch('/api/tools/self-signed-cert', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload)
+        });
+        await handleResponse(res, 'Failed to generate self-signed certificate');
         return res.json();
     },
     applySingboxChanges: async (): Promise<{ success: boolean; message: string }> => {

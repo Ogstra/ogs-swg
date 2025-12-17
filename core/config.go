@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -40,10 +41,28 @@ type Config struct {
 }
 
 type UserAccount struct {
-	Name        string   `json:"name"`
-	UUID        string   `json:"uuid"`
-	Flow        string   `json:"flow"`
-	InboundTags []string `json:"inbound_tags"`
+	Name          string   `json:"name"`
+	UUID          string   `json:"uuid"`
+	Flow          string   `json:"flow"`
+	VmessSecurity string   `json:"vmess_security,omitempty"`
+	VmessAlterID  int      `json:"vmess_alter_id,omitempty"`
+	InboundTags   []string `json:"inbound_tags"`
+}
+
+func isUserInboundType(inbType string) bool {
+	switch strings.ToLower(strings.TrimSpace(inbType)) {
+	case "vless", "vmess", "trojan":
+		return true
+	default:
+		return false
+	}
+}
+
+func inboundTypeFromMap(inbound map[string]interface{}) string {
+	if inbType, ok := inbound["type"].(string); ok {
+		return strings.ToLower(strings.TrimSpace(inbType))
+	}
+	return ""
 }
 
 func LoadConfig(path ...string) *Config {
@@ -111,8 +130,8 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 			continue
 		}
 
-		inbType, _ := inbound["type"].(string)
-		if inbType != "vless" {
+		inbType := inboundTypeFromMap(inbound)
+		if !isUserInboundType(inbType) {
 			continue
 		}
 
@@ -129,6 +148,34 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 			name, _ := userMapData["name"].(string)
 			uuid, _ := userMapData["uuid"].(string)
 			flow, _ := userMapData["flow"].(string)
+			vmessSecurity, _ := userMapData["security"].(string)
+			vmessAlterID := 0
+			if alterRaw, ok := userMapData["alter_id"]; ok {
+				switch v := alterRaw.(type) {
+				case float64:
+					vmessAlterID = int(v)
+				case int:
+					vmessAlterID = v
+				case int64:
+					vmessAlterID = int(v)
+				case string:
+					if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+						vmessAlterID = parsed
+					}
+				}
+			}
+			if inbType == "trojan" {
+				uuid, _ = userMapData["password"].(string)
+				flow = ""
+			}
+			if inbType == "vmess" {
+				if uuid == "" {
+					if id, ok := userMapData["id"].(string); ok {
+						uuid = id
+					}
+				}
+				flow = ""
+			}
 
 			if name != "" {
 				if existing, exists := userMap[name]; exists {
@@ -143,12 +190,26 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 					if !found {
 						existing.InboundTags = append(existing.InboundTags, tag)
 					}
+					if existing.UUID == "" && uuid != "" {
+						existing.UUID = uuid
+					}
+					if existing.Flow == "" && flow != "" {
+						existing.Flow = flow
+					}
+					if existing.VmessSecurity == "" && vmessSecurity != "" {
+						existing.VmessSecurity = vmessSecurity
+					}
+					if existing.VmessAlterID == 0 && vmessAlterID != 0 {
+						existing.VmessAlterID = vmessAlterID
+					}
 				} else {
 					userMap[name] = &UserAccount{
-						Name:        name,
-						UUID:        uuid,
-						Flow:        flow,
-						InboundTags: []string{tag},
+						Name:          name,
+						UUID:          uuid,
+						Flow:          flow,
+						VmessSecurity: vmessSecurity,
+						VmessAlterID:  vmessAlterID,
+						InboundTags:   []string{tag},
 					}
 				}
 			}
@@ -162,11 +223,10 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 	return users, nil
 }
 
-func (c *Config) AddUser(name, uuid, flow, inboundTag string) error {
+func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vmessAlterID int) error {
 	if inboundTag == "" {
 		return fmt.Errorf("inbound tag is required")
 	}
-	flow = normalizeFlow(flow)
 
 	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
 		inbounds := c.findManagedInbounds(cfgMap)
@@ -187,7 +247,15 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag string) error {
 			return fmt.Errorf("inbound '%s' not found or not managed", inboundTag)
 		}
 
+		inbType := inboundTypeFromMap(targetInbound)
+		if !isUserInboundType(inbType) {
+			return fmt.Errorf("unsupported inbound type: %s", inbType)
+		}
+
 		users := ensureUsers(targetInbound)
+		if inbType == "vmess" {
+			sanitizeVmessUsers(users)
+		}
 		for _, u := range users {
 			if um, ok := u.(map[string]interface{}); ok {
 				if um["name"] == name {
@@ -198,10 +266,23 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag string) error {
 
 		user := map[string]interface{}{
 			"name": name,
-			"uuid": uuid,
 		}
-		if flow != "" {
-			user["flow"] = flow
+		switch inbType {
+		case "vless":
+			user["uuid"] = uuid
+			flow = normalizeFlow(flow)
+			if flow != "" {
+				user["flow"] = flow
+			}
+		case "vmess":
+			user["uuid"] = uuid
+			if vmessAlterID != 0 {
+				user["alter_id"] = vmessAlterID
+			}
+		case "trojan":
+			user["password"] = uuid
+		default:
+			return fmt.Errorf("unsupported inbound type: %s", inbType)
 		}
 		users = append(users, user)
 		targetInbound["users"] = users
@@ -275,9 +356,7 @@ func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
 }
 
 // UpdateUserInInbound updates uuid/flow for a user in a specific inbound.
-func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag string) error {
-	flow = normalizeFlow(flow)
-
+func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity string, vmessAlterID int) error {
 	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
 		inbounds := c.findManagedInbounds(cfgMap)
 		if len(inbounds) == 0 {
@@ -291,14 +370,34 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag string) error 
 				continue
 			}
 
+			inbType := inboundTypeFromMap(inbound)
+			if !isUserInboundType(inbType) {
+				continue
+			}
+
 			users := ensureUsers(inbound)
+			if inbType == "vmess" {
+				sanitizeVmessUsers(users)
+			}
 			for _, u := range users {
 				if um, ok := u.(map[string]interface{}); ok {
 					if um["name"] == name {
-						um["uuid"] = uuid
-						if flow != "" {
-							um["flow"] = flow
-						} else {
+						switch inbType {
+						case "vless":
+							um["uuid"] = uuid
+							flow = normalizeFlow(flow)
+							if flow != "" {
+								um["flow"] = flow
+							} else {
+								delete(um, "flow")
+							}
+						case "vmess":
+							um["uuid"] = uuid
+							delete(um, "flow")
+							delete(um, "security")
+							um["alter_id"] = vmessAlterID
+						case "trojan":
+							um["password"] = uuid
 							delete(um, "flow")
 						}
 						found = true
@@ -317,24 +416,57 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag string) error 
 	})
 }
 
-func (c *Config) UpdateUser(name, uuid, flow string) error {
-	flow = normalizeFlow(flow)
-
+func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, vmessAlterID int) error {
 	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
 		inbounds := c.findManagedInbounds(cfgMap)
 		if len(inbounds) == 0 {
 			return os.ErrInvalid
 		}
 
+		targetType := ""
+		if inboundTag != "" {
+			for _, inbound := range inbounds {
+				if tag, ok := inbound["tag"].(string); ok && tag == inboundTag {
+					targetType = inboundTypeFromMap(inbound)
+					break
+				}
+			}
+		}
+
 		found := false
 		for _, inbound := range inbounds {
+			inbType := inboundTypeFromMap(inbound)
+			if !isUserInboundType(inbType) {
+				continue
+			}
+			if targetType != "" && inbType != targetType {
+				continue
+			}
+
 			users := ensureUsers(inbound)
+			if inbType == "vmess" {
+				sanitizeVmessUsers(users)
+			}
 			for _, u := range users {
 				if um, ok := u.(map[string]interface{}); ok {
 					if um["name"] == name {
-						um["uuid"] = uuid
-						if flow != "" {
-							um["flow"] = flow
+						switch inbType {
+						case "vless":
+							um["uuid"] = uuid
+							flow = normalizeFlow(flow)
+							if flow != "" {
+								um["flow"] = flow
+							} else {
+								delete(um, "flow")
+							}
+						case "vmess":
+							um["uuid"] = uuid
+							delete(um, "flow")
+							delete(um, "security")
+							um["alter_id"] = vmessAlterID
+						case "trojan":
+							um["password"] = uuid
+							delete(um, "flow")
 						}
 						found = true
 					}
@@ -367,7 +499,7 @@ func (c *Config) findManagedInbounds(cfgMap map[string]interface{}) []map[string
 	var result []map[string]interface{}
 	for _, inbound := range inbounds {
 		if inboundMap, ok := inbound.(map[string]interface{}); ok {
-			if inboundMap["type"] != "vless" {
+			if !isUserInboundType(inboundTypeFromMap(inboundMap)) {
 				continue
 			}
 			if len(tagFilter) > 0 {
@@ -390,6 +522,14 @@ func ensureUsers(inbound map[string]interface{}) []interface{} {
 	return clients
 }
 
+func sanitizeVmessUsers(users []interface{}) {
+	for _, u := range users {
+		if um, ok := u.(map[string]interface{}); ok {
+			delete(um, "security")
+		}
+	}
+}
+
 func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
 	names := []string{}
 	seen := make(map[string]bool)
@@ -405,7 +545,7 @@ func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
 			if !ok {
 				continue
 			}
-			if inbMap["type"] != "vless" {
+			if !isUserInboundType(inboundTypeFromMap(inbMap)) {
 				continue
 			}
 			if len(tagFilter) > 0 {

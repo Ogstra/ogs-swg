@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -141,9 +143,11 @@ func (c *Config) GetSingboxInbounds() ([]map[string]interface{}, error) {
 }
 
 type UserInboundInfo struct {
-	Tag  string `json:"tag"`
-	UUID string `json:"uuid"`
-	Flow string `json:"flow,omitempty"`
+	Tag           string `json:"tag"`
+	UUID          string `json:"uuid"`
+	Flow          string `json:"flow,omitempty"`
+	VmessSecurity string `json:"vmess_security,omitempty"`
+	VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
 }
 
 // GetUserInbounds returns inbound tags with per-inbound flow/uuid for a user.
@@ -159,6 +163,10 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 		if tag == "" {
 			continue
 		}
+		inbType := ""
+		if t, ok := inbound["type"].(string); ok {
+			inbType = strings.ToLower(strings.TrimSpace(t))
+		}
 		users, ok := inbound["users"].([]interface{})
 		if !ok || len(users) == 0 {
 			continue
@@ -168,10 +176,40 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 				if um["name"] == name {
 					uuid, _ := um["uuid"].(string)
 					flow, _ := um["flow"].(string)
+					if inbType == "trojan" {
+						uuid, _ = um["password"].(string)
+						flow = ""
+					}
+					if inbType == "vmess" {
+						if uuid == "" {
+							if id, ok := um["id"].(string); ok {
+								uuid = id
+							}
+						}
+						flow = ""
+					}
+					vmessSecurity, _ := um["security"].(string)
+					vmessAlterID := 0
+					if alterRaw, ok := um["alter_id"]; ok {
+						switch v := alterRaw.(type) {
+						case float64:
+							vmessAlterID = int(v)
+						case int:
+							vmessAlterID = v
+						case int64:
+							vmessAlterID = int(v)
+						case string:
+							if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+								vmessAlterID = parsed
+							}
+						}
+					}
 					result = append(result, UserInboundInfo{
-						Tag:  tag,
-						UUID: uuid,
-						Flow: flow,
+						Tag:           tag,
+						UUID:          uuid,
+						Flow:          flow,
+						VmessSecurity: vmessSecurity,
+						VmessAlterID:  vmessAlterID,
 					})
 				}
 			}
