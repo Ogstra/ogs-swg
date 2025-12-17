@@ -350,7 +350,7 @@ function DashboardTab({
                         <select
                             value={dashboardPrefs.defaultService}
                             onChange={e => setDashboardPrefs(prev => ({ ...prev, defaultService: e.target.value as 'singbox' | 'wireguard' }))}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                            className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                         >
                             <option value="singbox">Sing-box</option>
                             <option value="wireguard">WireGuard</option>
@@ -371,7 +371,7 @@ function DashboardTab({
                         <select
                             value={dashboardPrefs.defaultRange}
                             onChange={e => setDashboardPrefs(prev => ({ ...prev, defaultRange: e.target.value }))}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                            className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                         >
                             <option value="30m">Last 30 Minutes</option>
                             <option value="1h">Last Hour</option>
@@ -833,7 +833,7 @@ function DatabaseTab({
                     <select
                         value={historyLimit}
                         onChange={e => setHistoryLimit(parseInt(e.target.value))}
-                        className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
+                        className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
                     >
                         <option value={5}>Last 5</option>
                         <option value={10}>Last 10</option>

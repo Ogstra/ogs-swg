@@ -1,15 +1,21 @@
+import { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './context/ToastContext';
 import Dashboard from './components/Dashboard';
-import UserManagement from './components/UserManagement';
-import WireGuard from './components/WireGuard';
-import Settings from './components/Settings';
-import LogViewer from './components/LogViewer';
-import RawConfig from './components/RawConfig';
 import { Login } from './components/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import { Layout } from './components/Layout';
+
+const UserManagement = lazy(() => import('./components/UserManagement'));
+const WireGuard = lazy(() => import('./components/WireGuard'));
+const Settings = lazy(() => import('./components/Settings'));
+const LogViewer = lazy(() => import('./components/LogViewer'));
+const RawConfig = lazy(() => import('./components/RawConfig'));
+
+const RouteFallback = () => (
+    <div className="p-8 text-center text-slate-400">Loading...</div>
+);
 
 function App() {
     return (
@@ -22,11 +28,31 @@ function App() {
                         <Route element={<ProtectedRoute />}>
                             <Route element={<Layout />}>
                                 <Route path="/" element={<Dashboard />} />
-                                <Route path="/users" element={<UserManagement />} />
-                                <Route path="/wireguard" element={<WireGuard />} />
-                                <Route path="/logs" element={<LogViewer />} />
-                                <Route path="/raw-config" element={<RawConfig />} />
-                                <Route path="/settings" element={<Settings />} />
+                                <Route path="/users" element={
+                                    <Suspense fallback={<RouteFallback />}>
+                                        <UserManagement />
+                                    </Suspense>
+                                } />
+                                <Route path="/wireguard" element={
+                                    <Suspense fallback={<RouteFallback />}>
+                                        <WireGuard />
+                                    </Suspense>
+                                } />
+                                <Route path="/logs" element={
+                                    <Suspense fallback={<RouteFallback />}>
+                                        <LogViewer />
+                                    </Suspense>
+                                } />
+                                <Route path="/raw-config" element={
+                                    <Suspense fallback={<RouteFallback />}>
+                                        <RawConfig />
+                                    </Suspense>
+                                } />
+                                <Route path="/settings" element={
+                                    <Suspense fallback={<RouteFallback />}>
+                                        <Settings />
+                                    </Suspense>
+                                } />
                                 {/* Redirect unknown routes to dashboard */}
                                 <Route path="*" element={<Navigate to="/" replace />} />
                             </Route>

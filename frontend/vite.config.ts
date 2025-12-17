@@ -55,6 +55,19 @@ export default defineConfig(({ mode }) => {
                     secure: false, // In case backend uses self-signed HTTPS in future
                 }
             }
-        }
+        },
+        build: {
+            rollupOptions: {
+                output: {
+                    manualChunks: {
+                        react: ['react', 'react-dom', 'react-router-dom'],
+                        charts: ['recharts'],
+                        editor: ['react-simple-code-editor', 'prismjs'],
+                        qr: ['react-qr-code'],
+                        icons: ['lucide-react'],
+                    }
+                }
+            }
+        },
     }
 })
