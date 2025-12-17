@@ -420,6 +420,10 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 		}
 
 		nameTag := url.QueryEscape("VLESS-" + name)
+		udpParam := ""
+		if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
+			udpParam = "&udp=0"
+		}
 		link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s#%s",
 			url.QueryEscape(userInfo.UUID),
 			host,
@@ -431,6 +435,9 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 			url.QueryEscape(sid),
 			nameTag,
 		)
+		if udpParam != "" {
+			link = strings.Replace(link, "#"+nameTag, udpParam+"#"+nameTag, 1)
+		}
 		return link, nil
 	}
 
@@ -448,6 +455,9 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 	}
 	if shouldAllowInsecure(tls) {
 		params.Set("allowInsecure", "1")
+	}
+	if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
+		params.Set("udp", "0")
 	}
 	if transport.Type != "" && transport.Type != "tcp" {
 		params.Set("type", transport.Type)
