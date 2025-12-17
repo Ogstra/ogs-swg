@@ -2,18 +2,31 @@
 
 Web dashboard for managing sing-box and WireGuard VPN services.
 
-<img width="1498" height="848" alt="image" src="https://github.com/user-attachments/assets/7d363a13-af4c-47b0-b9a4-25df9ae439d0" />
+<img width="1499" height="851" alt="image" src="https://github.com/user-attachments/assets/b16a6c51-849d-4685-817b-9b3acf59a4ba" />
+
+## Supported protocols
+
+| Protocol | Security/Mode | QR/Link | Notes |
+| --- | --- | --- | --- |
+| VLESS | Reality / TLS / None | Yes | Uses Reality when present; falls back to standard VLESS |
+| VMess | TLS / None | Yes | Uses `vmess_security` and `alter_id` from metadata |
+| Trojan | TLS | Yes | TLS + transport supported |
 
 ## Features
 
+**Stable**
 - Real-time traffic monitoring
-- User and inbound management for sing-box
+- Multi-inbound user management for sing-box (add/edit/remove per inbound)
 - WireGuard peer management
-- QR code generation for clients
-- System log viewing
-- Service control (start/stop/restart)
-- Raw configuration editing
+- QR/link generation per inbound (VLESS/VMess/Trojan) and WireGuard
+- Sing-box log viewer with filtering
+- Service control (start/stop/restart)  
+- Dashboard preferences (default service, refresh interval, range)
 
+**Experimental**
+- VMess/Trojan inbound creation (sing-box validation still required)
+- Self-signed TLS certificate generator (Tools)
+- Raw configuration editor with find + backup/restore
 ## Installation
 
 ### Requirements
@@ -53,7 +66,7 @@ Create `config.json`:
   "access_log_path": "/var/log/singbox.log",
   "log_source": "journal",
   "database_path": "./stats.db",
-  "listen_addr": ":8111",
+  "listen_addr": "0.0.0.0:8111",
   "wireguard_config_path": "/etc/wireguard/wg0.conf",
   "enable_wireguard": true,
   "enable_singbox": true,
@@ -94,19 +107,18 @@ Create `config.json`:
 - `wg_retention_days` - Days to keep WireGuard stats (default: `30`)
 - `aggregation_enabled` - Enable data aggregation (default: `true`)
 - `aggregation_days` - Days threshold for aggregation (default: `7`)
-- `public_ip` - Server's public IP for QR codes (default: auto-detected)
-
+- `public_ip` - Public IP used for QR/link generation (falls back to request host if empty)
 ### Run
 
 ```bash
 ./ogs-swg
 ```
 
-Access at `http://localhost:8111`
+Access at `http://localhost:PORT`
 
 Default login: `admin` / `admin`
 
-## Docker
+## Docker (EXPERIMENTAL)
 
 ```bash
 docker-compose up -d
