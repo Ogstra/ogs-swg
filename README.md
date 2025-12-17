@@ -20,13 +20,14 @@ Web dashboard for managing sing-box and WireGuard VPN services.
 - WireGuard peer management
 - QR/link generation per inbound (VLESS/VMess/Trojan) and WireGuard
 - Sing-box log viewer with filtering
-- Service control (start/stop/restart)  
+- Service control (start/stop/restart)
 - Dashboard preferences (default service, refresh interval, range)
 
 **Experimental**
 - VMess/Trojan inbound creation (sing-box validation still required)
 - Self-signed TLS certificate generator (Tools)
 - Raw configuration editor with find + backup/restore
+
 ## Installation
 
 ### Requirements
