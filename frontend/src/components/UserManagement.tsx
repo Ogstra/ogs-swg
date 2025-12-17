@@ -101,6 +101,7 @@ export default function UserManagement() {
     const [copied, setCopied] = useState(false)
     const [publicIP, setPublicIP] = useState<string>('')
     const [inboundConfigs, setInboundConfigs] = useState<Map<string, any>>(new Map())
+    const [selectedQrInbound, setSelectedQrInbound] = useState<string>('')
 
     const getInboundUserFlow = (tag: string, userName: string) => {
         const inbound = inboundConfigs.get(tag)
@@ -172,6 +173,12 @@ export default function UserManagement() {
 
         return () => clearInterval(interval)
     }, [])
+
+    useEffect(() => {
+        if (modalState.type === 'qr' && modalState.data?.inbound_tags?.length > 0) {
+            setSelectedQrInbound(modalState.data.inbound_tags[0])
+        }
+    }, [modalState.type, modalState.data])
 
     const sortedUsers = users
         .filter(u => !filterInbound || (u.inbound_tags && u.inbound_tags.includes(filterInbound)) || (!u.inbound_tags && !filterInbound))
@@ -481,18 +488,19 @@ export default function UserManagement() {
         }
     }
 
-    const generateVLESSLink = (user: UserStatus) => {
+    const generateVLESSLink = (user: UserStatus, inboundTagOverride?: string) => {
         const uuid = user.uuid || "5e18b70f-bdaa-4b8a-8e50-67830e897bc5"
-        const flow = user.flow || ""
+        const inboundTag = inboundTagOverride || (user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags[0] : '')
+        const inboundConfig = inboundConfigs.get(inboundTag)
+        const inboundUsers = inboundConfig?.users || inboundConfig?.["users"]
+        const inboundUser = Array.isArray(inboundUsers) ? inboundUsers.find((u: any) => u && u.name === user.name) : null
+        const flow = typeof inboundUser?.flow === 'string' ? inboundUser.flow : (inboundUser?.flow ? String(inboundUser.flow) : '')
         const flowParam = flow ? `&flow=${flow}` : ""
 
         // Get IP from config or fallback
         const ip = publicIP || window.location.hostname || "127.0.0.1"
 
         // Get inbound config for the first inbound tag
-        const inboundTag = user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags[0] : ''
-        const inboundConfig = inboundConfigs.get(inboundTag)
-
         // Extract port from inbound config
         const port = inboundConfig?.listen_port || "443"
 
@@ -1413,11 +1421,28 @@ export default function UserManagement() {
                 <div className="flex flex-col items-center space-y-4">
                     {modalState.data && (
                         <>
+                            {modalState.data.inbound_tags && modalState.data.inbound_tags.length > 1 && (
+                                <div className="w-full flex flex-wrap gap-2">
+                                    {modalState.data.inbound_tags.map((tag: string) => (
+                                        <button
+                                            key={tag}
+                                            type="button"
+                                            onClick={() => setSelectedQrInbound(tag)}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${selectedQrInbound === tag
+                                                ? 'bg-slate-800 text-white border-slate-700'
+                                                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                                                }`}
+                                        >
+                                            {tag}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                             <div className="p-4 bg-white rounded-xl shadow-lg w-full">
                                 <QRCode
                                     size={256}
                                     style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                    value={generateVLESSLink(modalState.data)}
+                                    value={generateVLESSLink(modalState.data, selectedQrInbound)}
                                     viewBox={`0 0 256 256`}
                                 />
                             </div>
@@ -1426,13 +1451,13 @@ export default function UserManagement() {
                                 <div className="flex gap-2">
                                     <input
                                         readOnly
-                                        value={generateVLESSLink(modalState.data)}
+                                        value={generateVLESSLink(modalState.data, selectedQrInbound)}
                                         className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-400 font-mono focus:outline-none"
                                     />
                                     <Button
                                         size="sm"
                                         variant="secondary"
-                                        onClick={() => handleCopyLink(generateVLESSLink(modalState.data))}
+                                        onClick={() => handleCopyLink(generateVLESSLink(modalState.data, selectedQrInbound))}
                                         icon={copied ? <Check size={14} /> : <Copy size={14} />}
                                     >
                                         {copied ? 'Copied' : 'Copy'}
