@@ -81,8 +81,8 @@ export default function UserManagement() {
         inbound_tag: ''
     })
     const [quotaInput, setQuotaInput] = useState<string>('')
-    const [editingInboundCount, setEditingInboundCount] = useState<number>(0)
-    const [editingOriginalInboundTag, setEditingOriginalInboundTag] = useState<string>('')
+    const [inboundRows, setInboundRows] = useState<{ tag: string; flow: string }[]>([])
+    const [originalInboundTags, setOriginalInboundTags] = useState<string[]>([])
 
     // Bulk Form State
     const [bulkConfig, setBulkConfig] = useState({
@@ -101,6 +101,17 @@ export default function UserManagement() {
     const [copied, setCopied] = useState(false)
     const [publicIP, setPublicIP] = useState<string>('')
     const [inboundConfigs, setInboundConfigs] = useState<Map<string, any>>(new Map())
+
+    const getInboundUserFlow = (tag: string, userName: string) => {
+        const inbound = inboundConfigs.get(tag)
+        if (!inbound) return ''
+        const users = inbound.users || inbound["users"]
+        if (!Array.isArray(users)) return ''
+        const match = users.find((u: any) => u && u.name === userName)
+        if (!match) return ''
+        if (typeof match.flow === 'string') return match.flow
+        return match.flow ? String(match.flow) : ''
+    }
 
     const fetchUsers = () => {
         api.getUsers()
@@ -310,6 +321,7 @@ export default function UserManagement() {
     }
 
     const handleEditClick = (user: UserStatus) => {
+        const inboundTags = user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags : []
         setNewUser({
             name: user.name,
             uuid: user.uuid || '',
@@ -318,10 +330,18 @@ export default function UserManagement() {
             quota_period: user.quota_period,
             reset_day: user.reset_day,
             enabled: user.enabled,
-            inbound_tag: user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags[0] : ''
+            inbound_tag: inboundTags[0] || ''
         })
-        setEditingInboundCount(user.inbound_tags?.length || 0)
-        setEditingOriginalInboundTag(user.inbound_tags && user.inbound_tags.length > 0 ? user.inbound_tags[0] : '')
+        setOriginalInboundTags(inboundTags)
+        const fallbackFlow = user.flow || ''
+        setInboundRows(
+            inboundTags.length > 0
+                ? inboundTags.map(tag => ({
+                    tag,
+                    flow: inboundConfigs.size > 0 ? getInboundUserFlow(tag, user.name) : fallbackFlow
+                }))
+                : [{ tag: inbounds[0]?.tag || '', flow: 'xtls-rprx-vision' }]
+        )
         setQuotaInput(bytesToGbString(user.quota_limit))
         setOriginalName(user.name)
         setIsEditing(true)
@@ -330,26 +350,73 @@ export default function UserManagement() {
 
     const handleSaveUser = async () => {
         try {
-            if (isEditing) {
-                const payload = { ...newUser, original_name: originalName || newUser.name }
-                if (!payload.uuid) payload.uuid = uuidv4()
+            const normalizedRows = inboundRows.map(row => ({
+                tag: row.tag.trim(),
+                flow: row.flow
+            }))
+            const emptyInbound = normalizedRows.some(row => !row.tag)
+            const inboundTags = normalizedRows.map(row => row.tag)
+            const hasDuplicateInbound = new Set(inboundTags).size !== inboundTags.length
 
-                const inboundChanged = editingOriginalInboundTag && newUser.inbound_tag && newUser.inbound_tag !== editingOriginalInboundTag
-                if (inboundChanged && editingInboundCount >= 2) {
-                    toastError('Cannot change inbound: user is attached to multiple inbounds')
+            if (normalizedRows.length === 0 || emptyInbound || hasDuplicateInbound) {
+                toastError('Please fix inbound entries before saving')
+                return
+            }
+
+            if (isEditing) {
+                const nameChanged = originalName && originalName !== newUser.name
+                if (nameChanged && normalizedRows.length > 1) {
+                    toastError('Renaming users with multiple inbounds is not supported yet')
                     return
                 }
 
-                if (inboundChanged && editingOriginalInboundTag) {
-                    await api.removeUserFromInbound(originalName || newUser.name, editingOriginalInboundTag)
+                const payload = {
+                    ...newUser,
+                    original_name: originalName || newUser.name,
+                    inbound_tag: normalizedRows[0].tag,
+                    flow: nameChanged && normalizedRows.length === 1 ? normalizedRows[0].flow : '',
                 }
+                if (!payload.uuid) payload.uuid = uuidv4()
 
                 await api.updateUser(payload)
+
+                if (newUser.enabled !== false && !nameChanged) {
+                    const originalTags = originalInboundTags.length > 0
+                        ? originalInboundTags
+                        : ((modalState.data?.inbound_tags || []) as string[])
+                    const originalSet = new Set(originalTags)
+                    const desiredSet = new Set(inboundTags)
+
+                    for (const tag of originalTags) {
+                        if (!desiredSet.has(tag)) {
+                            await api.removeUserFromInbound(newUser.name, tag)
+                        }
+                    }
+
+                    for (const row of normalizedRows) {
+                        if (originalSet.has(row.tag)) {
+                            await api.removeUserFromInbound(newUser.name, row.tag)
+                        }
+                        await api.createUser({
+                            ...newUser,
+                            uuid: payload.uuid,
+                            inbound_tag: row.tag,
+                            flow: row.flow,
+                        })
+                    }
+                }
+
                 success(`User updated successfully`)
             } else {
                 const payload = { ...newUser }
                 if (!payload.uuid) payload.uuid = uuidv4()
-                await api.createUser(payload)
+                for (const row of normalizedRows) {
+                    await api.createUser({
+                        ...payload,
+                        inbound_tag: row.tag,
+                        flow: row.flow,
+                    })
+                }
                 success(`User created successfully`)
             }
             setModalState({ type: null }) // Close modal
@@ -366,13 +433,18 @@ export default function UserManagement() {
             setQuotaInput('')
             setOriginalName('')
             setIsEditing(false)
-            setEditingInboundCount(0)
-            setEditingOriginalInboundTag('')
+            setInboundRows([])
+            setOriginalInboundTags([])
             fetchUsers()
         } catch (err) {
             toastError('Failed to save user: ' + err)
         }
     }
+
+    const inboundTags = inboundRows.map(row => row.tag.trim()).filter(Boolean)
+    const hasEmptyInbound = inboundRows.some(row => !row.tag.trim())
+    const hasDuplicateInbound = new Set(inboundTags).size !== inboundTags.length
+    const inboundValid = inboundRows.length > 0 && !hasEmptyInbound && !hasDuplicateInbound
 
     const handleBulkCreate = async () => {
         try {
@@ -511,8 +583,8 @@ export default function UserManagement() {
                     <Button
                         onClick={() => {
                             setIsEditing(false)
-                            setEditingInboundCount(0)
-                            setEditingOriginalInboundTag('')
+                            setInboundRows([{ tag: inbounds.length > 0 ? inbounds[0].tag : '', flow: 'xtls-rprx-vision' }])
+                            setOriginalInboundTags([])
                             setNewUser({
                                 name: '',
                                 uuid: '',
@@ -923,7 +995,13 @@ export default function UserManagement() {
                 footer={
                     <>
                         <Button variant="ghost" onClick={() => setModalState({ type: null })}>Cancel</Button>
-                        <Button variant="primary" onClick={handleSaveUser}>{isEditing ? 'Save Changes' : 'Create User'}</Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSaveUser}
+                            disabled={!inboundValid}
+                        >
+                            {isEditing ? 'Save Changes' : 'Create User'}
+                        </Button>
                     </>
                 }
             >
@@ -940,7 +1018,7 @@ export default function UserManagement() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">UUID</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">UUID (shared across inbounds)</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
@@ -970,22 +1048,75 @@ export default function UserManagement() {
                             </div>
                         </div>
                     </div>
-                    {/* Inbound Selection */}
-                    <div>
-                        <label className="block text-sm font-medium text-slate-400 mb-1">Inbound</label>
-                        <select
-                            value={newUser.inbound_tag}
-                            onChange={e => setNewUser({ ...newUser, inbound_tag: e.target.value })}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors"
-                            disabled={isEditing && editingInboundCount >= 2}
-                        >
-                            <option value="" disabled>Select an Inbound</option>
-                            {inbounds.map(inb => (
-                                <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
-                            ))}
-                        </select>
-                        {isEditing && editingInboundCount >= 2 && (
-                            <p className="text-xs text-slate-500 mt-1">Inbound change disabled: user is linked to multiple inbounds.</p>
+                    {/* Inbound List */}
+                    <div className="space-y-3">
+                        <div className="space-y-2">
+                            {inboundRows.map((row, idx) => {
+                                const tagValue = row.tag
+                                return (
+                                    <div key={`${tagValue}-${idx}`} className="grid grid-cols-[1fr_1fr_auto] gap-3 items-end">
+                                        <div className="space-y-1">
+                                            <label className="block text-sm font-medium text-slate-400">Inbound</label>
+                                            <select
+                                                value={row.tag}
+                                                onChange={e => {
+                                                    const value = e.target.value
+                                                    setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, tag: value } : r))
+                                                }}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                            >
+                                                <option value="" disabled>Select an Inbound</option>
+                                                {inbounds.map(inb => (
+                                                    <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="block text-sm font-medium text-slate-400">Flow</label>
+                                            <select
+                                                value={row.flow}
+                                                onChange={e => {
+                                                    const value = e.target.value
+                                                    setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, flow: value } : r))
+                                                }}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                            >
+                                                <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                                                <option value="">none</option>
+                                            </select>
+                                        </div>
+                                        <div className="flex justify-end">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (inboundRows.length === 1) return
+                                                    setInboundRows(prev => prev.filter((_, rIdx) => rIdx !== idx))
+                                                }}
+                                                disabled={inboundRows.length === 1}
+                                                className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+                                                title="Remove inbound"
+                                            >
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                        <div className="flex justify-start">
+                            <button
+                                type="button"
+                                onClick={() => setInboundRows(prev => [...prev, { tag: '', flow: 'xtls-rprx-vision' }])}
+                                className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 hover:text-white text-sm"
+                            >
+                                Add Inbound
+                            </button>
+                        </div>
+                        {hasEmptyInbound && (
+                            <p className="text-xs text-amber-400">Each inbound row must have a selected inbound.</p>
+                        )}
+                        {hasDuplicateInbound && (
+                            <p className="text-xs text-amber-400">Duplicate inbounds are not allowed.</p>
                         )}
                     </div>
 
@@ -1004,17 +1135,6 @@ export default function UserManagement() {
                         </div>
                     )}
                     <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
-                            <select
-                                value={newUser.flow}
-                                onChange={e => setNewUser({ ...newUser, flow: e.target.value })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                            >
-                                <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                                <option value="">none</option>
-                            </select>
-                        </div>
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Quota Period</label>
                             <select
