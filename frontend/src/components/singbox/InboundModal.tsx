@@ -16,6 +16,7 @@ const DEFAULT_VLESS = {
     tag: 'vless-in',
     listen: '0.0.0.0',
     listen_port: 443,
+    external_port: '',
     tls: {
         enabled: false,
         server_name: '',
@@ -45,6 +46,7 @@ const DEFAULT_VMESS = {
     tag: 'vmess-in',
     listen: '0.0.0.0',
     listen_port: 443,
+    external_port: '',
     tls: {
         enabled: false,
         server_name: '',
@@ -65,6 +67,7 @@ const DEFAULT_TROJAN = {
     tag: 'trojan-in',
     listen: '0.0.0.0',
     listen_port: 443,
+    external_port: '',
     tls: {
         enabled: false,
         server_name: '',
@@ -102,6 +105,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
             if (!data.tls) data.tls = { ...fallback.tls }
             if (!data.tls.reality && data.type === 'vless') data.tls.reality = { ...DEFAULT_VLESS.tls.reality }
             if (!data.tls.alpn) data.tls.alpn = [...fallback.tls.alpn]
+            data.external_port = data.external_port ? String(data.external_port) : ''
             setFormData(data)
         } else {
             setFormData(JSON.parse(JSON.stringify(DEFAULT_VLESS)))
@@ -170,6 +174,17 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
         const submission: any = {
             ...formData,
             listen_port: parseInt(formData.listen_port)
+        }
+        const externalPortRaw = String(formData.external_port ?? '').trim()
+        if (externalPortRaw) {
+            const externalPort = parseInt(externalPortRaw, 10)
+            if (Number.isNaN(externalPort) || externalPort <= 0) {
+                alert('External Port must be a valid number')
+                return
+            }
+            submission.external_port = externalPort
+        } else {
+            delete submission.external_port
         }
 
         // Only include transport if enabled
@@ -250,7 +265,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                         ...JSON.parse(JSON.stringify(nextDefaults)),
                                         tag: prev.tag || nextDefaults.tag,
                                         listen: prev.listen || nextDefaults.listen,
-                                        listen_port: prev.listen_port || nextDefaults.listen_port
+                                        listen_port: prev.listen_port || nextDefaults.listen_port,
+                                        external_port: prev.external_port || ''
                                     }))
                                 }}
                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
@@ -277,6 +293,16 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                 value={formData.listen_port}
                                 onChange={e => setFormData({ ...formData, listen_port: e.target.value })}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-300">External Port (optional)</label>
+                            <input
+                                type="number"
+                                value={formData.external_port ?? ''}
+                                onChange={e => setFormData({ ...formData, external_port: e.target.value })}
+                                className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                                placeholder="e.g. 443"
                             />
                         </div>
                     </div>

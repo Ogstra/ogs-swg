@@ -60,6 +60,18 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if meta, err := s.store.GetAllInboundMeta(); err == nil {
+		for _, inbound := range inbounds {
+			tag, _ := inbound["tag"].(string)
+			if tag == "" {
+				continue
+			}
+			if entry, ok := meta[tag]; ok && entry.ExternalPort > 0 {
+				inbound["external_port"] = entry.ExternalPort
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inbounds)
 }
@@ -199,6 +211,10 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 	port, err := extractInboundPort(inbound)
 	if err != nil {
 		return "", "", err
+	}
+
+	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil && meta.ExternalPort > 0 {
+		port = strconv.Itoa(meta.ExternalPort)
 	}
 
 	host := s.resolvePublicHost(r)
@@ -538,9 +554,23 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	externalPort, externalPortSet, err := popExternalPort(newInbound)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	if err := s.config.AddSingboxInbound(newInbound); err != nil {
 		http.Error(w, "Failed to add inbound: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if externalPortSet {
+		tag, _ := newInbound["tag"].(string)
+		if err := s.store.SaveInboundMeta(tag, externalPort); err != nil {
+			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusCreated)
@@ -599,9 +629,32 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	externalPort, externalPortSet, err := popExternalPort(updatedInbound)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	newTag, _ := updatedInbound["tag"].(string)
+	tagChanged := newTag != "" && newTag != tag
+
 	if err := s.config.UpdateSingboxInbound(tag, updatedInbound); err != nil {
 		http.Error(w, "Failed to update inbound: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if tagChanged {
+		if err := s.store.RenameInboundMeta(tag, newTag); err != nil {
+			http.Error(w, "Failed to update inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		tag = newTag
+	}
+	if externalPortSet {
+		if err := s.store.SaveInboundMeta(tag, externalPort); err != nil {
+			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -623,7 +676,43 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	_ = s.store.DeleteInboundMeta(tag)
+
 	w.WriteHeader(http.StatusOK)
+}
+
+func popExternalPort(inbound map[string]interface{}) (int, bool, error) {
+	if inbound == nil {
+		return 0, false, nil
+	}
+	raw, ok := inbound["external_port"]
+	if !ok {
+		return 0, false, nil
+	}
+	delete(inbound, "external_port")
+
+	switch v := raw.(type) {
+	case nil:
+		return 0, true, nil
+	case float64:
+		return int(v), true, nil
+	case int:
+		return v, true, nil
+	case int64:
+		return int(v), true, nil
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, true, nil
+		}
+		parsed, err := strconv.Atoi(trimmed)
+		if err != nil {
+			return 0, true, fmt.Errorf("external_port must be a number")
+		}
+		return parsed, true, nil
+	default:
+		return 0, true, fmt.Errorf("external_port must be a number")
+	}
 }
 
 // handleApplySingboxChanges applies pending Sing-box configuration changes
