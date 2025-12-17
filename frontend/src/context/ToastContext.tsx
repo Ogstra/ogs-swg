@@ -25,13 +25,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         setToasts(prev => prev.filter(t => t.id !== id))
     }, [])
 
-    const showToast = useCallback((message: string, type: ToastType, duration = 3000) => {
+    const showToast = useCallback((message: string, type: ToastType, duration?: number) => {
+        const resolvedDuration = typeof duration === 'number'
+            ? duration
+            : (type === 'error' ? 8000 : 5000)
         const id = Math.random().toString(36).substring(2, 9)
-        const toast = { id, message, type, duration }
+        const toast = { id, message, type, duration: resolvedDuration }
         setToasts(prev => [...prev, toast])
 
-        if (duration > 0) {
-            setTimeout(() => removeToast(id), duration)
+        if (resolvedDuration > 0) {
+            setTimeout(() => removeToast(id), resolvedDuration)
         }
     }, [removeToast])
 
@@ -41,7 +44,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return (
         <ToastContext.Provider value={{ showToast, success, error }}>
             {children}
-            <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+            <div className="fixed bottom-4 right-4 z-[9999] flex flex-col gap-2">
                 {toasts.map(toast => (
                     <div
                         key={toast.id}

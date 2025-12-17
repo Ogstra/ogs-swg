@@ -372,68 +372,105 @@ func extractTLSInfo(inbound map[string]interface{}) tlsInfo {
 }
 
 func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
-	tls, _ := inbound["tls"].(map[string]interface{})
-	reality, _ := tls["reality"].(map[string]interface{})
-	if reality == nil {
-		return "", fmt.Errorf("Inbound is missing Reality configuration")
-	}
-	pbk, _ := reality["public_key"].(string)
-	if pbk == "" {
-		if priv, _ := reality["private_key"].(string); strings.TrimSpace(priv) != "" {
-			derived, err := deriveRealityPublicKey(priv)
-			if err != nil {
-				return "", fmt.Errorf("Reality private_key invalid: %w", err)
+	tlsMap, _ := inbound["tls"].(map[string]interface{})
+	reality, _ := tlsMap["reality"].(map[string]interface{})
+	if reality != nil {
+		pbk, _ := reality["public_key"].(string)
+		if pbk == "" {
+			if priv, _ := reality["private_key"].(string); strings.TrimSpace(priv) != "" {
+				derived, err := deriveRealityPublicKey(priv)
+				if err != nil {
+					return "", fmt.Errorf("Reality private_key invalid: %w", err)
+				}
+				pbk = derived
 			}
-			pbk = derived
 		}
-	}
-	if pbk == "" {
-		return "", fmt.Errorf("Reality public_key missing")
-	}
-	handshake, _ := reality["handshake"].(map[string]interface{})
-	sni, _ := handshake["server"].(string)
-	if sni == "" {
-		return "", fmt.Errorf("Reality handshake server missing")
-	}
+		if pbk == "" {
+			return "", fmt.Errorf("Reality public_key missing")
+		}
+		handshake, _ := reality["handshake"].(map[string]interface{})
+		sni, _ := handshake["server"].(string)
+		if sni == "" {
+			return "", fmt.Errorf("Reality handshake server missing")
+		}
 
-	var sid string
-	switch v := reality["short_id"].(type) {
-	case []interface{}:
-		if len(v) > 0 {
-			if s, ok := v[0].(string); ok {
-				sid = s
+		var sid string
+		switch v := reality["short_id"].(type) {
+		case []interface{}:
+			if len(v) > 0 {
+				if s, ok := v[0].(string); ok {
+					sid = s
+				}
 			}
+		case []string:
+			if len(v) > 0 {
+				sid = v[0]
+			}
+		case string:
+			sid = v
 		}
-	case []string:
-		if len(v) > 0 {
-			sid = v[0]
+		if sid == "" {
+			return "", fmt.Errorf("Reality short_id missing")
 		}
-	case string:
-		sid = v
-	}
-	if sid == "" {
-		return "", fmt.Errorf("Reality short_id missing")
+
+		transport := extractTransportInfo(inbound)
+		flowParam := ""
+		if userInfo.Flow != "" {
+			flowParam = "&flow=" + url.QueryEscape(userInfo.Flow)
+		}
+
+		nameTag := url.QueryEscape("VLESS-" + name)
+		link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s#%s",
+			url.QueryEscape(userInfo.UUID),
+			host,
+			port,
+			url.QueryEscape(pbk),
+			url.QueryEscape(transport.Type),
+			flowParam,
+			url.QueryEscape(sni),
+			url.QueryEscape(sid),
+			nameTag,
+		)
+		return link, nil
 	}
 
 	transport := extractTransportInfo(inbound)
-	flowParam := ""
-	if userInfo.Flow != "" {
-		flowParam = "&flow=" + url.QueryEscape(userInfo.Flow)
+	tls := extractTLSInfo(inbound)
+	params := url.Values{}
+	params.Set("encryption", "none")
+	if tls.Enabled {
+		params.Set("security", "tls")
+	} else {
+		params.Set("security", "none")
+	}
+	if tls.ServerName != "" {
+		params.Set("sni", tls.ServerName)
+	}
+	if shouldAllowInsecure(tls) {
+		params.Set("allowInsecure", "1")
+	}
+	if transport.Type != "" && transport.Type != "tcp" {
+		params.Set("type", transport.Type)
+	}
+	if transport.Type == "ws" || transport.Type == "http" || transport.Type == "httpupgrade" {
+		if transport.Path != "" {
+			params.Set("path", transport.Path)
+		}
+		if transport.Host != "" {
+			params.Set("host", transport.Host)
+		}
+	}
+	if transport.Type == "grpc" && transport.ServiceName != "" {
+		params.Set("serviceName", transport.ServiceName)
 	}
 
 	nameTag := url.QueryEscape("VLESS-" + name)
-	link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s#%s",
-		url.QueryEscape(userInfo.UUID),
-		host,
-		port,
-		url.QueryEscape(pbk),
-		url.QueryEscape(transport.Type),
-		flowParam,
-		url.QueryEscape(sni),
-		url.QueryEscape(sid),
-		nameTag,
-	)
-	return link, nil
+	base := fmt.Sprintf("vless://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
+	if encoded := params.Encode(); encoded != "" {
+		base += "?" + encoded
+	}
+	base += "#" + nameTag
+	return base, nil
 }
 
 func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
