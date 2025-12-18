@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Save, RefreshCw, FileJson, List } from 'lucide-react'
+import { Save, RefreshCw, FileJson, List, GitBranch } from 'lucide-react'
 import Editor from 'react-simple-code-editor'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
 import 'prismjs/themes/prism-tomorrow.css'
 import { api } from '../api'
 import InboundList from './singbox/InboundList'
+import { Card } from './ui/Card'
 
-type TabId = 'inbounds' | 'raw'
+type TabId = 'inbounds' | 'rules' | 'raw'
 
 export default function SingboxConfigEditor() {
     const [activeTab, setActiveTab] = useState<TabId>('inbounds')
@@ -20,12 +21,21 @@ export default function SingboxConfigEditor() {
     const searchInputRef = useRef<HTMLInputElement>(null)
     const [showDiff, setShowDiff] = useState(false)
     const [lastBackup, setLastBackup] = useState<string>('')
+    const [rules, setRules] = useState<Array<{ inbound: string; outbound: string; ipVersion?: string }>>([])
+    const [rulesLoading, setRulesLoading] = useState(false)
+    const [rulesSaving, setRulesSaving] = useState(false)
+    const [availableInbounds, setAvailableInbounds] = useState<string[]>([])
+    const [availableOutbounds, setAvailableOutbounds] = useState<string[]>([])
+    const [preservedRulesCount, setPreservedRulesCount] = useState(0)
 
     // Load Config
     useEffect(() => {
         if (activeTab === 'raw') {
             loadConfig()
             loadBackupMeta()
+        }
+        if (activeTab === 'rules') {
+            loadRules()
         }
     }, [activeTab])
 
@@ -160,6 +170,94 @@ export default function SingboxConfigEditor() {
         return Prism.highlight(code, Prism.languages.json, 'json')
     }
 
+    const isSimpleRule = (rule: any) => {
+        if (!rule || typeof rule !== 'object') return false
+        if (!('inbound' in rule) || !('outbound' in rule)) return false
+        const keys = Object.keys(rule)
+        const allowed = new Set(['inbound', 'outbound', 'ip_version'])
+        if (keys.some(k => !allowed.has(k))) return false
+        const inboundOk = Array.isArray(rule.inbound)
+            ? rule.inbound.every((x: any) => typeof x === 'string')
+            : typeof rule.inbound === 'string'
+        const outboundOk = typeof rule.outbound === 'string' && rule.outbound.trim() !== ''
+        const ipOk = rule.ip_version === undefined || rule.ip_version === 4 || rule.ip_version === 6
+        return inboundOk && outboundOk && ipOk
+    }
+
+    const loadRules = async () => {
+        setRulesLoading(true)
+        try {
+            const raw = await api.getSingboxConfig()
+            const parsed = JSON.parse(raw)
+            const inboundTags = Array.isArray(parsed?.inbounds)
+                ? parsed.inbounds.map((i: any) => (i && typeof i.tag === 'string' ? i.tag.trim() : '')).filter(Boolean)
+                : []
+            const outboundTags = Array.isArray(parsed?.outbounds)
+                ? parsed.outbounds.map((o: any) => (o && typeof o.tag === 'string' ? o.tag.trim() : '')).filter(Boolean)
+                : []
+            setAvailableInbounds(inboundTags)
+            setAvailableOutbounds(outboundTags)
+
+            const rulesArr = parsed?.route?.rules
+            if (Array.isArray(rulesArr)) {
+                const simple = rulesArr
+                    .filter(isSimpleRule)
+                    .map((r: any) => ({
+                        inbound: Array.isArray(r.inbound) ? (r.inbound[0] ?? '') : String(r.inbound || ''),
+                        outbound: String(r.outbound || '').trim(),
+                        ipVersion: r.ip_version === 4 || r.ip_version === 6 ? String(r.ip_version) : ''
+                    }))
+                const preserved = rulesArr.filter((r: any) => !isSimpleRule(r))
+                setPreservedRulesCount(preserved.length)
+                setRules(simple)
+            } else {
+                setRules([])
+                setPreservedRulesCount(0)
+            }
+        } catch (err) {
+            console.error('Failed to load rules', err)
+            alert('Failed to load rules')
+        } finally {
+            setRulesLoading(false)
+        }
+    }
+
+    const saveRules = async () => {
+        const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
+        if (hasInvalid) {
+            alert('Please fix rules before saving')
+            return
+        }
+        setRulesSaving(true)
+        try {
+            const raw = await api.getSingboxConfig()
+            const parsed = JSON.parse(raw)
+            const route = parsed.route || {}
+            const existing = Array.isArray(route.rules) ? route.rules : []
+            const preserved = existing.filter((r: any) => !isSimpleRule(r))
+            const nextRules = [
+                ...preserved,
+                ...rules.map(r => {
+                    const obj: any = { inbound: [r.inbound], outbound: r.outbound.trim() }
+                    if (r.ipVersion === '4' || r.ipVersion === '6') {
+                        obj.ip_version = Number(r.ipVersion)
+                    }
+                    return obj
+                })
+            ]
+            parsed.route = route
+            parsed.route.rules = nextRules
+            await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
+            alert('Rules saved')
+            await loadRules()
+        } catch (err) {
+            console.error('Failed to save rules', err)
+            alert('Failed to save rules')
+        } finally {
+            setRulesSaving(false)
+        }
+    }
+
     const hasChanges = config !== originalConfig
     const diffLines = useMemo(() => {
         const o = (originalConfig || '').split('\n')
@@ -217,6 +315,13 @@ export default function SingboxConfigEditor() {
                     >
                         <List size={16} />
                         Inbounds
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('rules')}
+                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'rules' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                    >
+                        <GitBranch size={16} />
+                        Rules
                     </button>
                     <button
                         onClick={() => setActiveTab('raw')}
@@ -332,11 +437,156 @@ export default function SingboxConfigEditor() {
                         </>
                     ) : (
                         <div className="flex-1 overflow-auto custom-scrollbar p-6">
-                            <InboundList />
+                            {activeTab === 'inbounds' && <InboundList />}
+                            {activeTab === 'rules' && (
+                                <RulesTab
+                                    rules={rules}
+                                    setRules={setRules}
+                                    availableInbounds={availableInbounds}
+                                    availableOutbounds={availableOutbounds}
+                                    preservedCount={preservedRulesCount}
+                                    loading={rulesLoading}
+                                    saving={rulesSaving}
+                                    reload={loadRules}
+                                    save={saveRules}
+                                />
+                            )}
                         </div>
                     )}
                 </div>
             </div>
+        </div>
+    )
+}
+
+function RulesTab({
+    rules,
+    setRules,
+    availableInbounds,
+    availableOutbounds,
+    preservedCount,
+    loading,
+    saving,
+    reload,
+    save,
+}: {
+    rules: Array<{ inbound: string; outbound: string; ipVersion?: string }>
+    setRules: React.Dispatch<React.SetStateAction<Array<{ inbound: string; outbound: string; ipVersion?: string }>>>
+    availableInbounds: string[]
+    availableOutbounds: string[]
+    preservedCount: number
+    loading: boolean
+    saving: boolean
+    reload: () => void
+    save: () => void
+}) {
+    const addRule = () => setRules(prev => [...prev, { inbound: '', outbound: '', ipVersion: '' }])
+    const updateRule = (idx: number, patch: Partial<{ inbound: string; outbound: string; ipVersion?: string }>) => {
+        setRules(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+    }
+    const removeRule = (idx: number) => setRules(prev => prev.filter((_, i) => i !== idx))
+
+    const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
+
+    return (
+        <div className="space-y-4">
+            <div className="flex items-center justify-between">
+                <div>
+                    <h3 className="text-lg font-semibold text-white">Rules (inbound → outbound)</h3>
+                    <p className="text-sm text-slate-400">Simple rules only. Other rules remain unchanged.</p>
+                    {preservedCount > 0 && (
+                        <p className="text-xs text-amber-400 mt-1">
+                            {preservedCount} non-editable rule(s) detected. Edit them in Raw Config if needed.
+                        </p>
+                    )}
+                </div>
+                <div className="flex gap-2">
+                    <button
+                        onClick={reload}
+                        className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
+                        disabled={loading}
+                    >
+                        {loading ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                    <button
+                        onClick={save}
+                        disabled={saving || hasInvalid}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${saving || hasInvalid
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-blue-600 hover:bg-blue-500 text-white'
+                            }`}
+                    >
+                        {saving ? 'Saving...' : 'Save Rules'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="space-y-3">
+                {rules.length === 0 && (
+                    <div className="text-sm text-slate-400">No editable rules. Add one below.</div>
+                )}
+                {rules.map((rule, idx) => (
+                    <Card key={idx} title={`Rule ${idx + 1}`} className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                            <div className="md:col-span-5 space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Inbound</label>
+                                <select
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors"
+                                    value={rule.inbound}
+                                    onChange={e => updateRule(idx, { inbound: e.target.value })}
+                                >
+                                    <option value="">Select inbound</option>
+                                    {availableInbounds.map(tag => (
+                                        <option key={tag} value={tag}>{tag}</option>
+                                    ))}
+                                </select>
+                                {!rule.inbound && <p className="text-xs text-amber-400">Inbound is required.</p>}
+                            </div>
+                            <div className="md:col-span-5 space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Outbound</label>
+                                <select
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors"
+                                    value={rule.outbound}
+                                    onChange={e => updateRule(idx, { outbound: e.target.value })}
+                                >
+                                    <option value="">Select outbound</option>
+                                    {availableOutbounds.map(tag => (
+                                        <option key={tag} value={tag}>{tag}</option>
+                                    ))}
+                                </select>
+                                {!rule.outbound && <p className="text-xs text-amber-400">Outbound is required.</p>}
+                            </div>
+                            <div className="md:col-span-2 space-y-1">
+                                <label className="text-xs font-medium text-slate-400">IP Version (optional)</label>
+                                <select
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors"
+                                    value={rule.ipVersion || ''}
+                                    onChange={e => updateRule(idx, { ipVersion: e.target.value })}
+                                >
+                                    <option value="">Any</option>
+                                    <option value="4">IPv4</option>
+                                    <option value="6">IPv6</option>
+                                </select>
+                            </div>
+                            <div className="md:col-span-12 flex justify-end">
+                                <button
+                                    onClick={() => removeRule(idx)}
+                                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
+                                >
+                                    Remove
+                                </button>
+                            </div>
+                        </div>
+                    </Card>
+                ))}
+            </div>
+
+            <button
+                onClick={addRule}
+                className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
+            >
+                Add Rule
+            </button>
         </div>
     )
 }

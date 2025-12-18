@@ -49,7 +49,6 @@ export default function Settings() {
         refreshMs: 10000,
         defaultRange: '24h'
     })
-
     useEffect(() => {
         loadAll()
         const savedPrefs = localStorage.getItem('dashboard_prefs')
@@ -400,6 +399,7 @@ function DashboardTab({
         </div>
     )
 }
+
 function GeneralTab({
     features,
     setFeatures,
