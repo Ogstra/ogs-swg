@@ -260,6 +260,14 @@ export const api = {
         });
         await handleResponse(res, 'Failed to delete peer');
     },
+    restoreWireGuardPeer: async (peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }) => {
+        const res = await fetch('/api/wireguard/peers/restore', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(peer)
+        });
+        await handleResponse(res, 'Failed to restore peer');
+    },
     getWireGuardInterface: async (): Promise<any> => {
         const res = await fetch('/api/wireguard/interface', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch interface config');

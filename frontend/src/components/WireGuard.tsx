@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api'
-import { Plus, Trash2, Copy, Check, Settings, Edit, ArrowUp, ArrowDown, Shield, ArrowUpDown, QrCode } from 'lucide-react'
+import { Plus, Trash2, Settings, Edit, ArrowUp, ArrowDown, Shield, ArrowUpDown, QrCode, RotateCcw } from 'lucide-react'
 import QRCode from 'react-qr-code'
+import { useToast } from '../context/ToastContext'
 
 interface WireGuardPeer {
     public_key: string
@@ -54,6 +55,7 @@ function formatTimeAgo(timestamp: number) {
 }
 
 export default function WireGuard() {
+    const { success, error: toastError } = useToast()
     const [peers, setPeers] = useState<WireGuardPeer[]>([])
     const [interfaceConfig, setInterfaceConfig] = useState<WireGuardInterface | null>(null)
     const [showPeerModal, setShowPeerModal] = useState(false)
@@ -64,9 +66,7 @@ export default function WireGuard() {
     const [newName, setNewName] = useState('')
     const [newIp, setNewIp] = useState('')
     const [newEndpoint, setNewEndpoint] = useState('')
-    const [generatedPeer, setGeneratedPeer] = useState<WireGuardPeer | null>(null)
-    const [generatedConfig, setGeneratedConfig] = useState('')
-    const [copied, setCopied] = useState(false)
+    const [generatedTab, setGeneratedTab] = useState<'qr' | 'details'>('qr')
 
     // Interface Edit State
     const [editInterface, setEditInterface] = useState<WireGuardInterface | null>(null)
@@ -77,10 +77,13 @@ export default function WireGuard() {
     const [configModalPeer, setConfigModalPeer] = useState<WireGuardPeer | null>(null)
     const [configText, setConfigText] = useState('')
     const [configLoading, setConfigLoading] = useState(false)
+    const [configExpiry, setConfigExpiry] = useState<string>('')
+    const [configPrivateKey, setConfigPrivateKey] = useState<string>('')
     const [copiedConfig, setCopiedConfig] = useState(false)
     const [pendingRestart, setPendingRestart] = useState(false)
     const [systemctlAvailable, setSystemctlAvailable] = useState<boolean | undefined>(undefined)
-    const [manualPrivateKey, setManualPrivateKey] = useState('')
+    const [confirmDeletePeer, setConfirmDeletePeer] = useState<WireGuardPeer | null>(null)
+    const [lastDeletedPeer, setLastDeletedPeer] = useState<WireGuardPeer | null>(null)
 
     const fetchData = useCallback(() => {
         api.getWireGuardPeers()
@@ -90,6 +93,7 @@ export default function WireGuard() {
             .catch(err => {
                 console.error(err)
                 setPeers([])
+                toastError('Failed to fetch peers: ' + err)
             })
 
         api.getWireGuardInterface()
@@ -97,6 +101,7 @@ export default function WireGuard() {
             .catch(err => {
                 console.error(err)
                 setInterfaceConfig(null)
+                toastError('Failed to fetch interface: ' + err)
             })
 
         api.getSystemStatus()
@@ -116,6 +121,30 @@ export default function WireGuard() {
         return () => clearInterval(interval)
     }, [fetchData])
 
+    const openConfigModal = (peer: WireGuardPeer) => {
+        setGeneratedTab('qr')
+        setConfigModalPeer(peer)
+        setConfigText('')
+        setConfigLoading(true)
+        setConfigExpiry('')
+        setConfigPrivateKey(peer.private_key || '')
+        setCopiedConfig(false)
+        api.getWireGuardPeerConfig(peer.public_key)
+            .then(res => {
+                setConfigText(res.config)
+                const expires = new Date(Date.now() + 60 * 60 * 1000)
+                setConfigExpiry(expires.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+                const match = res.config.match(/PrivateKey\s*=\s*([^\s]+)/)
+                if (match) setConfigPrivateKey(match[1])
+            })
+            .catch(err => {
+                console.error(err)
+                setConfigText('')
+                setConfigPrivateKey('')
+            })
+            .finally(() => setConfigLoading(false))
+    }
+
     const handleCreatePeer = async () => {
         if (!newName.trim()) {
             alert('Alias is required')
@@ -123,20 +152,15 @@ export default function WireGuard() {
         }
         try {
             const peer = await api.createWireGuardPeer({ alias: newName, ip: newIp, endpoint: newEndpoint })
-            setGeneratedPeer(peer)
             setNewName('')
             setNewIp('')
             setNewEndpoint('')
-            try {
-                const cfg = await api.getWireGuardPeerConfig(peer.public_key)
-                setGeneratedConfig(cfg.config)
-            } catch (err) {
-                console.error(err)
-                setGeneratedConfig('')
-            }
+            setGeneratedTab('qr')
+            setShowPeerModal(false)
+            openConfigModal(peer)
             fetchData()
         } catch (err) {
-            alert('Failed to create peer: ' + err)
+            toastError('Failed to create peer: ' + err)
         }
     }
 
@@ -149,17 +173,44 @@ export default function WireGuard() {
             setShowPeerModal(false)
             fetchData()
         } catch (err) {
-            alert('Failed to update peer: ' + err)
+            toastError('Failed to update peer: ' + err)
         }
     }
 
-    const handleDeletePeer = async (publicKey: string) => {
-        if (!confirm('Delete this peer?')) return
+    const handleDeletePeer = (publicKey: string) => {
+        const target = peers.find(p => p.public_key === publicKey) || null
+        setConfirmDeletePeer(target)
+    }
+
+    const confirmDelete = async () => {
+        if (!confirmDeletePeer) return
+        const target = confirmDeletePeer
+        setConfirmDeletePeer(null)
         try {
-            await api.deleteWireGuardPeer(publicKey)
+            await api.deleteWireGuardPeer(target.public_key)
+            setLastDeletedPeer(target)
+            success('Peer deleted')
             fetchData()
         } catch (err) {
-            alert('Failed to delete peer: ' + err)
+            toastError('Failed to delete peer: ' + err)
+        }
+    }
+
+    const handleRestorePeer = async () => {
+        if (!lastDeletedPeer) return
+        try {
+            await api.restoreWireGuardPeer({
+                public_key: lastDeletedPeer.public_key,
+                allowed_ips: lastDeletedPeer.allowed_ips,
+                endpoint: lastDeletedPeer.endpoint,
+                alias: lastDeletedPeer.alias,
+                preshared_key: lastDeletedPeer.preshared_key
+            })
+            success('Peer restored')
+            setLastDeletedPeer(null)
+            fetchData()
+        } catch (err) {
+            toastError('Failed to restore peer: ' + err)
         }
     }
 
@@ -170,14 +221,8 @@ export default function WireGuard() {
             setInterfaceConfig(editInterface)
             setShowInterfaceModal(false)
         } catch (err) {
-            alert('Failed to update interface: ' + err)
+            toastError('Failed to update interface: ' + err)
         }
-    }
-
-    const copyToClipboard = (text: string) => {
-        navigator.clipboard.writeText(text)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
     }
 
     const primaryAllowedIp = (allowed: string) => (allowed.split(',')[0] || '').trim()
@@ -279,8 +324,7 @@ export default function WireGuard() {
                     <button
                         onClick={() => {
                             setEditingPeer(null)
-                            setGeneratedPeer(null)
-                            setGeneratedConfig('')
+                            setGeneratedTab('qr')
                             setNewIp('')
                             setNewEndpoint('')
                             setShowPeerModal(true)
@@ -292,6 +336,27 @@ export default function WireGuard() {
                     </button>
                 </div>
             </div>
+
+            {lastDeletedPeer && (
+                <div className="flex items-center justify-between px-4 py-2 border border-amber-500/30 bg-amber-500/10 text-amber-100 rounded-lg">
+                    <span className="text-sm">Peer deleted.</span>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={handleRestorePeer}
+                            className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/30 hover:bg-amber-500/40 text-amber-50 rounded-lg text-xs font-semibold border border-amber-500/40"
+                        >
+                            <RotateCcw size={14} />
+                            Restore
+                        </button>
+                        <button
+                            onClick={() => setLastDeletedPeer(null)}
+                            className="text-amber-200 hover:text-white text-xs font-semibold"
+                        >
+                            Dismiss
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Interface Info Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -397,20 +462,8 @@ export default function WireGuard() {
                                                 >
                                                     <Edit size={16} />
                                                 </button>
-                                                <button
-                                                    onClick={() => {
-                                                        setConfigModalPeer(peer)
-                                                        setConfigText('')
-                                                        setManualPrivateKey('')
-                                                        setConfigLoading(true)
-                                                        api.getWireGuardPeerConfig(peer.public_key)
-                                                            .then(res => setConfigText(res.config))
-                                                            .catch(err => {
-                                                                console.error(err)
-                                                                setConfigText('')
-                                                            })
-                                                            .finally(() => setConfigLoading(false))
-                                                    }}
+                                        <button
+                                            onClick={() => openConfigModal(peer)}
                                                     className={`p-2 rounded-lg border transition-all ${peer.qr_available ? 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border-slate-700' : 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'}`}
                                                     title="View config / QR"
                                                     disabled={!peer.qr_available}
@@ -474,20 +527,12 @@ export default function WireGuard() {
                                             <Edit size={16} />
                                         </button>
                                         <button
-                                            onClick={() => {
-                                                setConfigModalPeer(peer)
-                                                setConfigText('')
-                                                setManualPrivateKey('')
-                                                setConfigLoading(true)
-                                                api.getWireGuardPeerConfig(peer.public_key)
-                                                    .then(res => setConfigText(res.config))
-                                                    .catch(err => {
-                                                        console.error(err)
-                                                        setConfigText('')
-                                                    })
-                                                    .finally(() => setConfigLoading(false))
-                                            }}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700"
+                                            onClick={() => openConfigModal(peer)}
+                                            className={`p-2 rounded-lg border transition-all ${
+                                                peer.qr_available
+                                                    ? 'bg-slate-800 text-slate-300 border-slate-700'
+                                                    : 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
+                                            }`}
                                             disabled={!peer.qr_available}
                                         >
                                             <QrCode size={16} />
@@ -542,7 +587,7 @@ export default function WireGuard() {
             {/* Peer Modal (Create/Edit) */}
             {showPeerModal && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-md p-6 shadow-xl">
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-6 shadow-xl">
                         <h2 className="text-xl font-bold text-white mb-4">
                             {editingPeer ? 'Edit Peer' : 'Add WireGuard Peer'}
                         </h2>
@@ -616,7 +661,7 @@ export default function WireGuard() {
                                     </button>
                                 </div>
                             </div>
-                        ) : !generatedPeer ? (
+                        ) : (
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Alias</label>
@@ -663,61 +708,6 @@ export default function WireGuard() {
                                     </button>
                                 </div>
                             </div>
-                        ) : (
-                            <div className="space-y-4">
-                                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-400 text-sm">
-                                    Peer created successfully!
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">Private Key (Save this!)</label>
-                                    <div className="flex gap-2">
-                                        <code className="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-emerald-400 font-mono text-xs break-all">
-                                            {generatedPeer.private_key}
-                                        </code>
-                                        <button
-                                            onClick={() => copyToClipboard(generatedPeer.private_key || '')}
-                                            className="p-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg"
-                                        >
-                                            {copied ? <Check size={16} /> : <Copy size={16} />}
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">Client Config Preview</label>
-                                    <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-slate-300 font-mono text-xs overflow-x-auto">
-                                        {generatedConfig || 'No config available yet.'}
-                                    </pre>
-                                </div>
-
-                                {generatedConfig && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-400 mb-2">QR para app WireGuard</label>
-                                        <div className="bg-white rounded-lg p-4 w-full">
-                                            <QRCode
-                                                size={256}
-                                                style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                                value={generatedConfig}
-                                                viewBox={`0 0 256 256`}
-                                            />
-                                        </div>
-                                    </div>
-                                )}
-
-                                <div className="flex justify-end mt-6">
-                                    <button
-                                        onClick={() => {
-                                            setShowPeerModal(false)
-                                            setGeneratedPeer(null)
-                                            setGeneratedConfig('')
-                                        }}
-                                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg"
-                                    >
-                                        Done
-                                    </button>
-                                </div>
-                            </div>
                         )}
                     </div>
                 </div>
@@ -726,7 +716,7 @@ export default function WireGuard() {
             {/* Peer Config Modal */}
             {configModalPeer && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-lg p-6 shadow-xl">
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 shadow-xl">
                         <div className="flex items-start justify-between gap-4 mb-4">
                             <div>
                                 <h2 className="text-xl font-bold text-white">Peer Config / QR</h2>
@@ -737,7 +727,9 @@ export default function WireGuard() {
                                     setConfigModalPeer(null)
                                     setConfigText('')
                                     setConfigLoading(false)
+                                    setConfigExpiry('')
                                     setCopiedConfig(false)
+                                    setGeneratedTab('qr')
                                 }}
                                 className="text-slate-400 hover:text-white"
                             >
@@ -749,72 +741,129 @@ export default function WireGuard() {
                             <div className="text-slate-400 text-sm">Loading config...</div>
                         ) : (
                             <div className="space-y-4">
-                                <div className="space-y-2">
-                                    <label className="text-sm text-slate-400">Private key (only for regenerating QR if not cached)</label>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            value={manualPrivateKey}
-                                            onChange={e => setManualPrivateKey(e.target.value)}
-                                            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white text-sm font-mono"
-                                            placeholder="Paste client private key to generate config"
-                                        />
-                                        <button
-                                            onClick={() => {
-                                                if (!configModalPeer) return
-                                                setConfigLoading(true)
-                                                api.getWireGuardPeerConfig(configModalPeer.public_key, manualPrivateKey || undefined)
-                                                    .then(res => setConfigText(res.config))
-                                                    .catch(err => {
-                                                        console.error(err)
-                                                        setConfigText(`Error: ${err}`)
-                                                    })
-                                                    .finally(() => setConfigLoading(false))
-                                            }}
-                                            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm"
-                                        >
-                                            Generate
-                                        </button>
-                                    </div>
-                                    <p className="text-xs text-slate-500">No se almacena la private key; el QR se cachea 1h.</p>
-                                </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex gap-2">
                                     <button
-                                        onClick={() => {
-                                            if (!configText) return
-                                            navigator.clipboard.writeText(configText)
-                                            setCopiedConfig(true)
-                                            setTimeout(() => setCopiedConfig(false), 2000)
-                                        }}
-                                        className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-md text-sm"
+                                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border ${
+                                            generatedTab === 'qr'
+                                                ? 'bg-blue-600 text-white border-blue-500'
+                                                : 'bg-slate-800 text-slate-200 border-slate-700'
+                                        }`}
+                                        onClick={() => setGeneratedTab('qr')}
                                     >
-                                        {copiedConfig ? 'Copied!' : 'Copy config'}
+                                        QR
                                     </button>
-                                    <span className="text-xs text-slate-500">Importable en la app WireGuard</span>
+                                    <button
+                                        className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border ${
+                                            generatedTab === 'details'
+                                                ? 'bg-blue-600 text-white border-blue-500'
+                                                : 'bg-slate-800 text-slate-200 border-slate-700'
+                                        }`}
+                                        onClick={() => setGeneratedTab('details')}
+                                    >
+                                        Details
+                                    </button>
                                 </div>
-                                <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-slate-300 font-mono text-xs overflow-x-auto max-h-64">
-                                    {configText || 'No config available.'}
-                                </pre>
-                                {configText && !configText.startsWith('Error:') && (
-                                    <div>
-                                        <label className="block text-sm font-medium text-slate-400 mb-2">QR</label>
-                                        <div className="bg-white rounded-lg p-4 w-full">
-                                            <QRCode
-                                                size={256}
-                                                style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                                value={configText}
-                                                viewBox={`0 0 256 256`}
-                                            />
+
+                                {generatedTab === 'qr' ? (
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center">
+                                            <label className="text-sm text-slate-400">QR</label>
+                                            <span className="text-xs text-slate-500">
+                                                Cache until {configExpiry || '--:--'}
+                                            </span>
+                                        </div>
+                                        {configText ? (
+                                            <div className="bg-white rounded-lg p-4 w-full">
+                                                <QRCode
+                                                    size={256}
+                                                    style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                                    value={configText}
+                                                    viewBox={`0 0 256 256`}
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div className="text-sm text-slate-500">Config not available.</div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div>
+                                            <label className="text-sm text-slate-400">Private Key</label>
+                                            <div className="flex gap-2 items-center">
+                                                <code className="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-emerald-400 font-mono text-xs break-all">
+                                                    {configPrivateKey || 'Not available'}
+                                                </code>
+                                                <button
+                                                    onClick={() => {
+                                                        if (!configPrivateKey) return
+                                                        try {
+                                                            if (navigator.clipboard?.writeText) {
+                                                                navigator.clipboard.writeText(configPrivateKey)
+                                                                    .catch(() => legacyCopy(configPrivateKey))
+                                                            } else {
+                                                                legacyCopy(configPrivateKey)
+                                                            }
+                                                        } catch {
+                                                            legacyCopy(configPrivateKey)
+                                                        }
+                                                    }}
+                                                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-md text-sm"
+                                                >
+                                                    Copy key
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="text-sm text-slate-400">Config</label>
+                                            <pre className="bg-slate-950 border border-slate-800 rounded-lg p-3 text-slate-300 font-mono text-xs overflow-x-auto max-h-64">
+                                                {configText || 'No config available.'}
+                                            </pre>
+                                        <div className="flex items-center gap-2 mt-2">
+                                            <button
+                                                onClick={() => {
+                                                    if (!configText) return
+                                                    try {
+                                                        if (navigator.clipboard?.writeText) {
+                                                            navigator.clipboard.writeText(configText)
+                                                                .then(() => {
+                                                                    setCopiedConfig(true)
+                                                                    setTimeout(() => setCopiedConfig(false), 2000)
+                                                                })
+                                                                .catch(() => {
+                                                                    legacyCopy(configText)
+                                                                    setCopiedConfig(true)
+                                                                    setTimeout(() => setCopiedConfig(false), 2000)
+                                                                })
+                                                        } else {
+                                                            legacyCopy(configText)
+                                                            setCopiedConfig(true)
+                                                            setTimeout(() => setCopiedConfig(false), 2000)
+                                                        }
+                                                    } catch {
+                                                        legacyCopy(configText)
+                                                        setCopiedConfig(true)
+                                                        setTimeout(() => setCopiedConfig(false), 2000)
+                                                    }
+                                                }}
+                                                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-white rounded-md text-sm"
+                                            >
+                                                {copiedConfig ? 'Copied!' : 'Copy config'}
+                                            </button>
+                                            </div>
                                         </div>
                                     </div>
                                 )}
+
                                 <div className="flex justify-end">
                                     <button
                                         onClick={() => {
                                             setConfigModalPeer(null)
                                             setConfigText('')
                                             setConfigLoading(false)
+                                            setConfigExpiry('')
                                             setCopiedConfig(false)
+                                            setConfigPrivateKey('')
+                                            setGeneratedTab('qr')
                                         }}
                                         className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg"
                                     >
@@ -849,7 +898,7 @@ export default function WireGuard() {
                                     value={editInterface.bind_address || ''}
                                     onChange={e => setEditInterface({ ...editInterface, bind_address: e.target.value })}
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                                    placeholder="149.50.133.58 (public IP for Endpoint)"
+                                    placeholder=""
                                 />
                             </div>
                             <div>
@@ -918,6 +967,47 @@ export default function WireGuard() {
                     </div>
                 </div>
             )}
+
+            {confirmDeletePeer && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-sm p-5 shadow-xl space-y-4">
+                        <div>
+                            <h3 className="text-lg font-semibold text-white">Delete peer?</h3>
+                            <p className="text-sm text-slate-400 mt-1">
+                                {confirmDeletePeer.alias || primaryAllowedIp(confirmDeletePeer.allowed_ips) || 'Peer'}
+                            </p>
+                        </div>
+                        <p className="text-sm text-slate-400">This removes the peer from WireGuard.</p>
+                        <div className="flex justify-end gap-2">
+                            <button
+                                onClick={() => setConfirmDeletePeer(null)}
+                                className="px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 text-sm"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-semibold"
+                            >
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     )
 }
+    const legacyCopy = (text: string) => {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.style.position = 'fixed'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.select()
+        try {
+            document.execCommand('copy')
+        } finally {
+            document.body.removeChild(textarea)
+        }
+    }

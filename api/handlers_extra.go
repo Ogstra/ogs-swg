@@ -325,6 +325,57 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusOK)
 }
 
+type RestorePeerRequest struct {
+	PublicKey    string `json:"public_key"`
+	AllowedIPs   string `json:"allowed_ips"`
+	Endpoint     string `json:"endpoint,omitempty"`
+	Alias        string `json:"alias,omitempty"`
+	Email        string `json:"email,omitempty"`
+	PresharedKey string `json:"preshared_key,omitempty"`
+}
+
+func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	var req RestorePeerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.PublicKey) == "" || strings.TrimSpace(req.AllowedIPs) == "" {
+		http.Error(w, "public_key and allowed_ips are required", http.StatusBadRequest)
+		return
+	}
+
+	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	if err != nil {
+		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	peer := core.WireGuardPeer{
+		PublicKey:    strings.TrimSpace(req.PublicKey),
+		AllowedIPs:   strings.TrimSpace(req.AllowedIPs),
+		Endpoint:     strings.TrimSpace(req.Endpoint),
+		Alias:        strings.TrimSpace(req.Alias),
+		Email:        strings.TrimSpace(req.Email),
+		PresharedKey: strings.TrimSpace(req.PresharedKey),
+	}
+
+	if err := wgConfig.AddPeer(peer); err != nil {
+		http.Error(w, "Failed to restore peer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if !s.syncWireGuardConfig(wgConfig) {
+		s.markWireGuardPending()
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(peer)
+}
+
 type ServiceActionRequest struct {
 	Service string `json:"service"`
 }
