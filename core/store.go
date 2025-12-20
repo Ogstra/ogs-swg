@@ -708,11 +708,11 @@ type TrafficStats struct {
 }
 
 // WGPubTotal represents aggregated wireguard usage for a peer.
-type WGPubTotal struct {
-	PublicKey string
-	Total     int64
-	Rx        int64
-	Tx        int64
+type TrafficTotal struct {
+	Key   string
+	Total int64
+	Rx    int64
+	Tx    int64
 }
 
 type User struct {
@@ -910,7 +910,7 @@ ORDER BY bucket_ts ASC
 }
 
 // GetWGTopTotals aggregates total usage per peer (rx/tx deltas) in the given range.
-func (s *Store) GetWGTopTotals(start, end int64, limit int) ([]WGPubTotal, error) {
+func (s *Store) GetWGTopTotals(start, end int64, limit int) ([]TrafficTotal, error) {
 	rows, err := s.db.Query(`
 		SELECT
 			public_key,
@@ -926,7 +926,7 @@ func (s *Store) GetWGTopTotals(start, end int64, limit int) ([]WGPubTotal, error
 	}
 	defer rows.Close()
 
-	results := []WGPubTotal{}
+	results := []TrafficTotal{}
 	for rows.Next() {
 		var pub string
 		var rx, tx sql.NullInt64
@@ -941,14 +941,82 @@ func (s *Store) GetWGTopTotals(start, end int64, limit int) ([]WGPubTotal, error
 		if t < 0 {
 			t = 0
 		}
-		results = append(results, WGPubTotal{
-			PublicKey: pub,
-			Rx:        r,
-			Tx:        t,
-			Total:     r + t,
+		results = append(results, TrafficTotal{
+			Key:   pub,
+			Rx:    r,
+			Tx:    t,
+			Total: r + t,
 		})
 	}
 	return results, nil
+}
+
+// GetSBTrafficBuckets aggregates Sing-box traffic per time bucket.
+func (s *Store) GetSBTrafficBuckets(start, end, interval int64) (map[int64]TrafficStats, error) {
+	out := make(map[int64]TrafficStats)
+	if interval <= 0 {
+		interval = 60
+	}
+	rows, err := s.db.Query(`
+		SELECT (ts / ?) * ? AS bucket_ts, SUM(uplink), SUM(downlink)
+		FROM samples
+		WHERE ts >= ? AND ts <= ?
+		GROUP BY bucket_ts
+		ORDER BY bucket_ts ASC
+	`, interval, interval, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ts int64
+		var up, down sql.NullInt64
+		if err := rows.Scan(&ts, &up, &down); err != nil {
+			return nil, err
+		}
+		out[ts] = TrafficStats{Uplink: up.Int64, Downlink: down.Int64}
+	}
+	return out, nil
+}
+
+// GetSBTopTotals aggregates Sing-box usage per user in the range.
+func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, error) {
+	rows, err := s.db.Query(`
+		SELECT user, SUM(uplink) AS up, SUM(downlink) AS down
+		FROM samples
+		WHERE ts >= ? AND ts <= ?
+		GROUP BY user
+		ORDER BY (up + down) DESC
+		LIMIT ?
+	`, start, end, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := []TrafficTotal{}
+	for rows.Next() {
+		var key string
+		var up, down sql.NullInt64
+		if err := rows.Scan(&key, &up, &down); err != nil {
+			return nil, err
+		}
+		u := up.Int64
+		d := down.Int64
+		if u < 0 {
+			u = 0
+		}
+		if d < 0 {
+			d = 0
+		}
+		res = append(res, TrafficTotal{
+			Key:   key,
+			Rx:    d,
+			Tx:    u,
+			Total: u + d,
+		})
+	}
+	return res, nil
 }
 
 func (s *Store) PruneWGSamplesOlderThan(ts int64) (int64, error) {

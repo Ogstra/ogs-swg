@@ -109,13 +109,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	// 1. Fetch System Status
 	status := s.collectSystemStatus()
 
-	// 2. Fetch Singbox Stats (Global History)
-	sbHistory, _ := s.store.GetGlobalTraffic(start, end)
-	if sbHistory == nil {
-		sbHistory = []core.TrafficPoint{}
-	}
-
-	// 3. Fetch WireGuard peers for range calculations
+	// 2. Fetch WireGuard peers for range calculations
 	var wgPeerKeys []string
 	wgAliases := make(map[string]string)
 	if s.config.EnableWireGuard {
@@ -129,7 +123,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// 4. Aggregate Chart Data (Downsampling)
+	// 3. Aggregate Chart Data (Downsampling)
 	diff := end - start
 	var interval int64
 	if diff <= 1800 {
@@ -146,20 +140,16 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		interval = 86400
 	}
 
-	// Buckets
+	// 4. Fetch buckets
 	sbBuckets := make(map[int64]TrafficStats)
 	wgBuckets := make(map[int64]TrafficStats)
 
-	// Process Singbox
-	for _, p := range sbHistory {
-		bucketTs := (p.Timestamp / interval) * interval
-		if bucketTs < start || bucketTs >= end {
-			continue
+	if s.config.EnableSingbox {
+		if buckets, err := s.store.GetSBTrafficBuckets(start, end, interval); err == nil {
+			for ts, stat := range buckets {
+				sbBuckets[ts] = TrafficStats{Uplink: stat.Uplink, Downlink: stat.Downlink}
+			}
 		}
-		entry := sbBuckets[bucketTs]
-		entry.Uplink += p.Uplink
-		entry.Downlink += p.Downlink
-		sbBuckets[bucketTs] = entry
 	}
 
 	// Process WireGuard using DB bucket aggregation (avoids truncation issues on long ranges)
@@ -212,13 +202,13 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 				if t.Total <= 0 {
 					continue
 				}
-				name := wgAliases[t.PublicKey]
-				if name == "" && len(t.PublicKey) >= 8 {
-					name = t.PublicKey[0:8]
+				name := wgAliases[t.Key]
+				if name == "" && len(t.Key) >= 8 {
+					name = t.Key[0:8]
 				}
 				topWG = append(topWG, Consumer{
 					Name:       name,
-					Key:        t.PublicKey,
+					Key:        t.Key,
 					Total:      t.Total,
 					Flow:       "WireGuard",
 					QuotaLimit: 0,
@@ -233,32 +223,31 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 
 	// Singbox Top Consumers
 	if s.config.EnableSingbox {
-		// Fetch usage per user for the range
-		usageMap, _ := s.store.GetTrafficPerUser(start, end)
-		// Fetch all users to map UUID -> Name
 		allUsers, _ := s.store.GetUsers()
-
 		userLookup := make(map[string]core.User)
 		for _, u := range allUsers {
 			userLookup[u.Uuid] = u
 		}
 
-		for uuid, stats := range usageMap {
-			total := stats.Uplink + stats.Downlink
-			if total > 0 {
-				user, exists := userLookup[uuid]
-				name := uuid
-				var limit int64 = 0
-				if exists {
-					name = user.Username
-					limit = user.DataLimit
+		if totals, err := s.store.GetSBTopTotals(start, end, 5); err == nil {
+			for _, t := range totals {
+				if t.Total <= 0 {
+					continue
+				}
+				name := t.Key
+				var limit int64
+				if u, ok := userLookup[t.Key]; ok {
+					if u.Username != "" {
+						name = u.Username
+					}
+					limit = u.DataLimit
 				}
 				topSB = append(topSB, Consumer{
 					Name:       name,
-					Total:      total,
+					Total:      t.Total,
 					Flow:       "Proxy",
 					QuotaLimit: limit,
-					Key:        uuid,
+					Key:        t.Key,
 				})
 			}
 		}
