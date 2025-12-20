@@ -3,6 +3,7 @@ package core
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -706,6 +707,14 @@ type TrafficStats struct {
 	Downlink int64
 }
 
+// WGPubTotal represents aggregated wireguard usage for a peer.
+type WGPubTotal struct {
+	PublicKey string
+	Total     int64
+	Rx        int64
+	Tx        int64
+}
+
 type User struct {
 	Uuid        string
 	Username    string
@@ -825,6 +834,121 @@ func (s *Store) GetWGTrafficSeries(publicKey string, start, end int64, limit int
 		series = append(series, smp)
 	}
 	return series, nil
+}
+
+// GetWGTrafficBuckets returns aggregated WireGuard traffic deltas bucketed by interval.
+// It computes per-sample deltas using window functions, then sums them per bucket.
+func (s *Store) GetWGTrafficBuckets(publicKeys []string, start, end, interval int64) (map[int64]TrafficStats, error) {
+	out := make(map[int64]TrafficStats)
+	if len(publicKeys) == 0 {
+		return out, nil
+	}
+	if interval <= 0 {
+		interval = 60
+	}
+
+	placeholders := strings.Repeat("?,", len(publicKeys))
+	placeholders = strings.TrimSuffix(placeholders, ",")
+
+	args := make([]interface{}, 0, len(publicKeys)+4)
+	for _, k := range publicKeys {
+		args = append(args, k)
+	}
+	args = append(args, start, end, interval, interval)
+
+	query := fmt.Sprintf(`
+WITH ordered AS (
+  SELECT
+    public_key,
+    ts,
+    rx,
+    tx,
+    LAG(rx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_rx,
+    LAG(tx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_tx
+  FROM wg_samples
+  WHERE public_key IN (%s) AND ts >= ? AND ts <= ?
+),
+diffs AS (
+  SELECT
+    ts,
+    CASE
+      WHEN prev_tx IS NULL THEN 0
+      WHEN tx - prev_tx < 0 THEN 0
+      ELSE tx - prev_tx
+    END AS dx,
+    CASE
+      WHEN prev_rx IS NULL THEN 0
+      WHEN rx - prev_rx < 0 THEN 0
+      ELSE rx - prev_rx
+    END AS dr
+  FROM ordered
+)
+SELECT
+  (ts / ?) * ? AS bucket_ts,
+  SUM(dx) AS uplink,
+  SUM(dr) AS downlink
+FROM diffs
+GROUP BY bucket_ts
+ORDER BY bucket_ts ASC
+`, placeholders)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var bucketTs int64
+		var up, down sql.NullInt64
+		if err := rows.Scan(&bucketTs, &up, &down); err != nil {
+			return nil, err
+		}
+		out[bucketTs] = TrafficStats{Uplink: up.Int64, Downlink: down.Int64}
+	}
+	return out, nil
+}
+
+// GetWGTopTotals aggregates total usage per peer (rx/tx deltas) in the given range.
+func (s *Store) GetWGTopTotals(start, end int64, limit int) ([]WGPubTotal, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			public_key,
+			(MAX(rx) - MIN(rx)) AS rx_delta,
+			(MAX(tx) - MIN(tx)) AS tx_delta
+		FROM wg_samples
+		WHERE ts >= ? AND ts <= ?
+		GROUP BY public_key
+		ORDER BY (rx_delta + tx_delta) DESC
+		LIMIT ?`, start, end, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := []WGPubTotal{}
+	for rows.Next() {
+		var pub string
+		var rx, tx sql.NullInt64
+		if err := rows.Scan(&pub, &rx, &tx); err != nil {
+			return nil, err
+		}
+		r := rx.Int64
+		t := tx.Int64
+		if r < 0 {
+			r = 0
+		}
+		if t < 0 {
+			t = 0
+		}
+		results = append(results, WGPubTotal{
+			PublicKey: pub,
+			Rx:        r,
+			Tx:        t,
+			Total:     r + t,
+		})
+	}
+	return results, nil
 }
 
 func (s *Store) PruneWGSamplesOlderThan(ts int64) (int64, error) {

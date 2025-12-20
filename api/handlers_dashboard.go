@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/core"
@@ -39,6 +40,21 @@ type Consumer struct {
 	Flow       string `json:"flow"`
 	QuotaLimit int64  `json:"quota_limit"` // 0 if none
 	Key        string `json:"key"`         // For linking/identification
+}
+
+// simple in-memory cache for dashboard responses
+var dashboardCache = struct {
+	mu   sync.Mutex
+	data map[string]cachedDashboard
+	ttl  time.Duration
+}{
+	data: make(map[string]cachedDashboard),
+	ttl:  15 * time.Second,
+}
+
+type cachedDashboard struct {
+	expires time.Time
+	payload DashboardData
 }
 
 func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +95,17 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		start = now - int64(duration.Seconds())
 	}
 
+	// Cache key
+	cacheKey := strconv.FormatInt(start, 10) + ":" + strconv.FormatInt(end, 10)
+	dashboardCache.mu.Lock()
+	if entry, ok := dashboardCache.data[cacheKey]; ok && time.Now().Before(entry.expires) {
+		dashboardCache.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(entry.payload)
+		return
+	}
+	dashboardCache.mu.Unlock()
+
 	// 1. Fetch System Status
 	status := s.collectSystemStatus()
 
@@ -88,14 +115,16 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		sbHistory = []core.TrafficPoint{}
 	}
 
-	// 3. Fetch WireGuard Series (All Peers)
-	wgSeriesRaw := make(map[string][]core.WGSample)
+	// 3. Fetch WireGuard peers for range calculations
+	var wgPeerKeys []string
+	wgAliases := make(map[string]string)
 	if s.config.EnableWireGuard {
 		wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
 		if wgCfg != nil {
+			wgPeerKeys = make([]string, 0, len(wgCfg.Peers))
 			for _, p := range wgCfg.Peers {
-				series, _ := s.store.GetWGTrafficSeries(p.PublicKey, start, end, 5000)
-				wgSeriesRaw[p.PublicKey] = series
+				wgPeerKeys = append(wgPeerKeys, p.PublicKey)
+				wgAliases[p.PublicKey] = p.Alias
 			}
 		}
 	}
@@ -133,51 +162,19 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		sbBuckets[bucketTs] = entry
 	}
 
-	// Process WireGuard
+	// Process WireGuard using DB bucket aggregation (avoids truncation issues on long ranges)
 	var totalWGRx, totalWGTx int64
-	for _, series := range wgSeriesRaw {
-		if len(series) < 2 {
-			continue
-		}
-		// Calculate buckets
-		for i := 1; i < len(series); i++ {
-			prev := series[i-1]
-			curr := series[i]
-			ts := curr.Timestamp
-			if ts < start || ts >= end {
-				continue
+	if s.config.EnableWireGuard && len(wgPeerKeys) > 0 {
+		if buckets, err := s.store.GetWGTrafficBuckets(wgPeerKeys, start, end, interval); err == nil {
+			for ts, stats := range buckets {
+				wgBuckets[ts] = TrafficStats{Uplink: stats.Uplink, Downlink: stats.Downlink}
 			}
-
-			bucketTs := (ts / interval) * interval
-
-			dx := curr.Tx - prev.Tx
-			dr := curr.Rx - prev.Rx
-			if dx < 0 {
-				dx = 0
-			}
-			if dr < 0 {
-				dr = 0
-			}
-
-			entry := wgBuckets[bucketTs]
-			entry.Uplink += dx   // Sent (Tx)
-			entry.Downlink += dr // Received (Rx)
-			wgBuckets[bucketTs] = entry
 		}
-
-		// Calculate Totals for Stats Card (Windowed)
-		first := series[0]
-		last := series[len(series)-1]
-		rx := last.Rx - first.Rx
-		tx := last.Tx - first.Tx
-		if rx < 0 {
-			rx = 0
+		for _, pubKey := range wgPeerKeys {
+			rx, tx, _ := s.store.GetWGTrafficDelta(pubKey, start, end)
+			totalWGRx += rx
+			totalWGTx += tx
 		}
-		if tx < 0 {
-			tx = 0
-		}
-		totalWGRx += rx
-		totalWGTx += tx
 	}
 
 	// Merge Chart Data (Cumulative for Graph)
@@ -208,44 +205,25 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	topSB := []Consumer{}
 	topWG := []Consumer{}
 
-	// WG Top Consumers
-	wgAliases := make(map[string]string)
-	if s.config.EnableWireGuard {
-		wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
-		if wgCfg != nil {
-			for _, p := range wgCfg.Peers {
-				wgAliases[p.PublicKey] = p.Alias
+	// WG Top Consumers (delta in selected range) via single query
+	if len(wgPeerKeys) > 0 {
+		if totals, err := s.store.GetWGTopTotals(start, end, 5); err == nil {
+			for _, t := range totals {
+				if t.Total <= 0 {
+					continue
+				}
+				name := wgAliases[t.PublicKey]
+				if name == "" && len(t.PublicKey) >= 8 {
+					name = t.PublicKey[0:8]
+				}
+				topWG = append(topWG, Consumer{
+					Name:       name,
+					Key:        t.PublicKey,
+					Total:      t.Total,
+					Flow:       "WireGuard",
+					QuotaLimit: 0,
+				})
 			}
-		}
-	}
-
-	for pubKey, series := range wgSeriesRaw {
-		if len(series) < 1 {
-			continue
-		}
-		first := series[0]
-		last := series[len(series)-1]
-		rx := last.Rx - first.Rx
-		tx := last.Tx - first.Tx
-		if rx < 0 {
-			rx = 0
-		}
-		if tx < 0 {
-			tx = 0
-		}
-		total := rx + tx
-		if total > 0 {
-			name := wgAliases[pubKey]
-			if name == "" {
-				name = pubKey[0:8]
-			}
-			topWG = append(topWG, Consumer{
-				Name:       name,
-				Key:        pubKey,
-				Total:      total,
-				Flow:       "WireGuard",
-				QuotaLimit: 0,
-			})
 		}
 	}
 	sort.Slice(topWG, func(i, j int) bool { return topWG[i].Total > topWG[j].Total })
@@ -310,6 +288,14 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		PublicIP:              getPublicIP(s.config),
 	}
 
+	// cache response
+	dashboardCache.mu.Lock()
+	dashboardCache.data[cacheKey] = cachedDashboard{
+		expires: time.Now().Add(dashboardCache.ttl),
+		payload: resp,
+	}
+	dashboardCache.mu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
 }
@@ -372,7 +358,6 @@ func (s *Server) collectSystemStatus() map[string]interface{} {
 		"enable_wireguard":            s.config.EnableWireGuard,
 	}
 }
-
 
 func getPublicIP(cfg *core.Config) string {
 	if cfg.PublicIP != "" {
