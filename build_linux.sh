@@ -76,8 +76,8 @@ if [[ "$SKIP_FRONTEND" != true ]]; then
   if [[ -d "$ROOT_DIR/frontend/dist" ]]; then
     echo ">>> Copying frontend build to $BUILD_DIR/frontend"
     rm -rf "$BUILD_DIR/frontend"
-    mkdir -p "$BUILD_DIR"
-    cp -R "$ROOT_DIR/frontend/dist" "$BUILD_DIR/frontend"
+    mkdir -p "$BUILD_DIR/frontend"
+    cp -R "$ROOT_DIR/frontend/dist/"* "$BUILD_DIR/frontend/"
   fi
 fi
 

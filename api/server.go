@@ -374,6 +374,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/wireguard/peers", s.secure(s.handleGetWireGuardPeers))
 	protected.HandleFunc("POST /api/wireguard/peers", s.secure(s.handleCreateWireGuardPeer))
 	protected.HandleFunc("DELETE /api/wireguard/peers", s.secure(s.handleDeleteWireGuardPeer))
+	protected.HandleFunc("POST /api/wireguard/peers/restore", s.secure(s.handleRestoreWireGuardPeer))
 	protected.HandleFunc("GET /api/wireguard/interface", s.secure(s.handleGetWireGuardInterface))
 	protected.HandleFunc("PUT /api/wireguard/interface", s.secure(s.handleUpdateWireGuardInterface))
 	protected.HandleFunc("PUT /api/wireguard/peer", s.secure(s.handleUpdateWireGuardPeer))
@@ -544,10 +545,10 @@ func StartServer(cfg *core.Config) {
 
 	router := server.Routes()
 
-	distDir := "./frontend/dist"
+	distDir := "./frontend"
 	if _, err := os.Stat(distDir); os.IsNotExist(err) {
 		if exe, e2 := os.Executable(); e2 == nil {
-			distDir = filepath.Join(filepath.Dir(exe), "frontend", "dist")
+			distDir = filepath.Join(filepath.Dir(exe), "frontend")
 		}
 	}
 	log.Printf("Serving static files from %s", distDir)

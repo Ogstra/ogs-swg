@@ -34,8 +34,8 @@ if [ "${SKIP_FRONTEND:-0}" != "1" ]; then
   if [ -d frontend/dist ]; then
     echo ">>> Copying frontend build to $OUTPUT_DIR/frontend"
     rm -rf "$OUTPUT_DIR/frontend"
-    mkdir -p "$OUTPUT_DIR"
-    cp -R frontend/dist "$OUTPUT_DIR/frontend"
+    mkdir -p "$OUTPUT_DIR/frontend"
+    cp -R frontend/dist/* "$OUTPUT_DIR/frontend/"
   fi
 else
   echo ">>> Skipping frontend (SKIP_FRONTEND=1)"
