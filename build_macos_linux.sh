@@ -5,7 +5,7 @@ set -euo pipefail
 # Usage: ./build_macos_linux.sh
 # Env vars:
 #   TARGETS="darwin/arm64 linux/amd64"  # override target matrix
-#   OUTPUT_DIR="./dist"                  # where binaries are placed
+#   OUTPUT_DIR="./build"                 # where build artifacts are placed
 #   SKIP_FRONTEND=1                     # skip npm build if already built
 
 assert_cmd() {
@@ -18,7 +18,7 @@ assert_cmd() {
 assert_cmd go
 assert_cmd npm
 
-OUTPUT_DIR="${OUTPUT_DIR:-./dist}"
+OUTPUT_DIR="${OUTPUT_DIR:-./build}"
 TARGETS="${TARGETS:-darwin/arm64 linux/amd64}"
 
 GO_MOD_FLAG=""
@@ -31,6 +31,12 @@ mkdir -p "$OUTPUT_DIR"
 if [ "${SKIP_FRONTEND:-0}" != "1" ]; then
   echo ">>> Building frontend (npm ci && npm run build)"
   (cd frontend && npm ci && npm run build)
+  if [ -d frontend/dist ]; then
+    echo ">>> Copying frontend build to $OUTPUT_DIR/frontend"
+    rm -rf "$OUTPUT_DIR/frontend"
+    mkdir -p "$OUTPUT_DIR"
+    cp -R frontend/dist "$OUTPUT_DIR/frontend"
+  fi
 else
   echo ">>> Skipping frontend (SKIP_FRONTEND=1)"
 fi
@@ -44,4 +50,4 @@ for target in $TARGETS; do
   GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build $GO_MOD_FLAG -o "$BIN" -ldflags="-s -w" main.go
 done
 
-echo "✓ Builds ready in $OUTPUT_DIR"
+echo "Builds ready in $OUTPUT_DIR"

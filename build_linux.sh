@@ -21,6 +21,7 @@ for arg in "$@"; do
 done
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_DIR="$ROOT_DIR/build"
 
 pick_bin() {
   local candidate="$1"
@@ -57,17 +58,27 @@ if [[ "$SKIP_BACKEND" != true ]]; then
     echo ">>> Backend tests skipped"
   fi
 
-  echo ">>> Backend build (swg)"
-  CGO_ENABLED=0 "$GO_BIN" build $GO_MOD_FLAG -o "$ROOT_DIR/swg" "$ROOT_DIR/main.go"
+  GOOS="$("$GO_BIN" env GOOS)"
+  GOARCH="$("$GO_BIN" env GOARCH)"
+  BIN_NAME="ogs-swg-${GOOS}-${GOARCH}"
+  mkdir -p "$BUILD_DIR"
+  echo ">>> Backend build (${BIN_NAME})"
+  CGO_ENABLED=0 "$GO_BIN" build $GO_MOD_FLAG -o "$BUILD_DIR/$BIN_NAME" "$ROOT_DIR/main.go"
 fi
 
 if [[ "$SKIP_FRONTEND" != true ]]; then
-  echo ">>> Frontend deps (npm ci --omit=optional)"
+  echo ">>> Frontend deps (npm ci)"
   pushd "$ROOT_DIR/frontend" >/dev/null
-  NODE_OPTIONS="--max-old-space-size=512" "$NPM_BIN" ci --omit=optional
+  NODE_OPTIONS="--max-old-space-size=512" "$NPM_BIN" ci
   echo ">>> Frontend build (npm run build)"
   NODE_OPTIONS="--max-old-space-size=512" "$NPM_BIN" run build
   popd >/dev/null
+  if [[ -d "$ROOT_DIR/frontend/dist" ]]; then
+    echo ">>> Copying frontend build to $BUILD_DIR/frontend"
+    rm -rf "$BUILD_DIR/frontend"
+    mkdir -p "$BUILD_DIR"
+    cp -R "$ROOT_DIR/frontend/dist" "$BUILD_DIR/frontend"
+  fi
 fi
 
 echo "DONE - Build finished."

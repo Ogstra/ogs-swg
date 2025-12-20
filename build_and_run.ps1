@@ -3,6 +3,7 @@ param (
 )
 
 $ErrorActionPreference = "Stop"
+$BUILD_DIR = Join-Path $PSScriptRoot "build"
 
 # --- Configuration ---
 $GO_VERSION = "1.22.1"
@@ -74,6 +75,12 @@ Write-Host "-------------------------"
 # --- Build Process ---
 
 Write-Host ">>> Step 1: Building Backend (Go)..." -ForegroundColor Green
+$goos = & go env GOOS
+$goarch = & go env GOARCH
+$binName = "ogs-swg-$goos-$goarch"
+if ($goos -eq "windows") { $binName += ".exe" }
+$procName = [System.IO.Path]::GetFileNameWithoutExtension($binName)
+$binPath = Join-Path $BUILD_DIR $binName
 
 # Optimization: Skip vendoring if vendor dir exists and not forced
 if ($ForceBuild -or -not (Test-Path "vendor")) {
@@ -85,12 +92,13 @@ if ($ForceBuild -or -not (Test-Path "vendor")) {
     Write-Host "    Skipping dependency check (vendor exists). Use -ForceBuild to update." -ForegroundColor Gray
 }
 
-# Always build the binary (it's fast), but we could skip if swg.exe exists
+# Always build the binary (it's fast), but we could skip if the binary exists
 Write-Host "    Building binary..."
-go build -mod=vendor -o swg.exe main.go
+if (-not (Test-Path $BUILD_DIR)) { New-Item -ItemType Directory -Path $BUILD_DIR | Out-Null }
+go build -mod=vendor -o $binPath main.go
 
-if (-not (Test-Path "swg.exe")) {
-    Write-Error "Build failed! swg.exe was not created."
+if (-not (Test-Path $binPath)) {
+    Write-Error "Build failed! $binPath was not created."
 }
 
 Write-Host ">>> Step 2: Building Frontend (React)..." -ForegroundColor Green
@@ -111,13 +119,19 @@ if ($ForceBuild -or -not (Test-Path "dist")) {
 }
 
 Set-Location ..
+if (Test-Path "frontend\\dist") {
+    $frontendOut = Join-Path $BUILD_DIR "frontend"
+    if (Test-Path $frontendOut) { Remove-Item $frontendOut -Recurse -Force }
+    New-Item -ItemType Directory -Path $frontendOut | Out-Null
+    Copy-Item "frontend\\dist\\*" $frontendOut -Recurse -Force
+}
 
 Write-Host ">>> Step 3: Preparing Environment..." -ForegroundColor Green
 
-# Kill existing swg process if running
-$ExistingProcess = Get-Process -Name "swg" -ErrorAction SilentlyContinue
+# Kill existing process if running
+$ExistingProcess = Get-Process -Name $procName -ErrorAction SilentlyContinue
 if ($ExistingProcess) {
-    Write-Host "    Stopping existing swg process..." -ForegroundColor Yellow
+    Write-Host "    Stopping existing $procName process..." -ForegroundColor Yellow
     Stop-Process -InputObject $ExistingProcess -Force
     Start-Sleep -Seconds 1
 }
@@ -140,4 +154,4 @@ Write-Host "App running at: http://localhost:8080"
 Write-Host "Press Ctrl+C to stop."
 Write-Host "-----------------------------------------------------"
 
-./swg.exe --config $XRAY_CONFIG --log $ACCESS_LOG --db $TEST_DB
+& $binPath --config $XRAY_CONFIG --log $ACCESS_LOG --db $TEST_DB
