@@ -5,6 +5,7 @@ Param(
 
 $ErrorActionPreference = "Stop"
 $TOOLS_DIR = "$PSScriptRoot\.tools"
+$BUILD_DIR = Join-Path $PSScriptRoot "build"
 
 # Ensure relative paths work even if invoked from elsewhere
 Set-Location $PSScriptRoot
@@ -47,8 +48,13 @@ if (-not $SkipBackend) {
     Run-Step "Backend tests (go test ./...)" {
         go test $goModFlag ./...
     }
-    Run-Step "Backend build (swg.exe)" {
-        go build $goModFlag -o swg.exe .
+    $goos = & go env GOOS
+    $goarch = & go env GOARCH
+    $binName = "ogs-swg-$goos-$goarch"
+    if ($goos -eq "windows") { $binName += ".exe" }
+    if (-not (Test-Path $BUILD_DIR)) { New-Item -ItemType Directory -Path $BUILD_DIR | Out-Null }
+    Run-Step "Backend build ($binName)" {
+        go build $goModFlag -o (Join-Path $BUILD_DIR $binName) .
     }
 }
 
@@ -62,6 +68,13 @@ if (-not $SkipFrontend) {
         npm run build
     }
     Pop-Location
+    $frontendDist = Join-Path $PSScriptRoot "frontend\\dist"
+    if (Test-Path $frontendDist) {
+        $frontendOut = Join-Path $BUILD_DIR "frontend"
+        if (Test-Path $frontendOut) { Remove-Item $frontendOut -Recurse -Force }
+        New-Item -ItemType Directory -Path $frontendOut | Out-Null
+        Copy-Item $frontendDist\* $frontendOut -Recurse -Force
+    }
 }
 
 Write-Host "DONE - Todo OK" -ForegroundColor Cyan

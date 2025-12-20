@@ -330,19 +330,19 @@ export default function WireGuard() {
             {/* Peers Table */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto hidden md:block">
-                    <table className="w-full text-left border-collapse">
+                    <table className="w-full text-left border-collapse table-fixed">
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('handshake')}>
                                     Last Seen {renderSortIcon('handshake')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('alias')}>
+                                <th className="p-4 w-48 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('alias')}>
                                     Name/Alias {renderSortIcon('alias')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('ip')}>
+                                <th className="p-4 w-56 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('ip')}>
                                     Allowed IPs {renderSortIcon('ip')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('endpoint')}>
+                                <th className="p-4 w-56 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('endpoint')}>
                                     Endpoint {renderSortIcon('endpoint')}
                                 </th>
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('traffic')}>
@@ -365,12 +365,12 @@ export default function WireGuard() {
                                             </div>
                                         </td>
                                         <td className="p-4">
-                                            <div className="font-semibold text-slate-200">{peer.alias || peer.name || '-'}</div>
+                                            <div className="font-semibold text-slate-200 truncate max-w-full">{peer.alias || peer.name || '-'}</div>
                                         </td>
-                                        <td className="p-4 font-mono text-slate-400 text-xs">
+                                        <td className="p-4 font-mono text-slate-400 text-xs break-all whitespace-normal">
                                             {peer.allowed_ips}
                                         </td>
-                                        <td className="p-4 font-mono text-slate-400 text-xs">
+                                        <td className="p-4 font-mono text-slate-400 text-xs break-all whitespace-normal">
                                             {peer.stats?.endpoint || peer.endpoint || '-'}
                                         </td>
                                         <td className="p-4">

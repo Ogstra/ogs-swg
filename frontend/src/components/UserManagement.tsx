@@ -726,7 +726,7 @@ export default function UserManagement() {
                 )}
 
                 <div className="overflow-x-auto hidden md:block">
-                    <table className="w-full text-left border-collapse">
+                    <table className="w-full text-left border-collapse table-fixed">
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
                                 <th className="p-4 w-10">
@@ -740,7 +740,7 @@ export default function UserManagement() {
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('status')}>
                                     Last Seen {renderSortIcon('status')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
+                                <th className="p-4 w-48 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
                                     Name/Alias {renderSortIcon('user')}
                                 </th>
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
@@ -750,7 +750,7 @@ export default function UserManagement() {
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('usage')}>
                                     Data Usage {renderSortIcon('usage')}
                                 </th>
-                                <th className="p-4 font-semibold text-left">Inbound</th>
+                                <th className="p-4 w-64 font-semibold text-left">Inbound</th>
                                 <th className="p-4 font-semibold text-right">Actions</th>
                             </tr>
                         </thead>
@@ -818,7 +818,7 @@ export default function UserManagement() {
                                                 </div>
                                             </td>
                                             <td className="p-4">
-                                                <div className="font-semibold text-slate-200">{user.name}</div>
+                                                <div className="font-semibold text-slate-200 truncate max-w-full">{user.name}</div>
                                             </td>
                                             <td className="p-4 align-middle">
                                                 {user.quota_limit ? (
@@ -863,15 +863,15 @@ export default function UserManagement() {
                                                 </div>
                                             </td>
                                             <td className="p-4">
-                                                <div className="flex flex-wrap gap-1">
+                                                <div className="flex flex-wrap gap-1 max-w-full">
                                                     {(user.inbound_tags && user.inbound_tags.length > 0) ? (
                                                         user.inbound_tags.map(tag => (
-                                                            <Badge key={tag} variant="info">
+                                                            <Badge key={tag} variant="info" className="max-w-[160px] truncate">
                                                                 {tag}
                                                             </Badge>
                                                         ))
                                                     ) : (
-                                                        <Badge variant="neutral">All</Badge>
+                                                        <Badge variant="neutral" className="max-w-[160px] truncate">All</Badge>
                                                     )}
                                                 </div>
                                             </td>
