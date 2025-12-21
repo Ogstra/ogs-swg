@@ -726,7 +726,7 @@ export default function UserManagement() {
                 )}
 
                 <div className="overflow-x-auto hidden md:block">
-                    <table className="w-full text-left border-collapse table-fixed">
+                    <table className="w-full min-w-[1100px] text-left border-collapse table-fixed">
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
                                 <th className="p-4 w-10">

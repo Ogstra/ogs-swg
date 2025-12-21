@@ -395,7 +395,7 @@ export default function WireGuard() {
             {/* Peers Table */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto hidden md:block">
-                    <table className="w-full text-left border-collapse table-fixed">
+                    <table className="w-full min-w-[960px] text-left border-collapse table-fixed">
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('handshake')}>
