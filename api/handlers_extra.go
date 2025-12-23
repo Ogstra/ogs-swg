@@ -286,7 +286,7 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if cfgText, err := buildPeerConfig(*wgConfig, peer, priv); err == nil {
+	if cfgText, err := buildPeerConfig(*wgConfig, peer, priv, s.config.PublicIP); err == nil {
 		s.storeQRConfig(pub, cfgText, time.Hour)
 	}
 
@@ -650,7 +650,7 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	if req.PrivateKey != "" {
 		updatedPeer := req
 		updatedPeer.PublicKey = pubKey
-		if cfgText, err := buildPeerConfig(*wgConfig, updatedPeer, req.PrivateKey); err == nil {
+		if cfgText, err := buildPeerConfig(*wgConfig, updatedPeer, req.PrivateKey, s.config.PublicIP); err == nil {
 			s.storeQRConfig(pubKey, cfgText, time.Hour)
 		}
 	}
@@ -704,7 +704,7 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 			http.Error(w, "Peer not found", http.StatusNotFound)
 			return
 		}
-		cfgText, err := buildPeerConfig(*wgConfig, *peer, priv)
+		cfgText, err := buildPeerConfig(*wgConfig, *peer, priv, s.config.PublicIP)
 		if err != nil {
 			http.Error(w, "Failed to build peer config: "+err.Error(), http.StatusBadRequest)
 			return
@@ -843,7 +843,7 @@ func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.
 	json.NewEncoder(w).Encode(result)
 }
 
-func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPrivateKey string) (string, error) {
+func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPrivateKey, publicIP string) (string, error) {
 	if clientPrivateKey == "" {
 		return "", fmt.Errorf("peer missing private key")
 	}
@@ -882,7 +882,7 @@ func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPr
 	if peer.PresharedKey != "" {
 		fmt.Fprintf(&b, "PresharedKey = %s\n", peer.PresharedKey)
 	}
-	if ep := detectWireGuardEndpoint(cfg); ep != "" {
+	if ep := detectWireGuardEndpoint(cfg, publicIP); ep != "" {
 		fmt.Fprintf(&b, "Endpoint = %s\n", ep)
 	}
 	fmt.Fprintf(&b, "AllowedIPs = 0.0.0.0/0, ::/0\n")
@@ -891,10 +891,13 @@ func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPr
 	return b.String(), nil
 }
 
-func detectWireGuardEndpoint(cfg core.WireGuardConfig) string {
+func detectWireGuardEndpoint(cfg core.WireGuardConfig, publicIP string) string {
 	port := cfg.Interface.ListenPort
 	if port == 0 {
 		port = 51820
+	}
+	if strings.TrimSpace(publicIP) != "" {
+		return fmt.Sprintf("%s:%d", strings.TrimSpace(publicIP), port)
 	}
 	// Prefer the IP from the interface Address (host part).
 	addr := strings.TrimSpace(cfg.Interface.Address)
