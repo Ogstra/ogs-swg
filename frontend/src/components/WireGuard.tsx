@@ -418,7 +418,7 @@ export default function WireGuard() {
                         </thead>
                         <tbody className="divide-y divide-slate-800">
                             {(sortedPeers || []).map(peer => {
-                                const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 60 // 1 min
+                                const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 180 // 3 mins
                                 return (
                                     <tr key={peer.public_key} className="hover:bg-slate-800/30 transition-colors">
                                         <td className="p-4">
@@ -503,7 +503,7 @@ export default function WireGuard() {
                 {/* Mobile Cards */}
                 <div className="md:hidden divide-y divide-slate-800">
                     {(sortedPeers || []).map(peer => {
-                        const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 60
+                        const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 180
                         return (
                             <div key={peer.public_key} className="p-4 space-y-4">
                                 <div className="flex items-start justify-between">
