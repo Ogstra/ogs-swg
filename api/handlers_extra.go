@@ -37,18 +37,38 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 	}
 
 	stats, _ := core.GetWireGuardStats()
+	storedPeers, _ := s.store.GetWGPeerMeta()
 
 	response := make([]PeerWithStats, 0)
 	for _, p := range wgConfig.Peers {
 		if p.Alias == "" && p.Email != "" {
 			p.Alias = p.Email
 		}
+		alias := p.Alias
+		if alias == "" {
+			if len(p.PublicKey) >= 8 {
+				alias = p.PublicKey[:8]
+			} else {
+				alias = p.PublicKey
+			}
+		}
+		_ = s.store.UpsertWGPeer(p.PublicKey, alias, false)
 		ps := PeerWithStats{
 			WireGuardPeer: p,
 			QRAvailable:   s.hasQRConfig(p.PublicKey),
 		}
 		if s, ok := stats[p.PublicKey]; ok {
 			ps.Stats = s
+			if ps.Stats.LatestHandshake == 0 {
+				if meta, ok := storedPeers[p.PublicKey]; ok {
+					ps.Stats.LatestHandshake = meta.LastHandshake
+				}
+			}
+		} else if meta, ok := storedPeers[p.PublicKey]; ok {
+			ps.Stats = core.PeerStats{
+				PublicKey:       p.PublicKey,
+				LatestHandshake: meta.LastHandshake,
+			}
 		}
 		response = append(response, ps)
 	}
@@ -280,11 +300,20 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		Alias:      req.Alias,
 		Endpoint:   strings.TrimSpace(req.Endpoint),
 	}
+	alias := peer.Alias
+	if alias == "" {
+		if len(peer.PublicKey) >= 8 {
+			alias = peer.PublicKey[:8]
+		} else {
+			alias = peer.PublicKey
+		}
+	}
 
 	if err := wgConfig.AddPeer(peer); err != nil {
 		http.Error(w, "Failed to add peer: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = s.store.UpsertWGPeer(peer.PublicKey, alias, false)
 
 	if cfgText, err := buildPeerConfig(*wgConfig, peer, priv, s.config.PublicIP); err == nil {
 		s.storeQRConfig(pub, cfgText, time.Hour)
@@ -313,6 +342,25 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	alias := ""
+	for _, p := range wgConfig.Peers {
+		if p.PublicKey == pubKey {
+			alias = p.Alias
+			if alias == "" && p.Email != "" {
+				alias = p.Email
+			}
+			break
+		}
+	}
+	if alias == "" {
+		if len(pubKey) >= 8 {
+			alias = pubKey[:8]
+		} else {
+			alias = pubKey
+		}
+	}
+	_ = s.store.UpsertWGPeer(pubKey, alias, true)
 
 	if err := wgConfig.RemovePeer(pubKey); err != nil {
 		http.Error(w, "Failed to remove peer: "+err.Error(), http.StatusInternalServerError)
@@ -362,11 +410,23 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 		Email:        strings.TrimSpace(req.Email),
 		PresharedKey: strings.TrimSpace(req.PresharedKey),
 	}
+	alias := peer.Alias
+	if alias == "" && peer.Email != "" {
+		alias = peer.Email
+	}
+	if alias == "" {
+		if len(peer.PublicKey) >= 8 {
+			alias = peer.PublicKey[:8]
+		} else {
+			alias = peer.PublicKey
+		}
+	}
 
 	if err := wgConfig.AddPeer(peer); err != nil {
 		http.Error(w, "Failed to restore peer: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	_ = s.store.UpsertWGPeer(peer.PublicKey, alias, false)
 
 	if !s.syncWireGuardConfig(wgConfig) {
 		s.markWireGuardPending()

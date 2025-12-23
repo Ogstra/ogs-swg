@@ -132,6 +132,14 @@ func (s *Store) initSchema() error {
 		endpoint TEXT DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_wg_samples_pub_ts ON wg_samples(public_key, ts);
+	CREATE TABLE IF NOT EXISTS wg_peers (
+		public_key TEXT PRIMARY KEY,
+		alias TEXT NOT NULL,
+		last_handshake INTEGER DEFAULT 0,
+		deleted INTEGER DEFAULT 0,
+		created_at INTEGER DEFAULT (strftime('%%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%%s','now'))
+	);
 
 	CREATE TABLE IF NOT EXISTS admins (
 		username TEXT PRIMARY KEY,
@@ -834,6 +842,84 @@ func (s *Store) GetWGTrafficSeries(publicKey string, start, end int64, limit int
 		series = append(series, smp)
 	}
 	return series, nil
+}
+
+type WGPeerMeta struct {
+	PublicKey     string
+	Alias         string
+	LastHandshake int64
+	Deleted       bool
+}
+
+func (s *Store) UpsertWGPeer(publicKey, alias string, deleted bool) error {
+	if publicKey == "" || alias == "" {
+		return fmt.Errorf("public_key and alias are required")
+	}
+	deletedVal := 0
+	if deleted {
+		deletedVal = 1
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO wg_peers (public_key, alias, deleted, updated_at)
+		VALUES (?, ?, ?, strftime('%s','now'))
+		ON CONFLICT(public_key) DO UPDATE SET
+			alias = excluded.alias,
+			deleted = excluded.deleted,
+			updated_at = strftime('%s','now')
+	`, publicKey, alias, deletedVal)
+	return err
+}
+
+func (s *Store) UpdateWGPeerHandshakes(handshakes map[string]int64) error {
+	if len(handshakes) == 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		UPDATE wg_peers
+		SET last_handshake = ?, updated_at = strftime('%s','now')
+		WHERE public_key = ?
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for key, ts := range handshakes {
+		if key == "" || ts <= 0 {
+			continue
+		}
+		if _, err := stmt.Exec(ts, key); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) GetWGPeerMeta() (map[string]WGPeerMeta, error) {
+	rows, err := s.db.Query(`SELECT public_key, alias, last_handshake, deleted FROM wg_peers`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]WGPeerMeta)
+	for rows.Next() {
+		var m WGPeerMeta
+		var deleted int
+		if err := rows.Scan(&m.PublicKey, &m.Alias, &m.LastHandshake, &deleted); err != nil {
+			return nil, err
+		}
+		m.Deleted = deleted == 1
+		result[m.PublicKey] = m
+	}
+	return result, nil
 }
 
 // GetWGTrafficBuckets returns aggregated WireGuard traffic deltas bucketed by interval.
