@@ -153,17 +153,11 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Process WireGuard using DB bucket aggregation (avoids truncation issues on long ranges)
-	var totalWGRx, totalWGTx int64
 	if s.config.EnableWireGuard && len(wgPeerKeys) > 0 {
 		if buckets, err := s.store.GetWGTrafficBuckets(wgPeerKeys, start, end, interval); err == nil {
 			for ts, stats := range buckets {
 				wgBuckets[ts] = TrafficStats{Uplink: stats.Uplink, Downlink: stats.Downlink}
 			}
-		}
-		for _, pubKey := range wgPeerKeys {
-			rx, tx, _ := s.store.GetWGTrafficDelta(pubKey, start, end)
-			totalWGRx += rx
-			totalWGTx += tx
 		}
 	}
 
@@ -258,9 +252,13 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var totalSBUplink, totalSBDownlink int64
+	var totalWGTx, totalWGRx int64
 	// Use the final accumulator values for Singbox totals (matches chart)
 	totalSBUplink = accUpSB
 	totalSBDownlink = accDownSB
+	// Use the final accumulator values for WireGuard totals (matches chart)
+	totalWGTx = accUpWG
+	totalWGRx = accDownWG
 
 	resp := DashboardData{
 		Status: status,

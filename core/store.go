@@ -912,15 +912,40 @@ ORDER BY bucket_ts ASC
 // GetWGTopTotals aggregates total usage per peer (rx/tx deltas) in the given range.
 func (s *Store) GetWGTopTotals(start, end int64, limit int) ([]TrafficTotal, error) {
 	rows, err := s.db.Query(`
-		SELECT
-			public_key,
-			(MAX(rx) - MIN(rx)) AS rx_delta,
-			(MAX(tx) - MIN(tx)) AS tx_delta
-		FROM wg_samples
-		WHERE ts >= ? AND ts <= ?
-		GROUP BY public_key
-		ORDER BY (rx_delta + tx_delta) DESC
-		LIMIT ?`, start, end, limit)
+WITH ordered AS (
+  SELECT
+    public_key,
+    ts,
+    rx,
+    tx,
+    LAG(rx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_rx,
+    LAG(tx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_tx
+  FROM wg_samples
+  WHERE ts >= ? AND ts <= ?
+),
+diffs AS (
+  SELECT
+    public_key,
+    CASE
+      WHEN prev_tx IS NULL THEN 0
+      WHEN tx - prev_tx < 0 THEN 0
+      ELSE tx - prev_tx
+    END AS dx,
+    CASE
+      WHEN prev_rx IS NULL THEN 0
+      WHEN rx - prev_rx < 0 THEN 0
+      ELSE rx - prev_rx
+    END AS dr
+  FROM ordered
+)
+SELECT
+  public_key,
+  SUM(dr) AS rx_delta,
+  SUM(dx) AS tx_delta
+FROM diffs
+GROUP BY public_key
+ORDER BY (rx_delta + tx_delta) DESC
+LIMIT ?`, start, end, limit)
 	if err != nil {
 		return nil, err
 	}

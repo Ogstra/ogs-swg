@@ -914,8 +914,14 @@ export default function WireGuard() {
                                 <label className="block text-sm font-medium text-slate-400 mb-1">MTU</label>
                                 <input
                                     type="number"
-                                    value={editInterface.mtu || 1420}
-                                    onChange={e => setEditInterface({ ...editInterface, mtu: parseInt(e.target.value) || 0 })}
+                                    value={editInterface.mtu ?? ''}
+                                    onChange={e => {
+                                        const raw = e.target.value
+                                        setEditInterface({
+                                            ...editInterface,
+                                            mtu: raw === '' ? undefined : Number(raw)
+                                        })
+                                    }}
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                                 />
                             </div>
