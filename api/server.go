@@ -164,6 +164,17 @@ func (s *Server) runWireGuardSample() {
 		log.Printf("wg sampler: failed to read stats: %v", err)
 		return
 	}
+	if s.store != nil {
+		handshakes := make(map[string]int64, len(stats))
+		for _, st := range stats {
+			if st.LatestHandshake > 0 {
+				handshakes[st.PublicKey] = st.LatestHandshake
+			}
+		}
+		if err := s.store.UpdateWGPeerHandshakes(handshakes); err != nil {
+			log.Printf("wg sampler: failed to store handshakes: %v", err)
+		}
+	}
 	var samples []core.WGSample
 	now := time.Now().Unix()
 	for _, st := range stats {
