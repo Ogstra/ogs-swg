@@ -59,7 +59,7 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 		}
 		if s, ok := stats[p.PublicKey]; ok {
 			ps.Stats = s
-			if ps.Stats.LatestHandshake == 0 {
+			if ps.Stats.LatestHandshake <= 0 {
 				if meta, ok := storedPeers[p.PublicKey]; ok {
 					ps.Stats.LatestHandshake = meta.LastHandshake
 				}

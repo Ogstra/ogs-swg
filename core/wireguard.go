@@ -312,10 +312,14 @@ func GetWireGuardStats() (map[string]PeerStats, error) {
 				endpoint = peer.Endpoint.String()
 			}
 
+			handshake := peer.LastHandshakeTime.Unix()
+			if peer.LastHandshakeTime.IsZero() || handshake < 0 {
+				handshake = 0
+			}
 			stats[peer.PublicKey.String()] = PeerStats{
 				PublicKey:       peer.PublicKey.String(),
 				Endpoint:        endpoint,
-				LatestHandshake: peer.LastHandshakeTime.Unix(),
+				LatestHandshake: handshake,
 				TransferRx:      peer.ReceiveBytes,
 				TransferTx:      peer.TransmitBytes,
 			}
