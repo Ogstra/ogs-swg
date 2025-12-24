@@ -434,19 +434,19 @@ export default function Dashboard() {
                                         type="monotone"
                                         dataKey={chartMode === 'singbox' ? "up_sb" : "up_wg"}
                                         name={chartMode === 'singbox' ? "Received" : "Sent"}
-                                        stroke="#3b82f6"
+                                        stroke={chartMode === 'singbox' ? "#3b82f6" : "#10b981"}
                                         strokeWidth={2}
                                         fillOpacity={1}
-                                        fill="url(#colorUp)"
+                                        fill={chartMode === 'singbox' ? "url(#colorUp)" : "url(#colorDown)"}
                                     />
                                     <Area
                                         type="monotone"
                                         dataKey={chartMode === 'singbox' ? "down_sb" : "down_wg"}
                                         name={chartMode === 'singbox' ? "Sent" : "Received"}
-                                        stroke="#10b981"
+                                        stroke={chartMode === 'singbox' ? "#10b981" : "#3b82f6"}
                                         strokeWidth={2}
                                         fillOpacity={1}
-                                        fill="url(#colorDown)"
+                                        fill={chartMode === 'singbox' ? "url(#colorDown)" : "url(#colorUp)"}
                                     />
                                 </AreaChart>
                             </ResponsiveContainer>
