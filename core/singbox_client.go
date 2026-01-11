@@ -9,6 +9,7 @@ import (
 
 	statsService "github.com/xtls/xray-core/app/stats/command"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -25,9 +26,19 @@ func NewSingboxClient(addr string) *SingboxClient {
 func (c *SingboxClient) ensureConn() (*grpc.ClientConn, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	
+	// Check if connection exists and is still valid
 	if c.conn != nil {
-		return c.conn, nil
+		state := c.conn.GetState()
+		// If connection is ready or connecting, reuse it
+		if state == connectivity.Ready || state == connectivity.Connecting {
+			return c.conn, nil
+		}
+		// Connection is in a bad state, close it and create a new one
+		c.conn.Close()
+		c.conn = nil
 	}
+	
 	conn, err := grpc.Dial(c.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err

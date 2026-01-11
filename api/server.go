@@ -142,13 +142,18 @@ func (s *Server) startWireGuardSampler() {
 		for {
 			select {
 			case <-s.wgSamplerTicker.C:
-				if !s.wgSamplerPaused {
+				s.wgMux.RLock()
+				paused := s.wgSamplerPaused
+				s.wgMux.RUnlock()
+				if !paused {
 					s.runWireGuardSample()
 				}
 			case <-s.wgSamplerStop:
+				s.wgMux.Lock()
 				if s.wgSamplerTicker != nil {
 					s.wgSamplerTicker.Stop()
 				}
+				s.wgMux.Unlock()
 				return
 			}
 		}
@@ -435,12 +440,41 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/tools/self-signed-cert", s.secure(s.handleGenerateSelfSignedCert))
 
 	// Mount protected routes under /api/
-	mux.Handle("/api/", s.GzipMiddleware(protected)) // Auth middleware commented out for testing
+	mux.Handle("/api/", s.AuthMiddleware(s.GzipMiddleware(protected)))
 
 	return mux
 }
 
-func StartServer(cfg *core.Config) {
+// Stop gracefully stops the server and cleans up resources
+func (s *Server) Stop() {
+	// Stop WireGuard sampler
+	if s.config.EnableWireGuard {
+		s.wgMux.Lock()
+		if s.wgSamplerTicker != nil {
+			s.wgSamplerTicker.Stop()
+		}
+		// Safely close channel (prevent double close panic)
+		select {
+		case <-s.wgSamplerStop:
+			// Already closed
+		default:
+			close(s.wgSamplerStop)
+		}
+		s.wgMux.Unlock()
+	}
+
+	// Stop sing-box sampler if running
+	if s.sampler != nil {
+		s.sampler.Stop()
+	}
+
+	// Close store connection
+	if s.store != nil {
+		s.store.Close()
+	}
+}
+
+func StartServer(cfg *core.Config) *Server {
 	cfg.LogSource = detectLogSource(cfg)
 
 	store, err := core.NewStore(cfg.DatabasePath)
@@ -569,9 +603,14 @@ func StartServer(cfg *core.Config) {
 		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
 	})
 
-	if err := http.ListenAndServe(cfg.ListenAddr, router); err != nil {
-		panic("HTTP server error: " + err.Error())
-	}
+	// Start server in goroutine so we can return the server instance
+	go func() {
+		if err := http.ListenAndServe(cfg.ListenAddr, router); err != nil {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	return server
 }
 
 type UserStatus struct {
@@ -775,18 +814,16 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" || req.UUID == "" || req.InboundTag == "" {
-		if req.Name == "" {
-			http.Error(w, "Name is required", http.StatusBadRequest)
-			return
-		}
-		if req.UUID == "" {
-			req.UUID = uuid.NewString()
-		}
-		if req.InboundTag == "" {
-			http.Error(w, "Inbound Tag is required", http.StatusBadRequest)
-			return
-		}
+	if req.Name == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+	if req.InboundTag == "" {
+		http.Error(w, "Inbound Tag is required", http.StatusBadRequest)
+		return
+	}
+	if req.UUID == "" {
+		req.UUID = uuid.NewString()
 	}
 
 	enabled := true

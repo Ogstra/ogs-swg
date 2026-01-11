@@ -7,18 +7,15 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 // SingboxConfigRaw is a helper to parse config as a map
 type SingboxConfigRaw map[string]interface{}
 
-var configMu sync.Mutex
-
 // GetSingboxConfig reads the raw config file content
 func (c *Config) GetSingboxConfig() (string, error) {
-	configMu.Lock()
-	defer configMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	content, err := os.ReadFile(c.SingboxConfigPath)
 	if err != nil {
@@ -29,8 +26,8 @@ func (c *Config) GetSingboxConfig() (string, error) {
 
 // GetSingboxConfigMap reads the raw config file content as a map
 func (c *Config) GetSingboxConfigMap() (map[string]interface{}, error) {
-	configMu.Lock()
-	defer configMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	content, err := os.ReadFile(c.SingboxConfigPath)
 	if err != nil {
@@ -46,8 +43,8 @@ func (c *Config) GetSingboxConfigMap() (map[string]interface{}, error) {
 
 // UpdateSingboxConfig writes raw content to config file and restarts service
 func (c *Config) UpdateSingboxConfig(content string) error {
-	configMu.Lock()
-	defer configMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// 1. Validate JSON structure
 	var validCheck map[string]interface{}
@@ -72,8 +69,8 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 
 // ModifySingboxConfig safely modifies the configuration using a callback
 func (c *Config) ModifySingboxConfig(modifier func(SingboxConfigRaw) error) error {
-	configMu.Lock()
-	defer configMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	// 1. Read
 	content, err := os.ReadFile(c.SingboxConfigPath)
@@ -114,8 +111,8 @@ func (c *Config) ModifySingboxConfig(modifier func(SingboxConfigRaw) error) erro
 
 // GetSingboxInbounds returns the list of inbounds as map objects
 func (c *Config) GetSingboxInbounds() ([]map[string]interface{}, error) {
-	configMu.Lock()
-	defer configMu.Unlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	content, err := os.ReadFile(c.SingboxConfigPath)
 	if err != nil {

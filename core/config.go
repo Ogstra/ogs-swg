@@ -1,6 +1,8 @@
 package core
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -90,7 +92,7 @@ func LoadConfig(path ...string) *Config {
 		WGSamplerIntervalSec: 60,
 		WGRetentionDays:      30,
 
-		JWTSecret: "replace-me-with-a-secure-secret-please",
+		JWTSecret: "", // Will be generated if empty
 	}
 
 	configPath := "config.json"
@@ -103,6 +105,17 @@ func LoadConfig(path ...string) *Config {
 	if err == nil {
 		defer f.Close()
 		json.NewDecoder(f).Decode(cfg)
+	}
+
+	// Generate secure JWT secret if not set or using default insecure value
+	if cfg.JWTSecret == "" || cfg.JWTSecret == "replace-me-with-a-secure-secret-please" {
+		secretBytes := make([]byte, 32)
+		if _, err := rand.Read(secretBytes); err == nil {
+			cfg.JWTSecret = base64.URLEncoding.EncodeToString(secretBytes)
+		} else {
+			// Fallback: use a timestamp-based secret (less secure but better than default)
+			cfg.JWTSecret = fmt.Sprintf("auto-generated-%d", os.Getpid())
+		}
 	}
 
 	return cfg

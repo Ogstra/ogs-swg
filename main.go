@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
 	"github.com/Ogstra/ogs-swg/api"
 	"github.com/Ogstra/ogs-swg/core"
 )
@@ -53,12 +54,16 @@ func main() {
 		return
 	}
 
+	var server *api.Server
 	go func() {
-		api.StartServer(cfg)
+		server = api.StartServer(cfg)
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down...")
+	if server != nil {
+		server.Stop()
+	}
 }

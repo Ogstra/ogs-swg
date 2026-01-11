@@ -3,6 +3,7 @@ package core
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -35,10 +36,19 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, err
 	}
 
-	db.Exec("PRAGMA journal_mode=WAL;")
-	db.Exec("PRAGMA synchronous=NORMAL;")
-	db.Exec("PRAGMA busy_timeout=5000;")
-	db.Exec("PRAGMA auto_vacuum = INCREMENTAL;")
+	// Configure SQLite pragmas - these are important for performance and reliability
+	pragmas := []string{
+		"PRAGMA journal_mode=WAL;",
+		"PRAGMA synchronous=NORMAL;",
+		"PRAGMA busy_timeout=5000;",
+		"PRAGMA auto_vacuum = INCREMENTAL;",
+	}
+	for _, pragma := range pragmas {
+		if _, err := db.Exec(pragma); err != nil {
+			// Log but don't fail - some pragmas might not be critical
+			log.Printf("Warning: Failed to set %s: %v", pragma, err)
+		}
+	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 
@@ -382,7 +392,10 @@ type SamplerRun struct {
 }
 
 func (s *Store) LogSamplerRun(ts int64, durationMs int64, inserted int64, errStr string, source string) {
-	_, _ = s.db.Exec("INSERT INTO sampler_runs (ts, duration_ms, inserted, error, source) VALUES (?, ?, ?, ?, ?)", ts, durationMs, inserted, errStr, source)
+	_, err := s.db.Exec("INSERT INTO sampler_runs (ts, duration_ms, inserted, error, source) VALUES (?, ?, ?, ?, ?)", ts, durationMs, inserted, errStr, source)
+	if err != nil {
+		log.Printf("Warning: Failed to log sampler run: %v", err)
+	}
 }
 
 func (s *Store) GetSamplerRuns(limit int) ([]SamplerRun, error) {
@@ -571,6 +584,12 @@ func (s *Store) AddSample(sample Sample) error {
 func (s *Store) BulkInsert(samples []Sample) error {
 	if len(samples) == 0 {
 		return nil
+	}
+	// Limit batch size to prevent memory issues and DoS
+	const maxBatchSize = 10000
+	if len(samples) > maxBatchSize {
+		samples = samples[:maxBatchSize]
+		log.Printf("Warning: BulkInsert limited to %d samples", maxBatchSize)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
