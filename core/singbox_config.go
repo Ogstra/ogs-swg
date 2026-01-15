@@ -1,12 +1,14 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // SingboxConfigRaw is a helper to parse config as a map
@@ -62,8 +64,8 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 		return err
 	}
 
-	// 4. Mark pending restart
-	c.MarkSingboxPending()
+	// 4. Mark pending restart (lock already held)
+	c.SingboxPendingChanges = true
 	return nil
 }
 
@@ -104,8 +106,8 @@ func (c *Config) ModifySingboxConfig(modifier func(SingboxConfigRaw) error) erro
 		return err
 	}
 
-	// 6. Mark pending restart
-	c.MarkSingboxPending()
+	// 6. Mark pending restart (lock already held)
+	c.SingboxPendingChanges = true
 	return nil
 }
 
@@ -374,11 +376,14 @@ func (c *Config) ValidateConfig(content []byte) error {
 		return fmt.Errorf("failed to close temp file: %v", err)
 	}
 
-	// Run sing-box check
-	// Assuming sing-box is in PATH or use absolute path if needed
-	// The command "sing-box check -c <file>"
-	cmd := exec.Command("sing-box", "check", "-c", tmpFile.Name())
+	// Run sing-box check with timeout to avoid hanging the API request.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sing-box", "check", "-c", tmpFile.Name())
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("sing-box check timeout")
+	}
 	if err != nil {
 		return fmt.Errorf("invalid config: %s", string(output))
 	}

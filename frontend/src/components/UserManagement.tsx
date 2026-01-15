@@ -444,7 +444,7 @@ export default function UserManagement() {
                     ...newUser,
                     original_name: originalName || newUser.name,
                     inbound_tag: normalizedRows[0].tag,
-                    flow: userType === 'vless' && nameChanged && normalizedRows.length === 1 ? normalizedRows[0].flow : '',
+                    flow: userType === 'vless' ? normalizedRows[0].flow : '',
                     vmess_security: vmessSecurity,
                     vmess_alter_id: vmessAlterID,
                 }
