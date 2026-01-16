@@ -58,6 +58,7 @@ export default function Dashboard() {
     const [timeRange, setTimeRange] = useState('24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [refreshInterval, setRefreshInterval] = useState<number>(10000)
+    const [prefsLoaded, setPrefsLoaded] = useState(false)
 
     // Data States
     const [chartData, setChartData] = useState<UnifiedChartPoint[]>([])
@@ -143,13 +144,15 @@ export default function Dashboard() {
         if (prefs.defaultService === 'wireguard') setChartMode('wireguard')
         if (prefs.defaultRange) setTimeRange(prefs.defaultRange)
         if (prefs.refreshMs && prefs.refreshMs >= 1000) setRefreshInterval(prefs.refreshMs)
+        setPrefsLoaded(true)
     }, [])
 
     useEffect(() => {
+        if (!prefsLoaded) return
         fetchData()
         const interval = setInterval(fetchData, refreshInterval)
         return () => clearInterval(interval)
-    }, [timeRange, customStart, customEnd, refreshInterval])
+    }, [prefsLoaded, timeRange, customStart, customEnd, refreshInterval])
 
     const handleApplySingboxChanges = async () => {
         try {
