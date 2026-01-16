@@ -924,11 +924,15 @@ func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPr
 	if firstAllowed == "" {
 		return "", fmt.Errorf("peer allowed IPs missing")
 	}
+	address, err := ensurePeerAddressCIDR(firstAllowed)
+	if err != nil {
+		return "", err
+	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Interface]\n")
 	fmt.Fprintf(&b, "PrivateKey = %s\n", clientPrivateKey)
-	fmt.Fprintf(&b, "Address = %s\n", firstAllowed)
+	fmt.Fprintf(&b, "Address = %s\n", address)
 	dns := cfg.Interface.DNS
 	if strings.TrimSpace(dns) == "" {
 		dns = "1.1.1.1, 8.8.8.8"
@@ -949,6 +953,28 @@ func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPr
 	fmt.Fprintf(&b, "PersistentKeepalive = 25\n")
 
 	return b.String(), nil
+}
+
+func ensurePeerAddressCIDR(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", fmt.Errorf("peer allowed IPs missing")
+	}
+	if strings.Contains(raw, "/") {
+		ip, _, err := net.ParseCIDR(raw)
+		if err != nil || ip == nil {
+			return "", fmt.Errorf("invalid CIDR: %s", raw)
+		}
+		raw = ip.String()
+	}
+	ip := net.ParseIP(raw)
+	if ip == nil {
+		return "", fmt.Errorf("invalid IP: %s", raw)
+	}
+	if ip.To4() != nil {
+		return fmt.Sprintf("%s/32", ip.String()), nil
+	}
+	return fmt.Sprintf("%s/128", ip.String()), nil
 }
 
 func detectWireGuardEndpoint(cfg core.WireGuardConfig, publicIP string) string {
