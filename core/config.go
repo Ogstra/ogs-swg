@@ -495,6 +495,79 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 	})
 }
 
+// RenameUser renames a user across all managed inbounds where it exists.
+func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity string, vmessAlterID int) error {
+	if originalName == "" || newName == "" {
+		return fmt.Errorf("user name is required")
+	}
+	if originalName == newName {
+		return nil
+	}
+
+	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
+		inbounds := c.findManagedInbounds(cfgMap)
+		if len(inbounds) == 0 {
+			return os.ErrInvalid
+		}
+
+		found := false
+		for _, inbound := range inbounds {
+			inbType := inboundTypeFromMap(inbound)
+			if !isUserInboundType(inbType) {
+				continue
+			}
+
+			tag, _ := inbound["tag"].(string)
+			users := ensureUsers(inbound)
+			if inbType == "vmess" {
+				sanitizeVmessUsers(users)
+			}
+
+			for _, u := range users {
+				if um, ok := u.(map[string]interface{}); ok {
+					if um["name"] == newName {
+						return fmt.Errorf("user %s already exists in inbound %s", newName, tag)
+					}
+				}
+			}
+
+			for _, u := range users {
+				if um, ok := u.(map[string]interface{}); ok {
+					if um["name"] == originalName {
+						um["name"] = newName
+						switch inbType {
+						case "vless":
+							um["uuid"] = uuid
+							flow = normalizeFlow(flow)
+							if flow != "" {
+								um["flow"] = flow
+							} else {
+								delete(um, "flow")
+							}
+						case "vmess":
+							um["uuid"] = uuid
+							delete(um, "flow")
+							delete(um, "security")
+							um["alter_id"] = vmessAlterID
+						case "trojan":
+							um["password"] = uuid
+							delete(um, "flow")
+						}
+						found = true
+					}
+				}
+			}
+		}
+
+		if !found {
+			return fmt.Errorf("user %s not found", originalName)
+		}
+
+		c.syncStatsUsers(cfgMap)
+		return nil
+	})
+}
+
 func (c *Config) findManagedInbounds(cfgMap map[string]interface{}) []map[string]interface{} {
 	inbounds, ok := cfgMap["inbounds"].([]interface{})
 	if !ok || len(inbounds) == 0 {

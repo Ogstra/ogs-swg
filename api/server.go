@@ -895,12 +895,8 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if enabled {
 		nameChanged := originalName != req.Name
 		if nameChanged {
-			if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
-				http.Error(w, "Failed to update user in config: "+err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if err := s.config.RemoveUser(originalName); err != nil {
-				http.Error(w, "Failed to remove original user from config: "+err.Error(), http.StatusInternalServerError)
+			if err := s.config.RenameUser(originalName, req.Name, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); err != nil {
+				http.Error(w, "Failed to rename user in config: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 		} else if err := s.config.UpdateUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {

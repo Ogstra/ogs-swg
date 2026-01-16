@@ -431,12 +431,6 @@ export default function UserManagement() {
             }
 
             if (isEditing) {
-                const nameChanged = originalName && originalName !== newUser.name
-                if (nameChanged && normalizedRows.length > 1) {
-                    toastError('Renaming users with multiple inbounds is not supported yet')
-                    return
-                }
-
                 const vmessSecurity = userType === 'vmess' ? newUser.vmess_security || '' : ''
                 const vmessAlterID = userType === 'vmess' ? (newUser.vmess_alter_id || 0) : 0
 
@@ -452,7 +446,7 @@ export default function UserManagement() {
 
                 await api.updateUser(payload)
 
-                if (newUser.enabled !== false && !nameChanged) {
+                if (newUser.enabled !== false) {
                     const originalTags = originalInboundTags.length > 0
                         ? originalInboundTags
                         : ((modalState.data?.inbound_tags || []) as string[])
@@ -641,7 +635,6 @@ export default function UserManagement() {
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white">User Management</h1>
-                    <p className="text-slate-400 text-sm mt-1">Manage proxy users and quotas</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     {selectedUsers.size > 0 && (
