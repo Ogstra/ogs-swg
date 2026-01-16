@@ -2,7 +2,7 @@
 
 Web dashboard for managing sing-box and WireGuard VPN services.
 
-<img width="1499" height="851" alt="image" src="https://github.com/user-attachments/assets/b16a6c51-849d-4685-817b-9b3acf59a4ba" />
+<img width="1511" height="853" alt="image" src="https://github.com/user-attachments/assets/2a7f0b49-6479-4511-b556-f95abf947aa0" />
 
 ## Supported protocols
 
