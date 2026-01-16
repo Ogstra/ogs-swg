@@ -164,7 +164,7 @@ export default function Dashboard() {
     }
 
     // Derived values for UI
-    const topConsumers = topConsumersMap[chartMode] || []
+    const topConsumers = (topConsumersMap[chartMode] || []).slice(0, 20)
 
     return (
         <div className="space-y-6">
@@ -468,7 +468,7 @@ export default function Dashboard() {
                         </div>
                     }
                 >
-                    <div className="space-y-4 mt-2">
+                    <div className="space-y-4 mt-2 max-h-72 overflow-y-auto pr-2">
                         {topConsumers.length === 0 ? (
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
                         ) : (

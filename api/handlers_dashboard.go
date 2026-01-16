@@ -189,11 +189,21 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	topSB := []Consumer{}
 	topWG := []Consumer{}
 
+	topLimit := 20
+
+	wgPeerSet := make(map[string]bool)
+	for _, key := range wgPeerKeys {
+		wgPeerSet[key] = true
+	}
+
 	// WG Top Consumers (delta in selected range) via single query
 	if len(wgPeerKeys) > 0 {
-		if totals, err := s.store.GetWGTopTotals(start, end, 5); err == nil {
+		if totals, err := s.store.GetWGTopTotals(start, end, topLimit); err == nil {
 			for _, t := range totals {
 				if t.Total <= 0 {
+					continue
+				}
+				if !wgPeerSet[t.Key] {
 					continue
 				}
 				name := wgAliases[t.Key]
@@ -211,44 +221,44 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	sort.Slice(topWG, func(i, j int) bool { return topWG[i].Total > topWG[j].Total })
-	if len(topWG) > 5 {
-		topWG = topWG[:5]
+	if len(topWG) > topLimit {
+		topWG = topWG[:topLimit]
 	}
 
 	// Singbox Top Consumers
 	if s.config.EnableSingbox {
-		allUsers, _ := s.store.GetUsers()
-		userLookup := make(map[string]core.User)
-		for _, u := range allUsers {
-			userLookup[u.Uuid] = u
+		allMeta, _ := s.store.GetAllUserMetadata()
+		metaLookup := make(map[string]core.UserMetadata)
+		for _, m := range allMeta {
+			metaLookup[m.Email] = m
 		}
 
-		if totals, err := s.store.GetSBTopTotals(start, end, 5); err == nil {
+		if totals, err := s.store.GetSBTopTotals(start, end, topLimit); err == nil {
 			for _, t := range totals {
 				if t.Total <= 0 {
 					continue
 				}
-				name := t.Key
-				var limit int64
-				if u, ok := userLookup[t.Key]; ok {
-					if u.Username != "" {
-						name = u.Username
-					}
-					limit = u.DataLimit
+				meta, ok := metaLookup[t.Key]
+				if !ok {
+					continue
+				}
+				name := meta.Email
+				if name == "" {
+					name = t.Key
 				}
 				topSB = append(topSB, Consumer{
 					Name:       name,
 					Total:      t.Total,
 					Flow:       "Proxy",
-					QuotaLimit: limit,
+					QuotaLimit: meta.QuotaLimit,
 					Key:        t.Key,
 				})
 			}
 		}
 	}
 	sort.Slice(topSB, func(i, j int) bool { return topSB[i].Total > topSB[j].Total })
-	if len(topSB) > 5 {
-		topSB = topSB[:5]
+	if len(topSB) > topLimit {
+		topSB = topSB[:topLimit]
 	}
 
 	var totalSBUplink, totalSBDownlink int64
