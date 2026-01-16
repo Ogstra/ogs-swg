@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { api, FeatureFlags } from '../api'
 import { Save, RefreshCw, Lock, User } from 'lucide-react'
@@ -39,7 +39,7 @@ export default function Settings() {
         aggregation_enabled: false,
         aggregation_days: 7,
     })
-    const [historyLimit, setHistoryLimit] = useState(5)
+    const [historyLimit, setHistoryLimit] = useState(10)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean; wireguard: boolean }>({ singbox: false, wireguard: false })
     const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' })
     const [usernameData, setUsernameData] = useState({ password: '', newUsername: '' })
@@ -711,164 +711,188 @@ function DatabaseTab({
     setHistoryLimit: Dispatch<SetStateAction<number>>
     samplerHistory: any[]
 }) {
+    const dbCardRef = useRef<HTMLDivElement | null>(null)
+    const [dbCardHeight, setDbCardHeight] = useState<number | null>(null)
+
+    useEffect(() => {
+        const target = dbCardRef.current
+        if (!target || typeof ResizeObserver === 'undefined') return
+
+        const updateHeight = () => setDbCardHeight(target.getBoundingClientRect().height)
+        updateHeight()
+        const observer = new ResizeObserver(updateHeight)
+        observer.observe(target)
+        return () => observer.disconnect()
+    }, [])
+
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-            <Card
-                title="Database & Retention"
-                action={
-                    <div className="flex gap-2">
-                        <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />}>
-                            Save Changes
-                        </Button>
-                        <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+            <div ref={dbCardRef}>
+                <Card
+                    title="Database & Retention"
+                    className="h-full flex flex-col"
+                    action={
+                        <div className="flex gap-2">
+                            <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />}>
+                                Save Changes
+                            </Button>
+                            <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
+                        </div>
+                    }
+                >
+                    <div className="grid grid-cols-2 gap-4 mb-6">
+                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
+                            <p className="text-[10px] uppercase text-slate-500 font-bold">Total Rows</p>
+                            <p className="text-xl font-mono text-white mt-1">{dbInfo.rows.toLocaleString()}</p>
+                        </div>
+                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
+                            <p className="text-[10px] uppercase text-slate-500 font-bold">Size (MB)</p>
+                            <p className="text-xl font-mono text-white mt-1">{dbInfo.sizeMB}</p>
+                        </div>
                     </div>
-                }
-            >
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                    <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                        <p className="text-[10px] uppercase text-slate-500 font-bold">Total Rows</p>
-                        <p className="text-xl font-mono text-white mt-1">{dbInfo.rows.toLocaleString()}</p>
-                    </div>
-                    <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                        <p className="text-[10px] uppercase text-slate-500 font-bold">Size (MB)</p>
-                        <p className="text-xl font-mono text-white mt-1">{dbInfo.sizeMB}</p>
-                    </div>
-                </div>
 
-                {/* Database Configuration Inputs */}
-                <div className="space-y-4 mb-6 pt-4 border-t border-slate-800">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-400">Retention Days (Sing-Box)</label>
-                            <input
-                                type="number"
-                                min={1}
-                                value={features.retention_days ?? 90}
-                                onChange={e => setFeatures(prev => ({ ...prev, retention_days: parseInt(e.target.value) }))}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-400">Retention Days (Wireguard)</label>
-                            <input
-                                type="number"
-                                min={1}
-                                value={features.wg_retention_days ?? 30}
-                                onChange={e => setFeatures(prev => ({ ...prev, wg_retention_days: parseInt(e.target.value) }))}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-400">SB Interval (s)</label>
-                            <input
-                                type="number"
-                                min={15}
-                                value={features.sampler_interval_sec ?? 120}
-                                onChange={e => setFeatures(prev => ({ ...prev, sampler_interval_sec: parseInt(e.target.value) }))}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-400">WG Interval (s)</label>
-                            <input
-                                type="number"
-                                min={15}
-                                value={features.wg_sampler_interval_sec ?? 60}
-                                onChange={e => setFeatures(prev => ({ ...prev, wg_sampler_interval_sec: parseInt(e.target.value) }))}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                            />
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-400">Aggregation Days</label>
-                            <input
-                                type="number"
-                                min={1}
-                                value={features.aggregation_days ?? 7}
-                                onChange={e => setFeatures(prev => ({ ...prev, aggregation_days: parseInt(e.target.value) }))}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                            />
-                        </div>
-                    </div>
-                    <div className="space-y-1">
-                        <label className="text-xs font-medium text-slate-400">Active Threshold (Bytes)</label>
-                        <input
-                            type="number"
-                            min={0}
-                            value={features.active_threshold_bytes ?? 1024}
-                            onChange={e => setFeatures(prev => ({ ...prev, active_threshold_bytes: parseInt(e.target.value) }))}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                        />
-                    </div>
-                </div>
-
-                <div className="space-y-3">
-                    <Button
-                        onClick={handlePruneNow}
-                        disabled={!features.retention_enabled}
-                        variant="secondary"
-                        className="w-full"
-                    >
-                        Prune Database Now
-                    </Button>
-                    <div className="flex gap-2">
-                        <Button
-                            onClick={handleRunSampler}
-                            disabled={samplerRunning}
-                            className="flex-1"
-                            isLoading={samplerRunning}
-                            variant="primary"
-                        >
-                            Run Sampler
-                        </Button>
-                        <Button
-                            onClick={handleTogglePause}
-                            variant="secondary"
-                            className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
-                        >
-                            {features.sampler_paused ? 'Resume' : 'Pause'}
-                        </Button>
-                    </div>
-                </div>
-            </Card>
-
-            <Card
-                title="Sampler History"
-                action={
-                    <select
-                        value={historyLimit}
-                        onChange={e => setHistoryLimit(parseInt(e.target.value))}
-                        className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
-                    >
-                        <option value={5}>Last 5</option>
-                        <option value={10}>Last 10</option>
-                        <option value={20}>Last 20</option>
-                    </select>
-                }
-            >
-                <div className="space-y-0 text-sm">
-                    {samplerHistory.length === 0 ? (
-                        <p className="text-slate-500 text-xs italic">No history available</p>
-                    ) : (
-                        samplerHistory.map((run, idx) => (
-                            <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
-                                            {run.source === 'wireguard' ? 'WG' : 'Proxy'}
-                                        </span>
-                                    </div>
-                                    {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
-                                </div>
-                                <div className="text-right">
-                                    <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
-                                    <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
-                                </div>
+                    {/* Database Configuration Inputs */}
+                    <div className="space-y-4 mb-6 pt-4 border-t border-slate-800">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Retention Days (Sing-Box)</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={features.retention_days ?? 90}
+                                    onChange={e => setFeatures(prev => ({ ...prev, retention_days: parseInt(e.target.value) }))}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
                             </div>
-                        ))
-                    )}
-                </div>
-            </Card>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Retention Days (Wireguard)</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={features.wg_retention_days ?? 30}
+                                    onChange={e => setFeatures(prev => ({ ...prev, wg_retention_days: parseInt(e.target.value) }))}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">SB Interval (s)</label>
+                                <input
+                                    type="number"
+                                    min={15}
+                                    value={features.sampler_interval_sec ?? 120}
+                                    onChange={e => setFeatures(prev => ({ ...prev, sampler_interval_sec: parseInt(e.target.value) }))}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">WG Interval (s)</label>
+                                <input
+                                    type="number"
+                                    min={15}
+                                    value={features.wg_sampler_interval_sec ?? 60}
+                                    onChange={e => setFeatures(prev => ({ ...prev, wg_sampler_interval_sec: parseInt(e.target.value) }))}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Aggregation Days</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={features.aggregation_days ?? 7}
+                                    onChange={e => setFeatures(prev => ({ ...prev, aggregation_days: parseInt(e.target.value) }))}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-400">Active Threshold (Bytes)</label>
+                            <input
+                                type="number"
+                                min={0}
+                                value={features.active_threshold_bytes ?? 1024}
+                                onChange={e => setFeatures(prev => ({ ...prev, active_threshold_bytes: parseInt(e.target.value) }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <Button
+                            onClick={handlePruneNow}
+                            disabled={!features.retention_enabled}
+                            variant="secondary"
+                            className="w-full"
+                        >
+                            Prune Database Now
+                        </Button>
+                        <div className="flex gap-2">
+                            <Button
+                                onClick={handleRunSampler}
+                                disabled={samplerRunning}
+                                className="flex-1"
+                                isLoading={samplerRunning}
+                                variant="primary"
+                            >
+                                Run Sampler
+                            </Button>
+                            <Button
+                                onClick={handleTogglePause}
+                                variant="secondary"
+                                className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
+                            >
+                                {features.sampler_paused ? 'Resume' : 'Pause'}
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            </div>
+
+            <div style={dbCardHeight ? { height: dbCardHeight } : undefined}>
+                <Card
+                    title="Sampler History"
+                    className="h-full flex flex-col"
+                    action={
+                        <select
+                            value={historyLimit}
+                            onChange={e => setHistoryLimit(parseInt(e.target.value))}
+                            className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
+                        >
+                            <option value={10}>Last 10</option>
+                            <option value={20}>Last 20</option>
+                            <option value={30}>Last 30</option>
+                            <option value={40}>Last 40</option>
+                            <option value={50}>Last 50</option>
+                        </select>
+                    }
+                >
+                    <div className="flex-1 min-h-0">
+                        <div className="space-y-0 text-sm h-full overflow-y-auto pr-2">
+                        {samplerHistory.length === 0 ? (
+                            <p className="text-slate-500 text-xs italic">No history available</p>
+                        ) : (
+                            samplerHistory.map((run, idx) => (
+                                <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
+                                                {run.source === 'wireguard' ? 'WG' : 'Proxy'}
+                                            </span>
+                                        </div>
+                                        {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
+                                    </div>
+                                    <div className="text-right">
+                                        <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
+                                        <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                        </div>
+                    </div>
+                </Card>
+            </div>
         </div>
     )
 }
