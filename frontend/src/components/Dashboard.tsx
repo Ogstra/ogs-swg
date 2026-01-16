@@ -4,7 +4,6 @@ import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from './ui/Card'
 import { Button } from './ui/Button'
-import { Badge } from './ui/Badge'
 
 const DASHBOARD_PREF_KEY = 'dashboard_prefs'
 
@@ -195,12 +194,6 @@ export default function Dashboard() {
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">Dashboard</h1>
                     <div className="flex items-center gap-2 mt-1">
-                        <Badge variant={status.singbox ? 'success' : 'error'} className="text-[10px]">
-                            sing-box: {status.singbox ? 'Running' : 'Stopped'}
-                        </Badge>
-                        <Badge variant={status.wireguard ? 'success' : 'error'} className="text-[10px]">
-                            WireGuard: {status.wireguard ? 'Running' : 'Stopped'}
-                        </Badge>
                         <span className="text-slate-500 text-xs hidden sm:inline">Updated {lastUpdated.toLocaleTimeString()}</span>
                     </div>
                 </div>

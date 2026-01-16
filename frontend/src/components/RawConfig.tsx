@@ -261,7 +261,7 @@ export default function RawConfig() {
                     <AlertTriangle size={16} className="shrink-0 mt-0.5 opacity-70" />
                     <div>
                         <p className="font-bold">Caution</p>
-                        <p className="opacity-80 leading-relaxed">Editing raw configurations can break your service. Search (Ctrl/Cmd+F) available. Validate syntax before saving.</p>
+                        <p className="opacity-80 leading-relaxed">Editing raw configurations can break your service. Validate syntax before saving.</p>
                     </div>
                 </div>
 

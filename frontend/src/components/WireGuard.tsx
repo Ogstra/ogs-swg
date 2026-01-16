@@ -296,7 +296,6 @@ export default function WireGuard() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white">WireGuard</h1>
-                    <p className="text-slate-400 text-sm mt-1">Manage WireGuard peers and settings</p>
                 </div>
                 {pendingRestart && (
                     <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 px-4 py-2 rounded-lg">

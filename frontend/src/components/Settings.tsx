@@ -441,7 +441,6 @@ function GeneralTab({
                             />
                             <div>
                                 <div className="font-semibold text-white">Enable sing-box</div>
-                                <div className="text-xs text-slate-400 mt-1">Core VLESS/Trojan proxy service</div>
                             </div>
                         </label>
                         <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
@@ -453,7 +452,6 @@ function GeneralTab({
                             />
                             <div>
                                 <div className="font-semibold text-white">Enable WireGuard</div>
-                                <div className="text-xs text-slate-400 mt-1">VPN tunnel interface</div>
                             </div>
                         </label>
                         <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
