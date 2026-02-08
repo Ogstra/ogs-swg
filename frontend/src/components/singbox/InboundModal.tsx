@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Save } from 'lucide-react'
-import { api } from '../../api'
+import { api } from '../../services/api'
 
 interface InboundModalProps {
     isOpen: boolean

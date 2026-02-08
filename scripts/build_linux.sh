@@ -20,7 +20,7 @@ for arg in "$@"; do
   esac
 done
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build"
 
 pick_bin() {
@@ -63,7 +63,7 @@ if [[ "$SKIP_BACKEND" != true ]]; then
   BIN_NAME="ogs-swg-${GOOS}-${GOARCH}"
   mkdir -p "$BUILD_DIR"
   echo ">>> Backend build (${BIN_NAME})"
-  CGO_ENABLED=0 "$GO_BIN" build $GO_MOD_FLAG -o "$BUILD_DIR/$BIN_NAME" "$ROOT_DIR/main.go"
+  CGO_ENABLED=0 "$GO_BIN" build $GO_MOD_FLAG -o "$BUILD_DIR/$BIN_NAME" "$ROOT_DIR/cmd/server/main.go"
 fi
 
 if [[ "$SKIP_FRONTEND" != true ]]; then

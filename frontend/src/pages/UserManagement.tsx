@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { api, UserStatus, CreateUserRequest } from '../api'
+import { api, UserStatus, CreateUserRequest } from '../services/api'
 import { Users, Plus, Trash2, RefreshCw, Edit, QrCode, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
-import { Button } from './ui/Button'
-import { Badge } from './ui/Badge'
-import { Modal } from './ui/Modal'
+import { Button } from '../components/ui/Button'
+import { Badge } from '../components/ui/Badge'
+import { Modal } from '../components/ui/Modal'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 

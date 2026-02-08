@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ogstra/ogs-swg/core"
+	"github.com/Ogstra/ogs-swg/internal/core"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { api } from '../services/api'
 import { FileJson, Copy, Check } from 'lucide-react'
 
 export default function ConfigViewer() {
@@ -11,7 +11,7 @@ export default function ConfigViewer() {
         api.getConfig().then(data => {
             setConfig(JSON.stringify(data, null, 2))
             setLoading(false)
-        }).catch(err => {
+        }).catch((err: any) => {
             console.error(err)
             setConfig('Error loading config: ' + err.message)
             setLoading(false)

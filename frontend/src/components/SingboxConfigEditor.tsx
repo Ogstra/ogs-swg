@@ -4,7 +4,7 @@ import Editor from 'react-simple-code-editor'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
 import 'prismjs/themes/prism-tomorrow.css'
-import { api } from '../api'
+import { api } from '../services/api'
 import InboundList from './singbox/InboundList'
 import { Card } from './ui/Card'
 
@@ -54,7 +54,7 @@ export default function SingboxConfigEditor() {
                 setConfig(content)
                 setOriginalConfig(content)
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to load config:', err)
             // alert('Failed to load config') // Don't block UI with alerts on load
         } finally {
@@ -214,7 +214,7 @@ export default function SingboxConfigEditor() {
                 setRules([])
                 setPreservedRulesCount(0)
             }
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to load rules', err)
             alert('Failed to load rules')
         } finally {
@@ -250,7 +250,7 @@ export default function SingboxConfigEditor() {
             await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
             alert('Rules saved')
             await loadRules()
-        } catch (err) {
+        } catch (err: any) {
             console.error('Failed to save rules', err)
             alert('Failed to save rules')
         } finally {

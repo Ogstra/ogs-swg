@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Ogstra/ogs-swg/core"
+	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
 func (s *Server) handleGetSingboxConfig(w http.ResponseWriter, r *http.Request) {

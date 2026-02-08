@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Switch to project root
+cd "$(dirname "$0")/.."
+
 # Simple build helper to produce binaries for macOS (host) and Linux.
-# Usage: ./build_macos_linux.sh
+# Usage: ./scripts/build_macos_linux.sh
 # Env vars:
 #   TARGETS="darwin/arm64 linux/amd64"  # override target matrix
 #   OUTPUT_DIR="./build"                 # where build artifacts are placed
@@ -47,7 +50,7 @@ for target in $TARGETS; do
   GOARCH="${target#*/}"
   BIN="${OUTPUT_DIR}/ogs-swg-${GOOS}-${GOARCH}"
   echo "  -> $GOOS/$GOARCH => $BIN"
-  GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build $GO_MOD_FLAG -o "$BIN" -ldflags="-s -w" main.go
+  GOOS="$GOOS" GOARCH="$GOARCH" CGO_ENABLED=0 go build $GO_MOD_FLAG -o "$BIN" -ldflags="-s -w" cmd/server/main.go
 done
 
 echo "Builds ready in $OUTPUT_DIR"

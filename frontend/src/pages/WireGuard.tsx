@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../api'
+import { api } from '../services/api'
 import { Plus, Trash2, Settings, Edit, ArrowUp, ArrowDown, Shield, ArrowUpDown, QrCode, RotateCcw } from 'lucide-react'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'

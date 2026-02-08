@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { api } from '../api'
+import { api } from '../services/api'
 import { Terminal, RefreshCw, Search } from 'lucide-react'
 
 export default function LogViewer() {

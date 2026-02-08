@@ -5,7 +5,7 @@ import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
 import 'prismjs/components/prism-ini'
 import 'prismjs/themes/prism-tomorrow.css'
-import { api } from '../api'
+import { api } from '../services/api'
 
 type TabId = 'raw-singbox' | 'raw-wireguard'
 

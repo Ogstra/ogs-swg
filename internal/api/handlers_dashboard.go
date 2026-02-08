@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Ogstra/ogs-swg/core"
+	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
 // DashboardData Structs

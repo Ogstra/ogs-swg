@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Edit, Trash2, Shield, Radio } from 'lucide-react'
-import { api } from '../../api'
+import { api } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'

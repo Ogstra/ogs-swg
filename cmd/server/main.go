@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Ogstra/ogs-swg/api"
-	"github.com/Ogstra/ogs-swg/core"
+	"github.com/Ogstra/ogs-swg/internal/api"
+	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
 func main() {

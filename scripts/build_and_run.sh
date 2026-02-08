@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Switch to project root
+cd "$(dirname "$0")/.."
+
 # Colors
 GREEN='\033[0;32m'
 NC='\033[0m'
@@ -16,7 +19,7 @@ GOARCH="$(go env GOARCH)"
 BIN_NAME="ogs-swg-${GOOS}-${GOARCH}"
 BUILD_DIR="./build"
 mkdir -p "$BUILD_DIR"
-go build -mod=vendor -o "$BUILD_DIR/$BIN_NAME" main.go
+go build -mod=vendor -o "$BUILD_DIR/$BIN_NAME" cmd/server/main.go
 
 echo -e "${GREEN}>>> Step 2: Building Frontend (React)...${NC}"
 cd frontend

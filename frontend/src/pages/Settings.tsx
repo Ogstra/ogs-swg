@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { api, FeatureFlags } from '../api'
+import { api, FeatureFlags } from '../services/api'
 import { Save, RefreshCw, Lock, User } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
-import { Card } from './ui/Card'
-import { Button } from './ui/Button'
-import { Badge } from './ui/Badge'
+import { Card } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
+import { Badge } from '../components/ui/Badge'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import SingboxConfigEditor from './SingboxConfigEditor'
-import { Tabs } from './ui/Tabs'
+import SingboxConfigEditor from '../components/SingboxConfigEditor'
+import { Tabs } from '../components/ui/Tabs'
 import { Database, Shield, Settings as SettingsIcon, Server } from 'lucide-react'
 
 type ServiceStatus = { singbox: boolean; wireguard: boolean }
@@ -868,27 +868,27 @@ function DatabaseTab({
                 >
                     <div className="flex-1 min-h-0">
                         <div className="space-y-0 text-sm h-full overflow-y-auto pr-2">
-                        {samplerHistory.length === 0 ? (
-                            <p className="text-slate-500 text-xs italic">No history available</p>
-                        ) : (
-                            samplerHistory.map((run, idx) => (
-                                <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
-                                                {run.source === 'wireguard' ? 'WG' : 'Proxy'}
-                                            </span>
+                            {samplerHistory.length === 0 ? (
+                                <p className="text-slate-500 text-xs italic">No history available</p>
+                            ) : (
+                                samplerHistory.map((run, idx) => (
+                                    <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
+                                        <div>
+                                            <div className="flex items-center gap-2">
+                                                <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
+                                                    {run.source === 'wireguard' ? 'WG' : 'Proxy'}
+                                                </span>
+                                            </div>
+                                            {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
                                         </div>
-                                        {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
+                                        <div className="text-right">
+                                            <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
+                                            <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
+                                        </div>
                                     </div>
-                                    <div className="text-right">
-                                        <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
-                                        <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
-                                    </div>
-                                </div>
-                            ))
-                        )}
+                                ))
+                            )}
                         </div>
                     </div>
                 </Card>

@@ -1,17 +1,17 @@
 import { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './context/ToastContext';
-import Dashboard from './components/Dashboard';
-import { Login } from './components/Login';
+import Dashboard from './pages/Dashboard';
+import { Login } from './pages/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
-import { Layout } from './components/Layout';
+import { Layout } from './layouts/Layout';
 
-const UserManagement = lazy(() => import('./components/UserManagement'));
-const WireGuard = lazy(() => import('./components/WireGuard'));
-const Settings = lazy(() => import('./components/Settings'));
-const LogViewer = lazy(() => import('./components/LogViewer'));
-const RawConfig = lazy(() => import('./components/RawConfig'));
+const UserManagement = lazy(() => import('./pages/UserManagement'));
+const WireGuard = lazy(() => import('./pages/WireGuard'));
+const Settings = lazy(() => import('./pages/Settings'));
+const LogViewer = lazy(() => import('./pages/LogViewer'));
+const RawConfig = lazy(() => import('./pages/RawConfig'));
 
 const RouteFallback = () => (
     <div className="p-8 text-center text-slate-400">Loading...</div>

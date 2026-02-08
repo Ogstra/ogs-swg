@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../api'
+import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Card } from './ui/Card'
-import { Button } from './ui/Button'
+import { Card } from '../components/ui/Card'
+import { Button } from '../components/ui/Button'
 
 const DASHBOARD_PREF_KEY = 'dashboard_prefs'
 

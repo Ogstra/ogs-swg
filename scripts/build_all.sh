@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Switch to project root
+cd "$(dirname "$0")/.."
+
 SKIP_BACKEND=false
 SKIP_FRONTEND=false
 
@@ -39,7 +42,7 @@ if [ "$SKIP_BACKEND" = false ]; then
   BIN_NAME="ogs-swg-${GOOS}-${GOARCH}"
   mkdir -p "$BUILD_DIR"
   echo ">>> Backend build (${BIN_NAME})"
-  go build $GO_MOD_FLAG -o "$BUILD_DIR/$BIN_NAME" main.go
+  go build $GO_MOD_FLAG -o "$BUILD_DIR/$BIN_NAME" cmd/server/main.go
 fi
 
 if [ "$SKIP_FRONTEND" = false ]; then
