@@ -1,0 +1,17 @@
+.git
+.github
+.vscode
+.idea
+node_modules
+frontend/node_modules
+frontend/dist
+build
+dist
+*.log
+.env
+.DS_Store
+github_deploy_key
+github_deploy_key.pub
+config/ssh_key
+config/ssh_key.pub
+data
