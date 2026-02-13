@@ -62,6 +62,9 @@ jobs:
             # Navigate to deployment directory (create if missing)
             mkdir -p ${{ secrets.DEPLOY_PATH }}/config
             mkdir -p ${{ secrets.DEPLOY_PATH }}/data
+            # Ensure system config directories exist
+            sudo mkdir -p /etc/sing-box
+            sudo mkdir -p /etc/wireguard
             cd ${{ secrets.DEPLOY_PATH }}
             
             # Clean up potential directory conflict
