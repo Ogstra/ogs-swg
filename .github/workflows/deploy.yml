@@ -122,6 +122,7 @@ jobs:
           port: ${{ secrets.VPS_PORT }}
           script: |
             set -euo pipefail
+            export COMPOSE_IGNORE_ORPHANS=1
 
             # Navigate to deployment directory (create if missing)
             mkdir -p ${{ secrets.DEPLOY_PATH }}/config
@@ -207,11 +208,19 @@ jobs:
 
             # Deploy target slot
             docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml pull
-            docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml up -d
+            if ! docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml up -d; then
+              echo "Target slot ogs-swg-${TARGET} did not stabilize on initial up; continuing with health probes."
+            fi
 
             # Healthcheck target slot (expects 401 for invalid login)
             HEALTH_OK=0
             for i in $(seq 1 30); do
+              TARGET_STATE="$(docker inspect -f '{{.State.Status}}' "ogs-swg-${TARGET}" 2>/dev/null || true)"
+              if [ "$TARGET_STATE" = "exited" ] || [ "$TARGET_STATE" = "dead" ]; then
+                echo "Target slot ogs-swg-${TARGET} is in terminal state: ${TARGET_STATE}"
+                break
+              fi
+
               CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
                 -s -o /dev/null -w '%{http_code}' \
                 -X POST "http://ogs-swg-${TARGET}:8080/api/login" \
@@ -226,6 +235,7 @@ jobs:
 
             if [ "$HEALTH_OK" -ne 1 ]; then
               echo "Target slot ogs-swg-${TARGET} failed healthcheck. Keeping current active slot: ${ACTIVE}."
+              docker ps -a --filter "name=ogs-swg-${TARGET}" || true
               docker logs --tail 100 "ogs-swg-${TARGET}" || true
               exit 1
             fi
