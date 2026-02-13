@@ -4,9 +4,9 @@ services:
     container_name: ogs-swg-green
     restart: unless-stopped
     volumes:
-      - ./data:/app/data
-      - ./config/ssh_key:/app/secrets/ssh_key:ro
-      - ./config/known_hosts:/app/secrets/known_hosts:ro
+      - ../../data:/app/data
+      - ../../config/ssh_key:/app/secrets/ssh_key:ro
+      - ../../config/known_hosts:/app/secrets/known_hosts:ro
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
     environment:

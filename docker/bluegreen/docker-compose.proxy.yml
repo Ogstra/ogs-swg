@@ -6,7 +6,7 @@ services:
     ports:
       - "${OGS_PROXY_HTTP_PORT:-8080}:80"
     volumes:
-      - ./docker/bluegreen/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - ogs_bg_net
 
