@@ -157,6 +157,27 @@ jobs:
             OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
             EOF
 
+            # Validate required runtime SSH inputs before any rollout
+            RUNTIME_SSH_USER="${{ secrets.OGS_AGENT_USER }}"
+            RUNTIME_SSH_HOST="${{ secrets.VPS_HOST }}"
+            RUNTIME_SSH_PORT="${{ secrets.VPS_PORT }}"
+            if [ -z "${RUNTIME_SSH_USER}" ]; then
+              echo "Secret OGS_AGENT_USER is empty. Aborting deploy."
+              exit 1
+            fi
+            if [ ! -s config/ssh_key ] || [ "$(wc -c < config/ssh_key)" -lt 100 ]; then
+              echo "Runtime ssh_key is missing or too small. Check OGS_AGENT_SSH_KEY secret."
+              exit 1
+            fi
+            if [ ! -s config/known_hosts ] || [ "$(wc -c < config/known_hosts)" -lt 40 ]; then
+              echo "Runtime known_hosts is missing or too small. Check OGS_SSH_KNOWN_HOSTS_CONTENT secret."
+              exit 1
+            fi
+            if ! grep -Eq "(\\[${RUNTIME_SSH_HOST}\\]:${RUNTIME_SSH_PORT}|${RUNTIME_SSH_HOST})" config/known_hosts; then
+              echo "known_hosts does not contain expected SSH target ${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}. Aborting deploy."
+              exit 1
+            fi
+
             PROXY_PORT="${{ secrets.OGS_PORT || '8080' }}"
             PORT_OWNERS="$(docker ps --filter "publish=${PROXY_PORT}" --format '{{.Names}}')"
             if [ -n "$PORT_OWNERS" ] && ! echo "$PORT_OWNERS" | grep -qx 'ogs-swg-proxy'; then
