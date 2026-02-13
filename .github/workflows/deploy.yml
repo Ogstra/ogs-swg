@@ -3,23 +3,15 @@ name: Build and Deploy
 on:
   push:
     branches: [ "main" ]
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
-      - '.dockerignore'
-      - 'LICENSE'
-      - 'docs/**'
-      - 'assets/**'
-      - 'scripts/**'
-      - 'docker/**'
-      - 'config/**' # Only local dev configs
-      - 'data/**'   # Only local dev data
-      - 'local-data/**'
-      - 'build/**'
-      - '*.json'    # config.json, token.json etc are local
-      - '*.txt'     # cookies.txt etc
-      - '*.bak'
-      - '.env.example'
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'frontend/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
 
 jobs:
