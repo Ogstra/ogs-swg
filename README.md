@@ -83,8 +83,8 @@ Required GitHub secrets for deploy:
 - `OGS_AGENT_SSH_KEY` (app runtime key for panel -> managed node)
 - `OGS_SSH_KNOWN_HOSTS_CONTENT` (known_hosts content for runtime SSH trust)
 - `OGS_AGENT_USER`
-- `OGS_ADMIN_USER`
-- `OGS_ADMIN_PASSWORD`
+- `OGS_API_KEY` (recommended; used by deploy to validate `/api/diag/ssh`)
+- `OGS_ADMIN_USER` and `OGS_ADMIN_PASSWORD` (optional fallback only if `OGS_API_KEY` is not set)
 - `OGS_PORT` (optional, defaults to `8080`)
 
 Manual force deploy:
@@ -162,6 +162,7 @@ Configure the application via `config.json` or the Settings UI:
 
 ```json
 {
+  "api_key": "CHANGE_ME_STRONG_RANDOM_API_KEY",
   "ssh_host": "10.0.0.5",
   "ssh_port": 22,
   "ssh_user": "ogs_agent",
@@ -184,6 +185,8 @@ export OGS_ADMIN_PASSWORD='use-a-strong-random-password'
 ```
 
 Without `OGS_ADMIN_PASSWORD`, startup is intentionally blocked to avoid insecure default credentials.
+
+If you later remove admin users for operational reasons, keep `api_key` configured and set `OGS_API_KEY` in GitHub Actions secrets so deploy diagnostics can still authenticate.
 
 ## Supported Protocols
 
