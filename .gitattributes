@@ -1,0 +1,3 @@
+# Exclude vendored dependencies from GitHub language statistics
+node_modules/** linguist-vendored
+**/node_modules/** linguist-vendored
