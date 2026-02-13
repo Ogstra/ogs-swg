@@ -63,6 +63,7 @@ jobs:
             
             # Create .env from secrets (Optional but recommended)
             echo "OGS_BIND=:8080" > .env
+            echo "OGS_PORT=${{ secrets.OGS_PORT }}" >> .env
             echo "OGS_DB_PATH=/app/data/stats.db" >> .env
             echo "OGS_ACCESS_LOG_PATH=/app/data/access.log" >> .env
             echo "OGS_SSH_HOST=${{ secrets.VPS_HOST }}" >> .env
