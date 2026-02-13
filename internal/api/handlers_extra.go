@@ -1467,7 +1467,7 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"log_source":              s.config.LogSource,
 		"access_log_path":         s.config.AccessLogPath,
 		"systemctl_available":     s.executor != nil,
-		"journalctl_available":    hasJournalctl(),
+		"journalctl_available":    s.executor != nil,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

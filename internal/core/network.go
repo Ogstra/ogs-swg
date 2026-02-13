@@ -1,18 +1,60 @@
 package core
 
 import (
+	"io"
 	"net"
+	"net/http"
+	"os"
 	"strings"
+	"time"
 )
 
-// DetectPublicIP attempts to detect the public IP address from network interfaces
+// DetectPublicIP attempts to detect the public IP address
+// It priorities:
+// 1. OGS_PUBLIC_IP environment variable
+// 2. External IP detection services (HTTP)
+// 3. Local interface inspection (fallback)
 func DetectPublicIP() string {
+	// 1. Check Env Var
+	if env := strings.TrimSpace(os.Getenv("OGS_PUBLIC_IP")); env != "" {
+		return env
+	}
+
+	// 2. Client for external requests with short timeout
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	services := []string{
+		"https://api.ipify.org?format=text",
+		"https://ifconfig.me/ip",
+		"https://icanhazip.com",
+		"http://checkip.amazonaws.com",
+	}
+
+	for _, url := range services {
+		resp, err := client.Get(url)
+		if err == nil {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			ip := strings.TrimSpace(string(body))
+			if ip != "" && net.ParseIP(ip) != nil {
+				return ip
+			}
+		}
+	}
+
+	// 3. Fallback to local interfaces (mostly for non-container usage)
+	return detectLocalIP()
+}
+
+func detectLocalIP() string {
 	// Try to get IP from eth0 first
-	if ip := getIPFromInterface("eth0"); ip != "" {
+	if ip := getIPFromInterface("eth0"); ip != "" && !isPrivateIP(ip) {
 		return ip
 	}
 	// Fallback to ens3 (common in cloud VMs)
-	if ip := getIPFromInterface("ens3"); ip != "" {
+	if ip := getIPFromInterface("ens3"); ip != "" && !isPrivateIP(ip) {
 		return ip
 	}
 	// Fallback to any non-loopback, non-private interface
@@ -39,7 +81,7 @@ func DetectPublicIP() string {
 			}
 		}
 	}
-	return "127.0.0.1"
+	return ""
 }
 
 func getIPFromInterface(name string) string {
