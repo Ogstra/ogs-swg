@@ -1,16 +1,19 @@
 # OGS-SWG Panel
 
-A web-based control panel for managing Sing-box users (VLESS/Reality) and monitoring WireGuard traffic. Supports both **local execution** (bare-metal) and **remote management** via SSH (Docker/AWS).
+A web-based control panel for managing Sing-box users (VLESS/Reality) and monitoring WireGuard traffic. This system supports both **local execution** (bare-metal) and **remote management** via SSH (Docker/AWS).
+
+![Dashboard Preview](assets/dashboard.png)
 
 ## Architecture
 
-This application uses a modular **System Executor** architecture:
-*   **Local Mode**: Runs commands (`systemctl`, `wg`, `ip`) directly on the host. Suitable for bare-metal installs (Debian/Ubuntu).
-*   **Remote Mode (SSH)**: Connects to a remote host via SSH to manage services and read logs. Suitable for **Docker**, **AWS ECS/Fargate**, or splitting the panel from the VPN node.
+This application utilizes a modular **System Executor** architecture:
+
+*   **Local Mode**: Executes commands (`systemctl`, `wg`, `ip`) directly on the host. Ideal for bare-metal installations on Debian/Ubuntu.
+*   **Remote Mode (SSH)**: Connects to a remote host via SSH to manage services and retrieve logs. Suitable for containerized environments (Docker, AWS ECS/Fargate) or distributed architectures.
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
 ### Option 1: Docker (Recommended)
 
@@ -36,18 +39,23 @@ This application uses a modular **System Executor** architecture:
           - "8080:8080"
         volumes:
           - ./data:/app/data
-          - ./config/ssh_key:/app/data/ssh_key:ro
+          - ./config/ssh_key:/app/secrets/ssh_key:ro
+          # Mount host configs for direct management
+          - /etc/sing-box:/etc/sing-box
+          - /etc/wireguard:/etc/wireguard
         environment:
           - OGS_DB_PATH=/app/data/stats.db
+          - OGS_SSH_KEY_PATH=/app/secrets/ssh_key
+    ```
+    
+    Start the container:
+    ```bash
+    docker compose up -d
     ```
 
-
-```bash
-docker compose up -d
-```
-
 ### Option 2: Bare Metal
-Build and run directly:
+
+Build and run the application directly:
 ```bash
 go build -o ogs-swg ./cmd/server
 ./ogs-swg -config config.json
@@ -55,18 +63,20 @@ go build -o ogs-swg ./cmd/server
 
 ---
 
-## 🔒 Security Setup (Target Host)
+## Security Setup (Target Host)
 
-For the **Remote Mode** to work securely, you must create a restricted user on the VPN node. Do NOT use root directly.
+For **Remote Mode** to function securely, a restricted user account must be configured on the VPN node. Do not use the root account directly.
 
 ### 1. Create the Agent User
+
 On your VPN server (Target Host):
 ```bash
 sudo useradd -m -s /bin/bash ogs_agent
 ```
 
 ### 2. Configure SSH Access
-Add the public key generated in the deployment step:
+
+Add the public key generated during the deployment step:
 ```bash
 sudo mkdir -p /home/ogs_agent/.ssh
 echo "YOUR_PUBLIC_KEY_CONTENT" | sudo tee -a /home/ogs_agent/.ssh/authorized_keys
@@ -76,13 +86,14 @@ sudo chmod 600 /home/ogs_agent/.ssh/authorized_keys
 ```
 
 ### 3. Configure Sudo Privileges (Least Privilege)
-This application requires limited `sudo` access to manage services. Create a sudoers file:
+
+The application requires limited `sudo` access to manage services. Create a sudoers file:
 
 ```bash
 sudo visudo -f /etc/sudoers.d/ogs_agent
 ```
 
-Add the following configuration (replace `/usr/bin/wg` etc. with actual paths if different):
+Add the following configuration (verify paths for your distribution):
 
 ```sudoers
 # Allow ogs_agent to manage specific services and files without password
@@ -101,20 +112,20 @@ ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -n *
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/journalctl -u sing-box *
 ```
 
-*Note: The sysctl and wg patterns use wildcards but are validated strictly within the application code (Whitelist).*
+*Note: The sysctl and wg patterns use wildcards but are validated strictly within the application code via a whitelist.*
 
 ---
 
 ## Configuration
 
-In `config.json` or via UI settings:
+Configure the application via `config.json` or the Settings UI:
 
 ```json
 {
   "ssh_host": "10.0.0.5",
   "ssh_port": 22,
   "ssh_user": "ogs_agent",
-  "ssh_key_path": "/app/data/ssh_key",
+  "ssh_key_path": "/app/secrets/ssh_key",
   "sysctl_whitelist": [
     "net.ipv4.ip_forward",
     "net.ipv6.conf.all.forwarding"
@@ -122,7 +133,7 @@ In `config.json` or via UI settings:
 }
 ```
 
-## Supported protocols
+## Supported Protocols
 
 | Protocol | Security/Mode | QR/Link | Notes |
 | --- | --- | --- | --- |
@@ -134,7 +145,7 @@ In `config.json` or via UI settings:
 
 **Stable**
 - Real-time traffic monitoring
-- Multi-inbound user management for sing-box (add/edit/remove per inbound)
+- Multi-inbound user management for Sing-box (add/edit/remove per inbound)
 - WireGuard peer management
 - QR/link generation per inbound (VLESS/VMess/Trojan) and WireGuard
 - Sing-box log viewer with filtering
@@ -143,9 +154,9 @@ In `config.json` or via UI settings:
 - **Sysctl Management** (View/Edit allowed keys)
 
 **Experimental**
-- VMess/Trojan inbound creation (sing-box validation still required)
-- Self-signed TLS certificate generator (Tools)
-- Raw configuration editor with find + backup/restore
+- VMess/Trojan inbound creation (Sing-box validation still required)
+- Self-signed TLS certificate generator
+- Raw configuration editor
 
 ## License
 
