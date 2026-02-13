@@ -184,27 +184,27 @@ jobs:
               SYSCTL_BIN="$(command -v sysctl || echo /usr/sbin/sysctl)"
               SUDOERS_TMP="$(mktemp)"
               SUDOERS_PATH="/etc/sudoers.d/ogs-swg-${RUNTIME_SSH_USER}"
-              cat > "${SUDOERS_TMP}" <<EOF
-Defaults:${RUNTIME_SSH_USER} !requiretty
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart sing-box
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop sing-box
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start sing-box
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active sing-box
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart wg-quick@wg0
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop wg-quick@wg0
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start wg-quick@wg0
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active wg-quick@wg0
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} show
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} show all dump
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} syncconf *
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/wireguard/wg0.conf
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/wireguard/wg0.conf
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/sing-box/config.json
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/sing-box/config.json
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -w *
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -n *
-${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${JOURNALCTL_BIN} -u sing-box *
-EOF
+              {
+                echo "Defaults:${RUNTIME_SSH_USER} !requiretty"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart sing-box"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop sing-box"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start sing-box"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active sing-box"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart wg-quick@wg0"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop wg-quick@wg0"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start wg-quick@wg0"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active wg-quick@wg0"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} show"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} show all dump"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} syncconf *"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/wireguard/wg0.conf"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/wireguard/wg0.conf"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/sing-box/config.json"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/sing-box/config.json"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -w *"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -n *"
+                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${JOURNALCTL_BIN} -u sing-box *"
+              } > "${SUDOERS_TMP}"
               as_root visudo -cf "${SUDOERS_TMP}"
               as_root mkdir -p /etc/sudoers.d
               as_root install -m 440 "${SUDOERS_TMP}" "${SUDOERS_PATH}"
