@@ -1302,15 +1302,26 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 			limit = v
 		}
 	}
+
 	var lines []string
 	var err error
+
 	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		lines, err = readJournalLines("sing-box", limit)
+		if s.executor != nil {
+			lines, err = s.executor.ReadJournal(r.Context(), "sing-box", limit)
+		} else {
+			lines, err = readJournalLines("sing-box", limit)
+		}
 	} else {
 		lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, limit)
 		if err != nil && s.config.LogSource == "file" {
 			// Fallback to journal if file missing or unreadable
-			if linesJ, jErr := readJournalLines("sing-box", limit); jErr == nil {
+			if s.executor != nil {
+				if linesJ, jErr := s.executor.ReadJournal(r.Context(), "sing-box", limit); jErr == nil {
+					lines = linesJ
+					err = nil
+				}
+			} else if linesJ, jErr := readJournalLines("sing-box", limit); jErr == nil {
 				lines = linesJ
 				err = nil
 			}
@@ -1381,13 +1392,23 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 
 	var lines []string
 	var err error
+
 	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		lines, err = searchJournalLines("sing-box", q, effectiveLimit)
+		if s.executor != nil {
+			lines, err = s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit)
+		} else {
+			lines, err = searchJournalLines("sing-box", q, effectiveLimit)
+		}
 	} else {
 		lines, err = searchFileLines(s.config.AccessLogPath, q, effectiveLimit)
 		if (err != nil || len(lines) == 0) && s.config.LogSource == "file" {
 			// Fallback to journal if file missing/unreadable or no matches
-			if linesJ, jErr := searchJournalLines("sing-box", q, effectiveLimit); jErr == nil {
+			if s.executor != nil {
+				if linesJ, jErr := s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit); jErr == nil {
+					lines = linesJ
+					err = nil
+				}
+			} else if linesJ, jErr := searchJournalLines("sing-box", q, effectiveLimit); jErr == nil {
 				lines = linesJ
 				err = nil
 			}

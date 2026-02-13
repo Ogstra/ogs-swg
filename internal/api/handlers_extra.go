@@ -1317,8 +1317,8 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"samples_count":               samplesCount,
 		"db_size_bytes":               dbSizeBytes,
 		"sampler_paused":              samplerPaused,
-		"systemctl_available":         hasSystemctl(),
-		"journalctl_available":        hasJournalctl(),
+		"systemctl_available":         s.executor != nil,
+		"journalctl_available":        s.executor != nil,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
