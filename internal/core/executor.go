@@ -40,6 +40,9 @@ type SystemExecutor interface {
 	// ValidateSingboxConfig validates the sing-box configuration content.
 	ValidateSingboxConfig(ctx context.Context, content []byte) error
 
+	// GetWireGuardStats retrieves WireGuard peer statistics.
+	GetWireGuardStats(ctx context.Context) (map[string]PeerStats, error)
+
 	// Lifecycle
 	// CheckConnectivity verifies if the underlying system (e.g. SSH connection) is reachable.
 	CheckConnectivity(ctx context.Context) error

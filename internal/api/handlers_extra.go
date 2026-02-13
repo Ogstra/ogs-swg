@@ -37,7 +37,12 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	stats, _ := core.GetWireGuardStats()
+	var stats map[string]core.PeerStats
+	if s.executor != nil {
+		stats, _ = s.executor.GetWireGuardStats(r.Context())
+	} else {
+		stats, _ = core.GetWireGuardStats()
+	}
 	storedPeers, _ := s.store.GetWGPeerMeta()
 
 	response := make([]PeerWithStats, 0)

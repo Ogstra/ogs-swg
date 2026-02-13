@@ -168,7 +168,16 @@ func (s *Server) runWireGuardSample() {
 	s.wgMux.Lock()
 	defer s.wgMux.Unlock()
 
-	stats, err := core.GetWireGuardStats()
+	var stats map[string]core.PeerStats
+	var err error
+
+	if s.executor != nil {
+		stats, err = s.executor.GetWireGuardStats(context.Background())
+	} else {
+		// Fallback (should typically have executor)
+		stats, err = core.GetWireGuardStats()
+	}
+
 	if err != nil {
 		log.Printf("wg sampler: failed to read stats: %v", err)
 		return

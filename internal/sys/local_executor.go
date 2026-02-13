@@ -8,6 +8,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/Ogstra/ogs-swg/internal/core"
+	"golang.zx2c4.com/wireguard/wgctrl"
 )
 
 // AllowedSysctlKeys defines the whitelist of sysctl keys that can be modified.
@@ -138,6 +141,47 @@ func (e *LocalExecutor) CheckConnectivity(ctx context.Context) error {
 func (e *LocalExecutor) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	var d net.Dialer
 	return d.DialContext(ctx, network, addr)
+}
+
+func (e *LocalExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.PeerStats, error) {
+	stats := make(map[string]core.PeerStats)
+
+	c, err := wgctrl.New()
+	if err != nil {
+		// If fails to open (e.g. not root, or kernel module not loaded), return empty or error
+		// Log/return empty to avoid crashing sampler
+		return stats, err
+	}
+	defer c.Close()
+
+	// wgctrl operations are not context-aware by default, but they are fast local calls.
+	devices, err := c.Devices()
+	if err != nil {
+		return stats, err
+	}
+
+	for _, dev := range devices {
+		for _, peer := range dev.Peers {
+			endpoint := ""
+			if peer.Endpoint != nil {
+				endpoint = peer.Endpoint.String()
+			}
+
+			handshake := peer.LastHandshakeTime.Unix()
+			if peer.LastHandshakeTime.IsZero() || handshake < 0 {
+				handshake = 0
+			}
+			stats[peer.PublicKey.String()] = core.PeerStats{
+				PublicKey:       peer.PublicKey.String(),
+				Endpoint:        endpoint,
+				LatestHandshake: handshake,
+				TransferRx:      peer.ReceiveBytes,
+				TransferTx:      peer.TransmitBytes,
+			}
+		}
+	}
+
+	return stats, nil
 }
 
 func (e *LocalExecutor) Close() error {

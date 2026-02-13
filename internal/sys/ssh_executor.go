@@ -7,6 +7,8 @@ import (
 	"io"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -291,6 +293,59 @@ func (e *SSHExecutor) Dial(ctx context.Context, network, addr string) (net.Conn,
 	}
 	// TODO: Wrap with context cancellation if needed (conn.Close() on ctx.Done())
 	return e.client.Dial(network, addr)
+}
+
+func (e *SSHExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.PeerStats, error) {
+	if err := e.ensureConnection(ctx); err != nil {
+		return nil, err
+	}
+
+	// Dump all stats: interface public-key preshared-key endpoint allowed-ips latest-handshake transfer-rx transfer-tx persistent-keepalive
+	output, err := e.runCommand(ctx, "sudo wg show all dump")
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute wg show: %w", err)
+	}
+
+	stats := make(map[string]core.PeerStats)
+	lines := strings.Split(string(output), "\n")
+	for _, line := range lines {
+		parts := strings.Fields(line)
+		// Expected format:
+		// all dump: <intf> <pubkey> <psk> <endpoint> <allowed-ips> <handshake> <rx> <tx> <keepalive>
+		// Length at least 8 or 9.
+		// "wg show all dump" prints:
+		// wg0 <pubkey> <psk> <endpoint> <allowed-ips> <handshake> <rx> <tx> <keepalive>
+		if len(parts) < 8 {
+			continue
+		}
+
+		// Check if it is a peer line (public key len ~44)
+		// Or if strict checking needed.
+		// parts[1] is pubkey
+		pubKey := parts[1]
+		if len(pubKey) < 40 { // rudimentary check
+			continue
+		}
+
+		endpoint := parts[3]
+		if endpoint == "(none)" {
+			endpoint = ""
+		}
+
+		latestHandshake, _ := strconv.ParseInt(parts[5], 10, 64)
+		transferRx, _ := strconv.ParseInt(parts[6], 10, 64)
+		transferTx, _ := strconv.ParseInt(parts[7], 10, 64)
+
+		stats[pubKey] = core.PeerStats{
+			PublicKey:       pubKey,
+			Endpoint:        endpoint,
+			LatestHandshake: latestHandshake,
+			TransferRx:      transferRx,
+			TransferTx:      transferTx,
+		}
+	}
+
+	return stats, nil
 }
 
 func (e *SSHExecutor) Close() error {
