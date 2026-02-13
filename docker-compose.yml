@@ -1,7 +1,7 @@
 services:
   ogs-swg:
     build: .
-    image: ogstra/ogs-swg:latest
+    image: ${OGS_IMAGE}
     container_name: ogs-swg
     restart: unless-stopped
     ports:
