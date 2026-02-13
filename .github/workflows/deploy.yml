@@ -173,9 +173,17 @@ jobs:
               echo "Runtime known_hosts is missing or too small. Check OGS_SSH_KNOWN_HOSTS_CONTENT secret."
               exit 1
             fi
-            if ! grep -Eq "(\\[${RUNTIME_SSH_HOST}\\]:${RUNTIME_SSH_PORT}|${RUNTIME_SSH_HOST})" config/known_hosts; then
-              echo "known_hosts does not contain expected SSH target ${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}. Aborting deploy."
-              exit 1
+            if command -v ssh-keygen >/dev/null 2>&1; then
+              if ! ssh-keygen -F "[${RUNTIME_SSH_HOST}]:${RUNTIME_SSH_PORT}" -f config/known_hosts >/dev/null 2>&1 \
+                && ! ssh-keygen -F "${RUNTIME_SSH_HOST}" -f config/known_hosts >/dev/null 2>&1; then
+                echo "known_hosts does not contain expected SSH target ${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}. Aborting deploy."
+                exit 1
+              fi
+            else
+              if ! grep -Eq "(\\[${RUNTIME_SSH_HOST}\\]:${RUNTIME_SSH_PORT}|${RUNTIME_SSH_HOST})" config/known_hosts; then
+                echo "known_hosts does not contain expected SSH target ${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}. Aborting deploy."
+                exit 1
+              fi
             fi
 
             PROXY_PORT="${{ secrets.OGS_PORT || '8080' }}"
