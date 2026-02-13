@@ -22,6 +22,8 @@ export const Layout: React.FC = () => {
     ];
 
     const activeLabel = navItems.find(n => n.path === location.pathname)?.label || 'OGS-SWG';
+    const rawCommit = (import.meta.env.VITE_APP_COMMIT as string | undefined) || '';
+    const commitLabel = rawCommit ? rawCommit.slice(0, 7) : 'local';
 
     const handleLogout = () => {
         logout();
@@ -98,6 +100,10 @@ export const Layout: React.FC = () => {
                         <Outlet />
                     </div>
                 </main>
+
+                <div className="pointer-events-none fixed bottom-2 right-3 z-20 text-[10px] text-slate-500">
+                    {commitLabel}
+                </div>
             </div>
         </div>
     );

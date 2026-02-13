@@ -4,6 +4,8 @@ WORKDIR /app
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
+ARG APP_COMMIT_SHA=local
+ENV VITE_APP_COMMIT=${APP_COMMIT_SHA}
 RUN npm run build
 
 # Stage 2: Build Backend

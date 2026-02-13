@@ -63,6 +63,36 @@ This application utilizes a modular **System Executor** architecture:
     docker compose up -d
     ```
 
+### GitHub Actions Deploy Strategy
+
+Automatic deploys use a **Blue/Green topology** only in CI/CD (not for local developers):
+
+- Local users keep using the standard `docker-compose.yml`.
+- CI deploy uses dedicated files under `docker/bluegreen/`.
+- `nginx` routes traffic to active slot (`blue` or `green`) on an internal Docker network.
+- Workflow deploys the inactive slot, runs healthchecks, and only then switches proxy upstream.
+- If healthcheck fails, traffic stays on previous slot.
+
+Required GitHub secrets for deploy:
+- `DOCKER_USERNAME`
+- `DOCKER_PASSWORD`
+- `VPS_HOST`
+- `VPS_PORT`
+- `VPS_USER`
+- `VPS_SSH_KEY` (deployment SSH key for Actions -> VPS)
+- `OGS_AGENT_SSH_KEY` (app runtime key for panel -> managed node)
+- `OGS_SSH_KNOWN_HOSTS_CONTENT` (known_hosts content for runtime SSH trust)
+- `OGS_AGENT_USER`
+- `OGS_ADMIN_USER`
+- `OGS_ADMIN_PASSWORD`
+- `OGS_PORT` (optional, defaults to `8080`)
+
+Manual force deploy:
+- In **Actions > Build and Deploy > Run workflow**, use `force_slot`:
+  - `auto`: normal blue/green toggle
+  - `blue`: force deploy to blue slot
+  - `green`: force deploy to green slot
+
 ### Option 2: Bare Metal
 
 Build and run the application directly:

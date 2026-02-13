@@ -7,12 +7,23 @@ on:
       - 'cmd/**'
       - 'internal/**'
       - 'frontend/**'
+      - 'docker/bluegreen/**'
       - 'go.mod'
       - 'go.sum'
       - 'Dockerfile'
       - 'docker-compose.yml'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:
+    inputs:
+      force_slot:
+        description: "Force deploy slot selection (overrides auto blue/green toggle)"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - blue
+          - green
 
 jobs:
   quality:
@@ -79,6 +90,8 @@ jobs:
           context: .
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest
+          build-args: |
+            APP_COMMIT_SHA=${{ github.sha }}
           platforms: ${{ secrets.DEPLOY_ARCH || 'linux/amd64,linux/arm64' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -97,7 +110,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          source: "docker-compose.yml"
+          source: "docker/bluegreen/*"
           target: "${{ secrets.DEPLOY_PATH }}"
 
       - name: Deploy on VPS
@@ -111,6 +124,7 @@ jobs:
             # Navigate to deployment directory (create if missing)
             mkdir -p ${{ secrets.DEPLOY_PATH }}/config
             mkdir -p ${{ secrets.DEPLOY_PATH }}/data
+            mkdir -p ${{ secrets.DEPLOY_PATH }}/docker/bluegreen/nginx
             # Ensure system config directories exist
             sudo mkdir -p /etc/sing-box
             sudo mkdir -p /etc/wireguard
@@ -126,23 +140,90 @@ jobs:
             echo "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}" > config/known_hosts
             chmod 600 config/known_hosts
             
-            # Create .env from secrets (Optional but recommended)
-            echo "OGS_LISTEN_ADDR=:8080" > .env
-            echo "OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest" >> .env
-            echo "OGS_PORT=${{ secrets.OGS_PORT }}" >> .env
-            echo "OGS_DB_PATH=/app/data/stats.db" >> .env
-            echo "OGS_ACCESS_LOG_PATH=/app/data/access.log" >> .env
-            echo "OGS_SSH_HOST=${{ secrets.VPS_HOST }}" >> .env
-            echo "OGS_SSH_PORT=${{ secrets.VPS_PORT }}" >> .env
-            echo "OGS_SSH_USER=${{ secrets.OGS_AGENT_USER }}" >> .env
-            echo "OGS_SSH_KEY_PATH=/app/secrets/ssh_key" >> .env
-            echo "OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts" >> .env
-            echo "OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}" >> .env
-            echo "OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}" >> .env
-            # Key Passphrase if needed
-            # echo "OGS_SSH_KEY_PASS=${{ secrets.SSH_KEY_PASS }}" >> .env
+            # Common env for blue/green app stacks + proxy
+            cat > .env.bluegreen <<EOF
+            OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest
+            OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
+            OGS_SSH_HOST=${{ secrets.VPS_HOST }}
+            OGS_SSH_PORT=${{ secrets.VPS_PORT }}
+            OGS_SSH_USER=${{ secrets.OGS_AGENT_USER }}
+            OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}
+            OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
+            EOF
 
-            # Pull and Restart
-            docker compose pull
-            docker compose up -d --remove-orphans
-            docker system prune -f
+            # Shared network for proxy + blue/green targets
+            docker network create ogs-bg-net >/dev/null 2>&1 || true
+
+            # Determine active slot (default blue on first deployment)
+            ACTIVE="blue"
+            if [ -f .bluegreen.active ]; then
+              ACTIVE="$(cat .bluegreen.active)"
+            fi
+            if [ "$ACTIVE" = "blue" ]; then
+              TARGET="green"
+            else
+              TARGET="blue"
+            fi
+
+            FORCE_SLOT="${{ github.event.inputs.force_slot || 'auto' }}"
+            if [ "$FORCE_SLOT" = "blue" ] || [ "$FORCE_SLOT" = "green" ]; then
+              TARGET="$FORCE_SLOT"
+            fi
+
+            # First deployment bootstrap: if no active container is running, force blue as target
+            if ! docker ps --format '{{.Names}}' | grep -Eq '^ogs-swg-(blue|green)$'; then
+              ACTIVE="none"
+              if [ "$FORCE_SLOT" = "green" ]; then
+                TARGET="green"
+              else
+                TARGET="blue"
+              fi
+            fi
+
+            echo "ACTIVE=$ACTIVE TARGET=$TARGET FORCE_SLOT=$FORCE_SLOT"
+
+            # Render nginx upstream config for ACTIVE (or TARGET on first deploy)
+            UPSTREAM_SLOT="$ACTIVE"
+            if [ "$UPSTREAM_SLOT" = "none" ]; then
+              UPSTREAM_SLOT="$TARGET"
+            fi
+            sed "s/__UPSTREAM__/ogs-swg-${UPSTREAM_SLOT}:8080/g" \
+              docker/bluegreen/nginx/default.conf.template > docker/bluegreen/nginx/default.conf
+
+            # Ensure proxy is up first (keeps current traffic path stable)
+            docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.proxy.yml up -d
+
+            # Deploy target slot
+            docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml pull
+            docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml up -d
+
+            # Healthcheck target slot (expects 401 for invalid login)
+            HEALTH_OK=0
+            for i in $(seq 1 30); do
+              CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                -s -o /dev/null -w '%{http_code}' \
+                -X POST "http://ogs-swg-${TARGET}:8080/api/login" \
+                -H 'Content-Type: application/json' \
+                -d '{"username":"invalid","password":"invalid"}' || true)"
+              if [ "$CODE" = "401" ] || [ "$CODE" = "405" ]; then
+                HEALTH_OK=1
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$HEALTH_OK" -ne 1 ]; then
+              echo "Target slot ogs-swg-${TARGET} failed healthcheck. Keeping current active slot: ${ACTIVE}."
+              docker logs --tail 100 "ogs-swg-${TARGET}" || true
+              exit 1
+            fi
+
+            # Promote target slot by switching nginx upstream
+            sed "s/__UPSTREAM__/ogs-swg-${TARGET}:8080/g" \
+              docker/bluegreen/nginx/default.conf.template > docker/bluegreen/nginx/default.conf
+            docker exec ogs-swg-proxy nginx -t
+            docker exec ogs-swg-proxy nginx -s reload
+            echo "$TARGET" > .bluegreen.active
+
+            # Optional: trim old images only after successful switch
+            docker image prune -f

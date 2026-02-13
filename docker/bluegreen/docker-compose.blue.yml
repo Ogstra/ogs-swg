@@ -1,0 +1,29 @@
+services:
+  ogs-swg-blue:
+    image: ${OGS_IMAGE}
+    container_name: ogs-swg-blue
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+      - ./config/ssh_key:/app/secrets/ssh_key:ro
+      - ./config/known_hosts:/app/secrets/known_hosts:ro
+      - /etc/sing-box:/etc/sing-box
+      - /etc/wireguard:/etc/wireguard
+    environment:
+      - OGS_LISTEN_ADDR=:8080
+      - OGS_DB_PATH=/app/data/stats.db
+      - OGS_ACCESS_LOG_PATH=/app/data/access.log
+      - OGS_SSH_HOST=${OGS_SSH_HOST}
+      - OGS_SSH_PORT=${OGS_SSH_PORT}
+      - OGS_SSH_USER=${OGS_SSH_USER}
+      - OGS_SSH_KEY_PATH=/app/secrets/ssh_key
+      - OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts
+      - OGS_ADMIN_USER=${OGS_ADMIN_USER}
+      - OGS_ADMIN_PASSWORD=${OGS_ADMIN_PASSWORD}
+    networks:
+      - ogs_bg_net
+
+networks:
+  ogs_bg_net:
+    external: true
+    name: ogs-bg-net
