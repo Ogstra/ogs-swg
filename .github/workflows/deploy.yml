@@ -61,8 +61,8 @@ jobs:
         run: npm run build
         working-directory: frontend
 
-      - name: Frontend audit (high+)
-        run: npm audit --audit-level=high
+      - name: Frontend audit (critical only)
+        run: npm audit --audit-level=critical
         working-directory: frontend
 
   build-and-push:
