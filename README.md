@@ -2,7 +2,7 @@
 
 A web-based control panel for managing Sing-box users (VLESS/Reality) and monitoring WireGuard traffic. This system supports both **local execution** (bare-metal) and **remote management** via SSH (Docker/AWS).
 
-![Dashboard Preview](assets/dashboard.png)
+<img width="1508" height="849" alt="Screenshot at Feb 03 18-30-39" src="https://github.com/user-attachments/assets/db59dedb-9f6e-4a70-8421-756fb7156a12" />
 
 ## Architecture
 
