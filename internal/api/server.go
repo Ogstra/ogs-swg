@@ -325,7 +325,7 @@ func (s *Server) syncWireGuardConfig(wgConfig *core.WireGuardConfig) bool {
 
 func (s *Server) writeSyncConf(wgConfig *core.WireGuardConfig) (string, func(), error) {
 	if wgConfig == nil {
-		cfg, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+		cfg, err := s.loadWireGuardConfig(context.Background())
 		if err != nil {
 			return "", func() {}, err
 		}
@@ -484,6 +484,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
+	protected.HandleFunc("GET /api/diag/ssh", s.secure(s.handleDiagSSH))
 
 	// Sing-box Configuration & Inbounds
 	protected.HandleFunc("GET /api/singbox/config", s.secure(s.handleGetSingboxConfig))

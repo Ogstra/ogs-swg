@@ -31,7 +31,7 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 	if !s.requireWireGuard(w) {
 		return
 	}
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -229,7 +229,7 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -315,8 +315,12 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	if err := wgConfig.AddPeer(peer); err != nil {
+	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.AddPeer(peer) }); err != nil {
 		http.Error(w, "Failed to add peer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
+		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	_ = s.store.UpsertWGPeer(peer.PublicKey, alias, false)
@@ -343,7 +347,7 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -368,8 +372,12 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	}
 	_ = s.store.UpsertWGPeer(pubKey, alias, true)
 
-	if err := wgConfig.RemovePeer(pubKey); err != nil {
+	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.RemovePeer(pubKey) }); err != nil {
 		http.Error(w, "Failed to remove peer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
+		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -402,7 +410,7 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -428,8 +436,12 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	if err := wgConfig.AddPeer(peer); err != nil {
+	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.AddPeer(peer) }); err != nil {
 		http.Error(w, "Failed to restore peer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
+		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	_ = s.store.UpsertWGPeer(peer.PublicKey, alias, false)
@@ -593,14 +605,7 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 	if s.executor != nil {
 		content, err := s.executor.ReadConfig(r.Context(), s.config.WireGuardConfigPath)
 		if err != nil {
-			// If file doesn't exist, return empty
-			if os.IsNotExist(err) { // This check might depend on executor implementation returning exact error
-				w.Header().Set("Content-Type", "text/plain")
-				w.Write([]byte(""))
-				return
-			}
-			// SSH/SFTP errors are slightly different, but usually contain "file does not exist"
-			if strings.Contains(strings.ToLower(err.Error()), "not exist") || strings.Contains(strings.ToLower(err.Error()), "no such file") {
+			if isNotFoundErr(err) {
 				w.Header().Set("Content-Type", "text/plain")
 				w.Write([]byte(""))
 				return
@@ -662,7 +667,7 @@ func (s *Server) handleGetWireGuardInterface(w http.ResponseWriter, r *http.Requ
 	if !s.requireWireGuard(w) {
 		return
 	}
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -688,14 +693,18 @@ func (s *Server) handleUpdateWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if err := wgConfig.UpdateInterface(req); err != nil {
+	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.UpdateInterface(req) }); err != nil {
 		http.Error(w, "Failed to update interface: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
+		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -721,7 +730,7 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -771,8 +780,12 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	if err := wgConfig.UpdatePeer(pubKey, req); err != nil {
+	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.UpdatePeer(pubKey, req) }); err != nil {
 		http.Error(w, "Failed to update peer: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
+		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -804,7 +817,7 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 	// Allow on-demand generation if a private key is provided (not stored).
 	priv := strings.TrimSpace(r.URL.Query().Get("private_key"))
 	if priv != "" {
-		wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+		wgConfig, err := s.loadWireGuardConfig(r.Context())
 		if err != nil {
 			http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -870,7 +883,7 @@ func (s *Server) handleGetWireGuardTraffic(w http.ResponseWriter, r *http.Reques
 		start = time.Now().Add(-duration).Unix()
 	}
 
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -936,7 +949,7 @@ func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.
 		start = time.Now().Add(-duration).Unix()
 	}
 
-	wgConfig, err := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1252,6 +1265,13 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		if lst, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
 			activeUsersList = lst
 		}
+		// Fallback: if threshold-based result is empty, show sessions with any traffic.
+		if activeUsersSB == 0 {
+			if lst, err := s.store.GetActiveUsers(5 * time.Minute); err == nil {
+				activeUsersList = lst
+				activeUsersSB = int64(len(lst))
+			}
+		}
 		if xc := core.NewSingboxClient(s.config.SingboxAPIAddr, s.executor); xc != nil {
 			if stats, err := xc.GetSysStats(); err == nil {
 				sysStats = stats
@@ -1276,7 +1296,7 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		// If local and containerized without systemd, this fails.
 		// But s.checkService now uses s.executor.IsServiceActive.
 		wireguardStatus = s.checkService(r.Context(), "wireguard")
-		wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+		wgCfg, _ := s.loadWireGuardConfig(r.Context())
 		pubToDisplay := make(map[string]string)
 		if wgCfg != nil {
 			for _, p := range wgCfg.Peers {
@@ -1294,7 +1314,16 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 				pubToDisplay[p.PublicKey] = display
 			}
 		}
-		if stats, err := core.GetWireGuardStats(); err == nil {
+		var (
+			stats map[string]core.PeerStats
+			err   error
+		)
+		if s.executor != nil {
+			stats, err = s.executor.GetWireGuardStats(r.Context())
+		} else {
+			stats, err = core.GetWireGuardStats()
+		}
+		if err == nil {
 			threshold := time.Now().Add(-3 * time.Minute).Unix()
 			for _, peer := range stats {
 				if peer.LatestHandshake >= threshold {
@@ -1342,6 +1371,51 @@ func (s *Server) checkService(ctx context.Context, service string) bool {
 		return false
 	}
 	return active
+}
+
+func (s *Server) handleDiagSSH(w http.ResponseWriter, r *http.Request) {
+	mode := "local"
+	if s.config.SSHHost != "" {
+		mode = "ssh"
+	}
+
+	resp := map[string]interface{}{
+		"ok":      true,
+		"mode":    mode,
+		"sshHost": s.config.SSHHost,
+		"sshPort": s.config.SSHPort,
+		"sshUser": s.config.SSHUser,
+	}
+
+	if mode == "local" {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	if s.executor == nil {
+		resp["ok"] = false
+		resp["error"] = "system executor not initialized"
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+
+	if err := s.executor.CheckConnectivity(ctx); err != nil {
+		resp["ok"] = false
+		resp["error"] = err.Error()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) requireAnyService(w http.ResponseWriter) bool {
@@ -1613,7 +1687,7 @@ func (s *Server) handleBackupConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	src := s.config.SingboxConfigPath
 	dst := src + ".bak"
-	if err := copyFile(src, dst); err != nil {
+	if err := s.copyConfig(r.Context(), src, dst); err != nil {
 		http.Error(w, "Backup failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1625,16 +1699,26 @@ func (s *Server) handleRestoreConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	src := s.config.SingboxConfigPath + ".bak"
-	if _, err := os.Stat(src); err != nil {
-		http.Error(w, "Backup not found", http.StatusNotFound)
-		return
-	}
 	dst := s.config.SingboxConfigPath
-	if err := copyFile(src, dst); err != nil {
+	if err := s.copyConfig(r.Context(), src, dst); err != nil {
+		if isNotFoundErr(err) {
+			http.Error(w, "Backup not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Restore failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	content, _ := os.ReadFile(dst)
+	var content []byte
+	var err error
+	if s.executor != nil {
+		content, err = s.executor.ReadConfig(r.Context(), dst)
+	} else {
+		content, err = os.ReadFile(dst)
+	}
+	if err != nil {
+		http.Error(w, "Restore succeeded but failed to read restored file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(content)
 }
@@ -1645,7 +1729,7 @@ func (s *Server) handleBackupWireGuardConfig(w http.ResponseWriter, r *http.Requ
 	}
 	src := s.config.WireGuardConfigPath
 	dst := src + ".bak"
-	if err := copyFile(src, dst); err != nil {
+	if err := s.copyConfig(r.Context(), src, dst); err != nil {
 		http.Error(w, "Backup failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1657,16 +1741,26 @@ func (s *Server) handleRestoreWireGuardConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 	src := s.config.WireGuardConfigPath + ".bak"
-	if _, err := os.Stat(src); err != nil {
-		http.Error(w, "Backup not found", http.StatusNotFound)
-		return
-	}
 	dst := s.config.WireGuardConfigPath
-	if err := copyFile(src, dst); err != nil {
+	if err := s.copyConfig(r.Context(), src, dst); err != nil {
+		if isNotFoundErr(err) {
+			http.Error(w, "Backup not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, "Restore failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	content, _ := os.ReadFile(dst)
+	var content []byte
+	var err error
+	if s.executor != nil {
+		content, err = s.executor.ReadConfig(r.Context(), dst)
+	} else {
+		content, err = os.ReadFile(dst)
+	}
+	if err != nil {
+		http.Error(w, "Restore succeeded but failed to read restored file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(content)
 }
@@ -1676,17 +1770,40 @@ func (s *Server) handleGetBackupMeta(w http.ResponseWriter, r *http.Request) {
 	wgBak := s.config.WireGuardConfigPath + ".bak"
 
 	info := map[string]*time.Time{}
-	if st, err := os.Stat(singboxBak); err == nil {
-		t := st.ModTime()
-		info["singbox_last_backup"] = &t
-	}
-	if st, err := os.Stat(wgBak); err == nil {
-		t := st.ModTime()
-		info["wireguard_last_backup"] = &t
+	if s.executor != nil {
+		now := time.Now()
+		if _, err := s.executor.ReadConfig(r.Context(), singboxBak); err == nil {
+			t := now
+			info["singbox_last_backup"] = &t
+		}
+		if _, err := s.executor.ReadConfig(r.Context(), wgBak); err == nil {
+			t := now
+			info["wireguard_last_backup"] = &t
+		}
+	} else {
+		if st, err := os.Stat(singboxBak); err == nil {
+			t := st.ModTime()
+			info["singbox_last_backup"] = &t
+		}
+		if st, err := os.Stat(wgBak); err == nil {
+			t := st.ModTime()
+			info["wireguard_last_backup"] = &t
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
+}
+
+func (s *Server) copyConfig(ctx context.Context, src, dst string) error {
+	if s.executor != nil {
+		content, err := s.executor.ReadConfig(ctx, src)
+		if err != nil {
+			return err
+		}
+		return s.executor.WriteConfig(ctx, dst, content, 0644)
+	}
+	return copyFile(src, dst)
 }
 
 func copyFile(src, dst string) error {

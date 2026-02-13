@@ -269,6 +269,32 @@ jobs:
               exit 1
             fi
 
+            # Validate runtime SSH connectivity via diagnostic endpoint (requires auth)
+            AUTH_JSON="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+              -s -X POST "http://ogs-swg-${TARGET}:8080/api/login" \
+              -H 'Content-Type: application/json' \
+              -d "{\"username\":\"${{ secrets.OGS_ADMIN_USER }}\",\"password\":\"${{ secrets.OGS_ADMIN_PASSWORD }}\"}" || true)"
+            TOKEN="$(printf '%s' "$AUTH_JSON" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+            if [ -z "$TOKEN" ]; then
+              echo "Failed to obtain auth token from target slot. Aborting promotion."
+              echo "Auth response: $AUTH_JSON"
+              docker logs --tail 100 "ogs-swg-${TARGET}" || true
+              exit 1
+            fi
+
+            DIAG_CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+              -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${TOKEN}" \
+              "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
+            if [ "$DIAG_CODE" != "200" ]; then
+              echo "SSH diagnostic endpoint failed with HTTP ${DIAG_CODE}. Aborting promotion."
+              docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                -s -H "Authorization: Bearer ${TOKEN}" \
+                "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true
+              docker logs --tail 100 "ogs-swg-${TARGET}" || true
+              exit 1
+            fi
+
             # Promote target slot by switching nginx upstream
             sed "s/__UPSTREAM__/ogs-swg-${TARGET}:8080/g" \
               docker/bluegreen/nginx/default.conf.template > docker/bluegreen/nginx/default.conf

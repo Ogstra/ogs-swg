@@ -114,7 +114,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	var wgPeerKeys []string
 	wgAliases := make(map[string]string)
 	if s.config.EnableWireGuard {
-		wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
+		wgCfg, _ := s.loadWireGuardConfig(r.Context())
 		if wgCfg != nil {
 			wgPeerKeys = make([]string, 0, len(wgCfg.Peers))
 			for _, p := range wgCfg.Peers {
@@ -318,26 +318,42 @@ func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{}
 			activeUsersSBList = users
 			activeUsersSB = int64(len(users))
 		}
+		// Fallback: if threshold-based result is empty, show sessions with any traffic.
+		if activeUsersSB == 0 {
+			if users, err := s.store.GetActiveUsers(5 * time.Minute); err == nil {
+				activeUsersSBList = users
+				activeUsersSB = int64(len(users))
+			}
+		}
 	}
 
 	if s.config.EnableWireGuard {
 		wireguardStatus = s.checkService(ctx, "wireguard")
-		if stats, err := core.GetWireGuardStats(); err == nil {
+		var (
+			stats map[string]core.PeerStats
+			err   error
+		)
+		if s.executor != nil {
+			stats, err = s.executor.GetWireGuardStats(ctx)
+		} else {
+			stats, err = core.GetWireGuardStats()
+		}
+		if err == nil {
 			threshold := time.Now().Add(-3 * time.Minute).Unix()
-			wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
-			peerAliases := make(map[string]string)
-			if wgCfg != nil {
-				for _, p := range wgCfg.Peers {
-					peerAliases[p.PublicKey] = p.Alias
-				}
-			}
-
+			storedPeers, _ := s.store.GetWGPeerMeta()
 			for _, peer := range stats {
 				if peer.LatestHandshake >= threshold {
 					activeUsersWG++
-					name := peerAliases[peer.PublicKey]
+					name := ""
+					if meta, ok := storedPeers[peer.PublicKey]; ok && meta.Alias != "" {
+						name = meta.Alias
+					}
 					if name == "" {
-						name = peer.PublicKey[0:8]
+						if len(peer.PublicKey) >= 8 {
+							name = peer.PublicKey[:8]
+						} else {
+							name = peer.PublicKey
+						}
 					}
 					activeUsersWGList = append(activeUsersWGList, name)
 				}
