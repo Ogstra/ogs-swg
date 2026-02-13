@@ -546,7 +546,7 @@ func StartServer(cfg *core.Config) *Server {
 	}
 
 	if err := store.EnsureDefaultAdmin(); err != nil {
-		log.Printf("StartServer: failed to ensure default admin: %v", err)
+		panic("StartServer: failed to ensure default admin: " + err.Error())
 	}
 
 	var executor core.SystemExecutor

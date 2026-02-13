@@ -32,7 +32,15 @@ func main() {
 	}
 
 	log.Printf("Starting OGS XWG...")
-	log.Printf("Config: %+v", cfg)
+	log.Printf(
+		"Config loaded: listen=%s db=%s singbox=%t wireguard=%t ssh_host_set=%t ssh_user=%s",
+		cfg.ListenAddr,
+		cfg.DatabasePath,
+		cfg.EnableSingbox,
+		cfg.EnableWireGuard,
+		cfg.SSHHost != "",
+		cfg.SSHUser,
+	)
 
 	if *samplerOnly {
 		log.Printf("Sampler-only mode: starting stats sampler without HTTP server")
@@ -40,8 +48,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to open store: %v", err)
 		}
-		defer store.Close()
-
 		defer store.Close()
 
 		var executor core.SystemExecutor

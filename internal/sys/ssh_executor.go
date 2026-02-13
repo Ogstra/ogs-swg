@@ -7,14 +7,17 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	"github.com/kballard/go-shellquote"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 // SSHExecutor implements SystemExecutor for remote hosts via SSH.
@@ -71,7 +74,7 @@ func (e *SSHExecutor) ensureConnection(ctx context.Context) error {
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: Implement known_hosts verification in production
+		HostKeyCallback: e.hostKeyCallback(),
 		Timeout:         10 * time.Second,
 	}
 
@@ -101,6 +104,46 @@ func parsePrivateKey(keyPath, passphrase string) (ssh.Signer, error) {
 		return ssh.ParsePrivateKeyWithPassphrase(key, []byte(passphrase))
 	}
 	return ssh.ParsePrivateKey(key)
+}
+
+func (e *SSHExecutor) hostKeyCallback() ssh.HostKeyCallback {
+	if e.config.SSHInsecureIgnoreHostKey {
+		return ssh.InsecureIgnoreHostKey()
+	}
+
+	paths := make([]string, 0, 3)
+	if p := strings.TrimSpace(e.config.SSHKnownHostsPath); p != "" {
+		paths = append(paths, p)
+	}
+
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		paths = append(paths, filepath.Join(home, ".ssh", "known_hosts"))
+	}
+	paths = append(paths, "/etc/ssh/ssh_known_hosts")
+
+	existing := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if _, err := os.Stat(p); err == nil {
+			existing = append(existing, p)
+		}
+	}
+
+	if len(existing) == 0 {
+		return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return fmt.Errorf("ssh host key verification enabled but no known_hosts file found (set ssh_known_hosts_path or OGS_SSH_KNOWN_HOSTS)")
+		}
+	}
+
+	cb, err := knownhosts.New(existing...)
+	if err != nil {
+		return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return fmt.Errorf("failed to load known_hosts: %w", err)
+		}
+	}
+	return cb
 }
 
 func (e *SSHExecutor) runCommand(ctx context.Context, cmdStr string) ([]byte, error) {
@@ -216,8 +259,7 @@ func (e *SSHExecutor) ApplySysctl(ctx context.Context, key, value string) error 
 	if !AllowedSysctlKeys[key] {
 		return fmt.Errorf("sysctl key '%s' is not in the whitelist", key)
 	}
-	// Using sudo for sysctl
-	cmd := fmt.Sprintf("sudo sysctl -w %s='%s'", key, value)
+	cmd := shellquote.Join("sudo", "sysctl", "-w", fmt.Sprintf("%s=%s", key, value))
 	out, err := e.runCommand(ctx, cmd)
 	if err != nil {
 		return fmt.Errorf("remote sysctl failed: %v, output: %s", err, string(out))
@@ -229,7 +271,7 @@ func (e *SSHExecutor) GetSysctl(ctx context.Context, key string) (string, error)
 	if !AllowedSysctlKeys[key] {
 		return "", fmt.Errorf("sysctl key '%s' is not in the whitelist", key)
 	}
-	cmd := fmt.Sprintf("sudo sysctl -n %s", key)
+	cmd := shellquote.Join("sudo", "sysctl", "-n", key)
 	out, err := e.runCommand(ctx, cmd)
 	if err != nil {
 		return "", err

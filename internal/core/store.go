@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -325,7 +326,15 @@ func (s *Store) EnsureDefaultAdmin() error {
 		return err
 	}
 	if count == 0 {
-		return s.CreateAdmin("admin", "admin")
+		username := strings.TrimSpace(os.Getenv("OGS_ADMIN_USER"))
+		if username == "" {
+			username = "admin"
+		}
+		password := os.Getenv("OGS_ADMIN_PASSWORD")
+		if strings.TrimSpace(password) == "" {
+			return fmt.Errorf("no admin found and OGS_ADMIN_PASSWORD is empty; set OGS_ADMIN_PASSWORD to bootstrap initial admin credentials")
+		}
+		return s.CreateAdmin(username, password)
 	}
 	return nil
 }

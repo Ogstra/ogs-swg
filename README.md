@@ -29,6 +29,11 @@ This application utilizes a modular **System Executor** architecture:
     ssh-keygen -t ed25519 -f config/ssh_key -C "ogs_agent" -N ""
     ```
     *Copy the public key (`config/ssh_key.pub`) to the target server's `~/.ssh/authorized_keys`.*
+    
+    Add target host key pinning file:
+    ```bash
+    ssh-keyscan -H YOUR_SERVER_HOST > config/known_hosts
+    ```
 
 3.  **Run with Docker Compose**:
     ```yaml
@@ -40,12 +45,17 @@ This application utilizes a modular **System Executor** architecture:
         volumes:
           - ./data:/app/data
           - ./config/ssh_key:/app/secrets/ssh_key:ro
+          - ./config/known_hosts:/app/secrets/known_hosts:ro
           # Mount host configs for direct management
           - /etc/sing-box:/etc/sing-box
           - /etc/wireguard:/etc/wireguard
         environment:
+          - OGS_LISTEN_ADDR=:8080
           - OGS_DB_PATH=/app/data/stats.db
           - OGS_SSH_KEY_PATH=/app/secrets/ssh_key
+          - OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts
+          - OGS_ADMIN_USER=admin
+          - OGS_ADMIN_PASSWORD=CHANGE_ME_STRONG_PASSWORD
     ```
     
     Start the container:
@@ -126,12 +136,24 @@ Configure the application via `config.json` or the Settings UI:
   "ssh_port": 22,
   "ssh_user": "ogs_agent",
   "ssh_key_path": "/app/secrets/ssh_key",
+  "ssh_known_hosts_path": "/app/secrets/known_hosts",
   "sysctl_whitelist": [
     "net.ipv4.ip_forward",
     "net.ipv6.conf.all.forwarding"
   ]
 }
 ```
+
+## Bootstrap Admin
+
+On first run, if no admin exists in DB, you must provide:
+
+```bash
+export OGS_ADMIN_USER=admin
+export OGS_ADMIN_PASSWORD='use-a-strong-random-password'
+```
+
+Without `OGS_ADMIN_PASSWORD`, startup is intentionally blocked to avoid insecure default credentials.
 
 ## Supported Protocols
 

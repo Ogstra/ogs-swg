@@ -10,10 +10,11 @@ services:
       - ./data:/app/data
       # Mount SSH Key if using remote management
       - ./config/ssh_key:/app/secrets/ssh_key:ro
+      - ./config/known_hosts:/app/secrets/known_hosts:ro
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
     environment:
-      - OGS_BIND=${OGS_BIND:-:8080}
+      - OGS_LISTEN_ADDR=${OGS_LISTEN_ADDR:-:8080}
       - OGS_DB_PATH=${OGS_DB_PATH:-/app/data/stats.db}
       # SSH Configuration for Remote Management
       - OGS_SSH_HOST=${OGS_SSH_HOST}

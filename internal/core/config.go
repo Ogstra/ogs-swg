@@ -44,6 +44,7 @@ type Config struct {
 	SSHUser                  string `json:"ssh_user"`
 	SSHKeyPath               string `json:"ssh_key_path"`
 	SSHKeyPassphrase         string `json:"ssh_key_passphrase"`
+	SSHKnownHostsPath        string `json:"ssh_known_hosts_path"`
 	SSHInsecureIgnoreHostKey bool   `json:"ssh_insecure_ignore_host_key"`
 
 	// Sysctl Whitelist (Optional override)
@@ -106,7 +107,7 @@ func LoadConfig(path ...string) *Config {
 		WGRetentionDays:      30,
 
 		SSHPort: 22,
-		SSHUser: "root",
+		SSHUser: "ogs_agent",
 
 		JWTSecret: "", // Will be generated if empty
 	}
@@ -152,7 +153,13 @@ func LoadConfig(path ...string) *Config {
 	if v := os.Getenv("OGS_SSH_KEY_PASS"); v != "" {
 		cfg.SSHKeyPassphrase = v
 	}
+	if v := os.Getenv("OGS_SSH_KNOWN_HOSTS"); v != "" {
+		cfg.SSHKnownHostsPath = v
+	}
 	if v := os.Getenv("OGS_LISTEN_ADDR"); v != "" {
+		cfg.ListenAddr = v
+	} else if v := os.Getenv("OGS_BIND"); v != "" {
+		// Legacy compatibility
 		cfg.ListenAddr = v
 	}
 	if v := os.Getenv("OGS_DB_PATH"); v != "" {

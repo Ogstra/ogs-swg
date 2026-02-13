@@ -15,8 +15,48 @@ on:
   workflow_dispatch:
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Go test
+        run: go test ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Go vuln check
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+      - name: Frontend install
+        run: npm ci
+        working-directory: frontend
+
+      - name: Frontend build
+        run: npm run build
+        working-directory: frontend
+
+      - name: Frontend audit (high+)
+        run: npm audit --audit-level=high
+        working-directory: frontend
+
   build-and-push:
     runs-on: ubuntu-latest
+    needs: quality
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -77,22 +117,28 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             
             # Clean up potential directory conflict
-            rm -rf config/ssh_key
+            rm -f config/ssh_key
+            rm -f config/known_hosts
             
             # Write SSH Key to file (for the container to use)
-            echo "${{ secrets.VPS_SSH_KEY }}" > config/ssh_key
+            echo "${{ secrets.OGS_AGENT_SSH_KEY }}" > config/ssh_key
             chmod 600 config/ssh_key
+            echo "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}" > config/known_hosts
+            chmod 600 config/known_hosts
             
             # Create .env from secrets (Optional but recommended)
-            echo "OGS_BIND=:8080" > .env
+            echo "OGS_LISTEN_ADDR=:8080" > .env
             echo "OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest" >> .env
             echo "OGS_PORT=${{ secrets.OGS_PORT }}" >> .env
             echo "OGS_DB_PATH=/app/data/stats.db" >> .env
             echo "OGS_ACCESS_LOG_PATH=/app/data/access.log" >> .env
             echo "OGS_SSH_HOST=${{ secrets.VPS_HOST }}" >> .env
             echo "OGS_SSH_PORT=${{ secrets.VPS_PORT }}" >> .env
-            echo "OGS_SSH_USER=${{ secrets.VPS_USER }}" >> .env
+            echo "OGS_SSH_USER=${{ secrets.OGS_AGENT_USER }}" >> .env
             echo "OGS_SSH_KEY_PATH=/app/secrets/ssh_key" >> .env
+            echo "OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts" >> .env
+            echo "OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}" >> .env
+            echo "OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}" >> .env
             # Key Passphrase if needed
             # echo "OGS_SSH_KEY_PASS=${{ secrets.SSH_KEY_PASS }}" >> .env
 

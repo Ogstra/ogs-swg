@@ -458,9 +458,16 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := runSystemCtl("restart", req.Service); err != nil {
-		http.Error(w, "Failed to restart service: "+err.Error(), http.StatusInternalServerError)
-		return
+	if s.executor != nil {
+		if err := s.executor.RestartService(r.Context(), req.Service); err != nil {
+			http.Error(w, "Failed to restart service: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := runSystemCtl("restart", req.Service); err != nil {
+			http.Error(w, "Failed to restart service: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if req.Service == "wireguard" {

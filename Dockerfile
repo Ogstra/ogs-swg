@@ -40,7 +40,7 @@ COPY --from=frontend-builder /app/dist /app/frontend
 RUN mkdir -p /app/data
 
 # Environment variables
-ENV OGS_BIND=":8080"
+ENV OGS_LISTEN_ADDR=":8080"
 ENV OGS_DB_PATH="/app/data/stats.db"
 
 # Expose port
