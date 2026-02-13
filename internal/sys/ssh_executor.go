@@ -220,7 +220,28 @@ func (e *SSHExecutor) WriteConfig(ctx context.Context, path string, content []by
 	tmpPath := path + ".tmp"
 	f, err := e.sftp.Create(tmpPath)
 	if err != nil {
-		return fmt.Errorf("sftp create failed: %w", err)
+		// Fallback for protected paths (e.g. /etc/wireguard): upload to /tmp then install via sudo.
+		tmpPath = fmt.Sprintf("/tmp/ogs-swg-%d.tmp", time.Now().UnixNano())
+		tf, tErr := e.sftp.Create(tmpPath)
+		if tErr != nil {
+			return fmt.Errorf("sftp create failed: %w (tmp fallback failed: %v)", err, tErr)
+		}
+		if _, wErr := tf.Write(content); wErr != nil {
+			tf.Close()
+			_ = e.sftp.Remove(tmpPath)
+			return fmt.Errorf("sftp write failed: %w", wErr)
+		}
+		_ = tf.Chmod(0600)
+		_ = tf.Close()
+
+		modeStr := fmt.Sprintf("%04o", fileMode.Perm())
+		cmd := shellquote.Join("sudo", "install", "-m", modeStr, tmpPath, path)
+		if out, cErr := e.runCommand(ctx, cmd); cErr != nil {
+			_ = e.sftp.Remove(tmpPath)
+			return fmt.Errorf("sudo install failed: %v, output: %s", cErr, string(out))
+		}
+		_ = e.sftp.Remove(tmpPath)
+		return nil
 	}
 	if _, err := f.Write(content); err != nil {
 		f.Close()
@@ -246,7 +267,13 @@ func (e *SSHExecutor) ReadConfig(ctx context.Context, path string) ([]byte, erro
 
 	f, err := e.sftp.Open(path)
 	if err != nil {
-		return nil, err
+		// Fallback for protected paths where direct SFTP read is denied.
+		cmd := shellquote.Join("sudo", "cat", path)
+		out, cmdErr := e.runCommand(ctx, cmd)
+		if cmdErr != nil {
+			return nil, fmt.Errorf("sftp open failed: %v; sudo cat failed: %v", err, cmdErr)
+		}
+		return out, nil
 	}
 	defer f.Close()
 

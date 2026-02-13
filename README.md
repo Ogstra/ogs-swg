@@ -147,13 +147,19 @@ ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop wg-quick@wg0
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl start wg-quick@wg0
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg show
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg show all dump
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg syncconf *
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/cat /etc/wireguard/wg0.conf
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/install -m * /tmp/ogs-swg-*.tmp /etc/wireguard/wg0.conf
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/cat /etc/sing-box/config.json
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/install -m * /tmp/ogs-swg-*.tmp /etc/sing-box/config.json
 ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -w *
 ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -n *
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/journalctl -u sing-box *
 ```
 
 *Note: The sysctl and wg patterns use wildcards but are validated strictly within the application code via a whitelist.*
+*If your runtime SSH user is `root`, these sudoers entries are not required.*
 
 ---
 
