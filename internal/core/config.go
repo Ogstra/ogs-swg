@@ -168,6 +168,9 @@ func LoadConfig(path ...string) *Config {
 	if v := os.Getenv("OGS_ACCESS_LOG_PATH"); v != "" {
 		cfg.AccessLogPath = v
 	}
+	if v := os.Getenv("OGS_API_KEY"); v != "" {
+		cfg.APIKey = v
+	}
 
 	return cfg
 }

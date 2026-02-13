@@ -22,6 +22,7 @@ services:
       - OGS_SSH_USER=${OGS_SSH_USER}
       - OGS_SSH_KEY_PATH=${OGS_SSH_KEY_PATH}
       - OGS_SSH_KEY_PASS=${OGS_SSH_KEY_PASS}
+      - OGS_API_KEY=${OGS_API_KEY}
     # capabilities might be needed if running local wireguard inside container (not recommended mode here)
     # cap_add:
     #   - NET_ADMIN

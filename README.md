@@ -54,6 +54,7 @@ This application utilizes a modular **System Executor** architecture:
           - OGS_DB_PATH=/app/data/stats.db
           - OGS_SSH_KEY_PATH=/app/secrets/ssh_key
           - OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts
+          - OGS_API_KEY=CHANGE_ME_STRONG_RANDOM_API_KEY
           - OGS_ADMIN_USER=admin
           - OGS_ADMIN_PASSWORD=CHANGE_ME_STRONG_PASSWORD
     ```

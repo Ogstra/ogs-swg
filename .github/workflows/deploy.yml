@@ -153,6 +153,7 @@ jobs:
             OGS_SSH_HOST=${{ secrets.VPS_HOST }}
             OGS_SSH_PORT=${{ secrets.VPS_PORT }}
             OGS_SSH_USER=${{ secrets.OGS_AGENT_USER }}
+            OGS_API_KEY=${{ secrets.OGS_API_KEY }}
             OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}
             OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
             EOF
@@ -274,41 +275,50 @@ jobs:
             fi
 
             # Validate runtime SSH connectivity via diagnostic endpoint.
-            # Preferred auth path: API key. Fallback: admin login.
+            # Try API key first when provided, then fallback to admin login if available.
             DIAG_CODE=""
             DIAG_DETAIL=""
+            DIAG_DONE=0
+
             if [ -n "${{ secrets.OGS_API_KEY }}" ]; then
               DIAG_CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
                 -s -o /dev/null -w '%{http_code}' \
                 -H "X-API-Key: ${{ secrets.OGS_API_KEY }}" \
                 "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
-              if [ "$DIAG_CODE" != "200" ]; then
+              if [ "$DIAG_CODE" = "200" ]; then
+                DIAG_DONE=1
+              else
                 DIAG_DETAIL="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
                   -s -H "X-API-Key: ${{ secrets.OGS_API_KEY }}" \
                   "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
               fi
-            else
+            fi
+
+            if [ "$DIAG_DONE" -ne 1 ] && [ -n "${{ secrets.OGS_ADMIN_USER }}" ] && [ -n "${{ secrets.OGS_ADMIN_PASSWORD }}" ]; then
               AUTH_JSON="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
                 -s -X POST "http://ogs-swg-${TARGET}:8080/api/login" \
                 -H 'Content-Type: application/json' \
                 -d "{\"username\":\"${{ secrets.OGS_ADMIN_USER }}\",\"password\":\"${{ secrets.OGS_ADMIN_PASSWORD }}\"}" || true)"
               TOKEN="$(printf '%s' "$AUTH_JSON" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-              if [ -z "$TOKEN" ]; then
-                echo "Failed to obtain auth token from target slot. Aborting promotion."
-                echo "Auth response: $AUTH_JSON"
-                docker logs --tail 100 "ogs-swg-${TARGET}" || true
-                exit 1
-              fi
-              DIAG_CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
-                -s -o /dev/null -w '%{http_code}' \
-                -H "Authorization: Bearer ${TOKEN}" \
-                "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
-              if [ "$DIAG_CODE" != "200" ]; then
-                DIAG_DETAIL="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
-                  -s -H "Authorization: Bearer ${TOKEN}" \
+              if [ -n "$TOKEN" ]; then
+                DIAG_CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                  -s -o /dev/null -w '%{http_code}' \
+                  -H "Authorization: Bearer ${TOKEN}" \
                   "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
+                if [ "$DIAG_CODE" = "200" ]; then
+                  DIAG_DONE=1
+                  DIAG_DETAIL=""
+                else
+                  DIAG_DETAIL="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                    -s -H "Authorization: Bearer ${TOKEN}" \
+                    "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
+                fi
+              else
+                echo "Fallback admin auth failed; could not obtain token from target slot."
+                echo "Auth response: $AUTH_JSON"
               fi
             fi
+
             if [ "$DIAG_CODE" != "200" ]; then
               echo "SSH diagnostic endpoint failed with HTTP ${DIAG_CODE}. Aborting promotion."
               if [ -n "$DIAG_DETAIL" ]; then

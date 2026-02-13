@@ -18,6 +18,7 @@ services:
       - OGS_SSH_USER=${OGS_SSH_USER}
       - OGS_SSH_KEY_PATH=/app/secrets/ssh_key
       - OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts
+      - OGS_API_KEY=${OGS_API_KEY}
       - OGS_ADMIN_USER=${OGS_ADMIN_USER}
       - OGS_ADMIN_PASSWORD=${OGS_ADMIN_PASSWORD}
     networks:
