@@ -9,6 +9,7 @@ import (
 
 	"github.com/Ogstra/ogs-swg/internal/api"
 	"github.com/Ogstra/ogs-swg/internal/core"
+	"github.com/Ogstra/ogs-swg/internal/sys"
 )
 
 func main() {
@@ -41,7 +42,18 @@ func main() {
 		}
 		defer store.Close()
 
-		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr)
+		defer store.Close()
+
+		var executor core.SystemExecutor
+		if cfg.SSHHost != "" {
+			log.Printf("Initializing SSH Executor for host: %s", cfg.SSHHost)
+			executor = sys.NewSSHExecutor(cfg)
+		} else {
+			log.Printf("Initializing Local Executor")
+			executor = sys.NewLocalExecutor()
+		}
+
+		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
 		sampler := core.NewStatsSampler(sbClient, store, cfg)
 		sampler.Start()
 

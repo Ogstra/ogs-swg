@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -277,6 +278,19 @@ func (e *SSHExecutor) SearchJournal(ctx context.Context, unit, query string, lim
 
 func (e *SSHExecutor) CheckConnectivity(ctx context.Context) error {
 	return e.ensureConnection(ctx)
+}
+
+func (e *SSHExecutor) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	if err := e.ensureConnection(ctx); err != nil {
+		return nil, err
+	}
+	// ssh.Client.Dial doesn't support context directly for cancellation during dial,
+	// but we can check context before dialing.
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	// TODO: Wrap with context cancellation if needed (conn.Close() on ctx.Done())
+	return e.client.Dial(network, addr)
 }
 
 func (e *SSHExecutor) Close() error {

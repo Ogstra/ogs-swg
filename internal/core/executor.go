@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"net"
 	"os"
 )
 
@@ -44,4 +45,8 @@ type SystemExecutor interface {
 	CheckConnectivity(ctx context.Context) error
 	// Close releases any resources held by the executor.
 	Close() error
+
+	// Network
+	// Dial creates a connection to the address on the target system.
+	Dial(ctx context.Context, network, addr string) (net.Conn, error)
 }

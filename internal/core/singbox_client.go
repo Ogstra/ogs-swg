@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -14,19 +15,23 @@ import (
 )
 
 type SingboxClient struct {
-	addr string
-	mu   sync.Mutex
-	conn *grpc.ClientConn
+	addr     string
+	executor SystemExecutor
+	mu       sync.Mutex
+	conn     *grpc.ClientConn
 }
 
-func NewSingboxClient(addr string) *SingboxClient {
-	return &SingboxClient{addr: addr}
+func NewSingboxClient(addr string, executor SystemExecutor) *SingboxClient {
+	return &SingboxClient{
+		addr:     addr,
+		executor: executor,
+	}
 }
 
 func (c *SingboxClient) ensureConn() (*grpc.ClientConn, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	// Check if connection exists and is still valid
 	if c.conn != nil {
 		state := c.conn.GetState()
@@ -38,8 +43,18 @@ func (c *SingboxClient) ensureConn() (*grpc.ClientConn, error) {
 		c.conn.Close()
 		c.conn = nil
 	}
-	
-	conn, err := grpc.Dial(c.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}
+
+	if c.executor != nil {
+		opts = append(opts, grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+			return c.executor.Dial(ctx, "tcp", addr)
+		}))
+	}
+
+	conn, err := grpc.Dial(c.addr, opts...)
 	if err != nil {
 		return nil, err
 	}

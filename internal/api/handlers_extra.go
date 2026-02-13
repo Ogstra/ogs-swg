@@ -1240,7 +1240,7 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		if lst, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
 			activeUsersList = lst
 		}
-		if xc := core.NewSingboxClient(s.config.SingboxAPIAddr); xc != nil {
+		if xc := core.NewSingboxClient(s.config.SingboxAPIAddr, s.executor); xc != nil {
 			if stats, err := xc.GetSysStats(); err == nil {
 				sysStats = stats
 			}

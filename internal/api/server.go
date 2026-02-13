@@ -561,7 +561,7 @@ func StartServer(cfg *core.Config) *Server {
 	server := NewServer(store, cfg, executor)
 
 	if cfg.EnableSingbox {
-		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr)
+		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
 		if cfg.UseStatsSampler {
 			sampler := core.NewStatsSampler(sbClient, store, cfg)
 			sampler.Start()

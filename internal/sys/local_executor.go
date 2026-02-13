@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"strconv"
@@ -132,6 +133,11 @@ func (e *LocalExecutor) SearchJournal(ctx context.Context, unit, query string, l
 
 func (e *LocalExecutor) CheckConnectivity(ctx context.Context) error {
 	return nil // Local is always connected
+}
+
+func (e *LocalExecutor) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, network, addr)
 }
 
 func (e *LocalExecutor) Close() error {
