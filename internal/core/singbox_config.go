@@ -19,6 +19,14 @@ func (c *Config) GetSingboxConfig() (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.executor != nil {
+		content, err := c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
+		if err != nil {
+			return "", err
+		}
+		return string(content), nil
+	}
+
 	content, err := os.ReadFile(c.SingboxConfigPath)
 	if err != nil {
 		return "", err
@@ -31,7 +39,13 @@ func (c *Config) GetSingboxConfigMap() (map[string]interface{}, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	content, err := os.ReadFile(c.SingboxConfigPath)
+	var content []byte
+	var err error
+	if c.executor != nil {
+		content, err = c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
+	} else {
+		content, err = os.ReadFile(c.SingboxConfigPath)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -60,8 +74,14 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 	}
 
 	// 3. Write to file
-	if err := os.WriteFile(c.SingboxConfigPath, []byte(content), 0644); err != nil {
-		return err
+	if c.executor != nil {
+		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, []byte(content), 0644); err != nil {
+			return err
+		}
+	} else {
+		if err := os.WriteFile(c.SingboxConfigPath, []byte(content), 0644); err != nil {
+			return err
+		}
 	}
 
 	// 4. Mark pending restart (lock already held)
@@ -75,7 +95,13 @@ func (c *Config) ModifySingboxConfig(modifier func(SingboxConfigRaw) error) erro
 	defer c.mu.Unlock()
 
 	// 1. Read
-	content, err := os.ReadFile(c.SingboxConfigPath)
+	var content []byte
+	var err error
+	if c.executor != nil {
+		content, err = c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
+	} else {
+		content, err = os.ReadFile(c.SingboxConfigPath)
+	}
 	if err != nil {
 		return err
 	}
@@ -102,8 +128,14 @@ func (c *Config) ModifySingboxConfig(modifier func(SingboxConfigRaw) error) erro
 	}
 
 	// 5. Save
-	if err := os.WriteFile(c.SingboxConfigPath, data, 0644); err != nil {
-		return err
+	if c.executor != nil {
+		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644); err != nil {
+			return err
+		}
+	} else {
+		if err := os.WriteFile(c.SingboxConfigPath, data, 0644); err != nil {
+			return err
+		}
 	}
 
 	// 6. Mark pending restart (lock already held)
@@ -116,7 +148,13 @@ func (c *Config) GetSingboxInbounds() ([]map[string]interface{}, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	content, err := os.ReadFile(c.SingboxConfigPath)
+	var content []byte
+	var err error
+	if c.executor != nil {
+		content, err = c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
+	} else {
+		content, err = os.ReadFile(c.SingboxConfigPath)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -344,8 +382,14 @@ func (c *Config) saveAndReload(rawConfig SingboxConfigRaw) error {
 		return fmt.Errorf("sing-box validation failed: %v", err)
 	}
 
-	if err := os.WriteFile(c.SingboxConfigPath, data, 0644); err != nil {
-		return err
+	if c.executor != nil {
+		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644); err != nil {
+			return err
+		}
+	} else {
+		if err := os.WriteFile(c.SingboxConfigPath, data, 0644); err != nil {
+			return err
+		}
 	}
 
 	c.MarkSingboxPending()
@@ -360,6 +404,12 @@ func (c *Config) ValidateConfig(content []byte) error {
 	// Check for port collisions manually since sing-box check might miss them
 	if err := c.DetectPortCollision(content); err != nil {
 		return err
+	}
+
+	if c.executor != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return c.executor.ValidateSingboxConfig(ctx, content)
 	}
 
 	// Create temp file
@@ -438,6 +488,11 @@ func (c *Config) ReloadSingbox() error {
 	if !c.EnableSingbox {
 		return nil
 	}
+
+	if c.executor != nil {
+		return c.executor.RestartService(context.Background(), "sing-box")
+	}
+
 	// Assuming systemd usage
 	cmd := exec.Command("systemctl", "restart", "sing-box")
 	return cmd.Run()

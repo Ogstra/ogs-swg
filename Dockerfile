@@ -1,37 +1,50 @@
-# Build frontend
+# Stage 1: Build Frontend
 FROM node:20-alpine AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
+WORKDIR /app
+COPY frontend/package*.json ./
 RUN npm ci
-COPY frontend .
+COPY frontend/ ./
 RUN npm run build
 
-# Build backend
-FROM golang:1.24-alpine AS backend-builder
+# Stage 2: Build Backend
+FROM golang:1.24-bookworm AS backend-builder
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -o /app/swg ./cmd/server/main.go
+# CGO_ENABLED=1 because we use SQLite (github.com/mattn/go-sqlite3)
+RUN CGO_ENABLED=1 GOOS=linux go build -o ogs-swg ./cmd/server
 
-# Final Stage (runtime)
-FROM alpine:3.19
-ARG ENABLE_WG_TOOLS=1
+# Stage 3: Final runtime image
+FROM debian:bookworm-slim
+
+# Install basic runtime dependencies
+# - ca-certificates for HTTPS
+# - tzdata for timezones
+# - iproute2 for ip command (optional debug)
+# - curl/wget for healthcheck
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    tzdata \
+    iproute2 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Minimal runtime deps
-RUN apk add --no-cache ca-certificates tzdata sqlite-libs \
-    && if [ "$ENABLE_WG_TOOLS" = "1" ]; then apk add --no-cache wireguard-tools; fi
+# Copy artifacts
+COPY --from=backend-builder /app/ogs-swg /app/ogs-swg
+COPY --from=frontend-builder /app/dist /app/frontend
 
-# Copy binary
-COPY --from=backend-builder /app/swg /usr/local/bin/swg
+# Create directory for data
+RUN mkdir -p /app/data
 
-# Copy frontend assets
-COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
+# Environment variables
+ENV OGS_BIND=":8080"
+ENV OGS_DB_PATH="/app/data/stats.db"
 
-# Create directories
-RUN mkdir -p /var/log/singbox /var/lib/ogs-swg /etc/sing-box /config
-
+# Expose port
 EXPOSE 8080
 
-CMD ["/usr/local/bin/swg"]
+# Entrypoint
+CMD ["/app/ogs-swg", "-config", "/app/data/config.json"]

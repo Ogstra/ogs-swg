@@ -38,8 +38,21 @@ type Config struct {
 	ConfigPath            string   `json:"-"`
 	APIKey                string   `json:"api_key"`
 
+	// SSH Configuration
+	SSHHost                  string `json:"ssh_host"`
+	SSHPort                  int    `json:"ssh_port"`
+	SSHUser                  string `json:"ssh_user"`
+	SSHKeyPath               string `json:"ssh_key_path"`
+	SSHKeyPassphrase         string `json:"ssh_key_passphrase"`
+	SSHInsecureIgnoreHostKey bool   `json:"ssh_insecure_ignore_host_key"`
+
+	// Sysctl Whitelist (Optional override)
+	SysctlWhitelist []string `json:"sysctl_whitelist"`
+
 	JWTSecret string `json:"jwt_secret"`
-	mu        sync.Mutex
+
+	executor SystemExecutor
+	mu       sync.Mutex
 }
 
 type UserAccount struct {
@@ -74,9 +87,9 @@ func LoadConfig(path ...string) *Config {
 		ManagedInbounds:      []string{"in-reality"},
 		StatsInbounds:        []string{"in-reality"},
 		StatsOutbounds:       []string{"direct"},
-		AccessLogPath:        "/var/log/singbox.log",
+		AccessLogPath:        "data/access.log",
 		LogSource:            "journal",
-		DatabasePath:         "/var/lib/ogs-swg/stats.db",
+		DatabasePath:         "data/stats.db",
 		ListenAddr:           ":8080",
 		WireGuardConfigPath:  "/etc/wireguard/wg0.conf",
 		EnableWireGuard:      true,
@@ -91,6 +104,9 @@ func LoadConfig(path ...string) *Config {
 		AggregationDays:      7,
 		WGSamplerIntervalSec: 60,
 		WGRetentionDays:      30,
+
+		SSHPort: 22,
+		SSHUser: "root",
 
 		JWTSecret: "", // Will be generated if empty
 	}
@@ -116,6 +132,34 @@ func LoadConfig(path ...string) *Config {
 			// Fallback: use a timestamp-based secret (less secure but better than default)
 			cfg.JWTSecret = fmt.Sprintf("auto-generated-%d", os.Getpid())
 		}
+	}
+
+	// Override with Environment Variables
+	if v := os.Getenv("OGS_SSH_HOST"); v != "" {
+		cfg.SSHHost = v
+	}
+	if v := os.Getenv("OGS_SSH_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.SSHPort = p
+		}
+	}
+	if v := os.Getenv("OGS_SSH_USER"); v != "" {
+		cfg.SSHUser = v
+	}
+	if v := os.Getenv("OGS_SSH_KEY_PATH"); v != "" {
+		cfg.SSHKeyPath = v
+	}
+	if v := os.Getenv("OGS_SSH_KEY_PASS"); v != "" {
+		cfg.SSHKeyPassphrase = v
+	}
+	if v := os.Getenv("OGS_LISTEN_ADDR"); v != "" {
+		cfg.ListenAddr = v
+	}
+	if v := os.Getenv("OGS_DB_PATH"); v != "" {
+		cfg.DatabasePath = v
+	}
+	if v := os.Getenv("OGS_ACCESS_LOG_PATH"); v != "" {
+		cfg.AccessLogPath = v
 	}
 
 	return cfg

@@ -1,8 +1,126 @@
-# OGS-SWG
+# OGS-SWG Panel
 
-Web dashboard for managing sing-box and WireGuard VPN services.
+A web-based control panel for managing Sing-box users (VLESS/Reality) and monitoring WireGuard traffic. Supports both **local execution** (bare-metal) and **remote management** via SSH (Docker/AWS).
 
-<img width="1511" height="853" alt="image" src="https://github.com/user-attachments/assets/2a7f0b49-6479-4511-b556-f95abf947aa0" />
+## Architecture
+
+This application uses a modular **System Executor** architecture:
+*   **Local Mode**: Runs commands (`systemctl`, `wg`, `ip`) directly on the host. Suitable for bare-metal installs (Debian/Ubuntu).
+*   **Remote Mode (SSH)**: Connects to a remote host via SSH to manage services and read logs. Suitable for **Docker**, **AWS ECS/Fargate**, or splitting the panel from the VPN node.
+
+---
+
+## 🚀 Deployment
+
+### Option 1: Docker (Recommended)
+
+1.  **Clone the repository**:
+    ```bash
+    git clone https://github.com/Ogstra/ogs-swg
+    cd ogs-swg
+    ```
+
+2.  **Prepare SSH Keys** (for Remote Mode):
+    Generate a dedicated keypair for the agent:
+    ```bash
+    ssh-keygen -t ed25519 -f config/ssh_key -C "ogs_agent" -N ""
+    ```
+    *Copy the public key (`config/ssh_key.pub`) to the target server's `~/.ssh/authorized_keys`.*
+
+3.  **Run with Docker Compose**:
+    ```yaml
+    services:
+      ogs-swg:
+        build: .
+        ports:
+          - "8080:8080"
+        volumes:
+          - ./data:/app/data
+          - ./config/ssh_key:/app/data/ssh_key:ro
+        environment:
+          - OGS_DB_PATH=/app/data/stats.db
+    ```
+
+
+```bash
+docker compose up -d
+```
+
+### Option 2: Bare Metal
+Build and run directly:
+```bash
+go build -o ogs-swg ./cmd/server
+./ogs-swg -config config.json
+```
+
+---
+
+## 🔒 Security Setup (Target Host)
+
+For the **Remote Mode** to work securely, you must create a restricted user on the VPN node. Do NOT use root directly.
+
+### 1. Create the Agent User
+On your VPN server (Target Host):
+```bash
+sudo useradd -m -s /bin/bash ogs_agent
+```
+
+### 2. Configure SSH Access
+Add the public key generated in the deployment step:
+```bash
+sudo mkdir -p /home/ogs_agent/.ssh
+echo "YOUR_PUBLIC_KEY_CONTENT" | sudo tee -a /home/ogs_agent/.ssh/authorized_keys
+sudo chown -R ogs_agent:ogs_agent /home/ogs_agent/.ssh
+sudo chmod 700 /home/ogs_agent/.ssh
+sudo chmod 600 /home/ogs_agent/.ssh/authorized_keys
+```
+
+### 3. Configure Sudo Privileges (Least Privilege)
+This application requires limited `sudo` access to manage services. Create a sudoers file:
+
+```bash
+sudo visudo -f /etc/sudoers.d/ogs_agent
+```
+
+Add the following configuration (replace `/usr/bin/wg` etc. with actual paths if different):
+
+```sudoers
+# Allow ogs_agent to manage specific services and files without password
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart sing-box
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop sing-box
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl start sing-box
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active sing-box
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart wg-quick@wg0
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop wg-quick@wg0
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl start wg-quick@wg0
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg show
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg syncconf *
+ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -w *
+ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -n *
+ogs_agent ALL=(root) NOPASSWD: /usr/bin/journalctl -u sing-box *
+```
+
+*Note: The sysctl and wg patterns use wildcards but are validated strictly within the application code (Whitelist).*
+
+---
+
+## Configuration
+
+In `config.json` or via UI settings:
+
+```json
+{
+  "ssh_host": "10.0.0.5",
+  "ssh_port": 22,
+  "ssh_user": "ogs_agent",
+  "ssh_key_path": "/app/data/ssh_key",
+  "sysctl_whitelist": [
+    "net.ipv4.ip_forward",
+    "net.ipv6.conf.all.forwarding"
+  ]
+}
+```
 
 ## Supported protocols
 
@@ -22,129 +140,12 @@ Web dashboard for managing sing-box and WireGuard VPN services.
 - Sing-box log viewer with filtering
 - Service control (start/stop/restart)
 - Dashboard preferences (default service, refresh interval, range)
+- **Sysctl Management** (View/Edit allowed keys)
 
 **Experimental**
 - VMess/Trojan inbound creation (sing-box validation still required)
 - Self-signed TLS certificate generator (Tools)
 - Raw configuration editor with find + backup/restore
-
-## Installation
-
-### Requirements
-
-- Go 1.24+
-- Node.js 18+
-- sing-box with V2Ray API support, build with tags `with_v2ray_api`, `with_quic`, `with_dhcp`, `with_wireguard`, `with_utls`, `with_acme`, `with_clash_api`, `with_gvisor`
-- WireGuard tools (`wg`, `wg-quick`) 
-
-### Build
-
-```bash
-git clone https://github.com/yourusername/ogs-swg.git
-cd ogs-swg
-
-# Frontend
-cd frontend
-npm install
-npm run build
-cd ..
-
-# Backend
-go build -o ogs-swg .
-```
-
-### Configuration
-
-Create `config.json`:
-
-```json
-{
-  "singbox_config_path": "/etc/sing-box/config.json",
-  "singbox_api_addr": "127.0.0.1:8080",
-  "managed_inbounds": [],
-  "stats_inbounds": [],
-  "stats_outbounds": [],
-  "access_log_path": "/var/log/singbox.log",
-  "log_source": "journal",
-  "database_path": "./stats.db",
-  "listen_addr": "0.0.0.0:8111",
-  "wireguard_config_path": "/etc/wireguard/wg0.conf",
-  "enable_wireguard": true,
-  "enable_singbox": true,
-  "use_stats_sampler": true,
-  "sampler_interval_sec": 60,
-  "active_threshold_bytes": 1024,
-  "retention_enabled": true,
-  "retention_days": 30,
-  "wg_sampler_interval_sec": 60,
-  "wg_retention_days": 30,
-  "aggregation_enabled": true,
-  "aggregation_days": 7,
-  "public_ip": ""
-}
-```
-
-**Required:**
-- `singbox_config_path` - Path to sing-box configuration file
-- `singbox_api_addr` - sing-box API listen address
-- `database_path` - SQLite database path for stats
-- `listen_addr` - Dashboard web server listen address
-
-**Optional:**
-- `managed_inbounds` - Inbound tags to manage (default: `[]`)
-- `stats_inbounds` - Inbound tags to collect stats from (default: `[]`)
-- `stats_outbounds` - Outbound tags to collect stats from (default: `[]`)
-- `access_log_path` - Path to sing-box log file (default: `/var/log/singbox.log`)
-- `log_source` - Log source: `"journal"` or `"file"` (default: `"journal"`)
-- `wireguard_config_path` - Path to WireGuard config (default: `/etc/wireguard/wg0.conf`)
-- `enable_wireguard` - Enable WireGuard management (default: `true`)
-- `enable_singbox` - Enable sing-box management (default: `true`)
-- `use_stats_sampler` - Enable traffic statistics sampling (default: `true`)
-- `sampler_interval_sec` - Stats sampling interval in seconds (default: `60`)
-- `active_threshold_bytes` - Minimum bytes to consider user active (default: `1024`)
-- `retention_enabled` - Enable automatic data cleanup (default: `true`)
-- `retention_days` - Days to keep raw stats data (default: `30`)
-- `wg_sampler_interval_sec` - WireGuard stats sampling interval (default: `60`)
-- `wg_retention_days` - Days to keep WireGuard stats (default: `30`)
-- `aggregation_enabled` - Enable data aggregation (default: `true`)
-- `aggregation_days` - Days threshold for aggregation (default: `7`)
-- `public_ip` - Public IP used for QR/link generation (falls back to request host if empty)
-### Run
-
-```bash
-./ogs-swg
-```
-
-Access at `http://localhost:PORT`
-
-Default login: `admin` / `admin`
-
-## Docker (EXPERIMENTAL)
-
-```bash
-docker-compose up -d
-```
-
-**Important notes for Docker:**
-
-- Set `log_source: "file"` instead of `"journal"` (systemd not available in containers)
-- Bind-mount your sing-box log file if using file-based logs
-- The default compose uses `network_mode: host` for WireGuard access
-- Requires `NET_ADMIN` capability and `/dev/net/tun` device access
-- Service control (start/stop/restart) may not work without systemd
-
-**Example Docker configuration:**
-
-```json
-{
-  "singbox_config_path": "/etc/sing-box/config.json",
-  "singbox_api_addr": "127.0.0.1:8080",
-  "log_source": "file",
-  "access_log_path": "/var/log/singbox.log",
-  "database_path": "/data/stats.db",
-  "listen_addr": ":8111"
-}
-```
 
 ## License
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -476,8 +477,13 @@ func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := runSystemCtl("start", req.Service); err != nil {
-		http.Error(w, "Failed to start service: "+err.Error(), http.StatusInternalServerError)
+	if s.executor != nil {
+		if err := s.executor.StartService(r.Context(), req.Service); err != nil {
+			http.Error(w, "Failed to start service: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -496,8 +502,13 @@ func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := runSystemCtl("stop", req.Service); err != nil {
-		http.Error(w, "Failed to stop service: "+err.Error(), http.StatusInternalServerError)
+	if s.executor != nil {
+		if err := s.executor.StopService(r.Context(), req.Service); err != nil {
+			http.Error(w, "Failed to stop service: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
 		return
 	}
 
@@ -566,6 +577,32 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 	if !s.requireWireGuard(w) {
 		return
 	}
+
+	if s.executor != nil {
+		content, err := s.executor.ReadConfig(r.Context(), s.config.WireGuardConfigPath)
+		if err != nil {
+			// If file doesn't exist, return empty
+			if os.IsNotExist(err) { // This check might depend on executor implementation returning exact error
+				w.Header().Set("Content-Type", "text/plain")
+				w.Write([]byte(""))
+				return
+			}
+			// SSH/SFTP errors are slightly different, but usually contain "file does not exist"
+			if strings.Contains(strings.ToLower(err.Error()), "not exist") || strings.Contains(strings.ToLower(err.Error()), "no such file") {
+				w.Header().Set("Content-Type", "text/plain")
+				w.Write([]byte(""))
+				return
+			}
+
+			http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write(content)
+		return
+	}
+
+	// Fallback/Legacy logic if executor is somehow nil (impossible with new init)
 	content, err := os.ReadFile(s.config.WireGuardConfigPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -591,9 +628,16 @@ func (s *Server) handleUpdateWireGuardConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := os.WriteFile(s.config.WireGuardConfigPath, content, 0644); err != nil {
-		http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
-		return
+	if s.executor != nil {
+		if err := s.executor.WriteConfig(r.Context(), s.config.WireGuardConfigPath, content, 0644); err != nil {
+			http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		if err := os.WriteFile(s.config.WireGuardConfigPath, content, 0644); err != nil {
+			http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	if !s.syncWireGuardConfig(nil) {
@@ -1191,7 +1235,7 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	samplerPaused := false
 
 	if s.config.EnableSingbox {
-		singboxStatus = checkService("sing-box")
+		singboxStatus = s.checkService(r.Context(), "sing-box")
 		activeUsersSB, _ = s.store.GetActiveUserCountWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes)
 		if lst, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
 			activeUsersList = lst
@@ -1215,7 +1259,11 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.config.EnableWireGuard {
-		wireguardStatus = checkService("wireguard")
+		// For WireGuard, we might want to check interface status too, but service check is a good start
+		// If we are in container, we can't easily check wg-quick@wg0 unless via SSH.
+		// If local and containerized without systemd, this fails.
+		// But s.checkService now uses s.executor.IsServiceActive.
+		wireguardStatus = s.checkService(r.Context(), "wireguard")
 		wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)
 		pubToDisplay := make(map[string]string)
 		if wgCfg != nil {
@@ -1272,27 +1320,16 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(status)
 }
 
-func checkService(service string) bool {
-	if runtime.GOOS == "windows" {
-		return true
-	}
-
-	if !hasSystemctl() {
-		log.Printf("checkService: cannot verify %s (systemctl not present in container)", service)
+func (s *Server) checkService(ctx context.Context, service string) bool {
+	if s.executor == nil {
 		return false
 	}
-
-	unitName := service
-	if service == "wireguard" {
-		unitName = "wg-quick@wg0"
-	}
-
-	cmd := exec.Command("systemctl", "is-active", unitName)
-	if err := cmd.Run(); err != nil {
-		log.Printf("checkService: %s is not active or cannot be checked: %v", unitName, err)
+	active, err := s.executor.IsServiceActive(ctx, service)
+	if err != nil {
+		log.Printf("checkService: failed to check %s: %v", service, err)
 		return false
 	}
-	return true
+	return active
 }
 
 func (s *Server) requireAnyService(w http.ResponseWriter) bool {

@@ -46,3 +46,9 @@ stats.db-shm
 stats.db-wal
 singbox_config.json
 ogstra
+
+# Deployment Keys
+github_deploy_key
+github_deploy_key.pub
+config/ssh_key
+config/ssh_key.pub

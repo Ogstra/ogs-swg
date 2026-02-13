@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
@@ -107,7 +108,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	dashboardCache.mu.Unlock()
 
 	// 1. Fetch System Status
-	status := s.collectSystemStatus()
+	status := s.collectSystemStatus(r.Context())
 
 	// 2. Fetch WireGuard peers for range calculations
 	var wgPeerKeys []string
@@ -297,7 +298,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (s *Server) collectSystemStatus() map[string]interface{} {
+func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{} {
 	// Replicating logic from handleGetSystemStatus
 	// Ideally refactor to shared method, but copy-paste is safer for now to avoid breaking legacy endpoint
 	singboxStatus := false
@@ -310,7 +311,7 @@ func (s *Server) collectSystemStatus() map[string]interface{} {
 	var activeUsersWGList []string
 
 	if s.config.EnableSingbox {
-		singboxStatus = checkService("sing-box")
+		singboxStatus = s.checkService(ctx, "sing-box")
 		// Fetch active users list (previously we only fetched count)
 		// We use the same threshold mechanism
 		if users, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
@@ -320,7 +321,7 @@ func (s *Server) collectSystemStatus() map[string]interface{} {
 	}
 
 	if s.config.EnableWireGuard {
-		wireguardStatus = checkService("wireguard")
+		wireguardStatus = s.checkService(ctx, "wireguard")
 		if stats, err := core.GetWireGuardStats(); err == nil {
 			threshold := time.Now().Add(-3 * time.Minute).Unix()
 			wgCfg, _ := core.LoadWireGuardConfig(s.config.WireGuardConfigPath)

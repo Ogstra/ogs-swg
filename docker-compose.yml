@@ -1,21 +1,24 @@
 services:
   ogs-swg:
-    build:
-      context: .
-      args:
-        ENABLE_WG_TOOLS: 1
-    image: ogs-swg:latest
+    build: .
+    image: ogstra/ogs-swg:latest
     container_name: ogs-swg
-    network_mode: "host"
-    cap_add:
-      - NET_ADMIN
-    devices:
-      - /dev/net/tun
-    volumes:
-      - ./local-data/logs/singbox.log:/var/log/singbox.log:ro
-      - ./local-data/singbox/config.json:/etc/sing-box/config.json:ro
-      - ./local-data/wireguard/wg0.conf:/etc/wireguard/wg0.conf
-      - ./config.json:/config/config.json # panel config
-      - ./local-data/data:/var/lib/ogs-swg
     restart: unless-stopped
-    command: ["/usr/local/bin/swg", "--config", "/config/config.json", "--db", "/var/lib/ogs-swg/stats.db", "--log", "/var/log/singbox.log"]
+    ports:
+      - "${OGS_PORT:-8080}:8080"
+    volumes:
+      - ./data:/app/data
+      # Mount SSH Key if using remote management
+      - ./config/ssh_key:/app/data/ssh_key:ro
+    environment:
+      - OGS_BIND=${OGS_BIND:-:8080}
+      - OGS_DB_PATH=${OGS_DB_PATH:-/app/data/stats.db}
+      # SSH Configuration for Remote Management
+      - OGS_SSH_HOST=${OGS_SSH_HOST}
+      - OGS_SSH_PORT=${OGS_SSH_PORT}
+      - OGS_SSH_USER=${OGS_SSH_USER}
+      - OGS_SSH_KEY_PATH=${OGS_SSH_KEY_PATH}
+      - OGS_SSH_KEY_PASS=${OGS_SSH_KEY_PASS}
+    # capabilities might be needed if running local wireguard inside container (not recommended mode here)
+    # cap_add:
+    #   - NET_ADMIN
