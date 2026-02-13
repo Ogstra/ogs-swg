@@ -123,14 +123,21 @@ jobs:
           script: |
             set -euo pipefail
             export COMPOSE_IGNORE_ORPHANS=1
+            as_root() {
+              if [ "$(id -u)" -eq 0 ]; then
+                "$@"
+              else
+                sudo "$@"
+              fi
+            }
 
             # Navigate to deployment directory (create if missing)
             mkdir -p ${{ secrets.DEPLOY_PATH }}/config
             mkdir -p ${{ secrets.DEPLOY_PATH }}/data
             mkdir -p ${{ secrets.DEPLOY_PATH }}/docker/bluegreen/nginx
             # Ensure system config directories exist
-            sudo mkdir -p /etc/sing-box
-            sudo mkdir -p /etc/wireguard
+            as_root mkdir -p /etc/sing-box
+            as_root mkdir -p /etc/wireguard
             cd ${{ secrets.DEPLOY_PATH }}
             
             # Clean up potential directory conflict
@@ -166,6 +173,44 @@ jobs:
               echo "Secret OGS_AGENT_USER is empty. Aborting deploy."
               exit 1
             fi
+
+            # Ensure runtime user has required NOPASSWD sudo rules (idempotent) when not root.
+            if [ "${RUNTIME_SSH_USER}" != "root" ]; then
+              WG_BIN="$(command -v wg || echo /usr/bin/wg)"
+              CAT_BIN="$(command -v cat || echo /usr/bin/cat)"
+              INSTALL_BIN="$(command -v install || echo /usr/bin/install)"
+              SYSTEMCTL_BIN="$(command -v systemctl || echo /usr/bin/systemctl)"
+              JOURNALCTL_BIN="$(command -v journalctl || echo /usr/bin/journalctl)"
+              SYSCTL_BIN="$(command -v sysctl || echo /usr/sbin/sysctl)"
+              SUDOERS_TMP="$(mktemp)"
+              SUDOERS_PATH="/etc/sudoers.d/ogs-swg-${RUNTIME_SSH_USER}"
+              cat > "${SUDOERS_TMP}" <<EOF
+Defaults:${RUNTIME_SSH_USER} !requiretty
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart sing-box
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop sing-box
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start sing-box
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active sing-box
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart wg-quick@wg0
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop wg-quick@wg0
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start wg-quick@wg0
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active wg-quick@wg0
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} show
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} show all dump
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${WG_BIN} syncconf *
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/wireguard/wg0.conf
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/wireguard/wg0.conf
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/sing-box/config.json
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/sing-box/config.json
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -w *
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -n *
+${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${JOURNALCTL_BIN} -u sing-box *
+EOF
+              as_root visudo -cf "${SUDOERS_TMP}"
+              as_root mkdir -p /etc/sudoers.d
+              as_root install -m 440 "${SUDOERS_TMP}" "${SUDOERS_PATH}"
+              rm -f "${SUDOERS_TMP}"
+            fi
+
             if [ ! -s config/ssh_key ] || [ "$(wc -c < config/ssh_key)" -lt 100 ]; then
               echo "Runtime ssh_key is missing or too small. Check OGS_AGENT_SSH_KEY secret."
               exit 1

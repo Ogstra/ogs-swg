@@ -88,6 +88,12 @@ Required GitHub secrets for deploy:
 - `OGS_ADMIN_USER` and `OGS_ADMIN_PASSWORD` (optional fallback only if `OGS_API_KEY` is not set)
 - `OGS_PORT` (optional, defaults to `8080`)
 
+Deploy behavior for runtime sudoers:
+- If `OGS_AGENT_USER` is not `root`, the workflow provisions `/etc/sudoers.d/ogs-swg-<user>` automatically on each deploy.
+- It is idempotent (the file is replaced, not appended), so rules are not duplicated across deploys.
+- This requires `${VPS_USER}` to be `root` or have passwordless sudo for `visudo`/`install` to `/etc/sudoers.d`.
+- If `OGS_AGENT_USER=root`, sudoers provisioning is skipped.
+
 Manual force deploy:
 - In **Actions > Build and Deploy > Run workflow**, use `force_slot`:
   - `auto`: normal blue/green toggle
@@ -160,6 +166,7 @@ ogs_agent ALL=(root) NOPASSWD: /usr/bin/journalctl -u sing-box *
 
 *Note: The sysctl and wg patterns use wildcards but are validated strictly within the application code via a whitelist.*
 *If your runtime SSH user is `root`, these sudoers entries are not required.*
+*If you use this repository's GitHub Actions deploy, this sudoers file is provisioned automatically when `OGS_AGENT_USER` is not `root`.*
 
 ---
 
