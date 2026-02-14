@@ -98,12 +98,11 @@ export const Layout: React.FC = () => {
                 <main className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth">
                     <div className="max-w-7xl mx-auto">
                         <Outlet />
+                        <div className="mt-8 pb-2 text-right text-[10px] text-slate-500">
+                            {commitLabel}
+                        </div>
                     </div>
                 </main>
-
-                <div className="pointer-events-none fixed bottom-2 right-3 z-20 text-[10px] text-slate-500">
-                    {commitLabel}
-                </div>
             </div>
         </div>
     );

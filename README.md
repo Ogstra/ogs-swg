@@ -15,7 +15,7 @@ This application utilizes a modular **System Executor** architecture:
 
 ## Deployment
 
-### Option 1: Docker (Recommended)
+### Quickstart (Docker local)
 
 1.  **Clone the repository**:
     ```bash
@@ -23,7 +23,7 @@ This application utilizes a modular **System Executor** architecture:
     cd ogs-swg
     ```
 
-2.  **Prepare SSH Keys** (for Remote Mode):
+2.  **Prepare SSH keys** (only if you use Remote Mode):
     Generate a dedicated keypair for the agent:
     ```bash
     ssh-keygen -t ed25519 -f config/ssh_key -C "ogs_agent" -N ""
@@ -64,25 +64,24 @@ This application utilizes a modular **System Executor** architecture:
     docker compose up -d
     ```
 
-### GitHub Actions Deploy Strategy
+### CI/CD Blue-Green Deploy (GitHub Actions)
 
-Automatic deploys use a **Blue/Green topology** only in CI/CD (not for local developers):
+Automatic deploys use a **blue/green topology** in CI/CD only:
 
-- Local users keep using the standard `docker-compose.yml`.
-- CI deploy uses dedicated files under `docker/bluegreen/`.
-- `nginx` routes traffic to active slot (`blue` or `green`) on an internal Docker network.
-- Workflow deploys the inactive slot, runs healthchecks, and only then switches proxy upstream.
-- If healthcheck fails, traffic stays on previous slot.
+- Local development keeps using `docker-compose.yml`.
+- CI uses `docker/bluegreen/*`.
+- `nginx` routes to active slot (`blue`/`green`).
+- Workflow deploys inactive slot, validates health, then switches traffic.
+- On failure, traffic stays on current slot.
 
-Required GitHub secrets for deploy:
+Required Actions secrets:
 - `DOCKER_USERNAME`
 - `DOCKER_PASSWORD`
 - `VPS_HOST`
 - `VPS_PORT`
 - `VPS_USER`
 - `VPS_SSH_KEY` (deployment SSH key for Actions -> VPS)
-- `OGS_AGENT_SSH_KEY` (app runtime key for panel -> managed node)
-- `OGS_AGENT_SSH_KEY_B64` (optional; base64 of runtime private key, preferred over multiline key secret)
+- `OGS_AGENT_SSH_KEY_B64` (base64-encoded runtime private key; required)
 - `OGS_SSH_KNOWN_HOSTS_CONTENT` (known_hosts content for runtime SSH trust)
 - `OGS_SSH_KNOWN_HOSTS_CONTENT_B64` (optional; base64 of known_hosts content, preferred over multiline secret)
 - `OGS_AGENT_USER`
@@ -90,18 +89,17 @@ Required GitHub secrets for deploy:
 - `OGS_ADMIN_USER` and `OGS_ADMIN_PASSWORD` (optional fallback only if `OGS_API_KEY` is not set)
 - `OGS_PORT` (optional, defaults to `8080`)
 
-Deploy behavior for runtime sudoers:
+Deploy behavior:
 - If `OGS_AGENT_USER` is not `root`, the workflow provisions `/etc/sudoers.d/ogs-swg-<user>` automatically on each deploy.
-- It is idempotent (the file is replaced, not appended), so rules are not duplicated across deploys.
+- The file is replaced (idempotent), so rules are not duplicated.
 - This requires `${VPS_USER}` to be `root` or have passwordless sudo for `visudo`/`install` to `/etc/sudoers.d`.
 - If `OGS_AGENT_USER=root`, sudoers provisioning is skipped.
-- Workflow also syncs the runtime SSH public key (derived from `OGS_AGENT_SSH_KEY*`) into `${OGS_AGENT_USER}` `authorized_keys` on each deploy.
+- Workflow also syncs the runtime SSH public key (derived from `OGS_AGENT_SSH_KEY_B64`) into `${OGS_AGENT_USER}` `authorized_keys` on each deploy.
 
-Manual force deploy:
-- In **Actions > Build and Deploy > Run workflow**, use `force_slot`:
-  - `auto`: normal blue/green toggle
-  - `blue`: force deploy to blue slot
-  - `green`: force deploy to green slot
+Manual deploy control (`force_slot` in Actions > Build and Deploy > Run workflow):
+- `auto`: normal toggle
+- `blue`: force deploy to blue
+- `green`: force deploy to green
 
 ### Option 2: Bare Metal
 
