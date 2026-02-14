@@ -235,6 +235,10 @@ jobs:
               echo "Runtime ssh_key is missing or too small. Check OGS_AGENT_SSH_KEY secret."
               exit 1
             fi
+            if command -v ssh-keygen >/dev/null 2>&1; then
+              echo "Runtime private key fingerprint (from OGS_AGENT_SSH_KEY):"
+              ssh-keygen -lf config/ssh_key || true
+            fi
             if [ ! -s config/known_hosts ] || [ "$(wc -c < config/known_hosts)" -lt 40 ]; then
               echo "Runtime known_hosts is missing or too small. Check OGS_SSH_KNOWN_HOSTS_CONTENT/VPS_HOST/VPS_PORT."
               exit 1
@@ -256,6 +260,19 @@ jobs:
               fi
             fi
             if command -v ssh >/dev/null 2>&1; then
+              if command -v ssh-keygen >/dev/null 2>&1; then
+                echo "Remote authorized_keys fingerprints for ${RUNTIME_SSH_USER}:"
+                ssh \
+                  -i config/ssh_key \
+                  -p "${RUNTIME_SSH_PORT}" \
+                  -o BatchMode=yes \
+                  -o IdentitiesOnly=yes \
+                  -o StrictHostKeyChecking=yes \
+                  -o UserKnownHostsFile=config/known_hosts \
+                  -o ConnectTimeout=8 \
+                  "${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}" \
+                  "ssh-keygen -lf ~/.ssh/authorized_keys 2>/dev/null || { echo 'authorized_keys not readable'; exit 1; }" || true
+              fi
               if ! ssh \
                 -i config/ssh_key \
                 -p "${RUNTIME_SSH_PORT}" \
