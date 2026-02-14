@@ -95,6 +95,7 @@ Deploy behavior for runtime sudoers:
 - It is idempotent (the file is replaced, not appended), so rules are not duplicated across deploys.
 - This requires `${VPS_USER}` to be `root` or have passwordless sudo for `visudo`/`install` to `/etc/sudoers.d`.
 - If `OGS_AGENT_USER=root`, sudoers provisioning is skipped.
+- Workflow also syncs the runtime SSH public key (derived from `OGS_AGENT_SSH_KEY*`) into `${OGS_AGENT_USER}` `authorized_keys` on each deploy.
 
 Manual force deploy:
 - In **Actions > Build and Deploy > Run workflow**, use `force_slot`:

@@ -254,6 +254,33 @@ jobs:
               echo "Runtime private key fingerprint (from ${KEY_SECRET_SOURCE}):"
               ssh-keygen -lf config/ssh_key || true
             fi
+            # Ensure runtime public key is present on target user authorized_keys.
+            # This keeps app runtime SSH key and target host trust in sync after key rotations.
+            if command -v ssh-keygen >/dev/null 2>&1; then
+              RUNTIME_PUBKEY="$(ssh-keygen -y -f config/ssh_key 2>/dev/null || true)"
+              if [ -n "${RUNTIME_PUBKEY}" ]; then
+                if [ "${RUNTIME_SSH_USER}" = "root" ]; then
+                  RUNTIME_HOME="/root"
+                else
+                  RUNTIME_HOME="$(getent passwd "${RUNTIME_SSH_USER}" 2>/dev/null | cut -d: -f6 || true)"
+                  if [ -z "${RUNTIME_HOME}" ]; then
+                    RUNTIME_HOME="/home/${RUNTIME_SSH_USER}"
+                  fi
+                fi
+                AUTH_DIR="${RUNTIME_HOME}/.ssh"
+                AUTH_FILE="${AUTH_DIR}/authorized_keys"
+                AUTH_TMP="$(mktemp)"
+                as_root mkdir -p "${AUTH_DIR}"
+                as_root chmod 700 "${AUTH_DIR}"
+                as_root chown "${RUNTIME_SSH_USER}:${RUNTIME_SSH_USER}" "${AUTH_DIR}"
+                as_root sh -c "cat '${AUTH_FILE}' 2>/dev/null || true" > "${AUTH_TMP}"
+                if ! grep -Fqx "${RUNTIME_PUBKEY}" "${AUTH_TMP}"; then
+                  echo "${RUNTIME_PUBKEY}" >> "${AUTH_TMP}"
+                fi
+                as_root install -m 600 -o "${RUNTIME_SSH_USER}" -g "${RUNTIME_SSH_USER}" "${AUTH_TMP}" "${AUTH_FILE}"
+                rm -f "${AUTH_TMP}"
+              fi
+            fi
             if [ ! -s config/known_hosts ] || [ "$(wc -c < config/known_hosts)" -lt 40 ]; then
               echo "Runtime known_hosts is missing or too small. Check OGS_SSH_KNOWN_HOSTS_CONTENT/VPS_HOST/VPS_PORT."
               exit 1
