@@ -167,9 +167,7 @@ jobs:
               KEY_SECRET_SOURCE="OGS_AGENT_SSH_KEY_B64"
               printf '%s' "${{ secrets.OGS_AGENT_SSH_KEY_B64 }}" | base64 -d > config/ssh_key
             else
-              cat > config/ssh_key <<'EOF_OGS_RUNTIME_KEY'
-${{ secrets.OGS_AGENT_SSH_KEY }}
-EOF_OGS_RUNTIME_KEY
+              printf '%s' "${{ secrets.OGS_AGENT_SSH_KEY }}" > config/ssh_key
             fi
             echo "Runtime SSH key source: ${KEY_SECRET_SOURCE}"
             chmod 600 config/ssh_key
@@ -177,9 +175,7 @@ EOF_OGS_RUNTIME_KEY
             if [ -n "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" ]; then
               printf '%s' "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" | base64 -d > /tmp/ogs-known-hosts.input
             else
-              cat > /tmp/ogs-known-hosts.input <<'EOF_OGS_KNOWN_HOSTS'
-${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}
-EOF_OGS_KNOWN_HOSTS
+              printf '%s\n' "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}" > /tmp/ogs-known-hosts.input
             fi
             {
               cat /tmp/ogs-known-hosts.input
