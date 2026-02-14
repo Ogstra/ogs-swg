@@ -161,6 +161,8 @@ jobs:
             rm -f config/known_hosts
             
             # Write SSH Key to file (for the container to use)
+            KEY_SECRET_SOURCE="OGS_AGENT_SSH_KEY"
+            echo "Runtime SSH key source: ${KEY_SECRET_SOURCE}"
             echo "${{ secrets.OGS_AGENT_SSH_KEY }}" > config/ssh_key
             chmod 600 config/ssh_key
             {
@@ -236,7 +238,7 @@ jobs:
               exit 1
             fi
             if command -v ssh-keygen >/dev/null 2>&1; then
-              echo "Runtime private key fingerprint (from OGS_AGENT_SSH_KEY):"
+              echo "Runtime private key fingerprint (from ${KEY_SECRET_SOURCE}):"
               ssh-keygen -lf config/ssh_key || true
             fi
             if [ ! -s config/known_hosts ] || [ "$(wc -c < config/known_hosts)" -lt 40 ]; then
@@ -284,7 +286,7 @@ jobs:
                 "${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}" \
                 "echo runtime-ssh-ok" >/dev/null 2>&1; then
                 echo "Runtime SSH auth preflight failed for ${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}."
-                echo "Verify OGS_AGENT_SSH_KEY matches ${RUNTIME_SSH_USER} authorized_keys on the new VM."
+                echo "Verify ${KEY_SECRET_SOURCE} matches ${RUNTIME_SSH_USER} authorized_keys on the new VM."
                 exit 1
               fi
             else
