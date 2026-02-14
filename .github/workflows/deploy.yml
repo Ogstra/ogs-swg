@@ -24,6 +24,11 @@ on:
           - auto
           - blue
           - green
+      bake_seconds:
+        description: "How long old slot stays running after promotion (for baking)"
+        required: false
+        default: "600"
+        type: string
 
 concurrency:
   group: deploy-${{ github.repository }}-${{ github.ref }}
@@ -102,7 +107,9 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest
+            ${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
           build-args: |
             APP_COMMIT_SHA=${{ github.sha }}
           platforms: ${{ secrets.DEPLOY_ARCH || 'linux/amd64,linux/arm64' }}
@@ -137,7 +144,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT }}
-          source: "docker/bluegreen/*"
+          source: "docker/bluegreen/**"
           target: "${{ secrets.DEPLOY_PATH }}"
 
       - name: Deploy on VPS
@@ -218,7 +225,7 @@ jobs:
             
             # Common env for blue/green app stacks + proxy
             cat > .env.bluegreen <<EOF
-            OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest
+            OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
             OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
             OGS_SSH_HOST=${{ secrets.VPS_HOST }}
             OGS_SSH_PORT=${{ secrets.VPS_PORT || 22 }}
@@ -371,6 +378,18 @@ jobs:
             # Shared network for proxy + blue/green targets
             docker network create ogs-bg-net >/dev/null 2>&1 || true
 
+            BAKE_SECONDS="${{ github.event.inputs.bake_seconds || '600' }}"
+            case "$BAKE_SECONDS" in
+              ''|*[!0-9]*)
+                echo "Invalid bake_seconds: ${BAKE_SECONDS} (must be numeric)."
+                exit 1
+                ;;
+            esac
+            if [ "$BAKE_SECONDS" -lt 60 ] || [ "$BAKE_SECONDS" -gt 86400 ]; then
+              echo "Invalid bake_seconds: ${BAKE_SECONDS} (allowed range: 60..86400)."
+              exit 1
+            fi
+
             # Determine active slot (default blue on first deployment)
             ACTIVE="blue"
             if [ -f .bluegreen.active ]; then
@@ -409,6 +428,8 @@ jobs:
 
             # Ensure proxy is up first (keeps current traffic path stable)
             docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.proxy.yml up -d
+            # Keep watchdog running; it handles post-bake GC and runtime rollback.
+            docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.monitor.yml up -d --build
 
             # Deploy target slot
             docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml pull
@@ -507,6 +528,15 @@ jobs:
             docker exec ogs-swg-proxy nginx -t
             docker exec ogs-swg-proxy nginx -s reload
             echo "$TARGET" > .bluegreen.active
+
+            # Persist rollback/baking metadata for watchdog.
+            if [ "$ACTIVE" = "blue" ] || [ "$ACTIVE" = "green" ]; then
+              echo "$ACTIVE" > .bluegreen.previous
+              BAKE_UNTIL="$(( $(date +%s) + BAKE_SECONDS ))"
+              echo "$BAKE_UNTIL" > .bluegreen.bake_until
+            else
+              rm -f .bluegreen.previous .bluegreen.bake_until
+            fi
 
             # Optional: trim old images only after successful switch
             docker image prune -f

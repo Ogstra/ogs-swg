@@ -1,0 +1,33 @@
+services:
+  ogs-swg-monitor:
+    build:
+      context: ./monitor
+      dockerfile: Dockerfile
+    container_name: ogs-swg-monitor
+    restart: unless-stopped
+    mem_limit: 15m
+    cpus: 0.20
+    environment:
+      - DEPLOY_ROOT=/state
+      - ACTIVE_FILE=.bluegreen.active
+      - PREVIOUS_FILE=.bluegreen.previous
+      - BAKE_UNTIL_FILE=.bluegreen.bake_until
+      - EVENTS_FILE=.bluegreen.events.log
+      - NGINX_TEMPLATE=docker/bluegreen/nginx/default.conf.template
+      - NGINX_CONF=docker/bluegreen/nginx/default.conf
+      - HEALTH_URL_PATH=/api/login
+      - HEALTH_METHOD=POST
+      - HEALTH_BODY={"username":"invalid","password":"invalid"}
+      - HEALTH_EXPECT=401,405
+      - CHECK_INTERVAL_SEC=15
+      - FAIL_THRESHOLD=4
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../../:/state
+    networks:
+      - ogs_bg_net
+
+networks:
+  ogs_bg_net:
+    external: true
+    name: ogs-bg-net

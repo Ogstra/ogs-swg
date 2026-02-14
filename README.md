@@ -66,13 +66,15 @@ This application utilizes a modular **System Executor** architecture:
 
 ### CI/CD Blue-Green Deploy (GitHub Actions)
 
-Automatic deploys use a **blue/green topology** in CI/CD only:
+Automatic deploys use a **blue/green topology with watchdog**:
 
 - Local development keeps using `docker-compose.yml`.
 - CI uses `docker/bluegreen/*`.
-- `nginx` routes to active slot (`blue`/`green`).
-- Workflow deploys inactive slot, validates health, then switches traffic.
-- On failure, traffic stays on current slot.
+- `nginx` routes traffic to active slot (`blue` or `green`).
+- Deploy pipeline updates the inactive slot, validates health + `/api/diag/ssh`, then does an atomic nginx reload.
+- Old slot stays alive during a baking window (default `600s`), then watchdog stops it to recover RAM.
+- If active slot degrades later, watchdog can auto-rollback to the previous slot and logs the incident.
+- Image deploy is immutable per run (`ogs-swg:${GITHUB_SHA}`), while `latest` is still pushed for convenience.
 
 Required Actions secrets:
 - `DOCKER_USERNAME`
@@ -101,12 +103,54 @@ Manual deploy control (`force_slot` in Actions > Build and Deploy > Run workflow
 - `blue`: force deploy to blue
 - `green`: force deploy to green
 
+Optional workflow input:
+- `bake_seconds`: baking window duration before watchdog stops old slot (range `60..86400`, default `600`).
+
+Runtime state files on VPS (`${DEPLOY_PATH}`):
+- `.bluegreen.active`: current live slot.
+- `.bluegreen.previous`: previous slot used for rollback.
+- `.bluegreen.bake_until`: unix timestamp; when elapsed, old slot is stopped.
+- `.bluegreen.events.log`: watchdog events and recovered incidents.
+
+Stable memory target after baking:
+- `1 app active + 1 watchdog + 1 nginx proxy`.
+
 ### Option 2: Bare Metal
 
 Build and run the application directly:
 ```bash
 go build -o ogs-swg ./cmd/server
 ./ogs-swg -config config.json
+```
+
+### Host Hardening (recommended)
+
+Persist network/kernel tuning and cap logs so the VPS stays stable over time:
+
+```bash
+# /etc/sysctl.d/99-ogs-swg.conf
+net.core.rmem_max=26214400
+net.core.wmem_max=26214400
+net.ipv4.tcp_congestion_control=bbr
+net.core.default_qdisc=fq
+
+sudo sysctl --system
+```
+
+```json
+// /etc/docker/daemon.json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "50m",
+    "max-file": "2"
+  }
+}
+```
+
+Then restart Docker:
+```bash
+sudo systemctl restart docker
 ```
 
 ---
