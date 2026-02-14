@@ -147,7 +147,11 @@ jobs:
             # Write SSH Key to file (for the container to use)
             echo "${{ secrets.OGS_AGENT_SSH_KEY }}" > config/ssh_key
             chmod 600 config/ssh_key
-            echo "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}" > config/known_hosts
+            {
+              echo "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}"
+              # Refresh runtime host fingerprint for post-migration/new-VM scenarios.
+              ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" 2>/dev/null || true
+            } | awk 'NF' | sort -u > config/known_hosts
             chmod 600 config/known_hosts
 
             # Best-effort cleanup of legacy single-slot deployment container
@@ -216,7 +220,7 @@ jobs:
               exit 1
             fi
             if [ ! -s config/known_hosts ] || [ "$(wc -c < config/known_hosts)" -lt 40 ]; then
-              echo "Runtime known_hosts is missing or too small. Check OGS_SSH_KNOWN_HOSTS_CONTENT secret."
+              echo "Runtime known_hosts is missing or too small. Check OGS_SSH_KNOWN_HOSTS_CONTENT/VPS_HOST/VPS_PORT."
               exit 1
             fi
             if [ -z "${{ secrets.OGS_API_KEY }}" ] && { [ -z "${{ secrets.OGS_ADMIN_USER }}" ] || [ -z "${{ secrets.OGS_ADMIN_PASSWORD }}" ]; }; then
