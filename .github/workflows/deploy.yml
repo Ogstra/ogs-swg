@@ -171,6 +171,15 @@ jobs:
             fi
             echo "Runtime SSH key source: ${KEY_SECRET_SOURCE}"
             chmod 600 config/ssh_key
+            echo "Runtime ssh_key bytes: $(wc -c < config/ssh_key)"
+            if ! ssh-keygen -y -f config/ssh_key >/tmp/ogs-runtime.pub 2>/dev/null; then
+              echo "Runtime ssh_key is not a valid private key. Check ${KEY_SECRET_SOURCE} (do not use .pub content)."
+              exit 1
+            fi
+            echo "Runtime public key fingerprint (derived from private):"
+            ssh-keygen -lf /tmp/ogs-runtime.pub || true
+            RUNTIME_PUBKEY="$(cat /tmp/ogs-runtime.pub)"
+            rm -f /tmp/ogs-runtime.pub
 
             if [ -n "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" ]; then
               printf '%s' "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" | base64 -d > /tmp/ogs-known-hosts.input
@@ -257,7 +266,6 @@ jobs:
             # Ensure runtime public key is present on target user authorized_keys.
             # This keeps app runtime SSH key and target host trust in sync after key rotations.
             if command -v ssh-keygen >/dev/null 2>&1; then
-              RUNTIME_PUBKEY="$(ssh-keygen -y -f config/ssh_key 2>/dev/null || true)"
               if [ -n "${RUNTIME_PUBKEY}" ]; then
                 if [ "${RUNTIME_SSH_USER}" = "root" ]; then
                   RUNTIME_HOME="/root"
