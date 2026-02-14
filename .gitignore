@@ -52,3 +52,11 @@ github_deploy_key
 github_deploy_key.pub
 config/ssh_key
 config/ssh_key.pub
+config/gha_ogs_agent
+config/gha_ogs_agent.pub
+data/ssh_key/
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+*.pem
