@@ -21,6 +21,7 @@ services:
       - OGS_API_KEY=${OGS_API_KEY}
       - OGS_ADMIN_USER=${OGS_ADMIN_USER}
       - OGS_ADMIN_PASSWORD=${OGS_ADMIN_PASSWORD}
+    command: ["/bin/sh", "-lc", "chmod 600 /app/secrets/ssh_key 2>/dev/null || true; exec /app/ogs-swg -config /app/data/config.json"]
     networks:
       - ogs_bg_net
 
