@@ -82,7 +82,9 @@ Required GitHub secrets for deploy:
 - `VPS_USER`
 - `VPS_SSH_KEY` (deployment SSH key for Actions -> VPS)
 - `OGS_AGENT_SSH_KEY` (app runtime key for panel -> managed node)
+- `OGS_AGENT_SSH_KEY_B64` (optional; base64 of runtime private key, preferred over multiline key secret)
 - `OGS_SSH_KNOWN_HOSTS_CONTENT` (known_hosts content for runtime SSH trust)
+- `OGS_SSH_KNOWN_HOSTS_CONTENT_B64` (optional; base64 of known_hosts content, preferred over multiline secret)
 - `OGS_AGENT_USER`
 - `OGS_API_KEY` (recommended; used by deploy to validate `/api/diag/ssh`)
 - `OGS_ADMIN_USER` and `OGS_ADMIN_PASSWORD` (optional fallback only if `OGS_API_KEY` is not set)

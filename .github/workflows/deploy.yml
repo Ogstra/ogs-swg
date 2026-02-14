@@ -160,16 +160,33 @@ jobs:
             rm -f config/ssh_key
             rm -f config/known_hosts
             
-            # Write SSH Key to file (for the container to use)
+            # Write runtime SSH key/known_hosts for app container.
+            # Prefer *_B64 secrets to avoid multiline interpolation edge cases.
             KEY_SECRET_SOURCE="OGS_AGENT_SSH_KEY"
+            if [ -n "${{ secrets.OGS_AGENT_SSH_KEY_B64 }}" ]; then
+              KEY_SECRET_SOURCE="OGS_AGENT_SSH_KEY_B64"
+              printf '%s' "${{ secrets.OGS_AGENT_SSH_KEY_B64 }}" | base64 -d > config/ssh_key
+            else
+              cat > config/ssh_key <<'EOF_OGS_RUNTIME_KEY'
+${{ secrets.OGS_AGENT_SSH_KEY }}
+EOF_OGS_RUNTIME_KEY
+            fi
             echo "Runtime SSH key source: ${KEY_SECRET_SOURCE}"
-            echo "${{ secrets.OGS_AGENT_SSH_KEY }}" > config/ssh_key
             chmod 600 config/ssh_key
+
+            if [ -n "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" ]; then
+              printf '%s' "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" | base64 -d > /tmp/ogs-known-hosts.input
+            else
+              cat > /tmp/ogs-known-hosts.input <<'EOF_OGS_KNOWN_HOSTS'
+${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}
+EOF_OGS_KNOWN_HOSTS
+            fi
             {
-              echo "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}"
+              cat /tmp/ogs-known-hosts.input
               # Refresh runtime host fingerprint for post-migration/new-VM scenarios.
               ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" 2>/dev/null || true
             } | awk 'NF' | sort -u > config/known_hosts
+            rm -f /tmp/ogs-known-hosts.input
             chmod 600 config/known_hosts
 
             # Best-effort cleanup of legacy single-slot deployment container
