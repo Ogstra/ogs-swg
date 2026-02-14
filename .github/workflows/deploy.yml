@@ -25,6 +25,10 @@ on:
           - blue
           - green
 
+concurrency:
+  group: deploy-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   quality:
     runs-on: ubuntu-latest
@@ -155,6 +159,11 @@ jobs:
             as_root mkdir -p /etc/sing-box
             as_root mkdir -p /etc/wireguard
             cd ${{ secrets.DEPLOY_PATH }}
+            # Serialize deploys on host to avoid concurrent runs mutating shared files.
+            if command -v flock >/dev/null 2>&1; then
+              exec 9>/tmp/ogs-swg-deploy.lock
+              flock -x 9
+            fi
             
             # Clean up potential directory conflict
             rm -f config/ssh_key
@@ -171,8 +180,12 @@ jobs:
             fi
             echo "Runtime SSH key source: ${KEY_SECRET_SOURCE}"
             chmod 600 config/ssh_key
+            PREFLIGHT_SSH_KEY="$(mktemp)"
+            trap 'rm -f "${PREFLIGHT_SSH_KEY}"' EXIT
+            cp config/ssh_key "${PREFLIGHT_SSH_KEY}"
+            chmod 600 "${PREFLIGHT_SSH_KEY}"
             echo "Runtime ssh_key bytes: $(wc -c < config/ssh_key)"
-            if ! ssh-keygen -y -f config/ssh_key >/tmp/ogs-runtime.pub 2>/dev/null; then
+            if ! ssh-keygen -y -f "${PREFLIGHT_SSH_KEY}" >/tmp/ogs-runtime.pub 2>/dev/null; then
               echo "Runtime ssh_key is not a valid private key. Check ${KEY_SECRET_SOURCE} (do not use .pub content)."
               exit 1
             fi
@@ -261,7 +274,7 @@ jobs:
             fi
             if command -v ssh-keygen >/dev/null 2>&1; then
               echo "Runtime private key fingerprint (from ${KEY_SECRET_SOURCE}):"
-              ssh-keygen -lf config/ssh_key || true
+              ssh-keygen -lf "${PREFLIGHT_SSH_KEY}" || true
             fi
             # Ensure runtime public key is present on target user authorized_keys.
             # This keeps app runtime SSH key and target host trust in sync after key rotations.
@@ -313,7 +326,7 @@ jobs:
               if command -v ssh-keygen >/dev/null 2>&1; then
                 echo "Remote authorized_keys fingerprints for ${RUNTIME_SSH_USER}:"
                 ssh \
-                  -i config/ssh_key \
+                  -i "${PREFLIGHT_SSH_KEY}" \
                   -p "${RUNTIME_SSH_PORT}" \
                   -o BatchMode=yes \
                   -o IdentitiesOnly=yes \
@@ -324,7 +337,7 @@ jobs:
                   "ssh-keygen -lf ~/.ssh/authorized_keys 2>/dev/null || { echo 'authorized_keys not readable'; exit 1; }" || true
               fi
               if ! ssh \
-                -i config/ssh_key \
+                -i "${PREFLIGHT_SSH_KEY}" \
                 -p "${RUNTIME_SSH_PORT}" \
                 -o BatchMode=yes \
                 -o IdentitiesOnly=yes \
