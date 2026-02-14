@@ -239,6 +239,24 @@ jobs:
                 exit 1
               fi
             fi
+            if command -v ssh >/dev/null 2>&1; then
+              if ! ssh \
+                -i config/ssh_key \
+                -p "${RUNTIME_SSH_PORT}" \
+                -o BatchMode=yes \
+                -o IdentitiesOnly=yes \
+                -o StrictHostKeyChecking=yes \
+                -o UserKnownHostsFile=config/known_hosts \
+                -o ConnectTimeout=8 \
+                "${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}" \
+                "echo runtime-ssh-ok" >/dev/null 2>&1; then
+                echo "Runtime SSH auth preflight failed for ${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}."
+                echo "Verify OGS_AGENT_SSH_KEY matches ${RUNTIME_SSH_USER} authorized_keys on the new VM."
+                exit 1
+              fi
+            else
+              echo "OpenSSH client not found on VPS; skipping runtime SSH auth preflight."
+            fi
 
             PROXY_PORT="${{ secrets.OGS_PORT || '8080' }}"
             PORT_OWNERS="$(docker ps --filter "publish=${PROXY_PORT}" --format '{{.Names}}')"
