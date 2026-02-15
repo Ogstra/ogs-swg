@@ -69,3 +69,6 @@ local-data/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+
+# Local app config
+config.json
