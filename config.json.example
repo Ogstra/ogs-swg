@@ -1,42 +1,42 @@
 {
+  "listen_addr": ":8080",
+  "api_key": "",
+  "jwt_secret": "",
+  "public_ip": "",
+  "enable_singbox": true,
+  "enable_wireguard": true,
+  "use_stats_sampler": true,
+  "log_source": "journal",
+  "access_log_path": "/var/log/singbox.log",
+  "database_path": "./data/stats.db",
   "singbox_config_path": "/etc/sing-box/config.json",
   "singbox_api_addr": "127.0.0.1:8080",
+  "wireguard_config_path": "/etc/wireguard/wg0.conf",
   "managed_inbounds": [
     "in-reality",
-    "in-reality-8443"
+    "in-reality-2"
   ],
   "stats_inbounds": [
     "in-reality",
-    "in-reality-8443"
+    "in-reality-2"
   ],
   "stats_outbounds": [
     "direct"
   ],
-  "access_log_path": "/var/log/singbox.log",
-  "log_source": "journal",
-  "database_path": "./data/stats.db",
-  "listen_addr": ":8080",
-  "wireguard_config_path": "/etc/wireguard/wg0.conf",
-  "enable_wireguard": true,
-  "enable_singbox": true,
-  "use_stats_sampler": true,
   "sampler_interval_sec": 30,
   "active_threshold_bytes": 2048,
+  "wg_sampler_interval_sec": 60,
   "retention_enabled": false,
   "retention_days": 90,
-  "wg_sampler_interval_sec": 60,
   "wg_retention_days": 30,
   "aggregation_enabled": false,
   "aggregation_days": 7,
-  "public_ip": "",
-  "api_key": "",
   "ssh_host": "",
   "ssh_port": 22,
   "ssh_user": "",
-  "ssh_key_path": "./data/gha_ogs_agent",
+  "ssh_key_path": "./data/ssh_key",
   "ssh_key_passphrase": "",
   "ssh_known_hosts_path": "./data/known_hosts",
   "ssh_insecure_ignore_host_key": false,
-  "sysctl_whitelist": null,
-  "jwt_secret": ""
+  "sysctl_whitelist": null
 }

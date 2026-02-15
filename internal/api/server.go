@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -666,16 +667,50 @@ func StartServer(cfg *core.Config) *Server {
 
 	router := server.Routes()
 
-	distDir := "./frontend"
-	if _, err := os.Stat(distDir); os.IsNotExist(err) {
-		if exe, e2 := os.Executable(); e2 == nil {
-			distDir = filepath.Join(filepath.Dir(exe), "frontend")
+	// Prefer built frontend assets; fallback to legacy path if needed.
+	var distDir string
+	candidates := []string{
+		"./frontend/dist",
+		"./frontend",
+	}
+	if exe, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "frontend", "dist"),
+			filepath.Join(exeDir, "frontend"),
+		)
+	}
+	for _, candidate := range candidates {
+		if st, err := os.Stat(candidate); err == nil && st.IsDir() {
+			distDir = candidate
+			break
 		}
 	}
-	log.Printf("Serving static files from %s", distDir)
+	if distDir == "" {
+		log.Printf("Frontend directory not found. Checked: %v", candidates)
+	} else {
+		log.Printf("Serving static files from %s", distDir)
+	}
+
 	fs := http.FileServer(http.Dir(distDir))
 	router.Handle("/assets/", http.StripPrefix("/", fs))
 	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		if distDir == "" {
+			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
+			return
+		}
+		relPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if relPath != "" && relPath != "." {
+			fullPath := filepath.Join(distDir, filepath.FromSlash(relPath))
+			if st, err := os.Stat(fullPath); err == nil && !st.IsDir() {
+				http.ServeFile(w, r, fullPath)
+				return
+			}
+		}
 		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
 	})
 
@@ -1278,13 +1313,13 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
-	content, err := os.ReadFile(s.config.SingboxConfigPath)
+	content, err := s.config.GetSingboxConfig()
 	if err != nil {
 		http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(content)
+	w.Write([]byte(content))
 }
 
 func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {

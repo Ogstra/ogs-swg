@@ -75,6 +75,20 @@ func (s *StatsSampler) IsPaused() bool {
 }
 
 func (s *StatsSampler) loadUsersIfNeeded() ([]UserAccount, error) {
+	// Remote mode (SSH): local os.Stat is invalid for remote paths like /etc/sing-box/config.json.
+	// In this mode, read through Config methods (which use the configured executor).
+	if s.cfg.getExecutor() != nil {
+		users, err := s.cfg.GetActiveUsers()
+		if err != nil {
+			if s.cachedUsers != nil {
+				return s.cachedUsers, nil
+			}
+			return nil, err
+		}
+		s.cachedUsers = users
+		return users, nil
+	}
+
 	info, err := os.Stat(s.cfg.SingboxConfigPath)
 	if err != nil {
 		return nil, err
