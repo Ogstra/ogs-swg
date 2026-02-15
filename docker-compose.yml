@@ -1,7 +1,7 @@
 services:
   ogs-swg:
     build: .
-    image: ${OGS_IMAGE}
+    image: ${OGS_IMAGE:-ogs-swg:local}
     container_name: ogs-swg
     restart: unless-stopped
     ports:
@@ -20,7 +20,8 @@ services:
       - OGS_SSH_HOST=${OGS_SSH_HOST}
       - OGS_SSH_PORT=${OGS_SSH_PORT}
       - OGS_SSH_USER=${OGS_SSH_USER}
-      - OGS_SSH_KEY_PATH=${OGS_SSH_KEY_PATH}
+      - OGS_SSH_KEY_PATH=${OGS_SSH_KEY_PATH:-/app/secrets/ssh_key}
+      - OGS_SSH_KNOWN_HOSTS=${OGS_SSH_KNOWN_HOSTS:-/app/secrets/known_hosts}
       - OGS_SSH_KEY_PASS=${OGS_SSH_KEY_PASS}
       - OGS_API_KEY=${OGS_API_KEY}
     command: ["/bin/sh", "-lc", "chmod 600 /app/secrets/ssh_key 2>/dev/null || true; exec /app/ogs-swg -config /app/data/config.json"]

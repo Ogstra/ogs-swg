@@ -12,6 +12,4 @@ dist
 .DS_Store
 github_deploy_key
 github_deploy_key.pub
-config/ssh_key
-config/ssh_key.pub
 data
