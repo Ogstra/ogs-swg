@@ -7,25 +7,22 @@ services:
     ports:
       - "${OGS_PORT:-8080}:8080"
     volumes:
-      - ./data:/app/data
-      - ./config.json:/app/config.json:ro
-      # Mount SSH Key if using remote management
-      - ./config/ssh_key:/app/secrets/ssh_key:ro
-      - ./config/known_hosts:/app/secrets/known_hosts:ro
+      - ./data:/data
+      - ./config.json:/config/config.json
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
     environment:
-      - OGS_LISTEN_ADDR=${OGS_LISTEN_ADDR:-:8080}
-      - OGS_DB_PATH=${OGS_DB_PATH:-/app/data/stats.db}
+      - OGS_LISTEN_ADDR=:8080
+      - OGS_DB_PATH=/data/stats.db
       # SSH Configuration for Remote Management
       - OGS_SSH_HOST=${OGS_SSH_HOST}
       - OGS_SSH_PORT=${OGS_SSH_PORT}
       - OGS_SSH_USER=${OGS_SSH_USER}
-      - OGS_SSH_KEY_PATH=${OGS_SSH_KEY_PATH:-/app/secrets/ssh_key}
-      - OGS_SSH_KNOWN_HOSTS=${OGS_SSH_KNOWN_HOSTS:-/app/secrets/known_hosts}
+      - OGS_SSH_KEY_PATH=${OGS_SSH_KEY_PATH:-/data/ssh_key}
+      - OGS_SSH_KNOWN_HOSTS=${OGS_SSH_KNOWN_HOSTS:-/data/known_hosts}
       - OGS_SSH_KEY_PASS=${OGS_SSH_KEY_PASS}
       - OGS_API_KEY=${OGS_API_KEY}
-    command: ["/bin/sh", "-lc", "chmod 600 /app/secrets/ssh_key 2>/dev/null || true; exec /app/ogs-swg -config /app/config.json"]
+    command: ["/bin/sh", "-lc", "chmod 600 ${OGS_SSH_KEY_PATH:-/data/ssh_key} 2>/dev/null || true; exec /app/ogs-swg -config /config/config.json"]
     # capabilities might be needed if running local wireguard inside container (not recommended mode here)
     # cap_add:
     #   - NET_ADMIN
