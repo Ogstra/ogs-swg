@@ -67,6 +67,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	var start, end int64
 	now := time.Now().Unix()
 
+	// Custom range (explicit start/end from client)
 	if startStr != "" && endStr != "" {
 		sVal, _ := strconv.ParseInt(startStr, 10, 64)
 		eVal, _ := strconv.ParseInt(endStr, 10, 64)
@@ -74,6 +75,9 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		end = eVal
 	}
 
+	// Preset ranges (30m, 1h, 6h, 24h, 1w, 1m, etc.)
+	// Here we quantize the end timestamp so that repeated calls within a small window
+	// hit the in-memory cache instead of recomputing everything on every refresh.
 	if start == 0 || end == 0 {
 		var duration time.Duration
 		switch rangeStr {
@@ -92,12 +96,37 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		default:
 			duration = 24 * time.Hour
 		}
-		end = now
-		start = now - int64(duration.Seconds())
+
+		// Choose a base resolution for quantization based on range size.
+		// Smaller ranges use 1-minute buckets, larger ranges use coarser buckets
+		// to maximize cache hits without losing meaningful precision.
+		var baseRes int64 = 60 // 1 minute
+		if duration >= 6*time.Hour && duration <= 24*time.Hour {
+			baseRes = 300 // 5 minutes
+		} else if duration > 24*time.Hour {
+			baseRes = 3600 // 1 hour
+		}
+
+		quantizedEnd := (now / baseRes) * baseRes
+		end = quantizedEnd
+		start = end - int64(duration.Seconds())
 	}
 
 	// Cache key
-	cacheKey := strconv.FormatInt(start, 10) + ":" + strconv.FormatInt(end, 10)
+	// For presets we key by (rangeStr, quantized end), so multiple requests in the same
+	// time window reuse the same cached payload even if "now" changes by a few seconds.
+	// For custom ranges we key by exact start/end so different manual selections
+	// are cached independently.
+	var cacheKey string
+	if startStr != "" && endStr != "" {
+		cacheKey = "custom:" + strconv.FormatInt(start, 10) + ":" + strconv.FormatInt(end, 10)
+	} else {
+		if rangeStr == "" {
+			rangeStr = "24h"
+		}
+		cacheKey = "range:" + rangeStr + ":" + strconv.FormatInt(end, 10)
+	}
+
 	dashboardCache.mu.Lock()
 	if entry, ok := dashboardCache.data[cacheKey]; ok && time.Now().Before(entry.expires) {
 		dashboardCache.mu.Unlock()
