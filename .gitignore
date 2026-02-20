@@ -72,3 +72,6 @@ local-data/
 
 # Local app config
 config.json
+
+# sqlc dev artifacts
+db/query_test/
