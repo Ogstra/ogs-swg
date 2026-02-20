@@ -5,52 +5,56 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/ilyakaznacheev/cleanenv"
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	SingboxConfigPath     string   `json:"singbox_config_path"`
-	SingboxAPIAddr        string   `json:"singbox_api_addr"`
-	ManagedInbounds       []string `json:"managed_inbounds"`
-	StatsInbounds         []string `json:"stats_inbounds"`
-	StatsOutbounds        []string `json:"stats_outbounds"`
-	AccessLogPath         string   `json:"access_log_path"`
-	LogSource             string   `json:"log_source"` // "journal" or "file"
-	DatabasePath          string   `json:"database_path"`
-	ListenAddr            string   `json:"listen_addr"`
-	WireGuardConfigPath   string   `json:"wireguard_config_path"`
-	EnableWireGuard       bool     `json:"enable_wireguard"`
-	EnableSingbox         bool     `json:"enable_singbox"`
-	UseStatsSampler       bool     `json:"use_stats_sampler"`
-	SamplerIntervalSec    int      `json:"sampler_interval_sec"`
-	ActiveThresholdBytes  int64    `json:"active_threshold_bytes"`
-	RetentionEnabled      bool     `json:"retention_enabled"`
-	RetentionDays         int      `json:"retention_days"`
-	WGSamplerIntervalSec  int      `json:"wg_sampler_interval_sec"`
-	WGRetentionDays       int      `json:"wg_retention_days"`
-	AggregationEnabled    bool     `json:"aggregation_enabled"`
-	AggregationDays       int      `json:"aggregation_days"`
-	PublicIP              string   `json:"public_ip"`
+	SingboxConfigPath     string   `json:"singbox_config_path" env:"OGS_SINGBOX_CONFIG_PATH" env-default:"/etc/sing-box/config.json"`
+	SingboxAPIAddr        string   `json:"singbox_api_addr" env:"OGS_SINGBOX_API_ADDR" env-default:"127.0.0.1:8080"`
+	ManagedInbounds       []string `json:"managed_inbounds" env:"OGS_MANAGED_INBOUNDS" env-default:"in-reality"`
+	StatsInbounds         []string `json:"stats_inbounds" env:"OGS_STATS_INBOUNDS" env-default:"in-reality"`
+	StatsOutbounds        []string `json:"stats_outbounds" env:"OGS_STATS_OUTBOUNDS" env-default:"direct"`
+	AccessLogPath         string   `json:"access_log_path" env:"OGS_ACCESS_LOG_PATH" env-default:"data/access.log"`
+	LogSource             string   `json:"log_source" env:"OGS_LOG_SOURCE" env-default:"journal"` // "journal" or "file"
+	DatabasePath          string   `json:"database_path" env:"OGS_DB_PATH" env-default:"data/stats.db"`
+	ListenAddr            string   `json:"listen_addr" env:"OGS_LISTEN_ADDR" env-default:":8080"`
+	WireGuardConfigPath   string   `json:"wireguard_config_path" env:"OGS_WIREGUARD_CONFIG_PATH" env-default:"/etc/wireguard/wg0.conf"`
+	EnableWireGuard       bool     `json:"enable_wireguard" env:"OGS_ENABLE_WIREGUARD" env-default:"true"`
+	EnableSingbox         bool     `json:"enable_singbox" env:"OGS_ENABLE_SINGBOX" env-default:"true"`
+	UseStatsSampler       bool     `json:"use_stats_sampler" env:"OGS_USE_STATS_SAMPLER" env-default:"true"`
+	SamplerIntervalSec    int      `json:"sampler_interval_sec" env:"OGS_SAMPLER_INTERVAL_SEC" env-default:"120"`
+	ActiveThresholdBytes  int64    `json:"active_threshold_bytes" env:"OGS_ACTIVE_THRESHOLD_BYTES" env-default:"1024"`
+	RetentionEnabled      bool     `json:"retention_enabled" env:"OGS_RETENTION_ENABLED" env-default:"false"`
+	RetentionDays         int      `json:"retention_days" env:"OGS_RETENTION_DAYS" env-default:"90"`
+	WGSamplerIntervalSec  int      `json:"wg_sampler_interval_sec" env:"OGS_WG_SAMPLER_INTERVAL_SEC" env-default:"60"`
+	WGRetentionDays       int      `json:"wg_retention_days" env:"OGS_WG_RETENTION_DAYS" env-default:"30"`
+	AggregationEnabled    bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
+	AggregationDays       int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
+	PublicIP              string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
 	SingboxPendingChanges bool     `json:"-"` // Not persisted, runtime flag
 	ConfigPath            string   `json:"-"`
-	APIKey                string   `json:"api_key"`
+	APIKey                string   `json:"api_key" env:"OGS_API_KEY"`
 
 	// SSH Configuration
-	SSHHost                  string `json:"ssh_host"`
-	SSHPort                  int    `json:"ssh_port"`
-	SSHUser                  string `json:"ssh_user"`
-	SSHKeyPath               string `json:"ssh_key_path"`
-	SSHKeyPassphrase         string `json:"ssh_key_passphrase"`
-	SSHKnownHostsPath        string `json:"ssh_known_hosts_path"`
-	SSHInsecureIgnoreHostKey bool   `json:"ssh_insecure_ignore_host_key"`
+	SSHHost                  string `json:"ssh_host" env:"OGS_SSH_HOST"`
+	SSHPort                  int    `json:"ssh_port" env:"OGS_SSH_PORT" env-default:"22"`
+	SSHUser                  string `json:"ssh_user" env:"OGS_SSH_USER" env-default:"ogs_agent"`
+	SSHKeyPath               string `json:"ssh_key_path" env:"OGS_SSH_KEY_PATH"`
+	SSHKeyPassphrase         string `json:"ssh_key_passphrase" env:"OGS_SSH_KEY_PASS"`
+	SSHKnownHostsPath        string `json:"ssh_known_hosts_path" env:"OGS_SSH_KNOWN_HOSTS"`
+	SSHInsecureIgnoreHostKey bool   `json:"ssh_insecure_ignore_host_key" env:"OGS_SSH_INSECURE_IGNORE_HOST_KEY"`
 
 	// Sysctl Whitelist (Optional override)
-	SysctlWhitelist []string `json:"sysctl_whitelist"`
+	SysctlWhitelist []string `json:"sysctl_whitelist" env:"OGS_SYSCTL_WHITELIST"`
 
-	JWTSecret string `json:"jwt_secret"`
+	JWTSecret string `json:"jwt_secret" env:"OGS_JWT_SECRET"`
 
 	executor SystemExecutor
 	mu       sync.Mutex
@@ -82,35 +86,7 @@ func inboundTypeFromMap(inbound map[string]interface{}) string {
 }
 
 func LoadConfig(path ...string) *Config {
-	cfg := &Config{
-		SingboxConfigPath:    "/etc/sing-box/config.json",
-		SingboxAPIAddr:       "127.0.0.1:8080",
-		ManagedInbounds:      []string{"in-reality"},
-		StatsInbounds:        []string{"in-reality"},
-		StatsOutbounds:       []string{"direct"},
-		AccessLogPath:        "data/access.log",
-		LogSource:            "journal",
-		DatabasePath:         "data/stats.db",
-		ListenAddr:           ":8080",
-		WireGuardConfigPath:  "/etc/wireguard/wg0.conf",
-		EnableWireGuard:      true,
-		EnableSingbox:        true,
-		APIKey:               "",
-		UseStatsSampler:      true,
-		SamplerIntervalSec:   120,
-		ActiveThresholdBytes: 1024,
-		RetentionEnabled:     false,
-		RetentionDays:        90,
-		AggregationEnabled:   false,
-		AggregationDays:      7,
-		WGSamplerIntervalSec: 60,
-		WGRetentionDays:      30,
-
-		SSHPort: 22,
-		SSHUser: "ogs_agent",
-
-		JWTSecret: "", // Will be generated if empty
-	}
+	cfg := &Config{}
 
 	configPath := "config.json"
 	if len(path) > 0 && path[0] != "" {
@@ -118,10 +94,21 @@ func LoadConfig(path ...string) *Config {
 	}
 	cfg.ConfigPath = configPath
 
-	f, err := os.Open(configPath)
-	if err == nil {
-		defer f.Close()
-		json.NewDecoder(f).Decode(cfg)
+	// Preload .env if it exists
+	_ = godotenv.Load(".env")
+
+	// cleanenv.ReadConfig automatically reads the JSON file, extracts defaults from tags, and overrides with OS Env vars.
+	err := cleanenv.ReadConfig(configPath, cfg)
+	if err != nil {
+		log.Printf("cleanenv: reading from %s failed, falling back to ENV variables (%v)", configPath, err)
+		_ = cleanenv.ReadEnv(cfg)
+	}
+
+	// Legacy bind fallback
+	if cfg.ListenAddr == "" || cfg.ListenAddr == ":8080" {
+		if v := os.Getenv("OGS_BIND"); v != "" {
+			cfg.ListenAddr = v
+		}
 	}
 
 	// Generate secure JWT secret if not set or using default insecure value
@@ -133,43 +120,6 @@ func LoadConfig(path ...string) *Config {
 			// Fallback: use a timestamp-based secret (less secure but better than default)
 			cfg.JWTSecret = fmt.Sprintf("auto-generated-%d", os.Getpid())
 		}
-	}
-
-	// Override with Environment Variables
-	if v := os.Getenv("OGS_SSH_HOST"); v != "" {
-		cfg.SSHHost = v
-	}
-	if v := os.Getenv("OGS_SSH_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.SSHPort = p
-		}
-	}
-	if v := os.Getenv("OGS_SSH_USER"); v != "" {
-		cfg.SSHUser = v
-	}
-	if v := os.Getenv("OGS_SSH_KEY_PATH"); v != "" {
-		cfg.SSHKeyPath = v
-	}
-	if v := os.Getenv("OGS_SSH_KEY_PASS"); v != "" {
-		cfg.SSHKeyPassphrase = v
-	}
-	if v := os.Getenv("OGS_SSH_KNOWN_HOSTS"); v != "" {
-		cfg.SSHKnownHostsPath = v
-	}
-	if v := os.Getenv("OGS_LISTEN_ADDR"); v != "" {
-		cfg.ListenAddr = v
-	} else if v := os.Getenv("OGS_BIND"); v != "" {
-		// Legacy compatibility
-		cfg.ListenAddr = v
-	}
-	if v := os.Getenv("OGS_DB_PATH"); v != "" {
-		cfg.DatabasePath = v
-	}
-	if v := os.Getenv("OGS_ACCESS_LOG_PATH"); v != "" {
-		cfg.AccessLogPath = v
-	}
-	if v := os.Getenv("OGS_API_KEY"); v != "" {
-		cfg.APIKey = v
 	}
 
 	return cfg
