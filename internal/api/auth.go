@@ -3,12 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	"github.com/o1egl/paseto"
 )
 
 type LoginRequest struct {
@@ -18,6 +17,12 @@ type LoginRequest struct {
 
 type LoginResponse struct {
 	Token string `json:"token"`
+}
+
+func getPasetoKey(secret string) []byte {
+	key := make([]byte, 32)
+	copy(key, []byte(secret))
+	return key
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -41,13 +46,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate JWT
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": req.Username,
-		"exp": time.Now().Add(24 * time.Hour).Unix(),
-	})
+	// Generate PASETO token
+	v2 := paseto.NewV2()
+	now := time.Now()
+	jsonToken := paseto.JSONToken{
+		Subject:    req.Username,
+		IssuedAt:   now,
+		Expiration: now.Add(24 * time.Hour),
+	}
 
-	tokenString, err := token.SignedString([]byte(s.config.JWTSecret))
+	tokenString, err := v2.Encrypt(getPasetoKey(s.config.JWTSecret), jsonToken, nil)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
 		return
@@ -75,7 +83,7 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get username from context (set by AuthMiddleware)
-	claims, ok := r.Context().Value("user").(jwt.MapClaims)
+	claims, ok := r.Context().Value("user").(map[string]interface{})
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -124,7 +132,7 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get username from context
-	claims, ok := r.Context().Value("user").(jwt.MapClaims)
+	claims, ok := r.Context().Value("user").(map[string]interface{})
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -159,7 +167,7 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// AuthMiddleware validates the JWT token
+// AuthMiddleware validates the PASETO token
 func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow login endpoint without token
@@ -192,20 +200,22 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		tokenString := parts[1]
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(s.config.JWTSecret), nil
-		})
 
-		if err != nil || !token.Valid {
-			http.Error(w, "Invalid or expired token", http.StatusUnauthorized)
+		var jsonToken paseto.JSONToken
+		v2 := paseto.NewV2()
+
+		if err := v2.Decrypt(tokenString, getPasetoKey(s.config.JWTSecret), &jsonToken, nil); err != nil {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		if time.Now().After(jsonToken.Expiration) {
+			http.Error(w, "Token expired", http.StatusUnauthorized)
 			return
 		}
 
 		// Token is valid, proceed
-		ctx := context.WithValue(r.Context(), "user", token.Claims)
+		ctx := context.WithValue(r.Context(), "user", map[string]interface{}{"sub": jsonToken.Subject})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
