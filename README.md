@@ -46,15 +46,38 @@ environment:
 
 ### Main Config (`config.json`)
 
-Manage API keys, SSH targets, and file paths.
+Manage API keys, SSH targets, and file paths. The system automatically detects whether to run in Local or Remote mode based on the `ssh_host` parameter.
+
+*   **Local Mode**: Leave `ssh_host` empty (`""`). The application will execute commands directly on the host machine.
+*   **Remote Mode**: Provide the `ssh_host` and corresponding SSH configuration.
+
 ```json
 {
+  "listen_addr": ":8080",
   "api_key": "CHANGE_ME_STRONG_RANDOM_API_KEY",
-  "ssh_host": "10.0.0.5",
+  "database_path": "./data/stats.db",
+  
+  "singbox_config_path": "/etc/sing-box/config.json",
+  "singbox_api_addr": "127.0.0.1:8080",
+  "managed_inbounds": ["in-reality", "in-reality-8443"],
+  "log_source": "journal",
+  "access_log_path": "/var/log/singbox.log",
+
+  "wireguard_config_path": "/etc/wireguard/wg0.conf",
+
+  "ssh_host": "10.0.0.5", 
+  "ssh_port": 22,
   "ssh_user": "ogs_agent",
-  "sysctl_whitelist": ["net.ipv4.ip_forward", "net.ipv6.conf.all.forwarding"]
+  "ssh_key_path": "/app/secrets/ssh_key",
+  "ssh_known_hosts_path": "/app/secrets/known_hosts",
+
+  "sysctl_whitelist": [
+    "net.ipv4.ip_forward",
+    "net.ipv6.conf.all.forwarding"
+  ]
 }
 ```
+*(For Local mode, you can safely remove all the `ssh_*` keys or leave them empty).*
 
 ---
 
