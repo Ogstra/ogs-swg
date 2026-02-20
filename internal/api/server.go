@@ -642,11 +642,11 @@ func StartServer(cfg *core.Config) *Server {
 			// Main Stats Retention
 			if cfg.RetentionEnabled && cfg.RetentionDays > 0 {
 				cutoff := time.Now().Add(-time.Duration(cfg.RetentionDays) * 24 * time.Hour).Unix()
-				deleted, err := store.PruneOlderThan(cutoff)
+				err := store.PruneOlderThan(cutoff)
 				if err != nil {
 					log.Printf("Retention prune error: %v", err)
-				} else if deleted > 0 {
-					log.Printf("Retention prune: removed %d samples older than %d", deleted, cutoff)
+				} else {
+					log.Printf("Retention prune: removed samples older than %d", cutoff)
 					vacuumNeeded = true
 				}
 			}
@@ -654,11 +654,11 @@ func StartServer(cfg *core.Config) *Server {
 			// WireGuard Stats Retention
 			if cfg.WGRetentionDays > 0 {
 				cutoff := time.Now().Add(-time.Duration(cfg.WGRetentionDays) * 24 * time.Hour).Unix()
-				deleted, err := store.PruneWGSamplesOlderThan(cutoff)
+				err := store.PruneWGSamplesOlderThan(cutoff)
 				if err != nil {
 					log.Printf("WG retention prune error: %v", err)
-				} else if deleted > 0 {
-					log.Printf("WG retention prune: removed %d samples older than %d", deleted, cutoff)
+				} else {
+					log.Printf("WG retention prune: removed samples older than %d", cutoff)
 					vacuumNeeded = true
 				}
 			}
@@ -666,19 +666,19 @@ func StartServer(cfg *core.Config) *Server {
 			// Aggregation / Rollup
 			if cfg.AggregationEnabled && cfg.AggregationDays > 0 {
 				aggCutoff := time.Now().Add(-time.Duration(cfg.AggregationDays) * 24 * time.Hour).Unix()
-				compressed, err := store.CompressOldSamples(aggCutoff)
+				err := store.CompressOldSamples(aggCutoff)
 				if err != nil {
 					log.Printf("Aggregation compression error: %v", err)
-				} else if compressed > 0 {
-					log.Printf("Aggregation: compressed %d samples older than %d", compressed, aggCutoff)
+				} else {
+					log.Printf("Aggregation: compressed samples older than %d", aggCutoff)
 					vacuumNeeded = true
 				}
 
-				wgCompressed, err := store.CompressOldWGSamples(aggCutoff)
+				err = store.CompressOldWGSamples(aggCutoff)
 				if err != nil {
 					log.Printf("WG Aggregation compression error: %v", err)
-				} else if wgCompressed > 0 {
-					log.Printf("WG Aggregation: compressed %d samples older than %d", wgCompressed, aggCutoff)
+				} else {
+					log.Printf("WG Aggregation: compressed samples older than %d", aggCutoff)
 					vacuumNeeded = true
 				}
 			}

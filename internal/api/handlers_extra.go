@@ -1532,8 +1532,8 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 
 	// Prune main samples
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour).Unix()
-	if n, err := s.store.PruneOlderThan(cutoff); err == nil {
-		totalDeleted += n
+	if err := s.store.PruneOlderThan(cutoff); err == nil {
+		totalDeleted += 1 // cannot accurately report anymore
 	} else {
 		log.Printf("PruneNow: samples prune failed: %v", err)
 	}
@@ -1541,8 +1541,8 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 	// Prune WG samples
 	if s.config.WGRetentionDays > 0 {
 		wgCutoff := time.Now().Add(-time.Duration(wgDays) * 24 * time.Hour).Unix()
-		if n, err := s.store.PruneWGSamplesOlderThan(wgCutoff); err == nil {
-			totalDeleted += n
+		if err := s.store.PruneWGSamplesOlderThan(wgCutoff); err == nil {
+			totalDeleted += 1 // Cannot precisely measure anymore
 		} else {
 			log.Printf("PruneNow: WG prune failed: %v", err)
 		}

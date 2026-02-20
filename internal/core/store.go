@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	sqlcStore "github.com/Ogstra/ogs-swg/internal/core/store"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
 )
@@ -29,6 +31,7 @@ type WGSample struct {
 
 type Store struct {
 	db *sql.DB
+	*sqlcStore.Queries
 }
 
 func NewStore(dbPath string) (*Store, error) {
@@ -57,7 +60,10 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, err
 	}
 
-	s := &Store{db: db}
+	s := &Store{
+		db:      db,
+		Queries: sqlcStore.New(db),
+	}
 	if err := s.initSchema(); err != nil {
 		return nil, err
 	}
@@ -200,13 +206,14 @@ func (s *Store) CreateAdmin(username, password string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Exec("INSERT INTO admins (username, password_hash) VALUES (?, ?)", username, string(hash))
-	return err
+	return s.Queries.CreateAdmin(context.Background(), sqlcStore.CreateAdminParams{
+		Username:     username,
+		PasswordHash: string(hash),
+	})
 }
 
 func (s *Store) VerifyAdmin(username, password string) (bool, error) {
-	var hash string
-	err := s.db.QueryRow("SELECT password_hash FROM admins WHERE username = ?", username).Scan(&hash)
+	hash, err := s.Queries.GetAdmin(context.Background(), username)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil
@@ -225,36 +232,25 @@ func (s *Store) UpdateAdminPassword(username, newPassword string) error {
 	if err != nil {
 		return err
 	}
-	res, err := s.db.Exec("UPDATE admins SET password_hash = ? WHERE username = ?", string(hash), username)
-	if err != nil {
-		return err
-	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return s.Queries.UpdateAdminPassword(context.Background(), sqlcStore.UpdateAdminPasswordParams{
+		PasswordHash: string(hash),
+		Username:     username,
+	})
 }
 
 func (s *Store) UpdateAdminUsername(oldUsername, newUsername string) error {
-	// Check if new username already exists
-	var count int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM admins WHERE username = ?", newUsername).Scan(&count); err != nil {
+	count, err := s.Queries.CheckAdminExists(context.Background(), newUsername)
+	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return fmt.Errorf("username %s already exists", newUsername)
 	}
 
-	res, err := s.db.Exec("UPDATE admins SET username = ? WHERE username = ?", newUsername, oldUsername)
-	if err != nil {
-		return err
-	}
-	rows, _ := res.RowsAffected()
-	if rows == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return s.Queries.UpdateAdminUsername(context.Background(), sqlcStore.UpdateAdminUsernameParams{
+		Username:   newUsername,
+		Username_2: oldUsername,
+	})
 }
 
 func (s *Store) SaveInboundMeta(tag string, externalPort int) error {
@@ -264,42 +260,44 @@ func (s *Store) SaveInboundMeta(tag string, externalPort int) error {
 	if externalPort <= 0 {
 		return s.DeleteInboundMeta(tag)
 	}
-	_, err := s.db.Exec("INSERT INTO inbound_meta (tag, external_port) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port", tag, externalPort)
-	return err
+	return s.Queries.UpsertInboundMeta(context.Background(), sqlcStore.UpsertInboundMetaParams{
+		Tag: tag,
+		ExternalPort: sql.NullInt64{
+			Int64: int64(externalPort),
+			Valid: true,
+		},
+	})
 }
 
 func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
 	if tag == "" {
 		return nil, nil
 	}
-	var meta InboundMeta
-	err := s.db.QueryRow("SELECT tag, external_port FROM inbound_meta WHERE tag = ?", tag).Scan(&meta.Tag, &meta.ExternalPort)
+	meta, err := s.Queries.GetInboundMeta(context.Background(), tag)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &meta, nil
+	return &InboundMeta{
+		Tag:          meta.Tag,
+		ExternalPort: int(meta.ExternalPort.Int64),
+	}, nil
 }
 
 func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
-	rows, err := s.db.Query("SELECT tag, external_port FROM inbound_meta")
+	rows, err := s.Queries.GetAllInboundMeta(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	meta := make(map[string]InboundMeta)
-	for rows.Next() {
-		var entry InboundMeta
-		if err := rows.Scan(&entry.Tag, &entry.ExternalPort); err != nil {
-			return nil, err
+	for _, entry := range rows {
+		meta[entry.Tag] = InboundMeta{
+			Tag:          entry.Tag,
+			ExternalPort: int(entry.ExternalPort.Int64),
 		}
-		meta[entry.Tag] = entry
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return meta, nil
 }
@@ -308,16 +306,17 @@ func (s *Store) DeleteInboundMeta(tag string) error {
 	if tag == "" {
 		return nil
 	}
-	_, err := s.db.Exec("DELETE FROM inbound_meta WHERE tag = ?", tag)
-	return err
+	return s.Queries.DeleteInboundMeta(context.Background(), tag)
 }
 
 func (s *Store) RenameInboundMeta(oldTag, newTag string) error {
 	if oldTag == "" || newTag == "" || oldTag == newTag {
 		return nil
 	}
-	_, err := s.db.Exec("UPDATE inbound_meta SET tag = ? WHERE tag = ?", newTag, oldTag)
-	return err
+	return s.Queries.RenameInboundMeta(context.Background(), sqlcStore.RenameInboundMetaParams{
+		Tag:   newTag,
+		Tag_2: oldTag,
+	})
 }
 
 func (s *Store) EnsureDefaultAdmin() error {
@@ -340,55 +339,64 @@ func (s *Store) EnsureDefaultAdmin() error {
 }
 
 func (s *Store) HasSamples() (bool, error) {
-	var count int64
-	if err := s.db.QueryRow("SELECT COUNT(1) FROM samples").Scan(&count); err != nil {
+	count, err := s.Queries.CountSamples(context.Background())
+	if err != nil {
 		return false, err
 	}
 	return count > 0, nil
 }
 
 func (s *Store) TruncateSamples() error {
-	_, err := s.db.Exec("DELETE FROM samples")
-	return err
+	return s.Queries.TruncateSamples(context.Background())
 }
 
 func (s *Store) GetMaxTimestamp() (int64, error) {
-	var ts sql.NullInt64
-	if err := s.db.QueryRow("SELECT MAX(ts) FROM samples").Scan(&ts); err != nil {
+	max, err := s.Queries.GetMaxTimestamp(context.Background())
+	if err != nil {
 		return 0, err
 	}
-	if ts.Valid {
-		return ts.Int64, nil
+	if max == nil {
+		return 0, nil
+	}
+	switch v := max.(type) {
+	case int64:
+		return v, nil
+	case sql.NullInt64:
+		if v.Valid {
+			return v.Int64, nil
+		}
 	}
 	return 0, nil
 }
 
 func (s *Store) GetMaxTimestampForUser(user string) (int64, error) {
-	var ts sql.NullInt64
-	if err := s.db.QueryRow("SELECT MAX(ts) FROM samples WHERE user = ?", user).Scan(&ts); err != nil {
+	max, err := s.Queries.GetMaxTimestampForUser(context.Background(), user)
+	if err != nil {
 		return 0, err
 	}
-	if ts.Valid {
-		return ts.Int64, nil
+	if max == nil {
+		return 0, nil
+	}
+	switch v := max.(type) {
+	case int64:
+		return v, nil
+	case sql.NullInt64:
+		if v.Valid {
+			return v.Int64, nil
+		}
 	}
 	return 0, nil
 }
 
-func (s *Store) PruneOlderThan(ts int64) (int64, error) {
-	res, err := s.db.Exec("DELETE FROM samples WHERE ts < ?", ts)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := res.RowsAffected()
-	return affected, nil
+func (s *Store) PruneOlderThan(ts int64) error {
+	return s.Queries.PruneSamplesOlderThan(context.Background(), ts)
 }
 
 func (s *Store) CountSamples() (int64, error) {
-	var c1, c2, c3, c4 int64
-	s.db.QueryRow("SELECT COUNT(*) FROM samples").Scan(&c1)
-	s.db.QueryRow("SELECT COUNT(*) FROM wg_samples").Scan(&c2)
-	s.db.QueryRow("SELECT COUNT(*) FROM daily_usage").Scan(&c3)
-	s.db.QueryRow("SELECT COUNT(*) FROM daily_wg_usage").Scan(&c4)
+	c1, _ := s.Queries.CountSamples(context.Background())
+	c2, _ := s.Queries.CountWGSamples(context.Background())
+	c3, _ := s.Queries.CountDailyUsage(context.Background())
+	c4, _ := s.Queries.CountWGDailyUsage(context.Background())
 	return c1 + c2 + c3 + c4, nil
 }
 
@@ -401,7 +409,19 @@ type SamplerRun struct {
 }
 
 func (s *Store) LogSamplerRun(ts int64, durationMs int64, inserted int64, errStr string, source string) {
-	_, err := s.db.Exec("INSERT INTO sampler_runs (ts, duration_ms, inserted, error, source) VALUES (?, ?, ?, ?, ?)", ts, durationMs, inserted, errStr, source)
+	err := s.Queries.InsertSamplerRun(context.Background(), sqlcStore.InsertSamplerRunParams{
+		Ts:         ts,
+		DurationMs: durationMs,
+		Inserted:   inserted,
+		Error: sql.NullString{
+			String: errStr,
+			Valid:  errStr != "",
+		},
+		Source: sql.NullString{
+			String: source,
+			Valid:  source != "",
+		},
+	})
 	if err != nil {
 		log.Printf("Warning: Failed to log sampler run: %v", err)
 	}
@@ -428,104 +448,135 @@ func (s *Store) GetSamplerRuns(limit int) ([]SamplerRun, error) {
 }
 
 func (s *Store) SaveUserMetadata(meta UserMetadata) error {
-	query := `
-	INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id) 
-	VALUES (?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(email) DO UPDATE SET
-		quota_limit = excluded.quota_limit,
-		quota_period = excluded.quota_period,
-		reset_day = excluded.reset_day,
-		enabled = excluded.enabled,
-		vmess_security = excluded.vmess_security,
-		vmess_alter_id = excluded.vmess_alter_id;
-	`
-	enabled := 0
+	enabled := int64(0)
 	if meta.Enabled {
 		enabled = 1
 	}
-	_, err := s.db.Exec(query, meta.Email, meta.QuotaLimit, meta.QuotaPeriod, meta.ResetDay, enabled, meta.VmessSecurity, meta.VmessAlterID)
-	return err
+	return s.Queries.UpsertUser(context.Background(), sqlcStore.UpsertUserParams{
+		Email: meta.Email,
+		QuotaLimit: sql.NullInt64{
+			Int64: meta.QuotaLimit,
+			Valid: true,
+		},
+		QuotaPeriod: sql.NullString{
+			String: meta.QuotaPeriod,
+			Valid:  true,
+		},
+		ResetDay: sql.NullInt64{
+			Int64: int64(meta.ResetDay),
+			Valid: true,
+		},
+		Enabled: sql.NullInt64{
+			Int64: enabled,
+			Valid: true,
+		},
+		VmessSecurity: sql.NullString{
+			String: meta.VmessSecurity,
+			Valid:  true,
+		},
+		VmessAlterID: sql.NullInt64{
+			Int64: int64(meta.VmessAlterID),
+			Valid: true,
+		},
+	})
 }
 
 func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
-	query := "SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users WHERE email = ?"
-	row := s.db.QueryRow(query, email)
-
-	var meta UserMetadata
-	var enabled int
-	if err := row.Scan(&meta.Email, &meta.QuotaLimit, &meta.QuotaPeriod, &meta.ResetDay, &enabled, &meta.VmessSecurity, &meta.VmessAlterID); err != nil {
+	meta, err := s.Queries.GetUser(context.Background(), email)
+	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
 		return nil, err
 	}
-	meta.Enabled = enabled != 0
-	return &meta, nil
+	return &UserMetadata{
+		Email:         meta.Email,
+		QuotaLimit:    meta.QuotaLimit.Int64,
+		QuotaPeriod:   meta.QuotaPeriod.String,
+		ResetDay:      int(meta.ResetDay.Int64),
+		Enabled:       meta.Enabled.Int64 != 0,
+		VmessSecurity: meta.VmessSecurity.String,
+		VmessAlterID:  int(meta.VmessAlterID.Int64),
+	}, nil
 }
 
 func (s *Store) DeleteUserMetadata(email string) error {
-	_, err := s.db.Exec("DELETE FROM users WHERE email = ?", email)
-	return err
+	return s.Queries.DeleteUser(context.Background(), email)
 }
 
 func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
-	rows, err := s.db.Query("SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users")
+	rows, err := s.Queries.GetAllUsers(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var result []UserMetadata
-	for rows.Next() {
-		var meta UserMetadata
-		var enabled int
-		if err := rows.Scan(&meta.Email, &meta.QuotaLimit, &meta.QuotaPeriod, &meta.ResetDay, &enabled, &meta.VmessSecurity, &meta.VmessAlterID); err != nil {
-			return nil, err
-		}
-		meta.Enabled = enabled != 0
-		result = append(result, meta)
+	for _, meta := range rows {
+		result = append(result, UserMetadata{
+			Email:         meta.Email,
+			QuotaLimit:    meta.QuotaLimit.Int64,
+			QuotaPeriod:   meta.QuotaPeriod.String,
+			ResetDay:      int(meta.ResetDay.Int64),
+			Enabled:       meta.Enabled.Int64 != 0,
+			VmessSecurity: meta.VmessSecurity.String,
+			VmessAlterID:  int(meta.VmessAlterID.Int64),
+		})
 	}
 	return result, nil
 }
 
 func (s *Store) GetLastSeenMap() (map[string]int64, error) {
-	rows, err := s.db.Query("SELECT user, MAX(ts) FROM samples GROUP BY user")
+	rows, err := s.Queries.GetLastSeenMap(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	result := make(map[string]int64)
-	for rows.Next() {
-		var u string
-		var ts sql.NullInt64
-		if err := rows.Scan(&u, &ts); err != nil {
-			return nil, err
-		}
-		if ts.Valid {
-			result[u] = ts.Int64
+	for _, r := range rows {
+		if r.MaxTs != nil {
+			switch v := r.MaxTs.(type) {
+			case int64:
+				result[r.User] = v
+			case float64:
+				result[r.User] = int64(v)
+			}
 		}
 	}
 	return result, nil
 }
 
 func (s *Store) GetLastSeenUser(user string) (int64, error) {
-	var ts sql.NullInt64
-	if err := s.db.QueryRow("SELECT MAX(ts) FROM samples WHERE user = ?", user).Scan(&ts); err != nil {
+	max, err := s.Queries.GetMaxTimestampForUser(context.Background(), user)
+	if err != nil {
 		return 0, err
 	}
-	if ts.Valid {
-		return ts.Int64, nil
+	if max == nil {
+		return 0, nil
+	}
+	switch v := max.(type) {
+	case int64:
+		return v, nil
+	case sql.NullInt64:
+		if v.Valid {
+			return v.Int64, nil
+		}
 	}
 	return 0, nil
 }
 
 func (s *Store) GetLastSeenUserWithTraffic(user string) (int64, error) {
-	var ts sql.NullInt64
-	if err := s.db.QueryRow("SELECT MAX(ts) FROM samples WHERE user = ? AND (uplink > 0 OR downlink > 0)", user).Scan(&ts); err != nil {
+	max, err := s.Queries.GetLastSeenUserWithTraffic(context.Background(), user)
+	if err != nil {
 		return 0, err
 	}
-	if ts.Valid {
-		return ts.Int64, nil
+	if max == nil {
+		return 0, nil
+	}
+	switch v := max.(type) {
+	case int64:
+		return v, nil
+	case sql.NullInt64:
+		if v.Valid {
+			return v.Int64, nil
+		}
 	}
 	return 0, nil
 }
@@ -534,32 +585,32 @@ func (s *Store) GetLastSeenWithThreshold(user string, threshold int64) (int64, e
 	if threshold <= 0 {
 		return s.GetLastSeenUserWithTraffic(user)
 	}
-	var ts sql.NullInt64
-	if err := s.db.QueryRow("SELECT MAX(ts) FROM samples WHERE user = ? AND (uplink + downlink) >= ?", user, threshold).Scan(&ts); err != nil {
+	max, err := s.Queries.GetLastSeenUserAndThreshold(context.Background(), sqlcStore.GetLastSeenUserAndThresholdParams{
+		User:   user,
+		Uplink: threshold,
+	})
+	if err != nil {
 		return 0, err
 	}
-	if ts.Valid {
-		return ts.Int64, nil
+	if max == nil {
+		return 0, nil
+	}
+	switch v := max.(type) {
+	case int64:
+		return v, nil
+	case float64:
+		return int64(v), nil
+	case sql.NullFloat64:
+		if v.Valid {
+			return int64(v.Float64), nil
+		}
 	}
 	return 0, nil
 }
 
 func (s *Store) GetActiveUsers(duration time.Duration) ([]string, error) {
 	cutoff := time.Now().Add(-duration).Unix()
-	rows, err := s.db.Query(`SELECT DISTINCT user FROM samples WHERE ts >= ? AND (uplink > 0 OR downlink > 0)`, cutoff)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var users []string
-	for rows.Next() {
-		var u string
-		if err := rows.Scan(&u); err != nil {
-			return nil, err
-		}
-		users = append(users, u)
-	}
-	return users, nil
+	return s.Queries.GetActiveUsersWithTraffic(context.Background(), cutoff)
 }
 
 func (s *Store) GetActiveUsersWithThreshold(duration time.Duration, threshold int64) ([]string, error) {
@@ -567,27 +618,27 @@ func (s *Store) GetActiveUsersWithThreshold(duration time.Duration, threshold in
 		return s.GetActiveUsers(duration)
 	}
 	cutoff := time.Now().Add(-duration).Unix()
-	rows, err := s.db.Query(`SELECT user, SUM(uplink + downlink) as total FROM samples WHERE ts >= ? GROUP BY user HAVING total >= ?`, cutoff, threshold)
+	rows, err := s.Queries.GetActiveUsersWithThreshold(context.Background(), sqlcStore.GetActiveUsersWithThresholdParams{
+		Ts:     cutoff,
+		Uplink: threshold,
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	var users []string
-	for rows.Next() {
-		var u string
-		var total int64
-		if err := rows.Scan(&u, &total); err != nil {
-			return nil, err
-		}
-		users = append(users, u)
+	for _, r := range rows {
+		users = append(users, r.User)
 	}
 	return users, nil
 }
 
 func (s *Store) AddSample(sample Sample) error {
-	query := "INSERT OR IGNORE INTO samples (user, ts, uplink, downlink) VALUES (?, ?, ?, ?)"
-	_, err := s.db.Exec(query, sample.User, sample.Timestamp, sample.Uplink, sample.Downlink)
-	return err
+	return s.Queries.InsertSample(context.Background(), sqlcStore.InsertSampleParams{
+		User:     sample.User,
+		Ts:       sample.Timestamp,
+		Uplink:   sample.Uplink,
+		Downlink: sample.Downlink,
+	})
 }
 
 func (s *Store) BulkInsert(samples []Sample) error {
@@ -621,67 +672,48 @@ func (s *Store) BulkInsert(samples []Sample) error {
 }
 
 func (s *Store) GetSamples(user string, start, end int64) ([]Sample, error) {
-	query := `
-	SELECT user, ts, uplink, downlink 
-	FROM samples 
-	WHERE user = ? AND ts >= ? AND ts <= ? 
-	ORDER BY ts ASC`
-
-	rows, err := s.db.Query(query, user, start, end)
+	rows, err := s.Queries.GetSamplesForUser(context.Background(), sqlcStore.GetSamplesForUserParams{
+		User: user,
+		Ts:   start,
+		Ts_2: end,
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var samples []Sample
-	for rows.Next() {
-		var smp Sample
-		if err := rows.Scan(&smp.User, &smp.Timestamp, &smp.Uplink, &smp.Downlink); err != nil {
-			return nil, err
-		}
-		samples = append(samples, smp)
+	for _, smp := range rows {
+		samples = append(samples, Sample{
+			User:      smp.User,
+			Timestamp: smp.Ts,
+			Uplink:    smp.Uplink,
+			Downlink:  smp.Downlink,
+		})
 	}
 	return samples, nil
 }
 
 func (s *Store) GetGlobalTraffic(start, end int64) ([]TrafficPoint, error) {
-	query := `
-	SELECT ts, SUM(uplink), SUM(downlink)
-	FROM samples
-	WHERE ts >= ? AND ts <= ?
-	GROUP BY ts
-	ORDER BY ts ASC`
-
-	rows, err := s.db.Query(query, start, end)
+	rows, err := s.Queries.GetGlobalTraffic(context.Background(), sqlcStore.GetGlobalTrafficParams{
+		Ts:   start,
+		Ts_2: end,
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var points []TrafficPoint
-	for rows.Next() {
-		var p TrafficPoint
-		if err := rows.Scan(&p.Timestamp, &p.Uplink, &p.Downlink); err != nil {
-			return nil, err
-		}
-		points = append(points, p)
+	for _, p := range rows {
+		points = append(points, TrafficPoint{
+			Timestamp: p.Ts,
+			Uplink:    int64(p.Up.Float64),
+			Downlink:  int64(p.Down.Float64),
+		})
 	}
 	return points, nil
 }
 
 func (s *Store) GetActiveUserCount(duration time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-duration).Unix()
-	query := `
-	SELECT COUNT(DISTINCT user)
-	FROM samples
-	WHERE ts >= ? AND (uplink > 0 OR downlink > 0)`
-
-	var count int64
-	err := s.db.QueryRow(query, cutoff).Scan(&count)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
+	return s.Queries.GetActiveUserCount(context.Background(), cutoff)
 }
 
 func (s *Store) GetActiveUserCountWithThreshold(duration time.Duration, threshold int64) (int64, error) {
@@ -689,20 +721,10 @@ func (s *Store) GetActiveUserCountWithThreshold(duration time.Duration, threshol
 		return s.GetActiveUserCount(duration)
 	}
 	cutoff := time.Now().Add(-duration).Unix()
-	query := `
-	SELECT COUNT(*) FROM (
-		SELECT user, SUM(uplink + downlink) as total
-		FROM samples
-		WHERE ts >= ?
-		GROUP BY user
-		HAVING total >= ?
-	)`
-	var count int64
-	err := s.db.QueryRow(query, cutoff, threshold).Scan(&count)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
+	return s.Queries.GetActiveUserCountWithThreshold(context.Background(), sqlcStore.GetActiveUserCountWithThresholdParams{
+		Ts:     cutoff,
+		Uplink: threshold,
+	})
 }
 
 func (s *Store) Close() error {
@@ -722,15 +744,19 @@ func (s *Store) InsertWGSamples(samples []WGSample) error {
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare("INSERT INTO wg_samples (public_key, ts, rx, tx, endpoint) VALUES (?, ?, ?, ?, ?)")
-	if err != nil {
-		tx.Rollback()
-		return err
-	}
-	defer stmt.Close()
-
+	qtx := s.Queries.WithTx(tx)
 	for _, smp := range samples {
-		if _, err := stmt.Exec(smp.PublicKey, smp.Timestamp, smp.Rx, smp.Tx, smp.Endpoint); err != nil {
+		err := qtx.InsertWGSample(context.Background(), sqlcStore.InsertWGSampleParams{
+			PublicKey: smp.PublicKey,
+			Ts:        smp.Timestamp,
+			Rx:        smp.Rx,
+			Tx:        smp.Tx,
+			Endpoint: sql.NullString{
+				String: smp.Endpoint,
+				Valid:  smp.Endpoint != "",
+			},
+		})
+		if err != nil {
 			tx.Rollback()
 			return err
 		}
@@ -762,50 +788,38 @@ type User struct {
 
 // GetUsers returns all users.
 func (s *Store) GetUsers() ([]User, error) {
-	query := `SELECT uuid, username, data_limit, quota_period, reset_day, enabled FROM users`
-	rows, err := s.db.Query(query)
+	rows, err := s.Queries.GetAllUsers(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	var users []User
-	for rows.Next() {
-		var u User
-		var enabled int
-		if err := rows.Scan(&u.Uuid, &u.Username, &u.DataLimit, &u.QuotaPeriod, &u.ResetDay, &enabled); err != nil {
-			return nil, err
-		}
-		u.Enabled = enabled == 1
-		users = append(users, u)
+	for _, u := range rows {
+		users = append(users, User{
+			Uuid:        "", // Optional since we dropped UUID requirement, keeping for compatibility
+			Username:    u.Email,
+			DataLimit:   u.QuotaLimit.Int64,
+			QuotaPeriod: u.QuotaPeriod.String,
+			ResetDay:    int(u.ResetDay.Int64),
+			Enabled:     u.Enabled.Int64 == 1,
+		})
 	}
 	return users, nil
 }
 
 // GetTrafficPerUser returns aggregated usage per user for the given time range.
 func (s *Store) GetTrafficPerUser(start, end int64) (map[string]TrafficStats, error) {
-	query := `
-	SELECT user, SUM(uplink), SUM(downlink)
-	FROM samples
-	WHERE ts >= ? AND ts <= ?
-	GROUP BY user`
-
-	rows, err := s.db.Query(query, start, end)
+	rows, err := s.Queries.GetTrafficPerUser(context.Background(), sqlcStore.GetTrafficPerUserParams{
+		Ts:   start,
+		Ts_2: end,
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
 	result := make(map[string]TrafficStats)
-	for rows.Next() {
-		var user string
-		var up, down sql.NullInt64
-		if err := rows.Scan(&user, &up, &down); err != nil {
-			return nil, err
-		}
-		result[user] = TrafficStats{
-			Uplink:   up.Int64,
-			Downlink: down.Int64,
+	for _, r := range rows {
+		result[r.User] = TrafficStats{
+			Uplink:   int64(r.Up.Float64),
+			Downlink: int64(r.Down.Float64),
 		}
 	}
 	return result, nil
@@ -816,25 +830,30 @@ func (s *Store) GetWGTrafficDelta(publicKey string, start, end int64) (int64, in
 	if publicKey == "" {
 		return 0, 0, nil
 	}
-	var firstRx, firstTx, lastRx, lastTx sql.NullInt64
-
-	err := s.db.QueryRow(`SELECT rx, tx FROM wg_samples WHERE public_key = ? AND ts >= ? AND ts <= ? ORDER BY ts ASC LIMIT 1`,
-		publicKey, start, end).Scan(&firstRx, &firstTx)
-	if err != nil && err != sql.ErrNoRows {
-		return 0, 0, err
-	}
-	err = s.db.QueryRow(`SELECT rx, tx FROM wg_samples WHERE public_key = ? AND ts >= ? AND ts <= ? ORDER BY ts DESC LIMIT 1`,
-		publicKey, start, end).Scan(&lastRx, &lastTx)
-	if err != nil && err != sql.ErrNoRows {
-		return 0, 0, err
+	firstSmp, err1 := s.Queries.GetWGBoundarySamples(context.Background(), sqlcStore.GetWGBoundarySamplesParams{
+		PublicKey: publicKey,
+		Ts:        start,
+		Ts_2:      end,
+	})
+	if err1 != nil {
+		return 0, 0, err1
 	}
 
-	if !firstRx.Valid || !lastRx.Valid {
+	lastSmp, err2 := s.Queries.GetWGLastBoundarySample(context.Background(), sqlcStore.GetWGLastBoundarySampleParams{
+		PublicKey: publicKey,
+		Ts:        start,
+		Ts_2:      end,
+	})
+	if err2 != nil {
+		return 0, 0, err2
+	}
+
+	if len(firstSmp) == 0 || len(lastSmp) == 0 {
 		return 0, 0, nil
 	}
 
-	deltaRx := lastRx.Int64 - firstRx.Int64
-	deltaTx := lastTx.Int64 - firstTx.Int64
+	deltaRx := lastSmp[0].Rx - firstSmp[0].Rx
+	deltaTx := lastSmp[0].Tx - firstSmp[0].Tx
 	if deltaRx < 0 {
 		deltaRx = 0
 	}
@@ -851,23 +870,26 @@ func (s *Store) GetWGTrafficSeries(publicKey string, start, end int64, limit int
 	if limit <= 0 || limit > 5000 {
 		limit = 5000
 	}
-	rows, err := s.db.Query(`SELECT public_key, ts, rx, tx, COALESCE(endpoint, '') 
-		FROM wg_samples 
-		WHERE public_key = ? AND ts >= ? AND ts <= ? 
-		ORDER BY ts ASC 
-		LIMIT ?`, publicKey, start, end, limit)
+
+	rows, err := s.Queries.GetWGTrafficSeries(context.Background(), sqlcStore.GetWGTrafficSeriesParams{
+		PublicKey: publicKey,
+		Ts:        start,
+		Ts_2:      end,
+		Limit:     int64(limit),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	var series []WGSample
-	for rows.Next() {
-		var smp WGSample
-		if err := rows.Scan(&smp.PublicKey, &smp.Timestamp, &smp.Rx, &smp.Tx, &smp.Endpoint); err != nil {
-			return nil, err
-		}
-		series = append(series, smp)
+	for _, r := range rows {
+		series = append(series, WGSample{
+			PublicKey: r.PublicKey,
+			Timestamp: r.Ts,
+			Rx:        r.Rx,
+			Tx:        r.Tx,
+			Endpoint:  r.Endpoint,
+		})
 	}
 	return series, nil
 }
@@ -883,19 +905,18 @@ func (s *Store) UpsertWGPeer(publicKey, alias string, deleted bool) error {
 	if publicKey == "" || alias == "" {
 		return fmt.Errorf("public_key and alias are required")
 	}
-	deletedVal := 0
+	deletedVal := int64(0)
 	if deleted {
 		deletedVal = 1
 	}
-	_, err := s.db.Exec(`
-		INSERT INTO wg_peers (public_key, alias, deleted, updated_at)
-		VALUES (?, ?, ?, strftime('%s','now'))
-		ON CONFLICT(public_key) DO UPDATE SET
-			alias = excluded.alias,
-			deleted = excluded.deleted,
-			updated_at = strftime('%s','now')
-	`, publicKey, alias, deletedVal)
-	return err
+	return s.Queries.UpsertWGPeer(context.Background(), sqlcStore.UpsertWGPeerParams{
+		PublicKey: publicKey,
+		Alias:     alias,
+		Deleted: sql.NullInt64{
+			Int64: deletedVal,
+			Valid: true,
+		},
+	})
 }
 
 func (s *Store) UpdateWGPeerHandshakes(handshakes map[string]int64) error {
@@ -908,21 +929,18 @@ func (s *Store) UpdateWGPeerHandshakes(handshakes map[string]int64) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`
-		UPDATE wg_peers
-		SET last_handshake = ?, updated_at = strftime('%s','now')
-		WHERE public_key = ?
-	`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
+	qtx := s.Queries.WithTx(tx)
 	for key, ts := range handshakes {
 		if key == "" || ts <= 0 {
 			continue
 		}
-		if _, err := stmt.Exec(ts, key); err != nil {
+		if err := qtx.UpdateWGPeerHandshake(context.Background(), sqlcStore.UpdateWGPeerHandshakeParams{
+			LastHandshake: sql.NullInt64{
+				Int64: ts,
+				Valid: true,
+			},
+			PublicKey: key,
+		}); err != nil {
 			return err
 		}
 	}
@@ -931,21 +949,19 @@ func (s *Store) UpdateWGPeerHandshakes(handshakes map[string]int64) error {
 }
 
 func (s *Store) GetWGPeerMeta() (map[string]WGPeerMeta, error) {
-	rows, err := s.db.Query(`SELECT public_key, alias, last_handshake, deleted FROM wg_peers`)
+	rows, err := s.Queries.GetAllWGPeers(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	result := make(map[string]WGPeerMeta)
-	for rows.Next() {
-		var m WGPeerMeta
-		var deleted int
-		if err := rows.Scan(&m.PublicKey, &m.Alias, &m.LastHandshake, &deleted); err != nil {
-			return nil, err
+	for _, m := range rows {
+		result[m.PublicKey] = WGPeerMeta{
+			PublicKey:     m.PublicKey,
+			Alias:         m.Alias,
+			LastHandshake: m.LastHandshake.Int64,
+			Deleted:       m.Deleted.Int64 == 1,
 		}
-		m.Deleted = deleted == 1
-		result[m.PublicKey] = m
 	}
 	return result, nil
 }
@@ -1158,20 +1174,15 @@ func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, err
 	return res, nil
 }
 
-func (s *Store) PruneWGSamplesOlderThan(ts int64) (int64, error) {
-	res, err := s.db.Exec("DELETE FROM wg_samples WHERE ts < ?", ts)
-	if err != nil {
-		return 0, err
-	}
-	affected, _ := res.RowsAffected()
-	return affected, nil
+func (s *Store) PruneWGSamplesOlderThan(ts int64) error {
+	return s.Queries.PruneWGSamplesOlderThan(context.Background(), ts)
 }
 
-func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
+func (s *Store) CompressOldSamples(olderThanTs int64) error {
 	// 1. Transaction start
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer tx.Rollback()
 
@@ -1186,7 +1197,7 @@ func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
 		GROUP BY user, bucket_ts
 	`, bucketSize, bucketSize, olderThanTs)
 	if err != nil {
-		return 0, fmt.Errorf("compress query failed: %v", err)
+		return fmt.Errorf("compress query failed: %v", err)
 	}
 
 	type aggRow struct {
@@ -1201,49 +1212,48 @@ func (s *Store) CompressOldSamples(olderThanTs int64) (int64, error) {
 		var r aggRow
 		if err := rows.Scan(&r.u, &r.ts, &r.up, &r.down); err != nil {
 			rows.Close()
-			return 0, err
+			return err
 		}
 		agg = append(agg, r)
 	}
 	rows.Close()
 
 	if len(agg) == 0 {
-		return 0, nil // Nothing to compress
+		return nil // Nothing to compress
 	}
+
+	qtx := s.Queries.WithTx(tx)
 
 	// 3. Upsert into daily_usage
 	for _, a := range agg {
-		_, err := tx.Exec(`
-			INSERT INTO daily_usage (user, ts, uplink, downlink)
-			VALUES (?, ?, ?, ?)
-			ON CONFLICT(user, ts) DO UPDATE SET
-			uplink = uplink + excluded.uplink,
-			downlink = downlink + excluded.downlink
-		`, a.u, a.ts, a.up, a.down)
+		err := qtx.InsertDailyUsage(context.Background(), sqlcStore.InsertDailyUsageParams{
+			User:     a.u,
+			Ts:       a.ts,
+			Uplink:   a.up,
+			Downlink: a.down,
+		})
 		if err != nil {
-			return 0, fmt.Errorf("compress insert failed: %v", err)
+			return fmt.Errorf("compress insert failed: %v", err)
 		}
 	}
 
 	// 4. Delete old samples
-	res, err := tx.Exec("DELETE FROM samples WHERE ts < ?", olderThanTs)
+	err = qtx.PruneSamplesOlderThan(context.Background(), olderThanTs)
 	if err != nil {
-		return 0, fmt.Errorf("compress delete failed: %v", err)
+		return fmt.Errorf("compress delete failed: %v", err)
 	}
-
-	deleted, _ := res.RowsAffected()
 
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return err
 	}
 
-	return deleted, nil
+	return nil
 }
 
-func (s *Store) CompressOldWGSamples(olderThanTs int64) (int64, error) {
+func (s *Store) CompressOldWGSamples(olderThanTs int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer tx.Rollback()
 
@@ -1257,7 +1267,7 @@ func (s *Store) CompressOldWGSamples(olderThanTs int64) (int64, error) {
 		GROUP BY public_key, bucket_ts
 	`, bucketSize, bucketSize, olderThanTs)
 	if err != nil {
-		return 0, fmt.Errorf("compress wg query failed: %v", err)
+		return fmt.Errorf("compress wg query failed: %v", err)
 	}
 
 	type aggRow struct {
@@ -1272,41 +1282,40 @@ func (s *Store) CompressOldWGSamples(olderThanTs int64) (int64, error) {
 		var r aggRow
 		if err := rows.Scan(&r.pk, &r.ts, &r.rx, &r.tx); err != nil {
 			rows.Close()
-			return 0, err
+			return err
 		}
 		agg = append(agg, r)
 	}
 	rows.Close()
 
 	if len(agg) == 0 {
-		return 0, nil
+		return nil
 	}
 
+	qtx := s.Queries.WithTx(tx)
+
 	for _, a := range agg {
-		_, err := tx.Exec(`
-			INSERT INTO daily_wg_usage (public_key, ts, rx, tx)
-			VALUES (?, ?, ?, ?)
-			ON CONFLICT(public_key, ts) DO UPDATE SET
-			rx = rx + excluded.rx,
-			tx = tx + excluded.tx
-		`, a.pk, a.ts, a.rx, a.tx)
+		err := qtx.InsertWGDailyUsage(context.Background(), sqlcStore.InsertWGDailyUsageParams{
+			PublicKey: a.pk,
+			Ts:        a.ts,
+			Rx:        a.rx,
+			Tx:        a.tx,
+		})
 		if err != nil {
-			return 0, fmt.Errorf("compress wg insert failed: %v", err)
+			return fmt.Errorf("compress wg insert failed: %v", err)
 		}
 	}
 
-	res, err := tx.Exec("DELETE FROM wg_samples WHERE ts < ?", olderThanTs)
+	err = qtx.PruneWGSamplesOlderThan(context.Background(), olderThanTs)
 	if err != nil {
-		return 0, fmt.Errorf("compress wg delete failed: %v", err)
+		return fmt.Errorf("compress wg delete failed: %v", err)
 	}
-
-	deleted, _ := res.RowsAffected()
 
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return err
 	}
 
-	return deleted, nil
+	return nil
 }
 
 // GetCombinedReport queries both daily_usage and samples to build a comprehensive report.
@@ -1345,18 +1354,19 @@ func (s *Store) GetCombinedReport(user string, start, end int64) ([]Sample, erro
 	// We might have overlap if compression ran recently.
 	// Ideally we only query raw samples > configured compression cut-off?
 	// But simplest is just union all for now.
-	rawRows, err := s.db.Query(`
-		SELECT user, ts, uplink, downlink
-		FROM samples
-		WHERE user = ? AND ts >= ? AND ts <= ?
-	`, user, start, end)
+	rawRows, err := s.Queries.GetSamplesForUser(context.Background(), sqlcStore.GetSamplesForUserParams{
+		User: user,
+		Ts:   start,
+		Ts_2: end,
+	})
 	if err == nil {
-		defer rawRows.Close()
-		for rawRows.Next() {
-			var smp Sample
-			if err := rawRows.Scan(&smp.User, &smp.Timestamp, &smp.Uplink, &smp.Downlink); err == nil {
-				samples = append(samples, smp)
-			}
+		for _, r := range rawRows {
+			samples = append(samples, Sample{
+				User:      r.User,
+				Timestamp: r.Ts,
+				Uplink:    r.Uplink,
+				Downlink:  r.Downlink,
+			})
 		}
 	}
 

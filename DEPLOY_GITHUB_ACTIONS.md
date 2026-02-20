@@ -65,11 +65,11 @@ Stable target after baking: `1 app active + 1 watchdog + 1 nginx proxy`.
 
 ## Security Setup (Target Host)
 
-For **Remote Mode** to function securely (which is what the CI/CD pipeline deploys), a restricted user account must be configured on the VPN node. Do not use the root account directly.
+For **Remote Mode** to function securely (which is what the CI/CD pipeline deploys), a restricted user account must be configured on the server node. Do not use the root account directly.
 
 ### 1. Create the Agent User
 
-On your VPN server (Target Host):
+On your server (Target Host):
 ```bash
 sudo useradd -m -s /bin/bash ogs_agent
 ```
