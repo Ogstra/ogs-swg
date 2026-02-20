@@ -87,7 +87,7 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 }
 
 type CreatePeerRequest struct {
-	Alias    string `json:"alias"`
+	Alias    string `json:"alias" validate:"required"`
 	Email    string `json:"email,omitempty"`
 	IP       string `json:"ip"`
 	Endpoint string `json:"endpoint,omitempty"`
@@ -220,13 +220,13 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	if req.Alias == "" {
-		req.Alias = req.Email
-	}
-	if req.Alias == "" {
-		http.Error(w, "Alias is required", http.StatusBadRequest)
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if req.Alias == "" && req.Email != "" {
+		req.Alias = req.Email
 	}
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
@@ -388,8 +388,8 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 }
 
 type RestorePeerRequest struct {
-	PublicKey    string `json:"public_key"`
-	AllowedIPs   string `json:"allowed_ips"`
+	PublicKey    string `json:"public_key" validate:"required"`
+	AllowedIPs   string `json:"allowed_ips" validate:"required"`
 	Endpoint     string `json:"endpoint,omitempty"`
 	Alias        string `json:"alias,omitempty"`
 	Email        string `json:"email,omitempty"`
@@ -405,8 +405,8 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "Invalid payload", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(req.PublicKey) == "" || strings.TrimSpace(req.AllowedIPs) == "" {
-		http.Error(w, "public_key and allowed_ips are required", http.StatusBadRequest)
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -455,12 +455,16 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 }
 
 type ServiceActionRequest struct {
-	Service string `json:"service"`
+	Service string `json:"service" validate:"required"`
 }
 
 func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.validate.Struct(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -495,6 +499,10 @@ func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	if err := validateService(req.Service); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -517,6 +525,10 @@ func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.validate.Struct(req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

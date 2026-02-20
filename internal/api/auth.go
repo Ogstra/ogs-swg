@@ -11,8 +11,8 @@ import (
 )
 
 type LoginRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username string `json:"username" validate:"required"`
+	Password string `json:"password" validate:"required"`
 }
 
 type LoginResponse struct {
@@ -29,6 +29,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -66,8 +70,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdatePasswordRequest struct {
-	CurrentPassword string `json:"current_password"`
-	NewPassword     string `json:"new_password"`
+	CurrentPassword string `json:"current_password" validate:"required"`
+	NewPassword     string `json:"new_password" validate:"required,min=8"`
 }
 
 func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
@@ -76,9 +80,8 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	if len(req.NewPassword) < 8 {
-		http.Error(w, "Password must be at least 8 characters", http.StatusBadRequest)
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -115,8 +118,8 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateUsernameRequest struct {
-	CurrentPassword string `json:"current_password"`
-	NewUsername     string `json:"new_username"`
+	CurrentPassword string `json:"current_password" validate:"required"`
+	NewUsername     string `json:"new_username" validate:"required"`
 }
 
 func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
@@ -125,9 +128,8 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	if req.NewUsername == "" {
-		http.Error(w, "New username is required", http.StatusBadRequest)
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

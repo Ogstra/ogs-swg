@@ -38,16 +38,15 @@ func (s *Server) handleGetSysctl(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleApplySysctl(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Key   string `json:"key"`
-		Value string `json:"value"`
+		Key   string `json:"key" validate:"required"`
+		Value string `json:"value" validate:"required"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-
-	if req.Key == "" || req.Value == "" {
-		http.Error(w, "Key and Value are required", http.StatusBadRequest)
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

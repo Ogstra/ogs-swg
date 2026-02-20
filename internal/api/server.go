@@ -21,6 +21,7 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/sys"
 	"github.com/alitto/pond"
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 )
 
@@ -30,6 +31,7 @@ type Server struct {
 	executor         core.SystemExecutor
 	sampler          *core.StatsSampler
 	pool             *pond.WorkerPool
+	validate         *validator.Validate
 	wgPendingRestart bool
 	wgQRCache        map[string]qrEntry
 	wgQRCacheMutex   sync.RWMutex
@@ -56,6 +58,7 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		executor:         executor,
 		sampler:          nil,
 		pool:             pond.New(100, 1000, pond.IdleTimeout(30*time.Second)),
+		validate:         validator.New(),
 		wgPendingRestart: false,
 		wgQRCache:        make(map[string]qrEntry),
 		wgQRCacheMutex:   sync.RWMutex{},
