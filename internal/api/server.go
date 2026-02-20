@@ -20,6 +20,7 @@ import (
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/sys"
+	"github.com/alitto/pond"
 	"github.com/google/uuid"
 )
 
@@ -28,14 +29,15 @@ type Server struct {
 	config           *core.Config
 	executor         core.SystemExecutor
 	sampler          *core.StatsSampler
+	pool             *pond.WorkerPool
 	wgPendingRestart bool
 	wgQRCache        map[string]qrEntry
-	wgSamplerStop    chan struct{}
-	wgSamplerTicker  *time.Ticker
-	wgSampleInterval time.Duration
+	wgQRCacheMutex   sync.RWMutex
 	wgMux            sync.RWMutex
-	wgLast           map[string]core.WGSample
+	wgSamplerTicker  *time.Ticker
+	wgSamplerStop    chan struct{}
 	wgSamplerPaused  bool
+	wgLast           map[string]core.WGSample
 }
 
 type qrEntry struct {
@@ -53,11 +55,13 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		config:           config,
 		executor:         executor,
 		sampler:          nil,
+		pool:             pond.New(100, 1000, pond.IdleTimeout(30*time.Second)),
 		wgPendingRestart: false,
 		wgQRCache:        make(map[string]qrEntry),
+		wgQRCacheMutex:   sync.RWMutex{},
 		wgSamplerStop:    make(chan struct{}),
 		wgSamplerTicker:  time.NewTicker(interval),
-		wgSampleInterval: interval,
+		wgMux:            sync.RWMutex{},
 		wgLast:           make(map[string]core.WGSample),
 		wgSamplerPaused:  false,
 	}
@@ -72,6 +76,17 @@ func (w gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+func (s *Server) PondMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		done := make(chan struct{})
+		s.pool.Submit(func() {
+			defer close(done)
+			next.ServeHTTP(w, r)
+		})
+		<-done
+	})
+}
+
 func (s *Server) GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
@@ -81,8 +96,8 @@ func (s *Server) GzipMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Encoding", "gzip")
 		gz := gzip.NewWriter(w)
 		defer gz.Close()
-		gzr := gzipResponseWriter{Writer: gz, ResponseWriter: w}
-		next.ServeHTTP(gzr, r)
+		gzw := &gzipResponseWriter{Writer: gz, ResponseWriter: w}
+		next.ServeHTTP(gzw, r)
 	})
 }
 
@@ -386,8 +401,8 @@ func (s *Server) storeQRConfig(pubKey, cfg string, ttl time.Duration) {
 		return
 	}
 
-	s.wgMux.Lock()
-	defer s.wgMux.Unlock()
+	s.wgQRCacheMutex.Lock()
+	defer s.wgQRCacheMutex.Unlock()
 	s.cleanupQRCache()
 	s.wgQRCache[pubKey] = qrEntry{
 		Config:    cfg,
@@ -396,8 +411,8 @@ func (s *Server) storeQRConfig(pubKey, cfg string, ttl time.Duration) {
 }
 
 func (s *Server) fetchQRConfig(pubKey string) (string, bool) {
-	s.wgMux.Lock()
-	defer s.wgMux.Unlock()
+	s.wgQRCacheMutex.Lock()
+	defer s.wgQRCacheMutex.Unlock()
 	s.cleanupQRCache()
 	if entry, ok := s.wgQRCache[pubKey]; ok {
 		if time.Now().Before(entry.ExpiresAt) {
@@ -505,32 +520,39 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/sysctl", s.secure(s.handleApplySysctl))
 
 	// Mount protected routes under /api/
-	mux.Handle("/api/", s.AuthMiddleware(s.GzipMiddleware(protected)))
+	mux.Handle("/api/", s.AuthMiddleware(s.PondMiddleware(s.GzipMiddleware(protected))))
 
 	return mux
 }
 
 // Stop gracefully stops the server and cleans up resources
 func (s *Server) Stop() {
-	// Stop WireGuard sampler
-	if s.config.EnableWireGuard {
-		s.wgMux.Lock()
-		if s.wgSamplerTicker != nil {
-			s.wgSamplerTicker.Stop()
-		}
-		// Safely close channel (prevent double close panic)
-		select {
-		case <-s.wgSamplerStop:
-			// Already closed
-		default:
-			close(s.wgSamplerStop)
-		}
-		s.wgMux.Unlock()
-	}
-
 	// Stop sing-box sampler if running
 	if s.sampler != nil {
 		s.sampler.Stop()
+	}
+
+	// Stop WireGuard sampler
+	s.wgMux.Lock()
+	if s.wgSamplerTicker != nil {
+		s.wgSamplerTicker.Stop()
+	}
+	s.wgMux.Unlock()
+
+	// Safely close channel (prevent double close panic)
+	select {
+	case <-s.wgSamplerStop:
+		// Already closed
+	default:
+		close(s.wgSamplerStop)
+	}
+
+	if s.executor != nil {
+		s.executor.Close()
+	}
+
+	if s.pool != nil {
+		s.pool.StopAndWait()
 	}
 
 	// Close store connection

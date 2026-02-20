@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	"github.com/alitto/pond"
 	"github.com/kballard/go-shellquote"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -26,11 +27,13 @@ type SSHExecutor struct {
 	client *ssh.Client
 	sftp   *sftp.Client
 	mu     sync.Mutex
+	pool   *pond.WorkerPool
 }
 
 func NewSSHExecutor(cfg *core.Config) *SSHExecutor {
 	return &SSHExecutor{
 		config: cfg,
+		pool:   pond.New(10, 100),
 	}
 }
 
@@ -165,11 +168,24 @@ func (e *SSHExecutor) runCommand(ctx context.Context, cmdStr string) ([]byte, er
 		session.Close()
 	}()
 
-	output, err := session.CombinedOutput(cmdStr)
-	if ctx.Err() != nil {
+	var output []byte
+	var combinedErr error
+
+	done := make(chan struct{})
+	e.pool.Submit(func() {
+		defer close(done)
+		output, combinedErr = session.CombinedOutput(cmdStr)
+	})
+
+	select {
+	case <-done:
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return output, combinedErr
+	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	return output, err
 }
 
 // Service Management (wrappers around systemctl)
@@ -535,6 +551,9 @@ func (e *SSHExecutor) Close() error {
 	if e.client != nil {
 		e.client.Close()
 		e.client = nil
+	}
+	if e.pool != nil {
+		e.pool.StopAndWait()
 	}
 	return nil
 }

@@ -1342,7 +1342,7 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"singbox":                     singboxStatus,
 		"wireguard":                   wireguardStatus,
 		"wireguard_pending_restart":   s.wgPendingRestart,
-		"wg_sample_interval_sec":      int(s.wgSampleInterval.Seconds()),
+		"wg_sample_interval_sec":      s.config.WGSamplerIntervalSec,
 		"active_users_singbox":        activeUsersSB,
 		"active_users_wireguard":      activeUsersWG,
 		"active_users_singbox_list":   activeUsersList,
