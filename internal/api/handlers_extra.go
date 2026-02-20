@@ -1260,6 +1260,15 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
+	cacheKey := "api:status"
+	if cachedPayload, found := s.cache.Get(cacheKey); found {
+		if payload, ok := cachedPayload.(map[string]interface{}); ok {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(payload)
+			return
+		}
+	}
+
 	singboxStatus := false
 	wireguardStatus := false
 	activeUsersSB := int64(0)
@@ -1368,6 +1377,9 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"systemctl_available":         s.executor != nil,
 		"journalctl_available":        s.executor != nil,
 	}
+
+	// Cost of 1, TTL of 15 seconds
+	s.cache.SetWithTTL(cacheKey, status, 1, 15*time.Second)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(status)

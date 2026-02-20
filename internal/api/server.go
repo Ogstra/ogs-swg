@@ -21,6 +21,7 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/sys"
 	"github.com/alitto/pond"
+	"github.com/dgraph-io/ristretto"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 )
@@ -32,6 +33,7 @@ type Server struct {
 	sampler          *core.StatsSampler
 	pool             *pond.WorkerPool
 	validate         *validator.Validate
+	cache            *ristretto.Cache
 	wgPendingRestart bool
 	wgQRCache        map[string]qrEntry
 	wgQRCacheMutex   sync.RWMutex
@@ -52,6 +54,15 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 	if config.WGSamplerIntervalSec > 0 {
 		interval = time.Duration(config.WGSamplerIntervalSec) * time.Second
 	}
+	cache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e6,     // number of keys to track frequency of (1M).
+		MaxCost:     1 << 25, // maximum cost of cache (32MB).
+		BufferItems: 64,      // number of keys per Get buffer.
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize ristretto cache: %v", err)
+	}
+
 	return &Server{
 		store:            store,
 		config:           config,
@@ -59,6 +70,7 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		sampler:          nil,
 		pool:             pond.New(100, 1000, pond.IdleTimeout(30*time.Second)),
 		validate:         validator.New(),
+		cache:            cache,
 		wgPendingRestart: false,
 		wgQRCache:        make(map[string]qrEntry),
 		wgQRCacheMutex:   sync.RWMutex{},
@@ -992,6 +1004,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -1066,6 +1079,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		s.store.DeleteUserMetadata(originalName)
 	}
 
+	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1089,6 +1103,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1197,6 +1212,7 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 		s.store.SaveUserMetadata(meta)
 	}
 
+	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusCreated)
 }
 

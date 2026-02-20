@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -41,21 +40,6 @@ type Consumer struct {
 	Flow       string `json:"flow"`
 	QuotaLimit int64  `json:"quota_limit"` // 0 if none
 	Key        string `json:"key"`         // For linking/identification
-}
-
-// simple in-memory cache for dashboard responses
-var dashboardCache = struct {
-	mu   sync.Mutex
-	data map[string]cachedDashboard
-	ttl  time.Duration
-}{
-	data: make(map[string]cachedDashboard),
-	ttl:  15 * time.Second,
-}
-
-type cachedDashboard struct {
-	expires time.Time
-	payload DashboardData
 }
 
 func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) {
@@ -127,14 +111,13 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		cacheKey = "range:" + rangeStr + ":" + strconv.FormatInt(end, 10)
 	}
 
-	dashboardCache.mu.Lock()
-	if entry, ok := dashboardCache.data[cacheKey]; ok && time.Now().Before(entry.expires) {
-		dashboardCache.mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(entry.payload)
-		return
+	if cachedPayload, found := s.cache.Get(cacheKey); found {
+		if payload, ok := cachedPayload.(DashboardData); ok {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(payload)
+			return
+		}
 	}
-	dashboardCache.mu.Unlock()
 
 	// 1. Fetch System Status
 	status := s.collectSystemStatus(r.Context())
@@ -316,12 +299,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// cache response
-	dashboardCache.mu.Lock()
-	dashboardCache.data[cacheKey] = cachedDashboard{
-		expires: time.Now().Add(dashboardCache.ttl),
-		payload: resp,
-	}
-	dashboardCache.mu.Unlock()
+	// Setting cost to 1 as default and TTL to 15 seconds
+	s.cache.SetWithTTL(cacheKey, resp, 1, 15*time.Second)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
