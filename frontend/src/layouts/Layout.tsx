@@ -68,7 +68,9 @@ export const Layout: React.FC = () => {
                         </Link>
                     ))}
                 </nav>
-
+                <div className="pb-2 pr-2 text-right text-[10px] text-slate-500">
+                    {commitLabel}
+                </div>
                 <div className="p-4 border-t border-slate-800">
                     <button
                         onClick={handleLogout}
@@ -100,9 +102,6 @@ export const Layout: React.FC = () => {
                         <Outlet />
                     </div>
                 </main>
-                <div className="pb-2 pr-2 text-right text-[10px] text-slate-500">
-                    {commitLabel}
-                </div>
             </div>
         </div>
     );
