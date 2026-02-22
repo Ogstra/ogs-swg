@@ -423,7 +423,7 @@ export default function Dashboard() {
                                     <Tooltip
                                         contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '0.75rem', color: '#f8fafc' }}
                                         itemStyle={{ color: '#f8fafc' }}
-                                        formatter={(val: number) => formatBytes(val)}
+                                        formatter={(val) => formatBytes(typeof val === 'number' ? val : 0)}
                                         labelFormatter={(ts) => new Date(ts * 1000).toLocaleString()}
                                     />
                                     <Area
