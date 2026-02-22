@@ -35,7 +35,7 @@ Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** bui
 
 ## Tech Stack
 *   **Runtime**: Go 1.24
-*   **Frontend**: React 18 + TypeScript (Vite)
+*   **Frontend**: React 19 + TypeScript (Vite)
 *   **DB**: SQLite + [sqlc](https://sqlc.dev/) (Type-safe SQL)
 *   **Cache**: [Ristretto](https://github.com/dgraph-io/ristretto)
 *   **Concurrency**: [Pond](https://github.com/alitto/pond) (Goroutine worker pools)
