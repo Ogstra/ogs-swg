@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/o1egl/paseto"
 )
 
@@ -16,7 +17,8 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string `json:"token"`
+	Token       string                    `json:"token"`
+	Permissions core.PanelUserPermissions `json:"permissions"`
 }
 
 func getPasetoKey(secret string) []byte {
@@ -36,21 +38,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	valid, err := s.store.VerifyAdmin(req.Username, req.Password)
+	perms, err := s.store.VerifyPanelUser(req.Username, req.Password)
 	if err != nil {
 		http.Error(w, "Authentication error", http.StatusInternalServerError)
 		return
 	}
-
-	if !valid {
-		// Fallback to legacy config for migration if DB is empty (should be handled by EnsureDefaultAdmin, but safe to check)
-		// Actually, EnsureDefaultAdmin handles creation, so we should strictly enforce DB auth.
-		// However, if the user explicitly provided credentials in Config that differ from DB, DB wins.
+	if perms == nil {
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	perms.Normalize()
 
-	// Generate PASETO token
+	// Generate PASETO token with permissions embedded
 	v2 := paseto.NewV2()
 	now := time.Now()
 	jsonToken := paseto.JSONToken{
@@ -58,6 +57,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		IssuedAt:   now,
 		Expiration: now.Add(24 * time.Hour),
 	}
+	permsJSON, _ := json.Marshal(perms)
+	jsonToken.Set("perms", string(permsJSON))
 
 	tokenString, err := v2.Encrypt(getPasetoKey(s.config.JWTSecret), jsonToken, nil)
 	if err != nil {
@@ -66,7 +67,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(LoginResponse{Token: tokenString})
+	json.NewEncoder(w).Encode(LoginResponse{Token: tokenString, Permissions: *perms})
 }
 
 type UpdatePasswordRequest struct {
@@ -86,7 +87,7 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get username from context (set by AuthMiddleware)
-	claims, ok := r.Context().Value("user").(map[string]interface{})
+	claims, ok := r.Context().Value(userContextKey).(map[string]interface{})
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -98,18 +99,18 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify current password
-	valid, err := s.store.VerifyAdmin(username, req.CurrentPassword)
+	perms, err := s.store.VerifyPanelUser(username, req.CurrentPassword)
 	if err != nil {
 		http.Error(w, "Verification error", http.StatusInternalServerError)
 		return
 	}
-	if !valid {
+	if perms == nil {
 		http.Error(w, "Invalid current password", http.StatusUnauthorized)
 		return
 	}
 
 	// Update password
-	if err := s.store.UpdateAdminPassword(username, req.NewPassword); err != nil {
+	if err := s.store.UpdatePanelUserPassword(username, req.NewPassword); err != nil {
 		http.Error(w, "Failed to update password", http.StatusInternalServerError)
 		return
 	}
@@ -134,7 +135,7 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get username from context
-	claims, ok := r.Context().Value("user").(map[string]interface{})
+	claims, ok := r.Context().Value(userContextKey).(map[string]interface{})
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
@@ -146,20 +147,20 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify current password
-	valid, err := s.store.VerifyAdmin(currentUsername, req.CurrentPassword)
+	perms, err := s.store.VerifyPanelUser(currentUsername, req.CurrentPassword)
 	if err != nil {
 		http.Error(w, "Verification error", http.StatusInternalServerError)
 		return
 	}
-	if !valid {
+	if perms == nil {
 		http.Error(w, "Invalid current password", http.StatusUnauthorized)
 		return
 	}
 
 	// Update username
-	if err := s.store.UpdateAdminUsername(currentUsername, req.NewUsername); err != nil {
+	if err := s.store.UpdatePanelUsername(currentUsername, req.NewUsername); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
-			http.Error(w, err.Error(), http.StatusConflict) // 409 Conflict
+			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
 		http.Error(w, "Failed to update username: "+err.Error(), http.StatusInternalServerError)
@@ -169,7 +170,15 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// AuthMiddleware validates the PASETO token
+// contextKey is a private type for context keys in this package.
+type contextKey string
+
+const (
+	userContextKey        contextKey = "user"
+	permissionsContextKey contextKey = "permissions"
+)
+
+// AuthMiddleware validates the PASETO token and injects user + permissions into context.
 func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow login endpoint without token
@@ -178,7 +187,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Allow public assets if needed (though usually served by static handler)
+		// Allow public assets
 		if strings.HasPrefix(r.URL.Path, "/assets/") {
 			next.ServeHTTP(w, r)
 			return
@@ -186,9 +195,23 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			// Fallback to API Key for legacy/script compatibility
+			// Fallback to API key.
 			if s.config.APIKey != "" && r.Header.Get("X-API-Key") == s.config.APIKey {
-				next.ServeHTTP(w, r)
+				allPerms := &core.PanelUserPermissions{
+					CanReadUsers:       true,
+					CanWriteUsers:      true,
+					CanReadWireguard:   true,
+					CanWriteWireguard:  true,
+					CanReadConfig:      true,
+					CanWriteConfig:     true,
+					CanReadSettings:    true,
+					CanWriteSettings:   true,
+					CanReadPanelUsers:  true,
+					CanWritePanelUsers: true,
+					CanReadLogs:        true,
+				}
+				ctx := context.WithValue(r.Context(), permissionsContextKey, allPerms)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
@@ -216,8 +239,16 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Token is valid, proceed
-		ctx := context.WithValue(r.Context(), "user", map[string]interface{}{"sub": jsonToken.Subject})
+		// Extract permissions from token
+		var perms core.PanelUserPermissions
+		if permsStr := jsonToken.Get("perms"); permsStr != "" {
+			json.Unmarshal([]byte(permsStr), &perms)
+		}
+		perms.Normalize()
+
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, userContextKey, map[string]interface{}{"sub": jsonToken.Subject})
+		ctx = context.WithValue(ctx, permissionsContextKey, &perms)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

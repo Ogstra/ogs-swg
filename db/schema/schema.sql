@@ -56,6 +56,24 @@ CREATE TABLE IF NOT EXISTS admins (
 	password_hash TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS panel_users (
+	username TEXT PRIMARY KEY,
+	password_hash TEXT NOT NULL,
+	can_read_users INTEGER NOT NULL DEFAULT 0,
+	can_write_users INTEGER NOT NULL DEFAULT 0,
+	can_read_wireguard INTEGER NOT NULL DEFAULT 0,
+	can_write_wireguard INTEGER NOT NULL DEFAULT 0,
+	can_read_config INTEGER NOT NULL DEFAULT 0,
+	can_write_config INTEGER NOT NULL DEFAULT 0,
+	can_read_settings INTEGER NOT NULL DEFAULT 0,
+	can_write_settings INTEGER NOT NULL DEFAULT 0,
+	can_read_panel_users INTEGER NOT NULL DEFAULT 0,
+	can_write_panel_users INTEGER NOT NULL DEFAULT 0,
+	can_read_logs INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER DEFAULT (strftime('%s','now')),
+	updated_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
 CREATE TABLE IF NOT EXISTS inbound_meta (
 	tag TEXT PRIMARY KEY,
 	external_port INTEGER DEFAULT 0
