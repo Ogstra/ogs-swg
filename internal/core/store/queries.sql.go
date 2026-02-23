@@ -21,6 +21,17 @@ func (q *Queries) CheckAdminExists(ctx context.Context, username string) (int64,
 	return count, err
 }
 
+const checkPanelUserExists = `-- name: CheckPanelUserExists :one
+SELECT COUNT(*) FROM panel_users WHERE username = ?
+`
+
+func (q *Queries) CheckPanelUserExists(ctx context.Context, username string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, checkPanelUserExists, username)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAdmins = `-- name: CountAdmins :one
 SELECT COUNT(*) FROM admins
 `
@@ -38,6 +49,17 @@ SELECT COUNT(*) FROM daily_usage
 
 func (q *Queries) CountDailyUsage(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countDailyUsage)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countPanelUsers = `-- name: CountPanelUsers :one
+SELECT COUNT(*) FROM panel_users
+`
+
+func (q *Queries) CountPanelUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countPanelUsers)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -93,12 +115,76 @@ func (q *Queries) CreateAdmin(ctx context.Context, arg CreateAdminParams) error 
 	return err
 }
 
+const createPanelUser = `-- name: CreatePanelUser :exec
+INSERT INTO panel_users (
+	username,
+	password_hash,
+	can_read_users,
+	can_write_users,
+	can_read_wireguard,
+	can_write_wireguard,
+	can_read_config,
+	can_write_config,
+	can_read_settings,
+	can_write_settings,
+	can_read_panel_users,
+	can_write_panel_users,
+	can_read_logs
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreatePanelUserParams struct {
+	Username           string `json:"username"`
+	PasswordHash       string `json:"password_hash"`
+	CanReadUsers       int64  `json:"can_read_users"`
+	CanWriteUsers      int64  `json:"can_write_users"`
+	CanReadWireguard   int64  `json:"can_read_wireguard"`
+	CanWriteWireguard  int64  `json:"can_write_wireguard"`
+	CanReadConfig      int64  `json:"can_read_config"`
+	CanWriteConfig     int64  `json:"can_write_config"`
+	CanReadSettings    int64  `json:"can_read_settings"`
+	CanWriteSettings   int64  `json:"can_write_settings"`
+	CanReadPanelUsers  int64  `json:"can_read_panel_users"`
+	CanWritePanelUsers int64  `json:"can_write_panel_users"`
+	CanReadLogs        int64  `json:"can_read_logs"`
+}
+
+// Panel Users Queries --
+func (q *Queries) CreatePanelUser(ctx context.Context, arg CreatePanelUserParams) error {
+	_, err := q.db.ExecContext(ctx, createPanelUser,
+		arg.Username,
+		arg.PasswordHash,
+		arg.CanReadUsers,
+		arg.CanWriteUsers,
+		arg.CanReadWireguard,
+		arg.CanWriteWireguard,
+		arg.CanReadConfig,
+		arg.CanWriteConfig,
+		arg.CanReadSettings,
+		arg.CanWriteSettings,
+		arg.CanReadPanelUsers,
+		arg.CanWritePanelUsers,
+		arg.CanReadLogs,
+	)
+	return err
+}
+
 const deleteInboundMeta = `-- name: DeleteInboundMeta :exec
 DELETE FROM inbound_meta WHERE tag = ?
 `
 
 func (q *Queries) DeleteInboundMeta(ctx context.Context, tag string) error {
 	_, err := q.db.ExecContext(ctx, deleteInboundMeta, tag)
+	return err
+}
+
+const deletePanelUser = `-- name: DeletePanelUser :exec
+DELETE FROM panel_users WHERE username = ?
+`
+
+func (q *Queries) DeletePanelUser(ctx context.Context, username string) error {
+	_, err := q.db.ExecContext(ctx, deletePanelUser, username)
 	return err
 }
 
@@ -241,6 +327,78 @@ func (q *Queries) GetAllInboundMeta(ctx context.Context) ([]InboundMetum, error)
 	for rows.Next() {
 		var i InboundMetum
 		if err := rows.Scan(&i.Tag, &i.ExternalPort); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllPanelUsers = `-- name: GetAllPanelUsers :many
+SELECT
+	username,
+	can_read_users,
+	can_write_users,
+	can_read_wireguard,
+	can_write_wireguard,
+	can_read_config,
+	can_write_config,
+	can_read_settings,
+	can_write_settings,
+	can_read_panel_users,
+	can_write_panel_users,
+	can_read_logs,
+	created_at
+FROM panel_users
+ORDER BY username ASC
+`
+
+type GetAllPanelUsersRow struct {
+	Username           string        `json:"username"`
+	CanReadUsers       int64         `json:"can_read_users"`
+	CanWriteUsers      int64         `json:"can_write_users"`
+	CanReadWireguard   int64         `json:"can_read_wireguard"`
+	CanWriteWireguard  int64         `json:"can_write_wireguard"`
+	CanReadConfig      int64         `json:"can_read_config"`
+	CanWriteConfig     int64         `json:"can_write_config"`
+	CanReadSettings    int64         `json:"can_read_settings"`
+	CanWriteSettings   int64         `json:"can_write_settings"`
+	CanReadPanelUsers  int64         `json:"can_read_panel_users"`
+	CanWritePanelUsers int64         `json:"can_write_panel_users"`
+	CanReadLogs        int64         `json:"can_read_logs"`
+	CreatedAt          sql.NullInt64 `json:"created_at"`
+}
+
+func (q *Queries) GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllPanelUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetAllPanelUsersRow
+	for rows.Next() {
+		var i GetAllPanelUsersRow
+		if err := rows.Scan(
+			&i.Username,
+			&i.CanReadUsers,
+			&i.CanWriteUsers,
+			&i.CanReadWireguard,
+			&i.CanWriteWireguard,
+			&i.CanReadConfig,
+			&i.CanWriteConfig,
+			&i.CanReadSettings,
+			&i.CanWriteSettings,
+			&i.CanReadPanelUsers,
+			&i.CanWritePanelUsers,
+			&i.CanReadLogs,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -500,6 +658,50 @@ func (q *Queries) GetMaxTimestampForUser(ctx context.Context, user string) (inte
 	var max interface{}
 	err := row.Scan(&max)
 	return max, err
+}
+
+const getPanelUser = `-- name: GetPanelUser :one
+SELECT
+	username,
+	password_hash,
+	can_read_users,
+	can_write_users,
+	can_read_wireguard,
+	can_write_wireguard,
+	can_read_config,
+	can_write_config,
+	can_read_settings,
+	can_write_settings,
+	can_read_panel_users,
+	can_write_panel_users,
+	can_read_logs,
+	created_at,
+	updated_at
+FROM panel_users
+WHERE username = ?
+`
+
+func (q *Queries) GetPanelUser(ctx context.Context, username string) (PanelUser, error) {
+	row := q.db.QueryRowContext(ctx, getPanelUser, username)
+	var i PanelUser
+	err := row.Scan(
+		&i.Username,
+		&i.PasswordHash,
+		&i.CanReadUsers,
+		&i.CanWriteUsers,
+		&i.CanReadWireguard,
+		&i.CanWriteWireguard,
+		&i.CanReadConfig,
+		&i.CanWriteConfig,
+		&i.CanReadSettings,
+		&i.CanWriteSettings,
+		&i.CanReadPanelUsers,
+		&i.CanWritePanelUsers,
+		&i.CanReadLogs,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getSamplerRuns = `-- name: GetSamplerRuns :many
@@ -966,6 +1168,85 @@ type UpdateAdminUsernameParams struct {
 
 func (q *Queries) UpdateAdminUsername(ctx context.Context, arg UpdateAdminUsernameParams) error {
 	_, err := q.db.ExecContext(ctx, updateAdminUsername, arg.Username, arg.Username_2)
+	return err
+}
+
+const updatePanelUserPassword = `-- name: UpdatePanelUserPassword :exec
+UPDATE panel_users SET password_hash = ?, updated_at = strftime('%s','now') WHERE username = ?
+`
+
+type UpdatePanelUserPasswordParams struct {
+	PasswordHash string `json:"password_hash"`
+	Username     string `json:"username"`
+}
+
+func (q *Queries) UpdatePanelUserPassword(ctx context.Context, arg UpdatePanelUserPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, updatePanelUserPassword, arg.PasswordHash, arg.Username)
+	return err
+}
+
+const updatePanelUserPermissions = `-- name: UpdatePanelUserPermissions :exec
+UPDATE panel_users
+SET
+	can_read_users = ?,
+	can_write_users = ?,
+	can_read_wireguard = ?,
+	can_write_wireguard = ?,
+	can_read_config = ?,
+	can_write_config = ?,
+	can_read_settings = ?,
+	can_write_settings = ?,
+	can_read_panel_users = ?,
+	can_write_panel_users = ?,
+	can_read_logs = ?,
+	updated_at = strftime('%s','now')
+WHERE username = ?
+`
+
+type UpdatePanelUserPermissionsParams struct {
+	CanReadUsers       int64  `json:"can_read_users"`
+	CanWriteUsers      int64  `json:"can_write_users"`
+	CanReadWireguard   int64  `json:"can_read_wireguard"`
+	CanWriteWireguard  int64  `json:"can_write_wireguard"`
+	CanReadConfig      int64  `json:"can_read_config"`
+	CanWriteConfig     int64  `json:"can_write_config"`
+	CanReadSettings    int64  `json:"can_read_settings"`
+	CanWriteSettings   int64  `json:"can_write_settings"`
+	CanReadPanelUsers  int64  `json:"can_read_panel_users"`
+	CanWritePanelUsers int64  `json:"can_write_panel_users"`
+	CanReadLogs        int64  `json:"can_read_logs"`
+	Username           string `json:"username"`
+}
+
+func (q *Queries) UpdatePanelUserPermissions(ctx context.Context, arg UpdatePanelUserPermissionsParams) error {
+	_, err := q.db.ExecContext(ctx, updatePanelUserPermissions,
+		arg.CanReadUsers,
+		arg.CanWriteUsers,
+		arg.CanReadWireguard,
+		arg.CanWriteWireguard,
+		arg.CanReadConfig,
+		arg.CanWriteConfig,
+		arg.CanReadSettings,
+		arg.CanWriteSettings,
+		arg.CanReadPanelUsers,
+		arg.CanWritePanelUsers,
+		arg.CanReadLogs,
+		arg.Username,
+	)
+	return err
+}
+
+const updatePanelUsername = `-- name: UpdatePanelUsername :exec
+UPDATE panel_users SET username = ?, updated_at = strftime('%s','now') WHERE username = ?
+`
+
+type UpdatePanelUsernameParams struct {
+	Username   string `json:"username"`
+	Username_2 string `json:"username_2"`
+}
+
+func (q *Queries) UpdatePanelUsername(ctx context.Context, arg UpdatePanelUsernameParams) error {
+	_, err := q.db.ExecContext(ctx, updatePanelUsername, arg.Username, arg.Username_2)
 	return err
 }
 

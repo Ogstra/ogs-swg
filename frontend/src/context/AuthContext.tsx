@@ -1,16 +1,54 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
+export interface PanelUserPermissions {
+    can_read_users: boolean;
+    can_write_users: boolean;
+    can_read_wireguard: boolean;
+    can_write_wireguard: boolean;
+    can_read_config: boolean;
+    can_write_config: boolean;
+    can_read_settings: boolean;
+    can_write_settings: boolean;
+    can_read_panel_users: boolean;
+    can_write_panel_users: boolean;
+    can_read_logs: boolean;
+}
+
 interface AuthContextType {
     isAuthenticated: boolean;
     token: string | null;
+    permissions: PanelUserPermissions | null;
     login: (username: string, pass: string) => Promise<void>;
     logout: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+const PERMISSIONS_KEY = 'permissions';
+
+const normalizePermissions = (raw: any): PanelUserPermissions => ({
+    can_read_users: !!raw?.can_read_users,
+    can_write_users: !!raw?.can_write_users,
+    can_read_wireguard: !!raw?.can_read_wireguard,
+    can_write_wireguard: !!raw?.can_write_wireguard,
+    can_read_config: !!raw?.can_read_config,
+    can_write_config: !!raw?.can_write_config,
+    can_read_settings: !!raw?.can_read_settings,
+    can_write_settings: !!raw?.can_write_settings,
+    can_read_panel_users: !!raw?.can_read_panel_users,
+    can_write_panel_users: !!raw?.can_write_panel_users,
+    can_read_logs: !!raw?.can_read_logs,
+});
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+    const [permissions, setPermissions] = useState<PanelUserPermissions | null>(() => {
+        const raw = localStorage.getItem(PERMISSIONS_KEY);
+        if (raw) {
+            try { return normalizePermissions(JSON.parse(raw)); } catch { return null; }
+        }
+        return null;
+    });
     const isAuthenticated = !!token;
 
     useEffect(() => {
@@ -22,10 +60,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, [token]);
 
     useEffect(() => {
+        if (permissions) {
+            localStorage.setItem(PERMISSIONS_KEY, JSON.stringify(permissions));
+        } else {
+            localStorage.removeItem(PERMISSIONS_KEY);
+        }
+    }, [permissions]);
+
+    useEffect(() => {
         const handleUnauthorized = () => {
             logout();
         };
-
         window.addEventListener('auth:unauthorized', handleUnauthorized);
         return () => {
             window.removeEventListener('auth:unauthorized', handleUnauthorized);
@@ -45,15 +90,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const data = await res.json();
         setToken(data.token);
+        setPermissions(data.permissions ? normalizePermissions(data.permissions) : null);
     };
 
     const logout = () => {
         setToken(null);
+        setPermissions(null);
         localStorage.removeItem('token');
+        localStorage.removeItem(PERMISSIONS_KEY);
     };
 
     return (
-        <AuthContext.Provider value={{ isAuthenticated, token, login, logout }}>
+        <AuthContext.Provider value={{ isAuthenticated, token, permissions, login, logout }}>
             {children}
         </AuthContext.Provider>
     );

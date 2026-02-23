@@ -1,3 +1,17 @@
+import type { PanelUserPermissions } from '../context/AuthContext';
+
+export interface PanelUserInfo {
+    username: string;
+    permissions: PanelUserPermissions;
+    created_at: number;
+}
+
+export interface CreatePanelUserRequest {
+    username: string;
+    password: string;
+    permissions: PanelUserPermissions;
+}
+
 export interface UserStatus {
     name: string;
     uuid?: string;
@@ -530,5 +544,43 @@ export const api = {
         });
         await handleResponse(res, 'Failed to apply Sing-box changes');
         return res.json();
-    }
+    },
+
+    // Panel user management
+    getPanelUsers: async (): Promise<PanelUserInfo[]> => {
+        const res = await fetch('/api/panel-users', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch panel users');
+        return res.json();
+    },
+    createPanelUser: async (data: CreatePanelUserRequest): Promise<void> => {
+        const res = await fetch('/api/panel-users', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(data),
+        });
+        await handleResponse(res, 'Failed to create panel user');
+    },
+    updatePanelUserPermissions: async (username: string, permissions: PanelUserPermissions): Promise<void> => {
+        const res = await fetch('/api/panel-users/permissions', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ username, permissions }),
+        });
+        await handleResponse(res, 'Failed to update permissions');
+    },
+    updatePanelUserUsername: async (username: string, new_username: string): Promise<void> => {
+        const res = await fetch('/api/panel-users/username', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ username, new_username }),
+        });
+        await handleResponse(res, 'Failed to update username');
+    },
+    deletePanelUser: async (username: string): Promise<void> => {
+        const res = await fetch(`/api/panel-users?username=${encodeURIComponent(username)}`, {
+            method: 'DELETE',
+            headers: buildHeaders(),
+        });
+        await handleResponse(res, 'Failed to delete panel user');
+    },
 };

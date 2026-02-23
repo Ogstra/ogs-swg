@@ -4,6 +4,7 @@ import { Users, Plus, Trash2, RefreshCw, Edit, QrCode, ArrowUp, ArrowDown, Arrow
 import { v4 as uuidv4 } from 'uuid'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
@@ -33,6 +34,9 @@ function parseGbToBytes(input: string) {
 
 export default function UserManagement() {
     const { success, error: toastError } = useToast()
+    const { permissions } = useAuth()
+    const canWriteUsers = !!permissions?.can_write_users
+    const canWriteConfig = !!permissions?.can_write_config
 
     function formatTimeAgo(timestamp: number) {
         if (!timestamp || timestamp <= 0) return 'Never'
@@ -295,10 +299,18 @@ export default function UserManagement() {
     }
 
     const handleDeleteSelected = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for sing-box users')
+            return
+        }
         setModalState({ type: 'delete_confirm' }) // Keep modal open until confirmed
     }
 
     const confirmDeleteSelected = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for sing-box users')
+            return
+        }
         // Check if any selected user is in multiple inbounds
         const multiInboundUsers = Array.from(selectedUsers).filter(name => {
             const user = users.find(u => u.name === name)
@@ -331,6 +343,10 @@ export default function UserManagement() {
     }
 
     const handleRemoveFromSelectedInbounds = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for sing-box users')
+            return
+        }
         if (!modalState.data) return
 
         const user = modalState.data as UserStatus
@@ -416,6 +432,10 @@ export default function UserManagement() {
     }
 
     const handleSaveUser = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for sing-box users')
+            return
+        }
         try {
             const normalizedRows = inboundRows.map(row => ({
                 tag: row.tag.trim(),
@@ -533,6 +553,10 @@ export default function UserManagement() {
     const inboundValid = inboundRows.length > 0 && !hasEmptyInbound && !hasDuplicateInbound && !inboundTypeMismatch && !unsupportedUserType && hasTypeInbounds
 
     const handleBulkCreate = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for sing-box users')
+            return
+        }
         try {
             const usersToCreate: CreateUserRequest[] = []
             const bulkInboundType = getInboundType(bulkConfig.inbound_tag || '')
@@ -599,6 +623,10 @@ export default function UserManagement() {
 
 
     const handleApplySingboxChanges = async () => {
+        if (!canWriteConfig) {
+            toastError('No write permission for config changes')
+            return
+        }
         try {
             await api.applySingboxChanges()
             setSingboxPendingChanges(false)
@@ -625,6 +653,7 @@ export default function UserManagement() {
                         onClick={handleApplySingboxChanges}
                         variant="primary"
                         size="sm"
+                        disabled={!canWriteConfig}
                         className="whitespace-nowrap bg-yellow-600 hover:bg-yellow-700 text-white"
                     >
                         Apply Changes
@@ -637,7 +666,7 @@ export default function UserManagement() {
                     <h1 className="text-2xl font-bold text-white">User Management</h1>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    {selectedUsers.size > 0 && (
+                    {canWriteUsers && selectedUsers.size > 0 && (
                         <Button
                             onClick={handleDeleteSelected}
                             variant="danger"
@@ -648,6 +677,7 @@ export default function UserManagement() {
                     )}
                     <Button
                         onClick={() => {
+                            if (!canWriteUsers) return
                             setIsEditing(false)
                             const nextType = getDefaultUserType()
                             setUserType(nextType)
@@ -670,13 +700,15 @@ export default function UserManagement() {
                         }}
                         icon={<Plus size={16} />}
                         variant="primary"
+                        disabled={!canWriteUsers}
                     >
                         Create User
                     </Button>
                     <Button
-                        onClick={() => setModalState({ type: 'bulk' })}
+                        onClick={() => canWriteUsers && setModalState({ type: 'bulk' })}
                         variant="secondary"
                         icon={<Users size={16} />}
+                        disabled={!canWriteUsers}
                     >
                         Bulk Create
                     </Button>
@@ -712,6 +744,7 @@ export default function UserManagement() {
                             type="checkbox"
                             onChange={handleSelectAll}
                             checked={users.length > 0 && selectedUsers.size === users.length}
+                            disabled={!canWriteUsers}
                             className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer h-4 w-4"
                         />
                         <span className="text-xs text-slate-400 font-medium">Select All</span>
@@ -727,6 +760,7 @@ export default function UserManagement() {
                                         type="checkbox"
                                         onChange={handleSelectAll}
                                         checked={users.length > 0 && selectedUsers.size === users.length}
+                                        disabled={!canWriteUsers}
                                         className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer"
                                     />
                                 </th>
@@ -799,6 +833,7 @@ export default function UserManagement() {
                                                     type="checkbox"
                                                     checked={isSelected}
                                                     onChange={() => handleSelectUser(user.name)}
+                                                    disabled={!canWriteUsers}
                                                     className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer"
                                                 />
                                             </td>
@@ -872,7 +907,8 @@ export default function UserManagement() {
                                                 <div className="flex items-center justify-end gap-2">
                                                     <button
                                                         onClick={() => handleEditClick(user)}
-                                                        className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-blue-400 hover:bg-slate-700 border border-slate-700 transition-all"
+                                                        disabled={!canWriteUsers}
+                                                        className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-blue-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                         title="Edit User"
                                                     >
                                                         <Edit size={16} />
@@ -886,6 +922,7 @@ export default function UserManagement() {
                                                     </button>
                                                     <button
                                                         onClick={() => {
+                                                            if (!canWriteUsers) return
                                                             if (user.inbound_tags && user.inbound_tags.length > 1) {
                                                                 // Show inbound selection modal
                                                                 setSelectedInboundsToRemove(new Set(user.inbound_tags))
@@ -902,7 +939,8 @@ export default function UserManagement() {
                                                                 }
                                                             }
                                                         }}
-                                                        className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all"
+                                                        disabled={!canWriteUsers}
+                                                        className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                         title="Delete User"
                                                     >
                                                         <Trash2 size={16} />
@@ -958,6 +996,7 @@ export default function UserManagement() {
                                             type="checkbox"
                                             checked={isSelected}
                                             onChange={() => handleSelectUser(user.name)}
+                                            disabled={!canWriteUsers}
                                             className="mt-1 rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer h-4 w-4"
                                         />
                                         <div className="space-y-1">
@@ -973,7 +1012,8 @@ export default function UserManagement() {
                                     <div className="flex gap-2">
                                         <button
                                             onClick={() => handleEditClick(user)}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700"
+                                            disabled={!canWriteUsers}
+                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <Edit size={16} />
                                         </button>
@@ -985,6 +1025,7 @@ export default function UserManagement() {
                                         </button>
                                         <button
                                             onClick={async () => {
+                                                if (!canWriteUsers) return
                                                 if (confirm(`Delete user ${user.name}?`)) {
                                                     try {
                                                         await api.deleteUser(user.name)
@@ -993,7 +1034,8 @@ export default function UserManagement() {
                                                     } catch (e) { toastError(String(e)) }
                                                 }
                                             }}
-                                            className="p-2 rounded-lg bg-slate-800 text-red-400 border border-slate-700"
+                                            disabled={!canWriteUsers}
+                                            className="p-2 rounded-lg bg-slate-800 text-red-400 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <Trash2 size={16} />
                                         </button>
@@ -1068,7 +1110,7 @@ export default function UserManagement() {
                         <Button
                             variant="primary"
                             onClick={handleSaveUser}
-                            disabled={!inboundValid}
+                            disabled={!canWriteUsers || !inboundValid}
                         >
                             {isEditing ? 'Save Changes' : 'Create User'}
                         </Button>
@@ -1318,7 +1360,7 @@ export default function UserManagement() {
                 footer={
                     <>
                         <Button variant="ghost" onClick={() => setModalState({ type: null })}>Cancel</Button>
-                        <Button variant="primary" onClick={handleBulkCreate}>Generate Users</Button>
+                        <Button variant="primary" onClick={handleBulkCreate} disabled={!canWriteUsers}>Generate Users</Button>
                     </>
                 }
             >
@@ -1612,7 +1654,7 @@ export default function UserManagement() {
                 footer={
                     <>
                         <Button variant="ghost" onClick={() => setModalState({ type: null })}>Cancel</Button>
-                        <Button variant="danger" onClick={confirmDeleteSelected}>Delete Users</Button>
+                        <Button variant="danger" onClick={confirmDeleteSelected} disabled={!canWriteUsers}>Delete Users</Button>
                     </>
                 }
             >
@@ -1645,7 +1687,7 @@ export default function UserManagement() {
                         <Button
                             variant="danger"
                             onClick={handleRemoveFromSelectedInbounds}
-                            disabled={selectedInboundsToRemove.size === 0}
+                            disabled={!canWriteUsers || selectedInboundsToRemove.size === 0}
                         >
                             Remove from {selectedInboundsToRemove.size} Inbound(s)
                         </Button>

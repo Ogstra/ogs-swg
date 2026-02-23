@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { api, FeatureFlags } from '../services/api'
-import { Save, RefreshCw, Lock, User } from 'lucide-react'
+import { Save, RefreshCw, Lock, User, UserCog } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext'
 import SingboxConfigEditor from '../components/SingboxConfigEditor'
 import { Tabs } from '../components/ui/Tabs'
 import { Database, Shield, Settings as SettingsIcon, Server } from 'lucide-react'
+import PanelUsers from './PanelUsers'
 
 type ServiceStatus = { singbox: boolean; wireguard: boolean }
 type DbInfo = { rows: number; sizeMB: number }
@@ -20,7 +21,9 @@ type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: numb
 
 export default function Settings() {
     const { success, error: toastError } = useToast()
-    const { logout } = useAuth()
+    const { logout, permissions } = useAuth()
+    const canWriteSettings = !!permissions?.can_write_settings
+    const canWriteConfig = !!permissions?.can_write_config
     const navigate = useNavigate()
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
@@ -122,6 +125,10 @@ export default function Settings() {
     }
 
     const handleSaveFeatures = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
         try {
             await api.updateFeatures(features)
             success('Feature toggles saved successfully')
@@ -131,6 +138,10 @@ export default function Settings() {
     }
 
     const handleSavePublicIP = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
         try {
             await api.updatePublicIP(publicIP.trim())
             success('Public IP saved')
@@ -140,6 +151,10 @@ export default function Settings() {
     }
 
     const handleRunSampler = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
         try {
             setSamplerRunning(true)
             await api.runSampler()
@@ -154,6 +169,10 @@ export default function Settings() {
     }
 
     const handleTogglePause = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
         try {
             if (features.sampler_paused) {
                 await api.resumeSampler()
@@ -170,6 +189,10 @@ export default function Settings() {
     }
 
     const handlePruneNow = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
         if (!features.retention_enabled) {
             toastError('Retention is disabled')
             return
@@ -185,6 +208,10 @@ export default function Settings() {
     }
 
     const handleServiceAction = async (service: string, action: 'restart' | 'stop' | 'start') => {
+        if (!canWriteConfig) {
+            toastError('No write permission for service control')
+            return
+        }
         if (!confirm(`Are you sure you want to ${action} ${service}?`)) return
         try {
             if (action === 'restart') {
@@ -202,6 +229,10 @@ export default function Settings() {
     }
 
     const handleChangeUsername = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
         if (!usernameData.password || !usernameData.newUsername) {
             toastError("All fields are required")
             return
@@ -304,6 +335,11 @@ export default function Settings() {
                 />
             )
         },
+        ...(permissions?.can_read_panel_users ? [{
+            id: 'panel-users',
+            label: <span className="flex items-center gap-2"><UserCog size={16} /> Admins</span>,
+            content: <PanelUsers />,
+        }] : []),
     ]
 
     return (

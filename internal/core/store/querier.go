@@ -10,8 +10,10 @@ import (
 
 type Querier interface {
 	CheckAdminExists(ctx context.Context, username string) (int64, error)
+	CheckPanelUserExists(ctx context.Context, username string) (int64, error)
 	CountAdmins(ctx context.Context) (int64, error)
 	CountDailyUsage(ctx context.Context) (int64, error)
+	CountPanelUsers(ctx context.Context) (int64, error)
 	// Samples Queries --
 	CountSamples(ctx context.Context) (int64, error)
 	CountWGDailyUsage(ctx context.Context) (int64, error)
@@ -19,7 +21,10 @@ type Querier interface {
 	CountWGSamples(ctx context.Context) (int64, error)
 	// Admin Queries --
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) error
+	// Panel Users Queries --
+	CreatePanelUser(ctx context.Context, arg CreatePanelUserParams) error
 	DeleteInboundMeta(ctx context.Context, tag string) error
+	DeletePanelUser(ctx context.Context, username string) error
 	DeleteUser(ctx context.Context, email string) error
 	GetActiveUserCount(ctx context.Context, ts int64) (int64, error)
 	GetActiveUserCountWithThreshold(ctx context.Context, arg GetActiveUserCountWithThresholdParams) (int64, error)
@@ -27,6 +32,7 @@ type Querier interface {
 	GetActiveUsersWithTraffic(ctx context.Context, ts int64) ([]string, error)
 	GetAdmin(ctx context.Context, username string) (string, error)
 	GetAllInboundMeta(ctx context.Context) ([]InboundMetum, error)
+	GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, error)
 	GetAllUsers(ctx context.Context) ([]User, error)
 	GetAllWGPeers(ctx context.Context) ([]GetAllWGPeersRow, error)
 	GetDailyUsageInDateRange(ctx context.Context, arg GetDailyUsageInDateRangeParams) ([]DailyUsage, error)
@@ -37,6 +43,7 @@ type Querier interface {
 	GetLastSeenUserWithTraffic(ctx context.Context, user string) (interface{}, error)
 	GetMaxTimestamp(ctx context.Context) (interface{}, error)
 	GetMaxTimestampForUser(ctx context.Context, user string) (interface{}, error)
+	GetPanelUser(ctx context.Context, username string) (PanelUser, error)
 	GetSamplerRuns(ctx context.Context, limit int64) ([]GetSamplerRunsRow, error)
 	GetSamplesForUser(ctx context.Context, arg GetSamplesForUserParams) ([]Sample, error)
 	GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserParams) ([]GetTrafficPerUserRow, error)
@@ -58,6 +65,9 @@ type Querier interface {
 	TruncateSamples(ctx context.Context) error
 	UpdateAdminPassword(ctx context.Context, arg UpdateAdminPasswordParams) error
 	UpdateAdminUsername(ctx context.Context, arg UpdateAdminUsernameParams) error
+	UpdatePanelUserPassword(ctx context.Context, arg UpdatePanelUserPasswordParams) error
+	UpdatePanelUserPermissions(ctx context.Context, arg UpdatePanelUserPermissionsParams) error
+	UpdatePanelUsername(ctx context.Context, arg UpdatePanelUsernameParams) error
 	UpdateWGPeerHandshake(ctx context.Context, arg UpdateWGPeerHandshakeParams) error
 	// InboundMeta Queries --
 	UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaParams) error
