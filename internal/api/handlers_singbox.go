@@ -66,8 +66,13 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 			if tag == "" {
 				continue
 			}
-			if entry, ok := meta[tag]; ok && entry.ExternalPort > 0 {
-				inbound["external_port"] = entry.ExternalPort
+			if entry, ok := meta[tag]; ok {
+				if entry.ExternalPort > 0 {
+					inbound["external_port"] = entry.ExternalPort
+				}
+				if entry.ClientSNI != nil {
+					inbound["client_sni"] = *entry.ClientSNI
+				}
 			}
 		}
 	}
@@ -213,8 +218,12 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		return "", "", err
 	}
 
-	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil && meta.ExternalPort > 0 {
-		port = strconv.Itoa(meta.ExternalPort)
+	var sniOverride *string
+	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil {
+		if meta.ExternalPort > 0 {
+			port = strconv.Itoa(meta.ExternalPort)
+		}
+		sniOverride = meta.ClientSNI
 	}
 
 	host := s.resolvePublicHost(r)
@@ -224,7 +233,7 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 
 	switch inbType {
 	case "vless":
-		link, err := buildVlessLink(name, userInfo, inbound, host, port)
+		link, err := buildVlessLink(name, userInfo, inbound, host, port, sniOverride)
 		return link, inbType, err
 	case "vmess":
 		userCopy := *userInfo
@@ -236,10 +245,10 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 				userCopy.VmessAlterID = meta.VmessAlterID
 			}
 		}
-		link, err := buildVmessLink(name, &userCopy, inbound, host, port)
+		link, err := buildVmessLink(name, &userCopy, inbound, host, port, sniOverride)
 		return link, inbType, err
 	case "trojan":
-		link, err := buildTrojanLink(name, userInfo, inbound, host, port)
+		link, err := buildTrojanLink(name, userInfo, inbound, host, port, sniOverride)
 		return link, inbType, err
 	default:
 		return "", "", fmt.Errorf("Inbound type is not supported")
@@ -371,7 +380,7 @@ func extractTLSInfo(inbound map[string]interface{}) tlsInfo {
 	return tlsInfo{Enabled: enabled, ServerName: serverName, CertPath: certPath}
 }
 
-func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
+func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string, sniOverride *string) (string, error) {
 	tlsMap, _ := inbound["tls"].(map[string]interface{})
 	reality, _ := tlsMap["reality"].(map[string]interface{})
 	if reality != nil {
@@ -389,10 +398,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 			return "", fmt.Errorf("Reality public_key missing")
 		}
 		handshake, _ := reality["handshake"].(map[string]interface{})
-		sni, _ := handshake["server"].(string)
-		if sni == "" {
-			return "", fmt.Errorf("Reality handshake server missing")
-		}
+		handshakedSNI, _ := handshake["server"].(string)
 
 		var sid string
 		switch v := reality["short_id"].(type) {
@@ -413,6 +419,22 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 			return "", fmt.Errorf("Reality short_id missing")
 		}
 
+		// Determine effective SNI for client link
+		var effectiveSNI string
+		skipSNI := false
+		if sniOverride != nil {
+			if *sniOverride == "" {
+				skipSNI = true
+			} else {
+				effectiveSNI = *sniOverride
+			}
+		} else {
+			if handshakedSNI == "" {
+				return "", fmt.Errorf("Reality handshake server missing")
+			}
+			effectiveSNI = handshakedSNI
+		}
+
 		transport := extractTransportInfo(inbound)
 		flowParam := ""
 		if userInfo.Flow != "" {
@@ -424,17 +446,32 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 		if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
 			udpParam = "&udp=0"
 		}
-		link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s#%s",
-			url.QueryEscape(userInfo.UUID),
-			host,
-			port,
-			url.QueryEscape(pbk),
-			url.QueryEscape(transport.Type),
-			flowParam,
-			url.QueryEscape(sni),
-			url.QueryEscape(sid),
-			nameTag,
-		)
+
+		var link string
+		if skipSNI {
+			link = fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sid=%s#%s",
+				url.QueryEscape(userInfo.UUID),
+				host,
+				port,
+				url.QueryEscape(pbk),
+				url.QueryEscape(transport.Type),
+				flowParam,
+				url.QueryEscape(sid),
+				nameTag,
+			)
+		} else {
+			link = fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s#%s",
+				url.QueryEscape(userInfo.UUID),
+				host,
+				port,
+				url.QueryEscape(pbk),
+				url.QueryEscape(transport.Type),
+				flowParam,
+				url.QueryEscape(effectiveSNI),
+				url.QueryEscape(sid),
+				nameTag,
+			)
+		}
 		if udpParam != "" {
 			link = strings.Replace(link, "#"+nameTag, udpParam+"#"+nameTag, 1)
 		}
@@ -450,7 +487,11 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 	} else {
 		params.Set("security", "none")
 	}
-	if tls.ServerName != "" {
+	if sniOverride != nil {
+		if *sniOverride != "" {
+			params.Set("sni", *sniOverride)
+		}
+	} else if tls.ServerName != "" {
 		params.Set("sni", tls.ServerName)
 	}
 	if shouldAllowInsecure(tls) {
@@ -483,7 +524,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 	return base, nil
 }
 
-func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
+func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string, sniOverride *string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User password missing for inbound")
 	}
@@ -494,7 +535,11 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[st
 	if tls.Enabled {
 		params.Set("security", "tls")
 	}
-	if tls.ServerName != "" {
+	if sniOverride != nil {
+		if *sniOverride != "" {
+			params.Set("sni", *sniOverride)
+		}
+	} else if tls.ServerName != "" {
 		params.Set("sni", tls.ServerName)
 	}
 	if shouldAllowInsecure(tls) {
@@ -524,7 +569,7 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[st
 	return base, nil
 }
 
-func buildVmessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
+func buildVmessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string, sniOverride *string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User UUID missing for inbound")
 	}
@@ -563,7 +608,11 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 	}
 	if tls.Enabled {
 		payload["tls"] = "tls"
-		if tls.ServerName != "" {
+		if sniOverride != nil {
+			if *sniOverride != "" {
+				payload["sni"] = *sniOverride
+			}
+		} else if tls.ServerName != "" {
 			payload["sni"] = tls.ServerName
 		}
 		if shouldAllowInsecure(tls) {
@@ -606,16 +655,23 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	clientSNI, clientSNISet := popClientSNI(newInbound)
 
 	if err := s.config.AddSingboxInbound(newInbound); err != nil {
 		http.Error(w, "Failed to add inbound: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	tag, _ := newInbound["tag"].(string)
 	if externalPortSet {
-		tag, _ := newInbound["tag"].(string)
 		if err := s.store.SaveInboundMeta(tag, externalPort); err != nil {
 			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if clientSNISet {
+		if err := s.store.SaveInboundClientSNI(tag, clientSNI); err != nil {
+			http.Error(w, "Failed to save inbound SNI metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -681,6 +737,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	clientSNI, clientSNISet := popClientSNI(updatedInbound)
 
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
@@ -700,6 +757,12 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 	if externalPortSet {
 		if err := s.store.SaveInboundMeta(tag, externalPort); err != nil {
 			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	if clientSNISet {
+		if err := s.store.SaveInboundClientSNI(tag, clientSNI); err != nil {
+			http.Error(w, "Failed to save inbound SNI metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -759,6 +822,25 @@ func popExternalPort(inbound map[string]interface{}) (int, bool, error) {
 		return parsed, true, nil
 	default:
 		return 0, true, fmt.Errorf("external_port must be a number")
+	}
+}
+
+func popClientSNI(inbound map[string]interface{}) (*string, bool) {
+	if inbound == nil {
+		return nil, false
+	}
+	raw, ok := inbound["client_sni"]
+	if !ok {
+		return nil, false
+	}
+	delete(inbound, "client_sni")
+	switch v := raw.(type) {
+	case nil:
+		return nil, true
+	case string:
+		return &v, true
+	default:
+		return nil, true
 	}
 }
 

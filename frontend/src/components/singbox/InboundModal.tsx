@@ -106,6 +106,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
             if (!data.tls.reality && data.type === 'vless') data.tls.reality = { ...DEFAULT_VLESS.tls.reality }
             if (!data.tls.alpn) data.tls.alpn = [...fallback.tls.alpn]
             data.external_port = data.external_port ? String(data.external_port) : ''
+            if (!('client_sni' in data)) data.client_sni = null
             setFormData(data)
         } else {
             setFormData(JSON.parse(JSON.stringify(DEFAULT_VLESS)))
@@ -185,6 +186,11 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
             submission.external_port = externalPort
         } else {
             delete submission.external_port
+        }
+
+        // client_sni: null = no override, "" = omit sni param, "domain" = use domain
+        if (submission.client_sni === undefined) {
+            submission.client_sni = null
         }
 
         // Only include transport if enabled
@@ -412,6 +418,19 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                                         className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
                                                     />
                                                 </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-medium text-slate-300">SNI for client links (optional)</label>
+                                                <input
+                                                    type="text"
+                                                    value={formData.client_sni ?? ''}
+                                                    onChange={e => setFormData({
+                                                        ...formData,
+                                                        client_sni: e.target.value === '' ? null : e.target.value
+                                                    })}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                    placeholder="Leave blank to use Server Name above"
+                                                />
                                             </div>
                                             <div className="space-y-1">
                                                 <label className="text-xs font-medium text-slate-300">Private Key</label>
