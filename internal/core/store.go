@@ -82,9 +82,8 @@ type UserMetadata struct {
 }
 
 type InboundMeta struct {
-	Tag          string  `json:"tag"`
-	ExternalPort int     `json:"external_port"`
-	ClientSNI    *string `json:"client_sni"` // nil=no override, ""=omit sni param, "x"=use x as sni
+	Tag          string `json:"tag"`
+	ExternalPort int    `json:"external_port"`
 }
 
 // DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
@@ -676,110 +675,48 @@ func (s *Store) SaveInboundMeta(tag string, externalPort int) error {
 		return fmt.Errorf("inbound tag required")
 	}
 	if externalPort <= 0 {
-		// Null out external_port but preserve client_sni if set
-		_, err := s.db.ExecContext(context.Background(), `
-			INSERT INTO inbound_meta (tag, external_port) VALUES (?, NULL)
-			ON CONFLICT(tag) DO UPDATE SET external_port = NULL`, tag)
-		if err != nil {
-			return err
-		}
-		return s.pruneEmptyInboundMetaRow(tag)
+		return s.DeleteInboundMeta(tag)
 	}
-	_, err := s.db.ExecContext(context.Background(), `
-		INSERT INTO inbound_meta (tag, external_port) VALUES (?, ?)
-		ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port`,
-		tag, externalPort)
-	return err
-}
-
-// pruneEmptyInboundMetaRow deletes the row only when both columns are NULL/empty.
-func (s *Store) pruneEmptyInboundMetaRow(tag string) error {
-	_, err := s.db.ExecContext(context.Background(),
-		`DELETE FROM inbound_meta WHERE tag = ? AND (external_port IS NULL OR external_port = 0) AND client_sni IS NULL`,
-		tag)
-	return err
-}
-
-// SaveInboundClientSNI sets or clears the client_sni override for a given inbound tag.
-// nil clears the override (sets column to NULL). "" explicitly suppresses the sni= param in links.
-func (s *Store) SaveInboundClientSNI(tag string, sni *string) error {
-	if tag == "" {
-		return fmt.Errorf("inbound tag required")
-	}
-	if sni == nil {
-		_, err := s.db.ExecContext(context.Background(), `
-			INSERT INTO inbound_meta (tag, client_sni) VALUES (?, NULL)
-			ON CONFLICT(tag) DO UPDATE SET client_sni = NULL`, tag)
-		if err != nil {
-			return err
-		}
-		return s.pruneEmptyInboundMetaRow(tag)
-	}
-	_, err := s.db.ExecContext(context.Background(), `
-		INSERT INTO inbound_meta (tag, client_sni) VALUES (?, ?)
-		ON CONFLICT(tag) DO UPDATE SET client_sni = excluded.client_sni`,
-		tag, *sni)
-	return err
+	return s.Queries.UpsertInboundMeta(context.Background(), sqlcStore.UpsertInboundMetaParams{
+		Tag: tag,
+		ExternalPort: sql.NullInt64{
+			Int64: int64(externalPort),
+			Valid: true,
+		},
+	})
 }
 
 func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
 	if tag == "" {
 		return nil, nil
 	}
-	row := s.db.QueryRowContext(context.Background(),
-		"SELECT tag, external_port, client_sni FROM inbound_meta WHERE tag = ?", tag)
-	var (
-		dbTag        string
-		extPort      sql.NullInt64
-		clientSNIRaw sql.NullString
-	)
-	err := row.Scan(&dbTag, &extPort, &clientSNIRaw)
+	meta, err := s.Queries.GetInboundMeta(context.Background(), tag)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	meta := &InboundMeta{
-		Tag:          dbTag,
-		ExternalPort: int(extPort.Int64),
-	}
-	if clientSNIRaw.Valid {
-		v := clientSNIRaw.String
-		meta.ClientSNI = &v
-	}
-	return meta, nil
+	return &InboundMeta{
+		Tag:          meta.Tag,
+		ExternalPort: int(meta.ExternalPort.Int64),
+	}, nil
 }
 
 func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
-	rows, err := s.db.QueryContext(context.Background(),
-		"SELECT tag, external_port, client_sni FROM inbound_meta")
+	rows, err := s.Queries.GetAllInboundMeta(context.Background())
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 
 	meta := make(map[string]InboundMeta)
-	for rows.Next() {
-		var (
-			tag          string
-			extPort      sql.NullInt64
-			clientSNIRaw sql.NullString
-		)
-		if err := rows.Scan(&tag, &extPort, &clientSNIRaw); err != nil {
-			return nil, err
+	for _, entry := range rows {
+		meta[entry.Tag] = InboundMeta{
+			Tag:          entry.Tag,
+			ExternalPort: int(entry.ExternalPort.Int64),
 		}
-		entry := InboundMeta{
-			Tag:          tag,
-			ExternalPort: int(extPort.Int64),
-		}
-		if clientSNIRaw.Valid {
-			v := clientSNIRaw.String
-			entry.ClientSNI = &v
-		}
-		meta[tag] = entry
 	}
-	return meta, rows.Err()
+	return meta, nil
 }
 
 func (s *Store) DeleteInboundMeta(tag string) error {
