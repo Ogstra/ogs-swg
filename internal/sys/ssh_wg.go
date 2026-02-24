@@ -40,8 +40,7 @@ func (e *SSHExecutor) SyncWireGuard(ctx context.Context, interfaceName string, c
 	}
 
 	// Apply config
-	// Using sudo for wg syncconf
-	cmd := fmt.Sprintf("sudo wg syncconf %s %s", interfaceName, randName)
+	cmd := fmt.Sprintf("wg syncconf %s %s", interfaceName, randName)
 	out, err := e.runCommand(ctx, cmd)
 	if err != nil {
 		// Try to cancel rollback immediately since applying failed

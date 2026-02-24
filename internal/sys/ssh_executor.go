@@ -21,19 +21,29 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
+const readCacheTTL = 30 * time.Second
+
+type readCacheEntry struct {
+	data   []byte
+	expiry time.Time
+}
+
 // SSHExecutor implements SystemExecutor for remote hosts via SSH.
 type SSHExecutor struct {
-	config *core.Config
-	client *ssh.Client
-	sftp   *sftp.Client
-	mu     sync.Mutex
-	pool   *pond.WorkerPool
+	config      *core.Config
+	client      *ssh.Client
+	sftp        *sftp.Client
+	mu          sync.Mutex
+	pool        *pond.WorkerPool
+	readCache   map[string]readCacheEntry
+	readCacheMu sync.RWMutex
 }
 
 func NewSSHExecutor(cfg *core.Config) *SSHExecutor {
 	return &SSHExecutor{
-		config: cfg,
-		pool:   pond.New(10, 100),
+		config:    cfg,
+		pool:      pond.New(10, 100),
+		readCache: make(map[string]readCacheEntry),
 	}
 }
 
@@ -257,6 +267,9 @@ func (e *SSHExecutor) WriteConfig(ctx context.Context, path string, content []by
 			return fmt.Errorf("sudo install failed: %v, output: %s", cErr, string(out))
 		}
 		_ = e.sftp.Remove(tmpPath)
+		e.readCacheMu.Lock()
+		delete(e.readCache, path)
+		e.readCacheMu.Unlock()
 		return nil
 	}
 	if _, err := f.Write(content); err != nil {
@@ -273,6 +286,9 @@ func (e *SSHExecutor) WriteConfig(ctx context.Context, path string, content []by
 			return fmt.Errorf("sftp rename failed: %w", rErr)
 		}
 	}
+	e.readCacheMu.Lock()
+	delete(e.readCache, path)
+	e.readCacheMu.Unlock()
 	return nil
 }
 
@@ -282,18 +298,30 @@ func (e *SSHExecutor) ReadConfig(ctx context.Context, path string) ([]byte, erro
 	}
 
 	f, err := e.sftp.Open(path)
-	if err != nil {
-		// Fallback for protected paths where direct SFTP read is denied.
-		cmd := shellquote.Join("sudo", "cat", path)
-		out, cmdErr := e.runCommand(ctx, cmd)
-		if cmdErr != nil {
-			return nil, fmt.Errorf("sftp open failed: %v; sudo cat failed: %v", err, cmdErr)
-		}
-		return out, nil
+	if err == nil {
+		defer f.Close()
+		return io.ReadAll(f)
 	}
-	defer f.Close()
 
-	return io.ReadAll(f)
+	// SFTP denied (protected path): check in-memory cache before invoking sudo cat.
+	e.readCacheMu.RLock()
+	if entry, ok := e.readCache[path]; ok && time.Now().Before(entry.expiry) {
+		e.readCacheMu.RUnlock()
+		return entry.data, nil
+	}
+	e.readCacheMu.RUnlock()
+
+	cmd := shellquote.Join("sudo", "cat", path)
+	out, cmdErr := e.runCommand(ctx, cmd)
+	if cmdErr != nil {
+		return nil, fmt.Errorf("sftp open failed: %v; sudo cat failed: %v", err, cmdErr)
+	}
+
+	e.readCacheMu.Lock()
+	e.readCache[path] = readCacheEntry{data: out, expiry: time.Now().Add(readCacheTTL)}
+	e.readCacheMu.Unlock()
+
+	return out, nil
 }
 
 // Sysctl Management (Whitelist enforcement still applies)
@@ -386,13 +414,13 @@ func (e *SSHExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.Pe
 	}
 
 	// Dump all stats: interface public-key preshared-key endpoint allowed-ips latest-handshake transfer-rx transfer-tx persistent-keepalive
-	output, err := e.runCommand(ctx, "sudo wg show all dump")
+	output, err := e.runCommand(ctx, "wg show all dump")
 	if err == nil {
 		return parseWGDumpStats(output), nil
 	}
 
 	// Fallback for stricter sudoers setups that allow only `wg show`.
-	textOut, textErr := e.runCommand(ctx, "sudo wg show")
+	textOut, textErr := e.runCommand(ctx, "wg show")
 	if textErr != nil {
 		return nil, fmt.Errorf("failed to execute wg show (dump=%v, text=%v)", err, textErr)
 	}

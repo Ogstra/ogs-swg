@@ -15,9 +15,12 @@ HEALTH_EXPECT="${HEALTH_EXPECT:-401,405}"
 CHECK_INTERVAL_SEC="${CHECK_INTERVAL_SEC:-15}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-4}"
 
+# Pre-parsed once — avoids re-splitting on every health check
+IFS=',' read -r -a _EXPECTED_CODES <<< "$HEALTH_EXPECT"
+
 log_event() {
-  local msg="$1"
-  printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$msg" | tee -a "$EVENTS_FILE" >/dev/null
+  # '>>' is a shell builtin redirect — no tee subprocess
+  printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$1" >> "$EVENTS_FILE"
 }
 
 slot_container() {
@@ -33,23 +36,19 @@ slot_running() {
 }
 
 slot_health_ok() {
-  local slot="$1"
-  local code
-  if ! slot_running "$slot"; then
-    return 1
-  fi
-
-  code="$(curl -s -o /dev/null -w '%{http_code}' \
+  local slot="$1" code expected
+  # No slot_running guard: saves 1 docker-inspect subprocess per cycle.
+  # curl fails fast (connect-timeout) if the container is down, which is
+  # equivalent — an empty/error code won't match any expected code.
+  code="$(curl -s --connect-timeout 3 --max-time 8 \
+    -o /dev/null -w '%{http_code}' \
     -X "$HEALTH_METHOD" \
     -H 'Content-Type: application/json' \
     -d "$HEALTH_BODY" \
-    "http://$(slot_container "$slot"):8080${HEALTH_URL_PATH}" || true)"
+    "http://$(slot_container "$slot"):8080${HEALTH_URL_PATH}" 2>/dev/null || true)"
 
-  IFS=',' read -r -a expected_codes <<< "$HEALTH_EXPECT"
-  for expected in "${expected_codes[@]}"; do
-    if [ "$code" = "$expected" ]; then
-      return 0
-    fi
+  for expected in "${_EXPECTED_CODES[@]}"; do
+    [ "$code" = "$expected" ] && return 0
   done
   return 1
 }
@@ -70,15 +69,16 @@ safe_stop_slot() {
   fi
 }
 
+# Accepts pre-computed 'now' to avoid a redundant date +%s call per cycle
 ensure_previous_is_stopped_after_bake() {
-  local now active previous bake_until
-  now="$(date +%s)"
-  [ -f "$PREVIOUS_FILE" ] || return 0
+  local now="$1" active="" previous="" bake_until=0
+  [ -f "$PREVIOUS_FILE" ]  || return 0
   [ -f "$BAKE_UNTIL_FILE" ] || return 0
 
-  active="$(cat "$ACTIVE_FILE" 2>/dev/null || true)"
-  previous="$(cat "$PREVIOUS_FILE" 2>/dev/null || true)"
-  bake_until="$(cat "$BAKE_UNTIL_FILE" 2>/dev/null || echo 0)"
+  # 'read < file' is a bash builtin — no fork/exec compared to $(cat file)
+  IFS= read -r active    < "$ACTIVE_FILE"    2>/dev/null || true
+  IFS= read -r previous  < "$PREVIOUS_FILE"  2>/dev/null || true
+  IFS= read -r bake_until < "$BAKE_UNTIL_FILE" 2>/dev/null || true
 
   case "$bake_until" in
     ''|*[!0-9]*) bake_until=0 ;;
@@ -90,9 +90,10 @@ ensure_previous_is_stopped_after_bake() {
 }
 
 rollback_to_previous() {
-  local active previous
-  active="$(cat "$ACTIVE_FILE" 2>/dev/null || true)"
-  previous="$(cat "$PREVIOUS_FILE" 2>/dev/null || true)"
+  local active="" previous=""
+  # Builtin reads instead of $(cat)
+  IFS= read -r active   < "$ACTIVE_FILE"   2>/dev/null || true
+  IFS= read -r previous < "$PREVIOUS_FILE" 2>/dev/null || true
 
   if [ -z "$active" ] || [ -z "$previous" ] || [ "$active" = "$previous" ]; then
     return 1
@@ -108,7 +109,9 @@ rollback_to_previous() {
     sleep 2
   fi
 
-  for _ in $(seq 1 20); do
+  # while loop avoids the $(seq 1 20) subprocess
+  local i=0
+  while [ "$i" -lt 20 ]; do
     if slot_health_ok "$previous"; then
       switch_proxy_to "$previous"
       printf '%s' "$active" > "$PREVIOUS_FILE"
@@ -117,6 +120,7 @@ rollback_to_previous() {
       return 0
     fi
     sleep 2
+    i=$(( i + 1 ))
   done
 
   log_event "rollback failed active=${active} previous=${previous}"
@@ -124,7 +128,7 @@ rollback_to_previous() {
 }
 
 main_loop() {
-  local failures=0 active
+  local failures=0 active="" now
   log_event "watchdog started"
 
   while true; do
@@ -133,18 +137,21 @@ main_loop() {
       continue
     fi
 
-    active="$(cat "$ACTIVE_FILE" 2>/dev/null || true)"
+    # Single builtin read replaces $(cat) subshell
+    IFS= read -r active < "$ACTIVE_FILE" 2>/dev/null || active=""
     if [ "$active" != "blue" ] && [ "$active" != "green" ]; then
       sleep "$CHECK_INTERVAL_SEC"
       continue
     fi
 
-    ensure_previous_is_stopped_after_bake
+    # Compute 'now' once per cycle and pass it down
+    now="$(date +%s)"
+    ensure_previous_is_stopped_after_bake "$now"
 
     if slot_health_ok "$active"; then
       failures=0
     else
-      failures=$((failures + 1))
+      failures=$(( failures + 1 ))
       log_event "active_health_failed slot=${active} failures=${failures}"
       if [ "$failures" -ge "$FAIL_THRESHOLD" ]; then
         if rollback_to_previous; then
