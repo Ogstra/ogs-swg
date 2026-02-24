@@ -37,6 +37,24 @@ type InboundMetum struct {
 	ExternalPort sql.NullInt64 `json:"external_port"`
 }
 
+type PanelUser struct {
+	Username           string        `json:"username"`
+	PasswordHash       string        `json:"password_hash"`
+	CanReadUsers       int64         `json:"can_read_users"`
+	CanWriteUsers      int64         `json:"can_write_users"`
+	CanReadWireguard   int64         `json:"can_read_wireguard"`
+	CanWriteWireguard  int64         `json:"can_write_wireguard"`
+	CanReadConfig      int64         `json:"can_read_config"`
+	CanWriteConfig     int64         `json:"can_write_config"`
+	CanReadSettings    int64         `json:"can_read_settings"`
+	CanWriteSettings   int64         `json:"can_write_settings"`
+	CanReadPanelUsers  int64         `json:"can_read_panel_users"`
+	CanWritePanelUsers int64         `json:"can_write_panel_users"`
+	CanReadLogs        int64         `json:"can_read_logs"`
+	CreatedAt          sql.NullInt64 `json:"created_at"`
+	UpdatedAt          sql.NullInt64 `json:"updated_at"`
+}
+
 type Sample struct {
 	User     string `json:"user"`
 	Ts       int64  `json:"ts"`

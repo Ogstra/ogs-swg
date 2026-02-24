@@ -476,7 +476,7 @@ export default function Dashboard() {
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
                         ) : (
                             topConsumers.map((u, i) => (
-                                <div key={u.key || u.name} className="flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-slate-800/50 hover:border-slate-800 transition-colors">
+                                <div key={u.key || u.name} className="flex-wrap flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-slate-800/50 hover:border-slate-800 transition-colors">
                                     <div className="flex items-center gap-3">
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
                                             {i + 1}

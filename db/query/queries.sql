@@ -17,6 +17,94 @@ UPDATE admins SET username = ? WHERE username = ?;
 -- name: CountAdmins :one
 SELECT COUNT(*) FROM admins;
 
+-- Panel Users Queries --
+-- name: CreatePanelUser :exec
+INSERT INTO panel_users (
+	username,
+	password_hash,
+	can_read_users,
+	can_write_users,
+	can_read_wireguard,
+	can_write_wireguard,
+	can_read_config,
+	can_write_config,
+	can_read_settings,
+	can_write_settings,
+	can_read_panel_users,
+	can_write_panel_users,
+	can_read_logs
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetPanelUser :one
+SELECT
+	username,
+	password_hash,
+	can_read_users,
+	can_write_users,
+	can_read_wireguard,
+	can_write_wireguard,
+	can_read_config,
+	can_write_config,
+	can_read_settings,
+	can_write_settings,
+	can_read_panel_users,
+	can_write_panel_users,
+	can_read_logs,
+	created_at,
+	updated_at
+FROM panel_users
+WHERE username = ?;
+
+-- name: GetAllPanelUsers :many
+SELECT
+	username,
+	can_read_users,
+	can_write_users,
+	can_read_wireguard,
+	can_write_wireguard,
+	can_read_config,
+	can_write_config,
+	can_read_settings,
+	can_write_settings,
+	can_read_panel_users,
+	can_write_panel_users,
+	can_read_logs,
+	created_at
+FROM panel_users
+ORDER BY username ASC;
+
+-- name: UpdatePanelUserPassword :exec
+UPDATE panel_users SET password_hash = ?, updated_at = strftime('%s','now') WHERE username = ?;
+
+-- name: UpdatePanelUserPermissions :exec
+UPDATE panel_users
+SET
+	can_read_users = ?,
+	can_write_users = ?,
+	can_read_wireguard = ?,
+	can_write_wireguard = ?,
+	can_read_config = ?,
+	can_write_config = ?,
+	can_read_settings = ?,
+	can_write_settings = ?,
+	can_read_panel_users = ?,
+	can_write_panel_users = ?,
+	can_read_logs = ?,
+	updated_at = strftime('%s','now')
+WHERE username = ?;
+
+-- name: UpdatePanelUsername :exec
+UPDATE panel_users SET username = ?, updated_at = strftime('%s','now') WHERE username = ?;
+
+-- name: DeletePanelUser :exec
+DELETE FROM panel_users WHERE username = ?;
+
+-- name: CountPanelUsers :one
+SELECT COUNT(*) FROM panel_users;
+
+-- name: CheckPanelUserExists :one
+SELECT COUNT(*) FROM panel_users WHERE username = ?;
+
 -- InboundMeta Queries --
 -- name: UpsertInboundMeta :exec
 INSERT INTO inbound_meta (tag, external_port) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port;

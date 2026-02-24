@@ -6,6 +6,7 @@ import 'prismjs/components/prism-json'
 import 'prismjs/components/prism-ini'
 import 'prismjs/themes/prism-tomorrow.css'
 import { api } from '../services/api'
+import { useAuth } from '../context/AuthContext'
 
 type TabId = 'raw-singbox' | 'raw-wireguard'
 
@@ -13,6 +14,8 @@ type TabId = 'raw-singbox' | 'raw-wireguard'
  * RawConfig renders the sing-box and WireGuard configs with a minimal highlighted editor.
  */
 export default function RawConfig() {
+    const { permissions } = useAuth()
+    const canWriteConfig = !!permissions?.can_write_config
     const [activeTab, setActiveTab] = useState<TabId>('raw-singbox')
     const [singboxConfig, setSingboxConfig] = useState('')
     const [wgConfig, setWgConfig] = useState('')
@@ -203,6 +206,7 @@ export default function RawConfig() {
                     </button>
                     <button
                         onClick={handleSave}
+                        disabled={!canWriteConfig}
                         className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow-lg shadow-blue-500/20 font-medium text-sm transition-colors"
                     >
                         <Save size={16} />
@@ -241,12 +245,14 @@ export default function RawConfig() {
                         <div className="h-4 w-px bg-slate-700 mx-1"></div>
                         <button
                             onClick={handleBackup}
+                            disabled={!canWriteConfig}
                             className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 border border-slate-700 text-xs font-medium transition-colors"
                         >
                             Backup Now
                         </button>
                         <button
                             onClick={handleRestore}
+                            disabled={!canWriteConfig}
                             className="px-3 py-1.5 bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 border border-slate-700 text-xs font-medium transition-colors"
                         >
                             Restore
