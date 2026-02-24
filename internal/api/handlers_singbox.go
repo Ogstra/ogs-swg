@@ -389,7 +389,13 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 			return "", fmt.Errorf("Reality public_key missing")
 		}
 		handshake, _ := reality["handshake"].(map[string]interface{})
-		sni, _ := handshake["server"].(string)
+		handshakeSNI, _ := handshake["server"].(string)
+
+		// Prefer tls.server_name as client SNI; fall back to handshake.server
+		sni, _ := tlsMap["server_name"].(string)
+		if sni == "" {
+			sni = handshakeSNI
+		}
 		if sni == "" {
 			return "", fmt.Errorf("Reality handshake server missing")
 		}

@@ -154,13 +154,31 @@ func (s *Store) initSchema() error {
 		alias TEXT NOT NULL,
 		last_handshake INTEGER DEFAULT 0,
 		deleted INTEGER DEFAULT 0,
-		created_at INTEGER DEFAULT (strftime('%%s','now')),
-		updated_at INTEGER DEFAULT (strftime('%%s','now'))
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
 	);
 
 	CREATE TABLE IF NOT EXISTS admins (
 		username TEXT PRIMARY KEY,
 		password_hash TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS panel_users (
+		username TEXT PRIMARY KEY,
+		password_hash TEXT NOT NULL,
+		can_read_users INTEGER NOT NULL DEFAULT 0,
+		can_write_users INTEGER NOT NULL DEFAULT 0,
+		can_read_wireguard INTEGER NOT NULL DEFAULT 0,
+		can_write_wireguard INTEGER NOT NULL DEFAULT 0,
+		can_read_config INTEGER NOT NULL DEFAULT 0,
+		can_write_config INTEGER NOT NULL DEFAULT 0,
+		can_read_settings INTEGER NOT NULL DEFAULT 0,
+		can_write_settings INTEGER NOT NULL DEFAULT 0,
+		can_read_panel_users INTEGER NOT NULL DEFAULT 0,
+		can_write_panel_users INTEGER NOT NULL DEFAULT 0,
+		can_read_logs INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
 	);
 
 	CREATE TABLE IF NOT EXISTS inbound_meta (
@@ -190,11 +208,410 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE users ADD COLUMN vmess_security TEXT DEFAULT '';")
 	s.db.Exec("ALTER TABLE users ADD COLUMN vmess_alter_id INTEGER DEFAULT 0;")
 	s.db.Exec("ALTER TABLE wg_samples ADD COLUMN endpoint TEXT DEFAULT ''")
-	// Migration for sampler_runs source column
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_users INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_users INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_wireguard INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_wireguard INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_config INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_config INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_settings INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_settings INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_panel_users INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_panel_users INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs INTEGER NOT NULL DEFAULT 0;")
 	var colCheck string
 	_ = s.db.QueryRow("SELECT name FROM pragma_table_info('sampler_runs') WHERE name='source'").Scan(&colCheck)
 	if colCheck == "" {
 		s.db.Exec("ALTER TABLE sampler_runs ADD COLUMN source TEXT DEFAULT 'sing-box'")
+	}
+	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN client_sni TEXT DEFAULT NULL;")
+	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
+	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
+	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
+	s.db.Exec(`UPDATE wg_peers SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
+	return nil
+}
+
+// PanelUserPermissions holds the set of permissions for a panel user.
+type PanelUserPermissions struct {
+	CanReadUsers       bool `json:"can_read_users"`
+	CanWriteUsers      bool `json:"can_write_users"`
+	CanReadWireguard   bool `json:"can_read_wireguard"`
+	CanWriteWireguard  bool `json:"can_write_wireguard"`
+	CanReadConfig      bool `json:"can_read_config"`
+	CanWriteConfig     bool `json:"can_write_config"`
+	CanReadSettings    bool `json:"can_read_settings"`
+	CanWriteSettings   bool `json:"can_write_settings"`
+	CanReadPanelUsers  bool `json:"can_read_panel_users"`
+	CanWritePanelUsers bool `json:"can_write_panel_users"`
+	CanReadLogs        bool `json:"can_read_logs"`
+}
+
+// PanelUserInfo is a safe (no password hash) representation of a panel user.
+type PanelUserInfo struct {
+	Username    string               `json:"username"`
+	Permissions PanelUserPermissions `json:"permissions"`
+	CreatedAt   int64                `json:"created_at"`
+}
+
+func boolToInt64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// Normalize keeps granular permissions coherent.
+func (p *PanelUserPermissions) Normalize() {
+	if p == nil {
+		return
+	}
+
+	// write implies read
+	p.CanReadUsers = p.CanReadUsers || p.CanWriteUsers
+	p.CanReadWireguard = p.CanReadWireguard || p.CanWriteWireguard
+	p.CanReadConfig = p.CanReadConfig || p.CanWriteConfig
+	p.CanReadSettings = p.CanReadSettings || p.CanWriteSettings
+	p.CanReadPanelUsers = p.CanReadPanelUsers || p.CanWritePanelUsers
+}
+
+func fullPanelUserPermissions() PanelUserPermissions {
+	p := PanelUserPermissions{
+		CanReadUsers:       true,
+		CanWriteUsers:      true,
+		CanReadWireguard:   true,
+		CanWriteWireguard:  true,
+		CanReadConfig:      true,
+		CanWriteConfig:     true,
+		CanReadSettings:    true,
+		CanWriteSettings:   true,
+		CanReadPanelUsers:  true,
+		CanWritePanelUsers: true,
+		CanReadLogs:        true,
+	}
+	p.Normalize()
+	return p
+}
+
+func (s *Store) CreatePanelUser(username, password string, perms PanelUserPermissions) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	perms.Normalize()
+	_, err = s.db.ExecContext(context.Background(), `
+		INSERT INTO panel_users
+			(username, password_hash,
+			 can_read_users, can_write_users,
+			 can_read_wireguard, can_write_wireguard,
+			 can_read_config, can_write_config,
+			 can_read_settings, can_write_settings,
+			 can_read_panel_users, can_write_panel_users,
+			 can_read_logs,
+			 created_at, updated_at)
+		VALUES (?, ?,
+		        ?, ?,
+		        ?, ?,
+		        ?, ?,
+		        ?, ?,
+		        ?, ?,
+		        ?,
+		        strftime('%s','now'), strftime('%s','now'))`,
+		username, string(hash),
+		boolToInt64(perms.CanReadUsers),
+		boolToInt64(perms.CanWriteUsers),
+		boolToInt64(perms.CanReadWireguard),
+		boolToInt64(perms.CanWriteWireguard),
+		boolToInt64(perms.CanReadConfig),
+		boolToInt64(perms.CanWriteConfig),
+		boolToInt64(perms.CanReadSettings),
+		boolToInt64(perms.CanWriteSettings),
+		boolToInt64(perms.CanReadPanelUsers),
+		boolToInt64(perms.CanWritePanelUsers),
+		boolToInt64(perms.CanReadLogs),
+	)
+	return err
+}
+
+// VerifyPanelUser checks credentials and returns the user's permissions if valid.
+func (s *Store) VerifyPanelUser(username, password string) (*PanelUserPermissions, error) {
+	row := s.db.QueryRowContext(context.Background(), `
+		SELECT
+			password_hash,
+			COALESCE(can_read_users, 0),
+			COALESCE(can_write_users, 0),
+			COALESCE(can_read_wireguard, 0),
+			COALESCE(can_write_wireguard, 0),
+			COALESCE(can_read_config, 0),
+			COALESCE(can_write_config, 0),
+			COALESCE(can_read_settings, 0),
+			COALESCE(can_write_settings, 0),
+			COALESCE(can_read_panel_users, 0),
+			COALESCE(can_write_panel_users, 0),
+			COALESCE(can_read_logs, 0)
+		FROM panel_users
+		WHERE username = ?
+	`, username)
+
+	var (
+		passwordHash       string
+		canReadUsers       int64
+		canWriteUsers      int64
+		canReadWireguard   int64
+		canWriteWireguard  int64
+		canReadConfig      int64
+		canWriteConfig     int64
+		canReadSettings    int64
+		canWriteSettings   int64
+		canReadPanelUsers  int64
+		canWritePanelUsers int64
+		canReadLogs        int64
+	)
+
+	err := row.Scan(
+		&passwordHash,
+		&canReadUsers,
+		&canWriteUsers,
+		&canReadWireguard,
+		&canWriteWireguard,
+		&canReadConfig,
+		&canWriteConfig,
+		&canReadSettings,
+		&canWriteSettings,
+		&canReadPanelUsers,
+		&canWritePanelUsers,
+		&canReadLogs,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)); err != nil {
+		return nil, nil
+	}
+	perms := &PanelUserPermissions{
+		CanReadUsers:       canReadUsers != 0,
+		CanWriteUsers:      canWriteUsers != 0,
+		CanReadWireguard:   canReadWireguard != 0,
+		CanWriteWireguard:  canWriteWireguard != 0,
+		CanReadConfig:      canReadConfig != 0,
+		CanWriteConfig:     canWriteConfig != 0,
+		CanReadSettings:    canReadSettings != 0,
+		CanWriteSettings:   canWriteSettings != 0,
+		CanReadPanelUsers:  canReadPanelUsers != 0,
+		CanWritePanelUsers: canWritePanelUsers != 0,
+		CanReadLogs:        canReadLogs != 0,
+	}
+	perms.Normalize()
+	return perms, nil
+}
+
+func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
+	rows, err := s.db.QueryContext(context.Background(), `
+		SELECT
+			username,
+			COALESCE(can_read_users, 0),
+			COALESCE(can_write_users, 0),
+			COALESCE(can_read_wireguard, 0),
+			COALESCE(can_write_wireguard, 0),
+			COALESCE(can_read_config, 0),
+			COALESCE(can_write_config, 0),
+			COALESCE(can_read_settings, 0),
+			COALESCE(can_write_settings, 0),
+			COALESCE(can_read_panel_users, 0),
+			COALESCE(can_write_panel_users, 0),
+			COALESCE(can_read_logs, 0),
+			COALESCE(created_at, 0)
+		FROM panel_users
+		ORDER BY username ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make([]PanelUserInfo, 0)
+	for rows.Next() {
+		var (
+			username           string
+			canReadUsers       int64
+			canWriteUsers      int64
+			canReadWireguard   int64
+			canWriteWireguard  int64
+			canReadConfig      int64
+			canWriteConfig     int64
+			canReadSettings    int64
+			canWriteSettings   int64
+			canReadPanelUsers  int64
+			canWritePanelUsers int64
+			canReadLogs        int64
+			createdAt          int64
+		)
+		if err := rows.Scan(
+			&username,
+			&canReadUsers,
+			&canWriteUsers,
+			&canReadWireguard,
+			&canWriteWireguard,
+			&canReadConfig,
+			&canWriteConfig,
+			&canReadSettings,
+			&canWriteSettings,
+			&canReadPanelUsers,
+			&canWritePanelUsers,
+			&canReadLogs,
+			&createdAt,
+		); err != nil {
+			return nil, err
+		}
+		perms := PanelUserPermissions{
+			CanReadUsers:       canReadUsers != 0,
+			CanWriteUsers:      canWriteUsers != 0,
+			CanReadWireguard:   canReadWireguard != 0,
+			CanWriteWireguard:  canWriteWireguard != 0,
+			CanReadConfig:      canReadConfig != 0,
+			CanWriteConfig:     canWriteConfig != 0,
+			CanReadSettings:    canReadSettings != 0,
+			CanWriteSettings:   canWriteSettings != 0,
+			CanReadPanelUsers:  canReadPanelUsers != 0,
+			CanWritePanelUsers: canWritePanelUsers != 0,
+			CanReadLogs:        canReadLogs != 0,
+		}
+		perms.Normalize()
+
+		result = append(result, PanelUserInfo{
+			Username:    username,
+			Permissions: perms,
+			CreatedAt:   createdAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Store) UpdatePanelUserPassword(username, newPassword string) error {
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return s.Queries.UpdatePanelUserPassword(context.Background(), sqlcStore.UpdatePanelUserPasswordParams{
+		PasswordHash: string(hash),
+		Username:     username,
+	})
+}
+
+func (s *Store) UpdatePanelUserPermissions(username string, perms PanelUserPermissions) error {
+	perms.Normalize()
+	_, err := s.db.ExecContext(context.Background(), `
+		UPDATE panel_users SET
+			can_read_users = ?,
+			can_write_users = ?,
+			can_read_wireguard = ?,
+			can_write_wireguard = ?,
+			can_read_config = ?,
+			can_write_config = ?,
+			can_read_settings = ?,
+			can_write_settings = ?,
+			can_read_panel_users = ?,
+			can_write_panel_users = ?,
+			can_read_logs = ?,
+			updated_at = strftime('%s','now')
+		WHERE username = ?`,
+		boolToInt64(perms.CanReadUsers),
+		boolToInt64(perms.CanWriteUsers),
+		boolToInt64(perms.CanReadWireguard),
+		boolToInt64(perms.CanWriteWireguard),
+		boolToInt64(perms.CanReadConfig),
+		boolToInt64(perms.CanWriteConfig),
+		boolToInt64(perms.CanReadSettings),
+		boolToInt64(perms.CanWriteSettings),
+		boolToInt64(perms.CanReadPanelUsers),
+		boolToInt64(perms.CanWritePanelUsers),
+		boolToInt64(perms.CanReadLogs),
+		username,
+	)
+	return err
+}
+
+func (s *Store) UpdatePanelUsername(oldUsername, newUsername string) error {
+	count, err := s.Queries.CheckPanelUserExists(context.Background(), newUsername)
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return fmt.Errorf("username %s already exists", newUsername)
+	}
+	return s.Queries.UpdatePanelUsername(context.Background(), sqlcStore.UpdatePanelUsernameParams{
+		Username:   newUsername,
+		Username_2: oldUsername,
+	})
+}
+
+func (s *Store) DeletePanelUser(username string) error {
+	return s.Queries.DeletePanelUser(context.Background(), username)
+}
+
+// EnsureDefaultPanelUser migrates existing admins to panel_users and/or bootstraps the initial superuser.
+func (s *Store) EnsureDefaultPanelUser() error {
+	// Collect existing admins first, then close the cursor BEFORE any INSERT.
+	// With SetMaxOpenConns(1), keeping rows open while calling db.Exec deadlocks SQLite.
+	type adminEntry struct{ username, passwordHash string }
+	var toMigrate []adminEntry
+
+	rows, err := s.db.Query("SELECT username, password_hash FROM admins")
+	if err == nil {
+		for rows.Next() {
+			var uname, phash string
+			if err := rows.Scan(&uname, &phash); err != nil {
+				continue
+			}
+			toMigrate = append(toMigrate, adminEntry{uname, phash})
+		}
+		rows.Close()
+	}
+
+	for _, a := range toMigrate {
+		s.db.Exec(`
+			INSERT OR IGNORE INTO panel_users
+				(username, password_hash,
+				 can_read_users, can_write_users,
+				 can_read_wireguard, can_write_wireguard,
+				 can_read_config, can_write_config,
+				 can_read_settings, can_write_settings,
+				 can_read_panel_users, can_write_panel_users,
+				 can_read_logs,
+				 created_at, updated_at)
+			VALUES (?, ?,
+			        1, 1,
+			        1, 1,
+			        1, 1,
+			        1, 1,
+			        1, 1,
+			        1,
+			        strftime('%s','now'), strftime('%s','now'))
+		`, a.username, a.passwordHash)
+	}
+
+	// Bootstrap from env if still empty
+	count, err := s.Queries.CountPanelUsers(context.Background())
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		username := strings.TrimSpace(os.Getenv("OGS_ADMIN_USER"))
+		if username == "" {
+			username = "admin"
+		}
+		password := os.Getenv("OGS_ADMIN_PASSWORD")
+		if strings.TrimSpace(password) == "" {
+			return fmt.Errorf("no panel user found and OGS_ADMIN_PASSWORD is empty; set it to bootstrap initial credentials")
+		}
+		allPerms := fullPanelUserPermissions()
+		return s.CreatePanelUser(username, password, allPerms)
 	}
 	return nil
 }

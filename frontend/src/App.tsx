@@ -12,7 +12,6 @@ import Settings from './pages/Settings';
 import LogViewer from './pages/LogViewer';
 import RawConfig from './pages/RawConfig';
 
-
 function App() {
     return (
         <AuthProvider>
@@ -24,12 +23,32 @@ function App() {
                         <Route element={<ProtectedRoute />}>
                             <Route element={<Layout />}>
                                 <Route path="/" element={<Dashboard />} />
-                                <Route path="/users" element={<UserManagement />} />
-                                <Route path="/wireguard" element={<WireGuard />} />
-                                <Route path="/logs" element={<LogViewer />} />
-                                <Route path="/raw-config" element={<RawConfig />} />
-                                <Route path="/settings" element={<Settings />} />
-                                {/* Redirect unknown routes to dashboard */}
+                                <Route path="/users" element={
+                                    <ProtectedRoute requiredPermission="can_read_users" />
+                                }>
+                                    <Route index element={<UserManagement />} />
+                                </Route>
+                                <Route path="/wireguard" element={
+                                    <ProtectedRoute requiredPermission="can_read_wireguard" />
+                                }>
+                                    <Route index element={<WireGuard />} />
+                                </Route>
+                                <Route path="/logs" element={
+                                    <ProtectedRoute requiredPermission="can_read_logs" />
+                                }>
+                                    <Route index element={<LogViewer />} />
+                                </Route>
+                                <Route path="/raw-config" element={
+                                    <ProtectedRoute requiredPermission="can_read_config" />
+                                }>
+                                    <Route index element={<RawConfig />} />
+                                </Route>
+                                <Route path="/settings" element={
+                                    <ProtectedRoute requiredPermission="can_read_settings" />
+                                }>
+                                    <Route index element={<Settings />} />
+                                </Route>
+{/* Redirect unknown routes to dashboard */}
                                 <Route path="*" element={<Navigate to="/" replace />} />
                             </Route>
                         </Route>

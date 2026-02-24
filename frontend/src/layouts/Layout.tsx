@@ -7,21 +7,25 @@ export const Layout: React.FC = () => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const location = useLocation();
     const navigate = useNavigate();
-    const { logout } = useAuth();
+    const { logout, permissions } = useAuth();
 
-    // Helper to check active route
     const isActive = (path: string) => location.pathname === path;
 
-    const navItems = [
-        { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-        { path: '/users', label: 'Users', icon: Users },
-        { path: '/wireguard', label: 'WireGuard', icon: Shield },
-        { path: '/logs', label: 'System Logs', icon: Activity },
-        { path: '/raw-config', label: 'Raw Config', icon: FileJson },
-        { path: '/settings', label: 'Settings', icon: Settings },
+    const allNavItems = [
+        { path: '/', label: 'Dashboard', icon: LayoutDashboard, permission: null },
+        { path: '/users', label: 'sing-box Users', icon: Users, permission: 'can_read_users' as const },
+        { path: '/wireguard', label: 'WireGuard', icon: Shield, permission: 'can_read_wireguard' as const },
+        { path: '/logs', label: 'System Logs', icon: Activity, permission: 'can_read_logs' as const },
+        { path: '/raw-config', label: 'Raw Config', icon: FileJson, permission: 'can_read_config' as const },
+        { path: '/settings', label: 'Settings', icon: Settings, permission: 'can_read_settings' as const },
     ];
 
-    const activeLabel = navItems.find(n => n.path === location.pathname)?.label || 'OGS-SWG';
+    const navItems = allNavItems.filter(item => {
+        if (!item.permission) return true;
+        return permissions?.[item.permission] === true;
+    });
+
+    const activeLabel = allNavItems.find(n => n.path === location.pathname)?.label || 'OGS-SWG';
     const rawCommit = (import.meta.env.VITE_APP_COMMIT as string | undefined) || '';
     const commitLabel = rawCommit ? rawCommit.slice(0, 7) : 'local';
 
@@ -94,7 +98,7 @@ export const Layout: React.FC = () => {
                         <Menu size={24} />
                     </button>
                     <span className="font-bold text-lg">{activeLabel}</span>
-                    <div className="w-8"></div> {/* Spacer for center alignment */}
+                    <div className="w-8"></div>
                 </header>
 
                 <main className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth">

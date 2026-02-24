@@ -3,6 +3,7 @@ import { api } from '../services/api'
 import { Plus, Trash2, Settings, Edit, ArrowUp, ArrowDown, Shield, ArrowUpDown, QrCode, RotateCcw } from 'lucide-react'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 
 interface WireGuardPeer {
     public_key: string
@@ -56,6 +57,9 @@ function formatTimeAgo(timestamp: number) {
 
 export default function WireGuard() {
     const { success, error: toastError } = useToast()
+    const { permissions } = useAuth()
+    const canWriteWireguard = !!permissions?.can_write_wireguard
+    const canWriteConfig = !!permissions?.can_write_config
     const [peers, setPeers] = useState<WireGuardPeer[]>([])
     const [interfaceConfig, setInterfaceConfig] = useState<WireGuardInterface | null>(null)
     const [showPeerModal, setShowPeerModal] = useState(false)
@@ -146,6 +150,10 @@ export default function WireGuard() {
     }
 
     const handleCreatePeer = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
         if (!newName.trim()) {
             alert('Alias is required')
             return
@@ -165,6 +173,10 @@ export default function WireGuard() {
     }
 
     const handleUpdatePeer = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
         if (!editingPeer) return
         try {
             const { persistent_keepalive, private_key, ...rest } = editingPeer as any
@@ -178,11 +190,16 @@ export default function WireGuard() {
     }
 
     const handleDeletePeer = (publicKey: string) => {
+        if (!canWriteWireguard) return
         const target = peers.find(p => p.public_key === publicKey) || null
         setConfirmDeletePeer(target)
     }
 
     const confirmDelete = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
         if (!confirmDeletePeer) return
         const target = confirmDeletePeer
         setConfirmDeletePeer(null)
@@ -197,6 +214,10 @@ export default function WireGuard() {
     }
 
     const handleRestorePeer = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
         if (!lastDeletedPeer) return
         try {
             await api.restoreWireGuardPeer({
@@ -215,6 +236,10 @@ export default function WireGuard() {
     }
 
     const handleUpdateInterface = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
         if (!editInterface) return
         try {
             await api.updateWireGuardInterface(editInterface)
@@ -281,6 +306,10 @@ export default function WireGuard() {
     }
 
     const handleRestartWireGuard = async () => {
+        if (!canWriteConfig) {
+            toastError('No write permission for service control')
+            return
+        }
         try {
             await api.restartService('wireguard')
             setPendingRestart(false)
@@ -302,8 +331,8 @@ export default function WireGuard() {
                         <span className="text-sm font-medium">Changes pending restart</span>
                         <button
                             onClick={handleRestartWireGuard}
-                            disabled={systemctlAvailable === false}
-                            className="px-3 py-1.5 bg-amber-500 text-black rounded font-medium text-sm hover:bg-amber-400 transition-colors disabled:opacity-50"
+                            disabled={!canWriteConfig || systemctlAvailable === false}
+                            className="px-3 py-1.5 bg-amber-500 text-black rounded font-medium text-sm hover:bg-amber-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             Restart WireGuard
                         </button>
@@ -312,23 +341,27 @@ export default function WireGuard() {
                 <div className="flex flex-wrap gap-3">
                     <button
                         onClick={() => {
+                            if (!canWriteWireguard) return
                             setEditInterface(interfaceConfig ?? { address: '', private_key: '', listen_port: 51820, post_up: '', post_down: '', mtu: 1420, dns: '' })
                             setShowInterfaceModal(true)
                         }}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors font-medium text-sm border border-slate-700"
+                        disabled={!canWriteWireguard}
+                        className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors font-medium text-sm border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Settings size={16} />
                         Interface Config
                     </button>
                     <button
                         onClick={() => {
+                            if (!canWriteWireguard) return
                             setEditingPeer(null)
                             setGeneratedTab('qr')
                             setNewIp('')
                             setNewEndpoint('')
                             setShowPeerModal(true)
                         }}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium text-sm shadow-lg shadow-blue-500/20"
+                        disabled={!canWriteWireguard}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium text-sm shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Plus size={16} />
                         Add Peer
@@ -342,6 +375,7 @@ export default function WireGuard() {
                     <div className="flex gap-2">
                         <button
                             onClick={handleRestorePeer}
+                            disabled={!canWriteWireguard}
                             className="flex items-center gap-1 px-3 py-1.5 bg-amber-500/30 hover:bg-amber-500/40 text-amber-50 rounded-lg text-xs font-semibold border border-amber-500/40"
                         >
                             <RotateCcw size={14} />
@@ -453,10 +487,12 @@ export default function WireGuard() {
                                             <div className="flex items-center justify-end gap-2">
                                                 <button
                                                     onClick={() => {
+                                                        if (!canWriteWireguard) return
                                                         setEditingPeer(peer)
                                                         setShowPeerModal(true)
                                                     }}
-                                                    className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-blue-400 hover:bg-slate-700 border border-slate-700 transition-all"
+                                                    disabled={!canWriteWireguard}
+                                                    className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-blue-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                     title="Edit Peer"
                                                 >
                                                     <Edit size={16} />
@@ -471,7 +507,8 @@ export default function WireGuard() {
                                                 </button>
                                                 <button
                                                     onClick={() => handleDeletePeer(peer.public_key)}
-                                                    className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all"
+                                                    disabled={!canWriteWireguard}
+                                                    className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                     title="Delete Peer"
                                                 >
                                                     <Trash2 size={16} />
@@ -518,10 +555,12 @@ export default function WireGuard() {
                                     <div className="flex gap-2">
                                         <button
                                             onClick={() => {
+                                                if (!canWriteWireguard) return
                                                 setEditingPeer(peer)
                                                 setShowPeerModal(true)
                                             }}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700"
+                                            disabled={!canWriteWireguard}
+                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <Edit size={16} />
                                         </button>
@@ -538,7 +577,8 @@ export default function WireGuard() {
                                         </button>
                                         <button
                                             onClick={() => handleDeletePeer(peer.public_key)}
-                                            className="p-2 rounded-lg bg-slate-800 text-red-400 border border-slate-700"
+                                            disabled={!canWriteWireguard}
+                                            className="p-2 rounded-lg bg-slate-800 text-red-400 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <Trash2 size={16} />
                                         </button>
@@ -654,6 +694,7 @@ export default function WireGuard() {
                                     </button>
                                     <button
                                         onClick={handleUpdatePeer}
+                                        disabled={!canWriteWireguard}
                                         className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg"
                                     >
                                         Save Changes
@@ -701,6 +742,7 @@ export default function WireGuard() {
                                     </button>
                                     <button
                                         onClick={handleCreatePeer}
+                                        disabled={!canWriteWireguard}
                                         className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg"
                                     >
                                         Create
@@ -963,6 +1005,7 @@ export default function WireGuard() {
                                 </button>
                                 <button
                                     onClick={handleUpdateInterface}
+                                    disabled={!canWriteWireguard}
                                     className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg"
                                 >
                                     Save Changes

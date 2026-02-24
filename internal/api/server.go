@@ -123,7 +123,7 @@ func (s *Server) secure(handler http.HandlerFunc) http.HandlerFunc {
 
 	return func(w http.ResponseWriter, r *http.Request) {
 		// If authenticated via JWT (AuthMiddleware), allow
-		if r.Context().Value("user") != nil {
+		if r.Context().Value(userContextKey) != nil {
 			handler(w, r)
 			return
 		}
@@ -134,6 +134,26 @@ func (s *Server) secure(handler http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		handler(w, r)
+	}
+}
+
+// getPermissions extracts PanelUserPermissions from the request context.
+// Returns nil if not present (e.g. API-key-only auth, which should not happen with the new middleware).
+func getPermissions(r *http.Request) *core.PanelUserPermissions {
+	p, _ := r.Context().Value(permissionsContextKey).(*core.PanelUserPermissions)
+	return p
+}
+
+// requirePerm wraps a handler and returns 403 if the caller lacks the required permission.
+func (s *Server) requirePerm(check func(*core.PanelUserPermissions) bool, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		p := getPermissions(r)
+		// nil permissions means API-key auth — grant full access for backward compatibility
+		if p != nil && !check(p) {
+			http.Error(w, "Forbidden", http.StatusForbidden)
+			return
+		}
+		h(w, r)
 	}
 }
 
@@ -457,82 +477,101 @@ func (s *Server) Routes() *http.ServeMux {
 	// Public Login
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 
-	// Auth Management
+	// Permission helpers (shorthand)
+	canReadUsers := func(p *core.PanelUserPermissions) bool { return p.CanReadUsers }
+	canWriteUsers := func(p *core.PanelUserPermissions) bool { return p.CanWriteUsers }
+	canReadWG := func(p *core.PanelUserPermissions) bool { return p.CanReadWireguard }
+	canWriteWG := func(p *core.PanelUserPermissions) bool { return p.CanWriteWireguard }
+	canReadConfig := func(p *core.PanelUserPermissions) bool { return p.CanReadConfig }
+	canWriteConfig := func(p *core.PanelUserPermissions) bool { return p.CanWriteConfig }
+	canReadSettings := func(p *core.PanelUserPermissions) bool { return p.CanReadSettings }
+	canWriteSettings := func(p *core.PanelUserPermissions) bool { return p.CanWriteSettings }
+	canReadPanelUsers := func(p *core.PanelUserPermissions) bool { return p.CanReadPanelUsers }
+	canWritePanelUsers := func(p *core.PanelUserPermissions) bool { return p.CanWritePanelUsers }
+	canReadLogs := func(p *core.PanelUserPermissions) bool { return p.CanReadLogs }
+
 	protected := http.NewServeMux()
+
+	// Auth: any authenticated user can change their own password/username
 	protected.HandleFunc("PUT /api/auth/password", s.secure(s.handleUpdatePassword))
-	protected.HandleFunc("PUT /api/auth/username", s.secure(s.handleUpdateUsername))
+	protected.HandleFunc("PUT /api/auth/username", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateUsername)))
 
-	protected.HandleFunc("GET /api/users", s.secure(s.handleGetUsers))
-	protected.HandleFunc("GET /api/report", s.secure(s.handleGetReport))
-	protected.HandleFunc("GET /api/report/summary", s.secure(s.handleGetReportSummary))
-	protected.HandleFunc("GET /api/logs", s.secure(s.handleGetLogs))
-	protected.HandleFunc("GET /api/logs/search", s.secure(s.handleSearchLogs))
-	protected.HandleFunc("POST /api/users", s.secure(s.handleCreateUser))
-	protected.HandleFunc("PUT /api/users", s.secure(s.handleUpdateUser))
-	protected.HandleFunc("DELETE /api/users", s.secure(s.handleDeleteUser))
-	protected.HandleFunc("GET /api/users/{name}/inbounds", s.secure(s.handleGetUserInbounds))
-	protected.HandleFunc("GET /api/users/{name}/vless", s.secure(s.handleGetUserVLESSLink))
-	protected.HandleFunc("GET /api/users/{name}/link", s.secure(s.handleGetUserLink))
-	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.handleRemoveUserFromInbound))
-	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.handleUpdateUserInInbound))
-	protected.HandleFunc("POST /api/users/bulk", s.secure(s.handleBulkCreateUsers))
+	// VPN Users
+	protected.HandleFunc("GET /api/users", s.secure(s.requirePerm(canReadUsers, s.handleGetUsers)))
+	protected.HandleFunc("POST /api/users", s.secure(s.requirePerm(canWriteUsers, s.handleCreateUser)))
+	protected.HandleFunc("PUT /api/users", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUser)))
+	protected.HandleFunc("DELETE /api/users", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteUser)))
+	protected.HandleFunc("GET /api/users/{name}/inbounds", s.secure(s.requirePerm(canReadUsers, s.handleGetUserInbounds)))
+	protected.HandleFunc("GET /api/users/{name}/vless", s.secure(s.requirePerm(canReadUsers, s.handleGetUserVLESSLink)))
+	protected.HandleFunc("GET /api/users/{name}/link", s.secure(s.requirePerm(canReadUsers, s.handleGetUserLink)))
+	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleRemoveUserFromInbound)))
+	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserInInbound)))
+	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.handleBulkCreateUsers)))
 
-	protected.HandleFunc("GET /api/wireguard/peers", s.secure(s.handleGetWireGuardPeers))
-	protected.HandleFunc("POST /api/wireguard/peers", s.secure(s.handleCreateWireGuardPeer))
-	protected.HandleFunc("DELETE /api/wireguard/peers", s.secure(s.handleDeleteWireGuardPeer))
-	protected.HandleFunc("POST /api/wireguard/peers/restore", s.secure(s.handleRestoreWireGuardPeer))
-	protected.HandleFunc("GET /api/wireguard/interface", s.secure(s.handleGetWireGuardInterface))
-	protected.HandleFunc("PUT /api/wireguard/interface", s.secure(s.handleUpdateWireGuardInterface))
-	protected.HandleFunc("PUT /api/wireguard/peer", s.secure(s.handleUpdateWireGuardPeer))
-	protected.HandleFunc("GET /api/wireguard/peer/config", s.secure(s.handleGetWireGuardPeerConfig))
-
-	protected.HandleFunc("POST /api/service/restart", s.secure(s.handleRestartService))
-	protected.HandleFunc("POST /api/service/start", s.secure(s.handleStartService))
-	protected.HandleFunc("POST /api/service/stop", s.secure(s.handleStopService))
-
-	protected.HandleFunc("GET /api/settings/features", s.secure(s.handleGetFeatures))
-	protected.HandleFunc("PUT /api/settings/features", s.secure(s.handleUpdateFeatures))
-	protected.HandleFunc("GET /api/settings/public-ip", s.secure(s.handleGetPublicIP))
-	protected.HandleFunc("PUT /api/settings/public-ip", s.secure(s.handleUpdatePublicIP))
-	protected.HandleFunc("POST /api/sampler/run", s.secure(s.handleRunSampler))
-	protected.HandleFunc("GET /api/sampler/history", s.secure(s.handleSamplerHistory))
-	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.handlePauseSampler))
-	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.handleResumeSampler))
-	protected.HandleFunc("POST /api/retention/prune", s.secure(s.handlePruneNow))
-	protected.HandleFunc("POST /api/config/backup", s.secure(s.handleBackupConfig))
-	protected.HandleFunc("POST /api/config/restore", s.secure(s.handleRestoreConfig))
-	protected.HandleFunc("GET /api/config/backup/meta", s.secure(s.handleGetBackupMeta))
-	protected.HandleFunc("POST /api/wireguard/config/backup", s.secure(s.handleBackupWireGuardConfig))
-	protected.HandleFunc("POST /api/wireguard/config/restore", s.secure(s.handleRestoreWireGuardConfig))
-	protected.HandleFunc("GET /api/wireguard/traffic", s.secure(s.handleGetWireGuardTraffic))
-	protected.HandleFunc("GET /api/wireguard/traffic/series", s.secure(s.handleGetWireGuardTrafficSeries))
-
-	protected.HandleFunc("GET /api/config", s.secure(s.handleGetConfig))
-	protected.HandleFunc("PUT /api/config", s.secure(s.handleUpdateConfig))
-	protected.HandleFunc("GET /api/wireguard/config", s.secure(s.handleGetWireGuardConfig))
-	protected.HandleFunc("PUT /api/wireguard/config", s.secure(s.handleUpdateWireGuardConfig))
-
+	// Reports/logs
+	protected.HandleFunc("GET /api/report", s.secure(s.requirePerm(canReadUsers, s.handleGetReport)))
+	protected.HandleFunc("GET /api/report/summary", s.secure(s.requirePerm(canReadUsers, s.handleGetReportSummary)))
+	protected.HandleFunc("GET /api/logs", s.secure(s.requirePerm(canReadLogs, s.handleGetLogs)))
+	protected.HandleFunc("GET /api/logs/search", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogs)))
 	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
 	protected.HandleFunc("GET /api/diag/ssh", s.secure(s.handleDiagSSH))
 
-	// Sing-box Configuration & Inbounds
-	protected.HandleFunc("GET /api/singbox/config", s.secure(s.handleGetSingboxConfig))
-	protected.HandleFunc("PUT /api/singbox/config", s.secure(s.handleUpdateSingboxConfig))
-	protected.HandleFunc("GET /api/singbox/inbounds", s.secure(s.handleGetSingboxInbounds))
-	protected.HandleFunc("POST /api/singbox/inbound", s.secure(s.handleAddSingboxInbound))
-	protected.HandleFunc("PUT /api/singbox/inbound", s.secure(s.handleUpdateSingboxInbound))
-	protected.HandleFunc("DELETE /api/singbox/inbound", s.secure(s.handleDeleteSingboxInbound))
-	protected.HandleFunc("POST /api/singbox/apply", s.secure(s.handleApplySingboxChanges))
+	// WireGuard
+	protected.HandleFunc("GET /api/wireguard/peers", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardPeers)))
+	protected.HandleFunc("POST /api/wireguard/peers", s.secure(s.requirePerm(canWriteWG, s.handleCreateWireGuardPeer)))
+	protected.HandleFunc("DELETE /api/wireguard/peers", s.secure(s.requirePerm(canWriteWG, s.handleDeleteWireGuardPeer)))
+	protected.HandleFunc("POST /api/wireguard/peers/restore", s.secure(s.requirePerm(canWriteWG, s.handleRestoreWireGuardPeer)))
+	protected.HandleFunc("GET /api/wireguard/interface", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardInterface)))
+	protected.HandleFunc("PUT /api/wireguard/interface", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardInterface)))
+	protected.HandleFunc("PUT /api/wireguard/peer", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardPeer)))
+	protected.HandleFunc("GET /api/wireguard/peer/config", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardPeerConfig)))
+	protected.HandleFunc("GET /api/wireguard/config", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardConfig)))
+	protected.HandleFunc("PUT /api/wireguard/config", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardConfig)))
+	protected.HandleFunc("POST /api/wireguard/config/backup", s.secure(s.requirePerm(canWriteWG, s.handleBackupWireGuardConfig)))
+	protected.HandleFunc("POST /api/wireguard/config/restore", s.secure(s.requirePerm(canWriteWG, s.handleRestoreWireGuardConfig)))
+	protected.HandleFunc("GET /api/wireguard/traffic", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTraffic)))
+	protected.HandleFunc("GET /api/wireguard/traffic/series", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTrafficSeries)))
 
-	// Tools
-	protected.HandleFunc("GET /api/tools/reality-keys", s.secure(s.handleGenerateRealityKeys))
-	protected.HandleFunc("POST /api/tools/self-signed-cert", s.secure(s.handleGenerateSelfSignedCert))
+	// Config / Sing-box / service control
+	protected.HandleFunc("GET /api/config", s.secure(s.requirePerm(canReadConfig, s.handleGetConfig)))
+	protected.HandleFunc("PUT /api/config", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateConfig)))
+	protected.HandleFunc("GET /api/singbox/config", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxConfig)))
+	protected.HandleFunc("PUT /api/singbox/config", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxConfig)))
+	protected.HandleFunc("GET /api/singbox/inbounds", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxInbounds)))
+	protected.HandleFunc("POST /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.handleAddSingboxInbound)))
+	protected.HandleFunc("PUT /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxInbound)))
+	protected.HandleFunc("DELETE /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.handleDeleteSingboxInbound)))
+	protected.HandleFunc("POST /api/singbox/apply", s.secure(s.requirePerm(canWriteConfig, s.handleApplySingboxChanges)))
+	protected.HandleFunc("POST /api/service/restart", s.secure(s.requirePerm(canWriteConfig, s.handleRestartService)))
+	protected.HandleFunc("POST /api/service/start", s.secure(s.requirePerm(canWriteConfig, s.handleStartService)))
+	protected.HandleFunc("POST /api/service/stop", s.secure(s.requirePerm(canWriteConfig, s.handleStopService)))
+	protected.HandleFunc("POST /api/config/backup", s.secure(s.requirePerm(canWriteConfig, s.handleBackupConfig)))
+	protected.HandleFunc("POST /api/config/restore", s.secure(s.requirePerm(canWriteConfig, s.handleRestoreConfig)))
+	protected.HandleFunc("GET /api/config/backup/meta", s.secure(s.requirePerm(canReadConfig, s.handleGetBackupMeta)))
+	protected.HandleFunc("GET /api/tools/reality-keys", s.secure(s.requirePerm(canReadConfig, s.handleGenerateRealityKeys)))
+	protected.HandleFunc("POST /api/tools/self-signed-cert", s.secure(s.requirePerm(canWriteConfig, s.handleGenerateSelfSignedCert)))
+	protected.HandleFunc("GET /api/sysctl", s.secure(s.requirePerm(canReadConfig, s.handleGetSysctl)))
+	protected.HandleFunc("POST /api/sysctl", s.secure(s.requirePerm(canWriteConfig, s.handleApplySysctl)))
 
-	// Sysctl
-	protected.HandleFunc("GET /api/sysctl", s.secure(s.handleGetSysctl))
-	protected.HandleFunc("POST /api/sysctl", s.secure(s.handleApplySysctl))
+	// Settings
+	protected.HandleFunc("GET /api/settings/features", s.secure(s.requirePerm(canReadSettings, s.handleGetFeatures)))
+	protected.HandleFunc("PUT /api/settings/features", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateFeatures)))
+	protected.HandleFunc("GET /api/settings/public-ip", s.secure(s.requirePerm(canReadSettings, s.handleGetPublicIP)))
+	protected.HandleFunc("PUT /api/settings/public-ip", s.secure(s.requirePerm(canWriteSettings, s.handleUpdatePublicIP)))
+	protected.HandleFunc("POST /api/sampler/run", s.secure(s.requirePerm(canWriteSettings, s.handleRunSampler)))
+	protected.HandleFunc("GET /api/sampler/history", s.secure(s.requirePerm(canReadSettings, s.handleSamplerHistory)))
+	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.requirePerm(canWriteSettings, s.handlePauseSampler)))
+	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.requirePerm(canWriteSettings, s.handleResumeSampler)))
+	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.handlePruneNow)))
+
+	// Panel user management
+	protected.HandleFunc("GET /api/panel-users", s.secure(s.requirePerm(canReadPanelUsers, s.handleGetPanelUsers)))
+	protected.HandleFunc("POST /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.handleCreatePanelUser)))
+	protected.HandleFunc("PUT /api/panel-users/permissions", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserPermissions)))
+	protected.HandleFunc("PUT /api/panel-users/username", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserUsername)))
+	protected.HandleFunc("DELETE /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.handleDeletePanelUser)))
 
 	// Mount protected routes under /api/
 	mux.Handle("/api/", s.AuthMiddleware(s.PondMiddleware(s.GzipMiddleware(protected))))
@@ -584,8 +623,8 @@ func StartServer(cfg *core.Config) *Server {
 		panic("StartServer: failed to open database: " + err.Error())
 	}
 
-	if err := store.EnsureDefaultAdmin(); err != nil {
-		panic("StartServer: failed to ensure default admin: " + err.Error())
+	if err := store.EnsureDefaultPanelUser(); err != nil {
+		panic("StartServer: failed to ensure default panel user: " + err.Error())
 	}
 
 	var executor core.SystemExecutor

@@ -414,6 +414,19 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                                                 </div>
                                             </div>
                                             <div className="space-y-1">
+                                                <label className="text-xs font-medium text-slate-300">Server Name for clients (optional)</label>
+                                                <input
+                                                    type="text"
+                                                    value={formData.tls?.server_name || ''}
+                                                    onChange={e => setFormData({
+                                                        ...formData,
+                                                        tls: { ...formData.tls, server_name: e.target.value || undefined }
+                                                    })}
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                    placeholder="e.g. cdn.example.com — overrides SNI in generated links"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
                                                 <label className="text-xs font-medium text-slate-300">Private Key</label>
                                                 <input
                                                     type="text"
