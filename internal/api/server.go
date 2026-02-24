@@ -474,6 +474,10 @@ func (s *Server) cleanupQRCache() {
 
 func (s *Server) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	// Public Login
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 
