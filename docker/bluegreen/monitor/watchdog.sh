@@ -8,18 +8,16 @@ BAKE_UNTIL_FILE="${DEPLOY_ROOT}/${BAKE_UNTIL_FILE:-.bluegreen.bake_until}"
 EVENTS_FILE="${DEPLOY_ROOT}/${EVENTS_FILE:-.bluegreen.events.log}"
 NGINX_TEMPLATE="${DEPLOY_ROOT}/${NGINX_TEMPLATE:-docker/bluegreen/nginx/default.conf.template}"
 NGINX_CONF="${DEPLOY_ROOT}/${NGINX_CONF:-docker/bluegreen/nginx/default.conf}"
-HEALTH_URL_PATH="${HEALTH_URL_PATH:-/api/login}"
-HEALTH_METHOD="${HEALTH_METHOD:-POST}"
-HEALTH_BODY="${HEALTH_BODY:-{\"username\":\"invalid\",\"password\":\"invalid\"}}"
-HEALTH_EXPECT="${HEALTH_EXPECT:-401,405}"
+HEALTH_URL_PATH="${HEALTH_URL_PATH:-/health}"
+HEALTH_METHOD="${HEALTH_METHOD:-GET}"
+HEALTH_BODY="${HEALTH_BODY:-}"
+HEALTH_EXPECT="${HEALTH_EXPECT:-204}"
 CHECK_INTERVAL_SEC="${CHECK_INTERVAL_SEC:-15}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-4}"
 
-# Pre-parsed once — avoids re-splitting on every health check
 IFS=',' read -r -a _EXPECTED_CODES <<< "$HEALTH_EXPECT"
 
 log_event() {
-  # '>>' is a shell builtin redirect — no tee subprocess
   printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$1" >> "$EVENTS_FILE"
 }
 
@@ -37,14 +35,12 @@ slot_running() {
 
 slot_health_ok() {
   local slot="$1" code expected
-  # No slot_running guard: saves 1 docker-inspect subprocess per cycle.
-  # curl fails fast (connect-timeout) if the container is down, which is
-  # equivalent — an empty/error code won't match any expected code.
+  local -a _body_flags=()
+  [ -n "$HEALTH_BODY" ] && _body_flags=(-H 'Content-Type: application/json' -d "$HEALTH_BODY")
   code="$(curl -s --connect-timeout 3 --max-time 8 \
     -o /dev/null -w '%{http_code}' \
     -X "$HEALTH_METHOD" \
-    -H 'Content-Type: application/json' \
-    -d "$HEALTH_BODY" \
+    "${_body_flags[@]}" \
     "http://$(slot_container "$slot"):8080${HEALTH_URL_PATH}" 2>/dev/null || true)"
 
   for expected in "${_EXPECTED_CODES[@]}"; do
@@ -69,13 +65,11 @@ safe_stop_slot() {
   fi
 }
 
-# Accepts pre-computed 'now' to avoid a redundant date +%s call per cycle
 ensure_previous_is_stopped_after_bake() {
   local now="$1" active="" previous="" bake_until=0
   [ -f "$PREVIOUS_FILE" ]  || return 0
   [ -f "$BAKE_UNTIL_FILE" ] || return 0
 
-  # 'read < file' is a bash builtin — no fork/exec compared to $(cat file)
   IFS= read -r active    < "$ACTIVE_FILE"    2>/dev/null || true
   IFS= read -r previous  < "$PREVIOUS_FILE"  2>/dev/null || true
   IFS= read -r bake_until < "$BAKE_UNTIL_FILE" 2>/dev/null || true
@@ -91,7 +85,6 @@ ensure_previous_is_stopped_after_bake() {
 
 rollback_to_previous() {
   local active="" previous=""
-  # Builtin reads instead of $(cat)
   IFS= read -r active   < "$ACTIVE_FILE"   2>/dev/null || true
   IFS= read -r previous < "$PREVIOUS_FILE" 2>/dev/null || true
 
@@ -109,7 +102,6 @@ rollback_to_previous() {
     sleep 2
   fi
 
-  # while loop avoids the $(seq 1 20) subprocess
   local i=0
   while [ "$i" -lt 20 ]; do
     if slot_health_ok "$previous"; then
@@ -137,14 +129,12 @@ main_loop() {
       continue
     fi
 
-    # Single builtin read replaces $(cat) subshell
     IFS= read -r active < "$ACTIVE_FILE" 2>/dev/null || active=""
     if [ "$active" != "blue" ] && [ "$active" != "green" ]; then
       sleep "$CHECK_INTERVAL_SEC"
       continue
     fi
 
-    # Compute 'now' once per cycle and pass it down
     now="$(date +%s)"
     ensure_previous_is_stopped_after_bake "$now"
 
