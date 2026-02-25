@@ -157,5 +157,9 @@ func (e *DockerLocalExecutor) runSystemctl(ctx context.Context, action, name str
 func runViaSystemdRun(ctx context.Context, name string, args ...string) ([]byte, error) {
 	runnerArgs := []string{"--wait", "--pipe", "--collect", "--quiet", name}
 	runnerArgs = append(runnerArgs, args...)
-	return exec.CommandContext(ctx, "systemd-run", runnerArgs...).CombinedOutput()
+	out, err := exec.CommandContext(ctx, "systemd-run", runnerArgs...).CombinedOutput()
+	if ctx.Err() != nil {
+		return out, ctx.Err()
+	}
+	return out, err
 }

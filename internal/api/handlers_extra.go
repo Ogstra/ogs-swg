@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -1293,11 +1294,13 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 				activeUsersSB = int64(len(lst))
 			}
 		}
-		if xc := core.NewSingboxClient(s.config.SingboxAPIAddr, s.executor); xc != nil {
-			if stats, err := xc.GetSysStats(); err == nil {
-				sysStats = stats
+		if !singboxAPILikelySelfTarget(s.config) {
+			if xc := core.NewSingboxClient(s.config.SingboxAPIAddr, s.executor); xc != nil {
+				if stats, err := xc.GetSysStats(); err == nil {
+					sysStats = stats
+				}
+				xc.Close()
 			}
-			xc.Close()
 		}
 		if s.sampler != nil && s.sampler.IsPaused() {
 			samplerPaused = true
@@ -1389,8 +1392,18 @@ func (s *Server) checkService(ctx context.Context, service string) bool {
 	if s.executor == nil {
 		return false
 	}
-	active, err := s.executor.IsServiceActive(ctx, service)
+
+	// Detach service checks from request cancellation so transient client/network
+	// aborts don't force false "stopped" statuses.
+	checkCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	active, err := s.executor.IsServiceActive(checkCtx, service)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			log.Printf("checkService: timeout/canceled checking %s: %v", service, err)
+			return false
+		}
 		log.Printf("checkService: failed to check %s: %v", service, err)
 		return false
 	}
