@@ -1,7 +1,7 @@
 # OGS-SWG — green slot (docker_local mode)
 #
 # Panel in Docker on the SAME host as sing-box/wg (systemd).
-# No SSH connection needed — uses nsenter -t 1 to reach host namespaces.
+# No SSH connection needed — talks to host systemd via bind-mounted runtime sockets.
 # Use this instead of docker-compose.green.yml when deploying locally.
 #
 # See DEPLOY_GITHUB_ACTIONS.md — Docker Local Mode section.
@@ -12,26 +12,22 @@ services:
     container_name: ogs-swg-green
     restart: unless-stopped
 
-    # Host PID namespace — required so nsenter -t 1 targets the host init process
-    pid: host
-
-    cap_add:
-      - SYS_PTRACE   # required for nsenter to enter host namespaces
-      - SYS_ADMIN    # required for sysctl writes via nsenter
-
     volumes:
       - ../../data:/app/data
 
       # Bind-mount at the same path as on the host
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
+      - /run/dbus:/run/dbus
+      - /run/systemd:/run/systemd
+      - /var/log/journal:/var/log/journal:ro
 
     environment:
       - OGS_LISTEN_ADDR=:8080
       - OGS_DB_PATH=/app/data/stats.db
       - OGS_ACCESS_LOG_PATH=/app/data/access.log
 
-      # Activates DockerLocalExecutor (nsenter-based)
+      # Activates DockerLocalExecutor (host D-Bus mode)
       - OGS_EXECUTION_MODE=docker_local
 
       - OGS_API_KEY=${OGS_API_KEY}

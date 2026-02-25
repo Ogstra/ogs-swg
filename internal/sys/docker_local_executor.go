@@ -14,8 +14,9 @@ import (
 
 // DockerLocalExecutor runs inside a Docker container co-located with the host's
 // singbox and wg-quick systemd services. File operations delegate to LocalExecutor
-// (bind mounts expose host paths at the same container paths). Commands that
-// require host namespaces are wrapped with nsenter -t 1.
+// (bind mounts expose host paths at the same container paths). Service/log
+// operations use host D-Bus/journal bind mounts; host-only commands run via
+// systemd-run through the host manager.
 type DockerLocalExecutor struct {
 	local  *LocalExecutor
 	config *core.Config
@@ -38,49 +39,47 @@ func (e *DockerLocalExecutor) ReadConfig(ctx context.Context, path string) ([]by
 	return e.local.ReadConfig(ctx, path)
 }
 
-// Service management: enter host mount namespace so systemctl
-// can reach the host's systemd D-Bus socket via the filesystem.
+// Service management: use host D-Bus bind mount directly.
 
 func (e *DockerLocalExecutor) RestartService(ctx context.Context, name string) error {
-	return e.runNsenterSystemctl(ctx, "restart", name)
+	return e.runSystemctl(ctx, "restart", name)
 }
 
 func (e *DockerLocalExecutor) StartService(ctx context.Context, name string) error {
-	return e.runNsenterSystemctl(ctx, "start", name)
+	return e.runSystemctl(ctx, "start", name)
 }
 
 func (e *DockerLocalExecutor) StopService(ctx context.Context, name string) error {
-	return e.runNsenterSystemctl(ctx, "stop", name)
+	return e.runSystemctl(ctx, "stop", name)
 }
 
 func (e *DockerLocalExecutor) IsServiceActive(ctx context.Context, name string) (bool, error) {
 	unit := resolveUnitName(name)
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--", "systemctl", "is-active", "--quiet", unit)
+	cmd := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", unit)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			// systemctl is-active exits 0=active, 3=inactive/failed, 4=not found.
-			// Any other non-zero code (e.g. 1) means nsenter or systemctl itself failed.
+			// Any other non-zero code (e.g. 1) means systemctl itself failed.
 			code := exitErr.ExitCode()
 			if code == 3 || code == 4 {
 				return false, nil // service is inactive or unit not found — not an error
 			}
-			// code 1 (or other unexpected): nsenter/systemctl printed an error; surface it.
-			return false, fmt.Errorf("nsenter systemctl is-active %s (exit %d): %s", unit, code, strings.TrimSpace(string(out)))
+			// code 1 (or other unexpected): systemctl printed an error; surface it.
+			return false, fmt.Errorf("systemctl is-active %s (exit %d): %s", unit, code, strings.TrimSpace(string(out)))
 		}
 		return false, err
 	}
 	return true, nil
 }
 
-// Sysctl: enter host mount namespace to reach /proc/sys on the host.
+// Sysctl: execute on host via systemd-run so /proc/sys is host-scoped.
 
 func (e *DockerLocalExecutor) ApplySysctl(ctx context.Context, key, value string) error {
 	if !AllowedSysctlKeys[key] {
 		return fmt.Errorf("sysctl key '%s' is not in the whitelist", key)
 	}
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--", "sysctl", "-w", fmt.Sprintf("%s=%s", key, value))
-	output, err := cmd.CombinedOutput()
+	output, err := runViaSystemdRun(ctx, "sysctl", "-w", fmt.Sprintf("%s=%s", key, value))
 	if err != nil {
 		return fmt.Errorf("failed to apply sysctl %s: %v, output: %s", key, err, string(output))
 	}
@@ -91,19 +90,17 @@ func (e *DockerLocalExecutor) GetSysctl(ctx context.Context, key string) (string
 	if !AllowedSysctlKeys[key] {
 		return "", fmt.Errorf("sysctl key '%s' is not in the whitelist", key)
 	}
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--", "sysctl", "-n", key)
-	output, err := cmd.CombinedOutput()
+	output, err := runViaSystemdRun(ctx, "sysctl", "-n", key)
 	if err != nil {
 		return "", fmt.Errorf("failed to get sysctl %s: %v", key, err)
 	}
 	return strings.TrimSpace(string(output)), nil
 }
 
-// Journal: enter host mount namespace to reach the host's journal files and socket.
+// Journal: host journal files are bind-mounted read-only; query directly.
 
 func (e *DockerLocalExecutor) ReadJournal(ctx context.Context, unit string, limit int) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--",
-		"journalctl", "--system", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
+	cmd := exec.CommandContext(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, analyzeJournalError(out, err)
@@ -116,8 +113,7 @@ func (e *DockerLocalExecutor) SearchJournal(ctx context.Context, unit, query str
 	if fetchLimit > 5000 {
 		fetchLimit = 5000
 	}
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--",
-		"journalctl", "--system", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
+	cmd := exec.CommandContext(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, analyzeJournalError(out, err)
@@ -153,11 +149,17 @@ func (e *DockerLocalExecutor) Close() error {
 
 // helpers
 
-func (e *DockerLocalExecutor) runNsenterSystemctl(ctx context.Context, action, name string) error {
+func (e *DockerLocalExecutor) runSystemctl(ctx context.Context, action, name string) error {
 	unit := resolveUnitName(name)
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--", "systemctl", action, unit)
+	cmd := exec.CommandContext(ctx, "systemctl", action, unit)
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("nsenter systemctl %s %s failed: %v, output: %s", action, unit, err, string(output))
+		return fmt.Errorf("systemctl %s %s failed: %v, output: %s", action, unit, err, string(output))
 	}
 	return nil
+}
+
+func runViaSystemdRun(ctx context.Context, name string, args ...string) ([]byte, error) {
+	runnerArgs := []string{"--wait", "--pipe", "--collect", "--quiet", name}
+	runnerArgs = append(runnerArgs, args...)
+	return exec.CommandContext(ctx, "systemd-run", runnerArgs...).CombinedOutput()
 }
