@@ -63,22 +63,25 @@ func (e *DockerLocalExecutor) GetWireGuardStats(ctx context.Context) (map[string
 
 func (e *DockerLocalExecutor) resolveWGBinary(ctx context.Context) (string, error) {
 	e.wgBinaryMu.Lock()
-	if e.wgBinaryResolved {
-		path := e.wgBinaryPath
-		e.wgBinaryMu.Unlock()
-		if path == "" {
-			return "", fmt.Errorf("wg binary not found on host")
-		}
+	path := e.wgBinaryPath
+	e.wgBinaryMu.Unlock()
+	if path != "" {
 		return path, nil
 	}
-	e.wgBinaryMu.Unlock()
 
 	candidates := []string{
 		strings.TrimSpace(os.Getenv("OGS_WG_BINARY_PATH")),
-		"wg",
 		"/usr/bin/wg",
 		"/usr/local/bin/wg",
 		"/usr/sbin/wg",
+		"/sbin/wg",
+		"/bin/wg",
+		"wg",
+	}
+	if out, err := runViaSystemdRun(ctx, "/bin/sh", "-lc", "command -v wg || true"); err == nil {
+		if v := strings.TrimSpace(string(out)); v != "" {
+			candidates = append([]string{v}, candidates...)
+		}
 	}
 
 	var lastMsg string
@@ -92,7 +95,6 @@ func (e *DockerLocalExecutor) resolveWGBinary(ctx context.Context) (string, erro
 		if err == nil {
 			e.wgBinaryMu.Lock()
 			e.wgBinaryPath = bin
-			e.wgBinaryResolved = true
 			e.wgBinaryMu.Unlock()
 			return bin, nil
 		}
@@ -103,15 +105,10 @@ func (e *DockerLocalExecutor) resolveWGBinary(ctx context.Context) (string, erro
 		if !isMissingExecutableMsg(lastMsg) {
 			e.wgBinaryMu.Lock()
 			e.wgBinaryPath = bin
-			e.wgBinaryResolved = true
 			e.wgBinaryMu.Unlock()
 			return bin, nil
 		}
 	}
 
-	e.wgBinaryMu.Lock()
-	e.wgBinaryResolved = true
-	e.wgBinaryPath = ""
-	e.wgBinaryMu.Unlock()
 	return "", fmt.Errorf("wg binary not found on host (tried: %s). last error: %s", strings.Join(candidates, ", "), lastMsg)
 }
