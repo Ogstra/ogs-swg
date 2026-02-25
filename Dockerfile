@@ -14,8 +14,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# CGO_ENABLED=1 because we use SQLite (github.com/mattn/go-sqlite3)
-RUN CGO_ENABLED=1 GOOS=linux go build -o ogs-swg ./cmd/server
+# CGO disabled for portable builds (SQLite uses modernc.org/sqlite in this project).
+RUN CGO_ENABLED=0 GOOS=linux go build -o ogs-swg ./cmd/server
 
 # Stage 3: Final runtime image
 FROM debian:bookworm-slim

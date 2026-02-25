@@ -1,6 +1,6 @@
 # OGS-SWG Panel
 
-Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with three execution modes: bare metal, Docker on the same host, and remote SSH orchestration. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
+Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
 ![Dashboard Screenshot](https://github.com/user-attachments/assets/db59dedb-9f6e-4a70-8421-756fb7156a12)
 
@@ -36,8 +36,7 @@ The mode is selected at startup:
 | Priority | Condition | Mode |
 |----------|-----------|------|
 | 1 | `execution_mode = docker_local` | **Docker Local** — panel in Docker on the same host as singbox/wg |
-| 2 | `ssh_host` is set (and not docker_local) | **SSH** — tunnels commands over SSH to a remote host |
-| 3 | *(default)* | **Local** — bare metal, commands run directly on the host |
+| 2 | *(default)* | **Local** — bare metal, commands run directly on the host |
 
 ### Local (bare metal)
 
@@ -76,20 +75,6 @@ environment:
   - OGS_LISTEN_ADDR=:18080   # blue (green uses :18081)
 ```
 
-### SSH (remote)
-
-Panel connects to the host over SSH. Set `ssh_host` and credentials; `execution_mode` is ignored:
-
-```json
-{
-  "ssh_host": "10.0.0.5",
-  "ssh_port": 22,
-  "ssh_user": "ogs_agent",
-  "ssh_key_path": "/app/secrets/ssh_key",
-  "ssh_known_hosts_path": "/app/secrets/known_hosts"
-}
-```
-
 ## Quick Start
 
 **Bare metal:**
@@ -104,7 +89,7 @@ cd docker/docker-local
 OGS_API_KEY=changeme docker compose up -d
 ```
 
-**Docker + SSH** (panel in Docker, singbox/wg on a different host):
+**Standalone Docker compose**:
 ```bash
 git clone https://github.com/Ogstra/ogs-swg && cd ogs-swg
 docker compose up -d
@@ -138,12 +123,6 @@ Parameters are merged from `config.json`, `.env`, and environment variables.
   "wireguard_config_path": "/etc/wireguard/wg0.conf",
 
   "execution_mode": "",
-
-  "ssh_host": "",
-  "ssh_port": 22,
-  "ssh_user": "ogs_agent",
-  "ssh_key_path": "/app/secrets/ssh_key",
-  "ssh_known_hosts_path": "/app/secrets/known_hosts",
 
   "sysctl_whitelist": [
     "net.ipv4.ip_forward",

@@ -19,7 +19,7 @@ GOARCH="$(go env GOARCH)"
 BIN_NAME="ogs-swg-${GOOS}-${GOARCH}"
 BUILD_DIR="./build"
 mkdir -p "$BUILD_DIR"
-go build -mod=vendor -o "$BUILD_DIR/$BIN_NAME" cmd/server/main.go
+CGO_ENABLED=0 go build -mod=vendor -o "$BUILD_DIR/$BIN_NAME" cmd/server/main.go
 
 echo -e "${GREEN}>>> Step 2: Building Frontend (React)...${NC}"
 cd frontend

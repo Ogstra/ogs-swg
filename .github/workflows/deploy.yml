@@ -2,7 +2,7 @@ name: Build and Deploy
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
     paths:
       - 'cmd/**'
       - 'internal/**'
@@ -158,6 +158,12 @@ jobs:
             set -euo pipefail
             umask 077
             export COMPOSE_IGNORE_ORPHANS=1
+
+            DEPLOY_PATH='${{ secrets.DEPLOY_PATH }}'
+            PROXY_PORT='${{ secrets.OGS_PORT || '8080' }}'
+            SLOT_BLUE_PORT='18080'
+            SLOT_GREEN_PORT='18081'
+
             as_root() {
               if [ "$(id -u)" -eq 0 ]; then
                 "$@"
@@ -166,252 +172,38 @@ jobs:
               fi
             }
 
-            EXECUTION_MODE="${{ secrets.OGS_EXECUTION_MODE }}"
+            mkdir -p "$DEPLOY_PATH/data" "$DEPLOY_PATH/docker/bluegreen/nginx"
+            as_root mkdir -p /etc/sing-box /etc/wireguard
+            cd "$DEPLOY_PATH"
 
-            # Navigate to deployment directory (create if missing)
-            mkdir -p ${{ secrets.DEPLOY_PATH }}/config
-            mkdir -p ${{ secrets.DEPLOY_PATH }}/data
-            mkdir -p ${{ secrets.DEPLOY_PATH }}/docker/bluegreen/nginx
-            # Ensure system config directories exist
-            as_root mkdir -p /etc/sing-box
-            as_root mkdir -p /etc/wireguard
-            cd ${{ secrets.DEPLOY_PATH }}
-            # Serialize deploys on host to avoid concurrent runs mutating shared files.
             if command -v flock >/dev/null 2>&1; then
               exec 9>/tmp/ogs-swg-deploy.lock
               flock -x 9
             fi
-            
-            # SSH key and known_hosts setup — SSH mode only.
-            # In docker_local mode the app runs on the same host; no agent SSH key is needed.
-            if [ "$EXECUTION_MODE" != "docker_local" ]; then
 
-            rm -f config/ssh_key
-            rm -f config/known_hosts
-
-            # Write runtime SSH key for app container.
-            KEY_SECRET_SOURCE="OGS_AGENT_SSH_KEY_B64"
-            if [ -z "${{ secrets.OGS_AGENT_SSH_KEY_B64 }}" ]; then
-              echo "Secret OGS_AGENT_SSH_KEY_B64 is required and cannot be empty."
-              exit 1
-            fi
-            printf '%s' "${{ secrets.OGS_AGENT_SSH_KEY_B64 }}" | base64 -d > config/ssh_key
-            echo "Runtime SSH key source: ${KEY_SECRET_SOURCE}"
-            chmod 600 config/ssh_key
-            PREFLIGHT_SSH_KEY="$(mktemp)"
-            trap 'rm -f "${PREFLIGHT_SSH_KEY}"' EXIT
-            cp config/ssh_key "${PREFLIGHT_SSH_KEY}"
-            chmod 600 "${PREFLIGHT_SSH_KEY}"
-            echo "Runtime ssh_key bytes: $(wc -c < config/ssh_key)"
-            if ! ssh-keygen -y -f "${PREFLIGHT_SSH_KEY}" >/tmp/ogs-runtime.pub 2>/dev/null; then
-              echo "Runtime ssh_key is not a valid private key. Check ${KEY_SECRET_SOURCE} (do not use .pub content)."
-              exit 1
-            fi
-            echo "Runtime public key fingerprint (derived from private):"
-            ssh-keygen -lf /tmp/ogs-runtime.pub || true
-            RUNTIME_PUBKEY="$(cat /tmp/ogs-runtime.pub)"
-            rm -f /tmp/ogs-runtime.pub
-
-            if [ -n "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" ]; then
-              printf '%s' "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT_B64 }}" | base64 -d > /tmp/ogs-known-hosts.input
-            else
-              printf '%s\n' "${{ secrets.OGS_SSH_KNOWN_HOSTS_CONTENT }}" > /tmp/ogs-known-hosts.input
-            fi
-            {
-              cat /tmp/ogs-known-hosts.input
-              # Refresh runtime host fingerprint for post-migration/new-VM scenarios.
-              ssh-keyscan -p "${{ secrets.VPS_PORT }}" -H "${{ secrets.VPS_HOST }}" 2>/dev/null || true
-            } | awk 'NF' | sort -u > config/known_hosts
-            rm -f /tmp/ogs-known-hosts.input
-            chmod 600 config/known_hosts
-
-            fi  # end SSH-only: key + known_hosts
-
-            # Best-effort cleanup of legacy single-slot deployment container
             docker rm -f ogs-swg >/dev/null 2>&1 || true
-            
-            # Common env for blue/green app stacks + proxy
-            if [ "$EXECUTION_MODE" = "docker_local" ]; then
-            cat > .env.bluegreen <<EOF
+
+            cat > .env.bluegreen <<EOF_ENV
             OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
             OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
             OGS_EXECUTION_MODE=docker_local
-            OGS_SLOT_BLUE_PORT=18080
-            OGS_SLOT_GREEN_PORT=18081
+            OGS_SLOT_BLUE_PORT=${SLOT_BLUE_PORT}
+            OGS_SLOT_GREEN_PORT=${SLOT_GREEN_PORT}
             OGS_API_KEY=${{ secrets.OGS_API_KEY }}
             OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}
             OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
-            EOF
-            else
-            cat > .env.bluegreen <<EOF
-            OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
-            OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
-            OGS_EXECUTION_MODE=ssh
-            OGS_SLOT_BLUE_PORT=18080
-            OGS_SLOT_GREEN_PORT=18081
-            OGS_SSH_HOST=${{ secrets.VPS_HOST }}
-            OGS_SSH_PORT=${{ secrets.VPS_PORT || 22 }}
-            OGS_SSH_USER=${{ secrets.OGS_AGENT_USER }}
-            OGS_API_KEY=${{ secrets.OGS_API_KEY }}
-            OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}
-            OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
-            EOF
-            fi
+            EOF_ENV
             chmod 600 .env.bluegreen
 
-            # SSH runtime validation, sudoers provisioning, preflight — SSH mode only.
-            if [ "$EXECUTION_MODE" != "docker_local" ]; then
-
-            # Validate required runtime SSH inputs before any rollout
-            RUNTIME_SSH_USER="${{ secrets.OGS_AGENT_USER }}"
-            RUNTIME_SSH_HOST="${{ secrets.VPS_HOST }}"
-            RUNTIME_SSH_PORT="${{ secrets.VPS_PORT || 22 }}"
-            if [ -z "${RUNTIME_SSH_USER}" ]; then
-              echo "Secret OGS_AGENT_USER is empty. Aborting deploy."
-              exit 1
-            fi
-
-            # Ensure runtime user has required NOPASSWD sudo rules (idempotent) when not root.
-            if [ "${RUNTIME_SSH_USER}" != "root" ]; then
-              WG_BIN="$(command -v wg || echo /usr/bin/wg)"
-              CAT_BIN="$(command -v cat || echo /usr/bin/cat)"
-              INSTALL_BIN="$(command -v install || echo /usr/bin/install)"
-              SYSTEMCTL_BIN="$(command -v systemctl || echo /usr/bin/systemctl)"
-              JOURNALCTL_BIN="$(command -v journalctl || echo /usr/bin/journalctl)"
-              SYSCTL_BIN="$(command -v sysctl || echo /usr/sbin/sysctl)"
-              SUDOERS_TMP="$(mktemp)"
-              SUDOERS_PATH="/etc/sudoers.d/ogs-swg-${RUNTIME_SSH_USER}"
-              {
-                echo "Defaults:${RUNTIME_SSH_USER} !requiretty"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart sing-box"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop sing-box"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start sing-box"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active sing-box"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart wg-quick@wg0"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} stop wg-quick@wg0"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} start wg-quick@wg0"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} is-active wg-quick@wg0"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/wireguard/wg0.conf"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/wireguard/wg0.conf"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${CAT_BIN} /etc/sing-box/config.json"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${INSTALL_BIN} -m * /tmp/ogs-swg-*.tmp /etc/sing-box/config.json"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -w *"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${SYSCTL_BIN} -n *"
-                echo "${RUNTIME_SSH_USER} ALL=(root) NOPASSWD: ${JOURNALCTL_BIN} -u sing-box *"
-              } > "${SUDOERS_TMP}"
-              as_root visudo -cf "${SUDOERS_TMP}"
-              as_root mkdir -p /etc/sudoers.d
-              as_root install -m 440 "${SUDOERS_TMP}" "${SUDOERS_PATH}"
-              rm -f "${SUDOERS_TMP}"
-
-              # Grant CAP_NET_ADMIN to wg binary so the agent can run wg commands without sudo.
-              as_root setcap cap_net_admin+ep "${WG_BIN}"
-
-              # Allow agent group to read sing-box config directly (avoids sudo cat on every request).
-              AGENT_GROUP="$(id -gn "${RUNTIME_SSH_USER}" 2>/dev/null || echo "${RUNTIME_SSH_USER}")"
-              as_root chgrp "${AGENT_GROUP}" /etc/sing-box/config.json
-              as_root chmod 640 /etc/sing-box/config.json
-            fi
-
-            if [ ! -s config/ssh_key ] || [ "$(wc -c < config/ssh_key)" -lt 100 ]; then
-              echo "Runtime ssh_key is missing or too small. Check OGS_AGENT_SSH_KEY_B64 secret."
-              exit 1
-            fi
-            if command -v ssh-keygen >/dev/null 2>&1; then
-              echo "Runtime private key fingerprint (from ${KEY_SECRET_SOURCE}):"
-              ssh-keygen -lf "${PREFLIGHT_SSH_KEY}" || true
-            fi
-            # Ensure runtime public key is present on target user authorized_keys.
-            # This keeps app runtime SSH key and target host trust in sync after key rotations.
-            if command -v ssh-keygen >/dev/null 2>&1; then
-              if [ -n "${RUNTIME_PUBKEY}" ]; then
-                if [ "${RUNTIME_SSH_USER}" = "root" ]; then
-                  RUNTIME_HOME="/root"
-                else
-                  RUNTIME_HOME="$(getent passwd "${RUNTIME_SSH_USER}" 2>/dev/null | cut -d: -f6 || true)"
-                  if [ -z "${RUNTIME_HOME}" ]; then
-                    RUNTIME_HOME="/home/${RUNTIME_SSH_USER}"
-                  fi
-                fi
-                AUTH_DIR="${RUNTIME_HOME}/.ssh"
-                AUTH_FILE="${AUTH_DIR}/authorized_keys"
-                AUTH_TMP="$(mktemp)"
-                as_root mkdir -p "${AUTH_DIR}"
-                as_root chmod 700 "${AUTH_DIR}"
-                as_root chown "${RUNTIME_SSH_USER}:${RUNTIME_SSH_USER}" "${AUTH_DIR}"
-                as_root sh -c "cat '${AUTH_FILE}' 2>/dev/null || true" > "${AUTH_TMP}"
-                if ! grep -Fqx "${RUNTIME_PUBKEY}" "${AUTH_TMP}"; then
-                  echo "${RUNTIME_PUBKEY}" >> "${AUTH_TMP}"
-                fi
-                as_root install -m 600 -o "${RUNTIME_SSH_USER}" -g "${RUNTIME_SSH_USER}" "${AUTH_TMP}" "${AUTH_FILE}"
-                rm -f "${AUTH_TMP}"
-              fi
-            fi
-            if [ ! -s config/known_hosts ] || [ "$(wc -c < config/known_hosts)" -lt 40 ]; then
-              echo "Runtime known_hosts is missing or too small. Check OGS_SSH_KNOWN_HOSTS_CONTENT/VPS_HOST/VPS_PORT."
-              exit 1
-            fi
-            if [ -z "${{ secrets.OGS_API_KEY }}" ] && { [ -z "${{ secrets.OGS_ADMIN_USER }}" ] || [ -z "${{ secrets.OGS_ADMIN_PASSWORD }}" ]; }; then
-              echo "Set OGS_API_KEY (recommended) or both OGS_ADMIN_USER and OGS_ADMIN_PASSWORD for deploy diagnostics auth."
-              exit 1
-            fi
-            if command -v ssh-keygen >/dev/null 2>&1; then
-              if ! ssh-keygen -F "[${RUNTIME_SSH_HOST}]:${RUNTIME_SSH_PORT}" -f config/known_hosts >/dev/null 2>&1 \
-                && ! ssh-keygen -F "${RUNTIME_SSH_HOST}" -f config/known_hosts >/dev/null 2>&1; then
-                echo "known_hosts does not contain expected SSH target ${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}. Aborting deploy."
-                exit 1
-              fi
-            else
-              if ! grep -Eq "(\\[${RUNTIME_SSH_HOST}\\]:${RUNTIME_SSH_PORT}|${RUNTIME_SSH_HOST})" config/known_hosts; then
-                echo "known_hosts does not contain expected SSH target ${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}. Aborting deploy."
-                exit 1
-              fi
-            fi
-            if command -v ssh >/dev/null 2>&1; then
-              if command -v ssh-keygen >/dev/null 2>&1; then
-                echo "Remote authorized_keys fingerprints for ${RUNTIME_SSH_USER}:"
-                ssh \
-                  -i "${PREFLIGHT_SSH_KEY}" \
-                  -p "${RUNTIME_SSH_PORT}" \
-                  -o BatchMode=yes \
-                  -o IdentitiesOnly=yes \
-                  -o StrictHostKeyChecking=yes \
-                  -o UserKnownHostsFile=config/known_hosts \
-                  -o ConnectTimeout=8 \
-                  "${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}" \
-                  "ssh-keygen -lf ~/.ssh/authorized_keys 2>/dev/null || { echo 'authorized_keys not readable'; exit 1; }" || true
-              fi
-              if ! ssh \
-                -i "${PREFLIGHT_SSH_KEY}" \
-                -p "${RUNTIME_SSH_PORT}" \
-                -o BatchMode=yes \
-                -o IdentitiesOnly=yes \
-                -o StrictHostKeyChecking=yes \
-                -o UserKnownHostsFile=config/known_hosts \
-                -o ConnectTimeout=8 \
-                "${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}" \
-                "echo runtime-ssh-ok" >/dev/null 2>&1; then
-                echo "Runtime SSH auth preflight failed for ${RUNTIME_SSH_USER}@${RUNTIME_SSH_HOST}:${RUNTIME_SSH_PORT}."
-                echo "Verify ${KEY_SECRET_SOURCE} matches ${RUNTIME_SSH_USER} authorized_keys on the new VM."
-                exit 1
-              fi
-            else
-              echo "OpenSSH client not found on VPS; skipping runtime SSH auth preflight."
-            fi
-
-            fi  # end SSH-only: validation + sudoers + preflight
-
-            PROXY_PORT="${{ secrets.OGS_PORT || '8080' }}"
             PORT_OWNERS="$(docker ps --filter "publish=${PROXY_PORT}" --format '{{.Names}}')"
             if [ -n "$PORT_OWNERS" ] && ! echo "$PORT_OWNERS" | grep -qx 'ogs-swg-proxy'; then
               echo "Port ${PROXY_PORT} is already allocated by: ${PORT_OWNERS}. Aborting deploy."
               exit 1
             fi
 
-            # Shared network for proxy + blue/green targets
             docker network create ogs-bg-net >/dev/null 2>&1 || true
 
-            BAKE_SECONDS="${{ github.event.inputs.bake_seconds || '600' }}"
+            BAKE_SECONDS='${{ github.event.inputs.bake_seconds || '600' }}'
             case "$BAKE_SECONDS" in
               ''|*[!0-9]*)
                 echo "Invalid bake_seconds: ${BAKE_SECONDS} (must be numeric)."
@@ -423,37 +215,32 @@ jobs:
               exit 1
             fi
 
-            # Determine active slot (default blue on first deployment)
-            ACTIVE="blue"
+            ACTIVE='blue'
             if [ -f .bluegreen.active ]; then
               ACTIVE="$(cat .bluegreen.active)"
             fi
-            if [ "$ACTIVE" = "blue" ]; then
-              TARGET="green"
+            if [ "$ACTIVE" = 'blue' ]; then
+              TARGET='green'
             else
-              TARGET="blue"
+              TARGET='blue'
             fi
 
-            FORCE_SLOT="${{ github.event.inputs.force_slot || 'auto' }}"
-            if [ "$FORCE_SLOT" = "blue" ] || [ "$FORCE_SLOT" = "green" ]; then
+            FORCE_SLOT='${{ github.event.inputs.force_slot || 'auto' }}'
+            if [ "$FORCE_SLOT" = 'blue' ] || [ "$FORCE_SLOT" = 'green' ]; then
               TARGET="$FORCE_SLOT"
             fi
 
-            # First deployment bootstrap: if no active container is running, force blue as target
             if ! docker ps --format '{{.Names}}' | grep -Eq '^ogs-swg-(blue|green)$'; then
-              ACTIVE="none"
-              if [ "$FORCE_SLOT" = "green" ]; then
-                TARGET="green"
+              ACTIVE='none'
+              if [ "$FORCE_SLOT" = 'green' ]; then
+                TARGET='green'
               else
-                TARGET="blue"
+                TARGET='blue'
               fi
             fi
 
-            SLOT_BLUE_PORT="${OGS_SLOT_BLUE_PORT:-18080}"
-            SLOT_GREEN_PORT="${OGS_SLOT_GREEN_PORT:-18081}"
-
             slot_port() {
-              if [ "$1" = "blue" ]; then
+              if [ "$1" = 'blue' ]; then
                 printf '%s' "$SLOT_BLUE_PORT"
               else
                 printf '%s' "$SLOT_GREEN_PORT"
@@ -462,49 +249,33 @@ jobs:
 
             slot_upstream() {
               local slot="$1"
-              if [ "$EXECUTION_MODE" = "docker_local" ]; then
-                printf 'host.docker.internal:%s' "$(slot_port "$slot")"
-              else
-                printf 'ogs-swg-%s:8080' "$slot"
-              fi
+              printf 'host.docker.internal:%s' "$(slot_port "$slot")"
             }
 
-            CURL_HOST_ARGS=()
-            if [ "$EXECUTION_MODE" = "docker_local" ]; then
-              CURL_HOST_ARGS=(--add-host host.docker.internal:host-gateway)
-            fi
+            CURL_HOST_ARGS=(--add-host host.docker.internal:host-gateway)
+            echo "ACTIVE=$ACTIVE TARGET=$TARGET FORCE_SLOT=$FORCE_SLOT EXECUTION_MODE=docker_local"
 
-            echo "ACTIVE=$ACTIVE TARGET=$TARGET FORCE_SLOT=$FORCE_SLOT EXECUTION_MODE=$EXECUTION_MODE"
-
-            # Render nginx upstream config for ACTIVE (or TARGET on first deploy)
             UPSTREAM_SLOT="$ACTIVE"
-            if [ "$UPSTREAM_SLOT" = "none" ]; then
+            if [ "$UPSTREAM_SLOT" = 'none' ]; then
               UPSTREAM_SLOT="$TARGET"
             fi
             sed "s/__UPSTREAM__/$(slot_upstream "$UPSTREAM_SLOT")/g" \
               docker/bluegreen/nginx/default.conf.template > docker/bluegreen/nginx/default.conf
 
-            # Ensure proxy is up first (keeps current traffic path stable)
             docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.proxy.yml up -d
-            # Keep watchdog running; it handles post-bake GC and runtime rollback.
             docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.monitor.yml up -d --build
 
-            # Deploy target slot (use *-local.yml compose in docker_local mode)
-            COMPOSE_SLOT="docker/bluegreen/docker-compose.${TARGET}.yml"
-            if [ "$EXECUTION_MODE" = "docker_local" ]; then
-              COMPOSE_SLOT="docker/bluegreen/docker-compose.${TARGET}-local.yml"
-            fi
-            docker compose --env-file .env.bluegreen -f "${COMPOSE_SLOT}" pull
-            if ! docker compose --env-file .env.bluegreen -f "${COMPOSE_SLOT}" up -d; then
+            COMPOSE_SLOT="docker/bluegreen/docker-compose.${TARGET}-local.yml"
+            docker compose --env-file .env.bluegreen -f "$COMPOSE_SLOT" pull
+            if ! docker compose --env-file .env.bluegreen -f "$COMPOSE_SLOT" up -d; then
               echo "Target slot ogs-swg-${TARGET} did not stabilize on initial up; continuing with health probes."
             fi
 
-            # Healthcheck target slot (expects 401 for invalid login)
             HEALTH_OK=0
             TARGET_BASE_URL="http://$(slot_upstream "$TARGET")"
             for i in $(seq 1 60); do
               TARGET_STATE="$(docker inspect -f '{{.State.Status}}' "ogs-swg-${TARGET}" 2>/dev/null || true)"
-              if [ "$TARGET_STATE" = "exited" ] || [ "$TARGET_STATE" = "dead" ]; then
+              if [ "$TARGET_STATE" = 'exited' ] || [ "$TARGET_STATE" = 'dead' ]; then
                 echo "Target slot ogs-swg-${TARGET} is in terminal state: ${TARGET_STATE}"
                 break
               fi
@@ -514,7 +285,7 @@ jobs:
                 -X POST "${TARGET_BASE_URL}/api/login" \
                 -H 'Content-Type: application/json' \
                 -d '{"username":"invalid","password":"invalid"}' || true)"
-              if [ "$CODE" = "401" ] || [ "$CODE" = "405" ]; then
+              if [ "$CODE" = '401' ] || [ "$CODE" = '405' ]; then
                 HEALTH_OK=1
                 break
               fi
@@ -528,75 +299,13 @@ jobs:
               exit 1
             fi
 
-            # Validate runtime SSH connectivity via diagnostic endpoint (SSH mode only).
-            if [ "$EXECUTION_MODE" != "docker_local" ]; then
-            # Try API key first when provided, then fallback to admin login if available.
-            DIAG_CODE=""
-            DIAG_DETAIL=""
-            DIAG_DONE=0
-            for i in $(seq 1 40); do
-              if [ -n "${{ secrets.OGS_API_KEY }}" ]; then
-                DIAG_CODE="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
-                  -s -o /dev/null -w '%{http_code}' \
-                  -H "X-API-Key: ${{ secrets.OGS_API_KEY }}" \
-                  "${TARGET_BASE_URL}/api/diag/ssh" || true)"
-                if [ "$DIAG_CODE" = "200" ]; then
-                  DIAG_DONE=1
-                  DIAG_DETAIL=""
-                  break
-                else
-                  DIAG_DETAIL="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
-                    -s -H "X-API-Key: ${{ secrets.OGS_API_KEY }}" \
-                    "${TARGET_BASE_URL}/api/diag/ssh" || true)"
-                fi
-              fi
-
-              if [ "$DIAG_DONE" -ne 1 ] && [ -n "${{ secrets.OGS_ADMIN_USER }}" ] && [ -n "${{ secrets.OGS_ADMIN_PASSWORD }}" ]; then
-                AUTH_JSON="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
-                  -s -X POST "${TARGET_BASE_URL}/api/login" \
-                  -H 'Content-Type: application/json' \
-                  -d "{\"username\":\"${{ secrets.OGS_ADMIN_USER }}\",\"password\":\"${{ secrets.OGS_ADMIN_PASSWORD }}\"}" || true)"
-                TOKEN="$(printf '%s' "$AUTH_JSON" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
-                if [ -n "$TOKEN" ]; then
-                  DIAG_CODE="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
-                    -s -o /dev/null -w '%{http_code}' \
-                    -H "Authorization: Bearer ${TOKEN}" \
-                    "${TARGET_BASE_URL}/api/diag/ssh" || true)"
-                  if [ "$DIAG_CODE" = "200" ]; then
-                    DIAG_DONE=1
-                    DIAG_DETAIL=""
-                    break
-                  else
-                    DIAG_DETAIL="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
-                      -s -H "Authorization: Bearer ${TOKEN}" \
-                      "${TARGET_BASE_URL}/api/diag/ssh" || true)"
-                  fi
-                fi
-              fi
-
-              sleep 3
-            done
-
-            if [ "$DIAG_CODE" != "200" ]; then
-              echo "SSH diagnostic endpoint failed with HTTP ${DIAG_CODE}. Aborting promotion."
-              if [ -n "$DIAG_DETAIL" ]; then
-                echo "$DIAG_DETAIL"
-              fi
-              docker logs --tail 100 "ogs-swg-${TARGET}" || true
-              exit 1
-            fi
-
-            fi  # end SSH-only: diag check
-
-            # Promote target slot by switching nginx upstream
             sed "s/__UPSTREAM__/$(slot_upstream "$TARGET")/g" \
               docker/bluegreen/nginx/default.conf.template > docker/bluegreen/nginx/default.conf
             docker exec ogs-swg-proxy nginx -t
             docker exec ogs-swg-proxy nginx -s reload
             echo "$TARGET" > .bluegreen.active
 
-            # Persist rollback/baking metadata for watchdog.
-            if [ "$ACTIVE" = "blue" ] || [ "$ACTIVE" = "green" ]; then
+            if [ "$ACTIVE" = 'blue' ] || [ "$ACTIVE" = 'green' ]; then
               echo "$ACTIVE" > .bluegreen.previous
               BAKE_UNTIL="$(( $(date +%s) + BAKE_SECONDS ))"
               echo "$BAKE_UNTIL" > .bluegreen.bake_until
@@ -604,5 +313,4 @@ jobs:
               rm -f .bluegreen.previous .bluegreen.bake_until
             fi
 
-            # Optional: trim old images only after successful switch
             docker image prune -f

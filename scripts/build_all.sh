@@ -42,7 +42,7 @@ if [ "$SKIP_BACKEND" = false ]; then
   BIN_NAME="ogs-swg-${GOOS}-${GOARCH}"
   mkdir -p "$BUILD_DIR"
   echo ">>> Backend build (${BIN_NAME})"
-  go build $GO_MOD_FLAG -o "$BUILD_DIR/$BIN_NAME" cmd/server/main.go
+  CGO_ENABLED=0 go build $GO_MOD_FLAG -o "$BUILD_DIR/$BIN_NAME" cmd/server/main.go
 fi
 
 if [ "$SKIP_FRONTEND" = false ]; then

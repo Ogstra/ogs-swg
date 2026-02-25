@@ -12,6 +12,7 @@
   "singbox_config_path": "/etc/sing-box/config.json",
   "singbox_api_addr": "127.0.0.1:8080",
   "wireguard_config_path": "/etc/wireguard/wg0.conf",
+  "execution_mode": "",
   "managed_inbounds": [
     "in-reality",
     "in-reality-2"
@@ -31,12 +32,8 @@
   "wg_retention_days": 30,
   "aggregation_enabled": false,
   "aggregation_days": 7,
-  "ssh_host": "",
-  "ssh_port": 22,
-  "ssh_user": "",
-  "ssh_key_path": "./data/ssh_key",
-  "ssh_key_passphrase": "",
-  "ssh_known_hosts_path": "./data/known_hosts",
-  "ssh_insecure_ignore_host_key": false,
-  "sysctl_whitelist": null
+  "sysctl_whitelist": [
+    "net.ipv4.ip_forward",
+    "net.ipv6.conf.all.forwarding"
+  ]
 }
