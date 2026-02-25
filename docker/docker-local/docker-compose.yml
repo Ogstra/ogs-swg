@@ -36,6 +36,7 @@ services:
 
       # Activates DockerLocalExecutor (host D-Bus mode)
       - OGS_EXECUTION_MODE=docker_local
+      - OGS_SINGBOX_BINARY_PATH=${OGS_SINGBOX_BINARY_PATH:-}
 
       - OGS_API_KEY=${OGS_API_KEY}
 
