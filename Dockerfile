@@ -25,11 +25,13 @@ FROM debian:bookworm-slim
 # - tzdata for timezones
 # - iproute2 for ip command (optional debug)
 # - curl/wget for healthcheck
+# - systemd package for systemd-run/systemctl/journalctl binaries (docker_local mode)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     tzdata \
     iproute2 \
     curl \
+    systemd \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -14,9 +14,8 @@ import (
 
 // DockerLocalExecutor runs inside a Docker container co-located with the host's
 // singbox and wg-quick systemd services. File operations delegate to LocalExecutor
-// (bind mounts expose host paths at the same container paths). Service/log
-// operations use host D-Bus/journal bind mounts; host-only commands run via
-// systemd-run through the host manager.
+// (bind mounts expose host paths at the same container paths). Host-level
+// commands run via systemd-run through the host manager.
 type DockerLocalExecutor struct {
 	local  *LocalExecutor
 	config *core.Config
@@ -39,7 +38,7 @@ func (e *DockerLocalExecutor) ReadConfig(ctx context.Context, path string) ([]by
 	return e.local.ReadConfig(ctx, path)
 }
 
-// Service management: use host D-Bus bind mount directly.
+// Service management: run via host systemd manager (systemd-run).
 
 func (e *DockerLocalExecutor) RestartService(ctx context.Context, name string) error {
 	return e.runSystemctl(ctx, "restart", name)
@@ -55,18 +54,17 @@ func (e *DockerLocalExecutor) StopService(ctx context.Context, name string) erro
 
 func (e *DockerLocalExecutor) IsServiceActive(ctx context.Context, name string) (bool, error) {
 	unit := resolveUnitName(name)
-	cmd := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", unit)
-	out, err := cmd.CombinedOutput()
+	out, err := runViaSystemdRun(ctx, "systemctl", "--system", "is-active", "--quiet", unit)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			// systemctl is-active exits 0=active, 3=inactive/failed, 4=not found.
-			// Any other non-zero code (e.g. 1) means systemctl itself failed.
+			// Any other non-zero code (e.g. 1) means systemctl/systemd-run failed.
 			code := exitErr.ExitCode()
 			if code == 3 || code == 4 {
 				return false, nil // service is inactive or unit not found — not an error
 			}
-			// code 1 (or other unexpected): systemctl printed an error; surface it.
-			return false, fmt.Errorf("systemctl is-active %s (exit %d): %s", unit, code, strings.TrimSpace(string(out)))
+			// code 1 (or other unexpected): command printed an error; surface it.
+			return false, fmt.Errorf("host systemctl is-active %s (exit %d): %s", unit, code, strings.TrimSpace(string(out)))
 		}
 		return false, err
 	}
@@ -97,11 +95,10 @@ func (e *DockerLocalExecutor) GetSysctl(ctx context.Context, key string) (string
 	return strings.TrimSpace(string(output)), nil
 }
 
-// Journal: host journal files are bind-mounted read-only; query directly.
+// Journal: query from host context via systemd-run.
 
 func (e *DockerLocalExecutor) ReadJournal(ctx context.Context, unit string, limit int) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
-	out, err := cmd.CombinedOutput()
+	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
 	if err != nil {
 		return nil, analyzeJournalError(out, err)
 	}
@@ -113,8 +110,7 @@ func (e *DockerLocalExecutor) SearchJournal(ctx context.Context, unit, query str
 	if fetchLimit > 5000 {
 		fetchLimit = 5000
 	}
-	cmd := exec.CommandContext(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
-	out, err := cmd.CombinedOutput()
+	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
 	if err != nil {
 		return nil, analyzeJournalError(out, err)
 	}
@@ -151,9 +147,9 @@ func (e *DockerLocalExecutor) Close() error {
 
 func (e *DockerLocalExecutor) runSystemctl(ctx context.Context, action, name string) error {
 	unit := resolveUnitName(name)
-	cmd := exec.CommandContext(ctx, "systemctl", action, unit)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("systemctl %s %s failed: %v, output: %s", action, unit, err, string(output))
+	output, err := runViaSystemdRun(ctx, "systemctl", "--system", action, unit)
+	if err != nil {
+		return fmt.Errorf("host systemctl %s %s failed: %v, output: %s", action, unit, err, string(output))
 	}
 	return nil
 }
