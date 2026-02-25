@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -47,7 +48,12 @@ func (e *DockerLocalExecutor) ValidateSingboxConfig(ctx context.Context, content
 	if msg == "" && lastErr != nil {
 		msg = lastErr.Error()
 	}
-	return fmt.Errorf("invalid config: sing-box binary not found on host (tried: %s). last error: %s", strings.Join(candidates, ", "), msg)
+
+	// In docker_local mode, binary discovery can fail even when service control
+	// works (host/container runtime differences). Do not block config saves in
+	// this specific case; service restart/apply will still surface real runtime errors.
+	log.Printf("docker_local: skipping sing-box pre-validation because executable could not be resolved (tried: %s). last error: %s", strings.Join(candidates, ", "), msg)
+	return nil
 }
 
 func isMissingExecutableMsg(msg string) bool {
