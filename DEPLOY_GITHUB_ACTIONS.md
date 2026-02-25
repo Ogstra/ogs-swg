@@ -1,176 +1,80 @@
-# OGS-SWG GitHub Actions Deployment Guide
+# OGS-SWG Deployment Guide
 
-This guide details how to set up the CI/CD pipeline and the necessary security configurations on your target host.
+## SSH Mode (Remote)
 
-## CI/CD Blue-Green Deploy (GitHub Actions)
+The panel runs in Docker and manages singbox/wg on a separate host over SSH. This is what the included `deploy.yml` pipeline uses.
 
-Automatic deploys use a **blue/green topology with watchdog**:
+### GitHub Actions Secrets
 
-- Local development keeps using `docker-compose.yml`.
-- CI uses `docker/bluegreen/*`.
-- `nginx` routes traffic to active slot (`blue` or `green`).
-- Deploy pipeline updates the inactive slot, validates health + `/api/diag/ssh`, then does an atomic nginx reload.
-- Old slot stays alive during a baking window (default `600s`), then watchdog stops it to recover RAM.
-- If active slot degrades later, watchdog can auto-rollback to the previous slot and logs the incident.
-- Image deploy is immutable per run (`ogs-swg:${GITHUB_SHA}`), while `latest` is still pushed for convenience.
-
-### Required Actions Secrets
-
-Configure these secrets in your GitHub repository settings:
-
-- `DOCKER_USERNAME`
-- `DOCKER_PASSWORD`
-- `VPS_HOST`
-- `VPS_PORT`
-- `VPS_USER`
-- `VPS_SSH_KEY` (deployment SSH key for Actions -> VPS)
-- `OGS_AGENT_SSH_KEY_B64` (base64-encoded runtime private key; required)
-- `OGS_SSH_KNOWN_HOSTS_CONTENT` (known_hosts content for runtime SSH trust)
-- `OGS_SSH_KNOWN_HOSTS_CONTENT_B64` (optional; base64 of known_hosts content, preferred over multiline secret)
-- `OGS_AGENT_USER`
-- `OGS_API_KEY` (recommended; used by deploy to validate `/api/diag/ssh`)
-- `OGS_ADMIN_USER` and `OGS_ADMIN_PASSWORD` (optional fallback only if `OGS_API_KEY` is not set)
-- `OGS_PORT` (optional, defaults to `8080`)
+| Secret | Required | Notes |
+|--------|----------|-------|
+| `DOCKER_USERNAME` | Yes | |
+| `DOCKER_PASSWORD` | Yes | |
+| `VPS_HOST` | Yes | Target host |
+| `VPS_PORT` | Yes | |
+| `VPS_USER` | Yes | User with sudo on the VPS |
+| `VPS_SSH_KEY` | Yes | Deployment key for Actions → VPS |
+| `OGS_AGENT_SSH_KEY_B64` | Yes | Base64-encoded runtime private key |
+| `OGS_AGENT_USER` | Yes | Runtime SSH user on the target host |
+| `OGS_SSH_KNOWN_HOSTS_CONTENT_B64` | Yes | Base64 of known_hosts (preferred) |
+| `OGS_SSH_KNOWN_HOSTS_CONTENT` | Fallback | Plaintext known_hosts if B64 not set |
+| `OGS_API_KEY` | Recommended | Used by deploy to validate `/api/diag/ssh` |
+| `OGS_ADMIN_USER` / `OGS_ADMIN_PASSWORD` | Optional | Fallback if `OGS_API_KEY` not set |
+| `OGS_PORT` | Optional | Default `8080` |
+| `DEPLOY_ARCH` | Optional | Default `linux/amd64,linux/arm64` |
 
 ### Deploy Behavior
 
-- If `OGS_AGENT_USER` is not `root`, the workflow provisions `/etc/sudoers.d/ogs-swg-<user>` automatically on each deploy.
-- The file is replaced (idempotent), so rules are not duplicated.
-- This requires `${VPS_USER}` to be `root` or have passwordless sudo for `visudo`/`install` to `/etc/sudoers.d`.
-- If `OGS_AGENT_USER=root`, sudoers provisioning is skipped.
-- Workflow also syncs the runtime SSH public key (derived from `OGS_AGENT_SSH_KEY_B64`) into `${OGS_AGENT_USER}` `authorized_keys` on each deploy.
+- If `OGS_AGENT_USER` is not `root`, the workflow provisions `/etc/sudoers.d/ogs-swg-<user>` automatically on each deploy (idempotent).
+- Requires `VPS_USER` to be `root` or have passwordless sudo for `visudo`/`install` to `/etc/sudoers.d`.
+- Workflow syncs the runtime SSH public key into `OGS_AGENT_USER` `authorized_keys` on each deploy.
 
 ### Manual Deploy Control
 
-Inputs for `force_slot` in Actions > Build and Deploy > Run workflow:
-- `auto`: normal toggle
-- `blue`: force deploy to blue
-- `green`: force deploy to green
+In Actions → Build and Deploy → Run workflow:
 
-**Optional Input:**
-- `bake_seconds`: baking window duration before watchdog stops old slot (range `60..86400`, default `600`).
+| Input | Values | Default |
+|-------|--------|---------|
+| `force_slot` | `auto` / `blue` / `green` | `auto` |
+| `bake_seconds` | `60..86400` | `600` |
 
 ### Runtime State Files
 
 Location: `${DEPLOY_PATH}` on VPS.
-- `.bluegreen.active`: current live slot.
-- `.bluegreen.previous`: previous slot used for rollback.
-- `.bluegreen.bake_until`: unix timestamp; when elapsed, old slot is stopped.
-- `.bluegreen.events.log`: watchdog events and recovered incidents.
 
-### Memory Usage
-Stable target after baking: `1 app active + 1 watchdog + 1 nginx proxy`.
+| File | Purpose |
+|------|---------|
+| `.bluegreen.active` | Current live slot |
+| `.bluegreen.previous` | Previous slot used for rollback |
+| `.bluegreen.bake_until` | Unix timestamp; when elapsed, old slot is stopped |
+| `.bluegreen.events.log` | Watchdog events and recovered incidents |
 
----
+Stable memory target after baking: `1 app + 1 watchdog + 1 nginx`.
 
-## Docker Local Mode
+### Host Security Setup
 
-Use this mode when the panel runs as a Docker container **on the same host** as the singbox and wg-quick systemd services. No SSH connection is needed — the container uses `nsenter -t 1` to reach host namespaces, and bind mounts expose service config files at the same paths.
+Configure a restricted agent user on the target host. If `OGS_AGENT_USER=root`, skip this section — the pipeline handles it automatically for non-root users.
 
-### Container requirements
-
-| Requirement | Compose key | Purpose |
-|-------------|------------|---------|
-| Host PID namespace | `pid: host` | `nsenter -t 1` targets the host init process |
-| `SYS_PTRACE` capability | `cap_add: [SYS_PTRACE]` | Required to enter host namespaces via nsenter |
-| `SYS_ADMIN` capability | `cap_add: [SYS_ADMIN]` | Required for sysctl writes |
-| Bind mounts | `volumes` | `/etc/sing-box` and `/etc/wireguard` at the same host paths |
-
-### Standalone deployment
-
-```bash
-cd docker/docker-local
-cp ../../config.json.example ../../data/config.json
-# Edit data/config.json — set execution_mode to "docker_local" (already set via env var)
-OGS_API_KEY=changeme docker compose up -d
-```
-
-The compose file at `docker/docker-local/docker-compose.yml` sets `OGS_EXECUTION_MODE=docker_local` automatically.
-
-### Blue/Green deployment (local mode)
-
-Use `docker-compose.blue-local.yml` / `docker-compose.green-local.yml` instead of the SSH variants:
-
-```bash
-# Deploy blue slot
-docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.blue-local.yml up -d
-```
-
-**Required `.env.bluegreen` keys** (SSH keys are NOT needed):
-
-```env
-OGS_IMAGE=yourusername/ogs-swg:<sha>
-OGS_PROXY_HTTP_PORT=8080
-OGS_API_KEY=<your-api-key>
-OGS_ADMIN_USER=<admin>
-OGS_ADMIN_PASSWORD=<password>
-```
-
-Keys **not required** for local mode: `OGS_SSH_HOST`, `OGS_SSH_PORT`, `OGS_SSH_USER`, `OGS_AGENT_SSH_KEY_B64`, `OGS_SSH_KNOWN_HOSTS_*`.
-
-### GitHub Actions CI/CD (local mode)
-
-The existing `deploy.yml` is designed for SSH mode. For Docker Local mode, the main differences are:
-
-- **Skip** the SSH key setup steps (`OGS_AGENT_SSH_KEY_B64`, known_hosts, sudoers provisioning).
-- **Skip** the `/api/diag/ssh` connectivity validation step (there is no SSH connection to validate).
-- Use `docker-compose.*-local.yml` files instead of `docker-compose.blue.yml` / `docker-compose.green.yml`.
-- Health validation still applies (the HTTP `401` login check is mode-agnostic).
-
-A dedicated `deploy-local.yml` workflow can be set up with the following simplified secrets:
-
-| Secret | Required |
-|--------|----------|
-| `DOCKER_USERNAME` | Yes |
-| `DOCKER_PASSWORD` | Yes |
-| `VPS_HOST` | Yes |
-| `VPS_PORT` | Yes |
-| `VPS_USER` | Yes |
-| `VPS_SSH_KEY` | Yes (deployment key for Actions → VPS) |
-| `OGS_API_KEY` | Yes |
-| `OGS_PORT` | Optional (default `8080`) |
-| `DEPLOY_ARCH` | Optional (default `linux/amd64,linux/arm64`) |
-
-### No sudoers configuration needed
-
-In Docker Local mode, privilege escalation is handled by Docker capabilities (`SYS_PTRACE`, `SYS_ADMIN`) rather than sudoers rules. No user account setup on the target host is required beyond Docker access.
-
----
-
-## Security Setup (Target Host)
-
-For **Remote Mode** to function securely (which is what the CI/CD pipeline deploys), a restricted user account must be configured on the server node. Do not use the root account directly.
-
-### 1. Create the Agent User
-
-On your server (Target Host):
+**1. Create the agent user:**
 ```bash
 sudo useradd -m -s /bin/bash ogs_agent
 ```
 
-### 2. Configure SSH Access
-
-Add the public key generated during the deployment step:
+**2. Add the SSH public key:**
 ```bash
 sudo mkdir -p /home/ogs_agent/.ssh
-echo "YOUR_PUBLIC_KEY_CONTENT" | sudo tee -a /home/ogs_agent/.ssh/authorized_keys
+echo "YOUR_PUBLIC_KEY" | sudo tee -a /home/ogs_agent/.ssh/authorized_keys
 sudo chown -R ogs_agent:ogs_agent /home/ogs_agent/.ssh
-sudo chmod 700 /home/ogs_agent/.ssh
-sudo chmod 600 /home/ogs_agent/.ssh/authorized_keys
+sudo chmod 700 /home/ogs_agent/.ssh && sudo chmod 600 /home/ogs_agent/.ssh/authorized_keys
 ```
 
-### 3. Configure Sudo Privileges (Least Privilege)
-
-The application requires limited `sudo` access to manage services. Create a sudoers file:
-
+**3. Configure sudo (least privilege):**
 ```bash
 sudo visudo -f /etc/sudoers.d/ogs_agent
 ```
 
-Add the following configuration (verify paths for your distribution):
-
 ```sudoers
-# Allow ogs_agent to manage specific services and files without password
+Defaults:ogs_agent !requiretty
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart sing-box
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop sing-box
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl start sing-box
@@ -191,6 +95,64 @@ ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -n *
 ogs_agent ALL=(root) NOPASSWD: /usr/bin/journalctl -u sing-box *
 ```
 
-*Note: The sysctl and wg patterns use wildcards but are validated strictly within the application code via a whitelist.*
-*If your runtime SSH user is `root`, these sudoers entries are not required.*
-*If you use this repository's GitHub Actions deploy, this sudoers file is provisioned automatically when `OGS_AGENT_USER` is not `root`.*
+*Sysctl and wg wildcards are validated server-side via a strict whitelist.*
+
+---
+
+## Docker Local Mode
+
+Panel runs as a Docker container on the **same host** as singbox and wg-quick (systemd). No SSH connection needed — file ops use bind mounts, system commands use `nsenter -t 1`.
+
+### Container Requirements
+
+| Compose key | Value | Purpose |
+|-------------|-------|---------|
+| `pid` | `host` | `nsenter -t 1` targets the host init process |
+| `cap_add` | `SYS_PTRACE` | Enter host namespaces via nsenter |
+| `cap_add` | `SYS_ADMIN` | sysctl writes |
+| `volumes` | `/etc/sing-box:/etc/sing-box` | Bind-mount at same host path |
+| `volumes` | `/etc/wireguard:/etc/wireguard` | Bind-mount at same host path |
+
+### Standalone Deployment
+
+```bash
+cd docker/docker-local
+OGS_API_KEY=changeme docker compose up -d
+```
+
+### Blue/Green Deployment
+
+Use the `-local` compose variants instead of the SSH ones:
+
+```bash
+docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.blue-local.yml up -d
+```
+
+**`.env.bluegreen` for local mode:**
+
+```env
+OGS_IMAGE=yourusername/ogs-swg:<sha>
+OGS_PROXY_HTTP_PORT=8080
+OGS_API_KEY=<your-api-key>
+OGS_ADMIN_USER=<admin>
+OGS_ADMIN_PASSWORD=<password>
+```
+
+### GitHub Actions Secrets
+
+For a `deploy-local.yml` workflow. SSH keys and sudoers are not needed.
+
+| Secret | Required | Notes |
+|--------|----------|-------|
+| `DOCKER_USERNAME` | Yes | |
+| `DOCKER_PASSWORD` | Yes | |
+| `VPS_HOST` | Yes | |
+| `VPS_PORT` | Yes | |
+| `VPS_USER` | Yes | |
+| `VPS_SSH_KEY` | Yes | Deployment key for Actions → VPS |
+| `OGS_API_KEY` | Yes | |
+| `OGS_EXECUTION_MODE` | Yes | Set to `docker_local` |
+| `OGS_PORT` | Optional | Default `8080` |
+| `DEPLOY_ARCH` | Optional | Default `linux/amd64,linux/arm64` |
+
+Differences from SSH mode pipeline: skip SSH key setup, known_hosts, sudoers provisioning, and `/api/diag/ssh` validation. Health check (`401` on invalid login) still applies.

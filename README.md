@@ -1,38 +1,8 @@
 # OGS-SWG Panel
 
-Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a **single binary** with native support for **local execution** and **remote orchestration via SSH**. Designed for high-availability deployment cycles using automated **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
+Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with three execution modes: bare metal, Docker on the same host, and remote SSH orchestration. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
 ![Dashboard Screenshot](https://github.com/user-attachments/assets/db59dedb-9f6e-4a70-8421-756fb7156a12)
-
-## Features
-
-### Supported Protocols
-
-| Protocol | Transport |
-|----------|-----------|
-| VLESS    | Reality / TLS |
-| VMess    | TLS / None |
-| Trojan   | TLS |
-| WireGuard | UDP |
-
-### Core Capabilities
-*   **User Management**: create, modify, and delete users with multi-inbound support.
-*   **Traffic Monitoring**: real-time stats for Sing-box users and WireGuard peers.
-*   **Service Control**: restart/stop services and reload configs from the UI.
-*   **Logs**: view and filter system logs (Sing-box/Systemd).
-
-### System Management
-*   **Sysctl Management**: view and edit allowed kernel parameters via whitelist.
-*   **Self-Signed Certificates**: generate ephemeral certificates for internal testing.
-*   **Raw Configuration**: direct editing of underlying JSON configurations (Experimental).
-
-## Architecture
-
-| Mode | Trigger | Executor |
-|------|---------|----------|
-| **Local** | `ssh_host` empty, `execution_mode` unset | Runs `systemctl`, `wg`, `ip` directly on host (bare metal) |
-| **Docker Local** | `execution_mode: docker_local` | Panel runs in Docker on the same host; file ops via bind mounts, system commands via `nsenter -t 1` |
-| **Remote** | `ssh_host` set | Tunnels commands over SSH (Docker, ECS/Fargate) |
 
 ## Tech Stack
 *   **Runtime**: Go 1.24
@@ -43,32 +13,104 @@ Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** bui
 *   **Config**: [Cleanenv](https://github.com/ilyakaznacheev/cleanenv) (`.env` + JSON)
 *   **Validation**: [Validator v10](https://github.com/go-playground/validator)
 
-## Quick Start (Docker)
+## Features
 
+| Protocol | Security | Transport |
+|----------|----------|-----------|
+| VLESS    | Reality / None | TCP |
+| VMess    | TLS / None | TCP · WebSocket |
+| Trojan   | TLS | TCP |
+| WireGuard | WireGuard | UDP |
+
+*   **User Management**: create, modify, and delete users with multi-inbound support.
+*   **Traffic Monitoring**: real-time stats for Sing-box users and WireGuard peers.
+*   **Service Control**: restart/stop services and reload configs from the UI.
+*   **Logs**: view and filter system logs (Sing-box/Systemd).
+*   **Sysctl Management**: view and edit allowed kernel parameters via whitelist.
+*   **Raw Configuration**: direct editing of underlying JSON configurations (Experimental).
+
+## Execution Modes
+
+The mode is selected at startup — `ssh_host` always wins:
+
+| Priority | Condition | Mode |
+|----------|-----------|------|
+| 1 | `ssh_host` is set | **SSH** — tunnels commands over SSH to a remote host |
+| 2 | `execution_mode = docker_local` | **Docker Local** — panel in Docker on the same host as singbox/wg |
+| 3 | *(default)* | **Local** — bare metal, commands run directly on the host |
+
+### Local (bare metal)
+
+No extra config. Run the binary directly on the host:
+
+```bash
+./ogs-swg -config config.json
+```
+
+### Docker Local
+
+Panel runs as a Docker container on the same host as singbox and wg-quick (systemd). File operations use bind mounts; system commands go through `nsenter -t 1` into host namespaces. Required compose keys:
+
+```yaml
+pid: host
+cap_add:
+  - SYS_PTRACE   # nsenter
+  - SYS_ADMIN    # sysctl
+environment:
+  - OGS_EXECUTION_MODE=docker_local
+volumes:
+  - /etc/sing-box:/etc/sing-box
+  - /etc/wireguard:/etc/wireguard
+```
+
+Ready-to-use compose at [`docker/docker-local/docker-compose.yml`](docker/docker-local/docker-compose.yml).
+
+### SSH (remote)
+
+Panel connects to the host over SSH. Set `ssh_host` and credentials; `execution_mode` is ignored:
+
+```json
+{
+  "ssh_host": "10.0.0.5",
+  "ssh_port": 22,
+  "ssh_user": "ogs_agent",
+  "ssh_key_path": "/app/secrets/ssh_key",
+  "ssh_known_hosts_path": "/app/secrets/known_hosts"
+}
+```
+
+## Quick Start
+
+**Bare metal:**
+```bash
+git clone https://github.com/Ogstra/ogs-swg && cd ogs-swg
+./ogs-swg -config config.json
+```
+
+**Docker Local** (panel in Docker, singbox/wg as systemd on the same host):
+```bash
+cd docker/docker-local
+OGS_API_KEY=changeme docker compose up -d
+```
+
+**Docker + SSH** (panel in Docker, singbox/wg on a different host):
 ```bash
 git clone https://github.com/Ogstra/ogs-swg && cd ogs-swg
 docker compose up -d
 ```
 
----
-
 ### Bootstrap Admin
 
-On the first run, if no admin user exists, you must set the following environment variables to create one:
+On the first run, if no admin user exists, set:
 ```yaml
 environment:
   - OGS_ADMIN_USER=admin
   - OGS_ADMIN_PASSWORD=admin
 ```
-*(Add these to your `docker-compose.yml` or export them for bare metal execution)*
 
-### Main Config (`config.json` / `.env`)
+## Configuration
 
-Configuration parameters are merged from environment variables, `.env`, and `config.json`. The execution mode is selected in this order:
-
-1.  **SSH Mode**: `ssh_host` is set — always takes priority.
-2.  **Docker Local Mode**: `execution_mode: "docker_local"` — panel in Docker on the same host as singbox/wg.
-3.  **Local Mode** (default): everything else — bare metal, commands run directly on the host.
+Parameters are merged from `config.json`, `.env`, and environment variables.
 
 ```json
 {
@@ -86,7 +128,7 @@ Configuration parameters are merged from environment variables, `.env`, and `con
 
   "execution_mode": "",
 
-  "ssh_host": "10.0.0.5",
+  "ssh_host": "",
   "ssh_port": 22,
   "ssh_user": "ogs_agent",
   "ssh_key_path": "/app/secrets/ssh_key",
@@ -99,30 +141,11 @@ Configuration parameters are merged from environment variables, `.env`, and `con
 }
 ```
 
-**Docker Local quick-start** (panel in Docker, singbox/wg as systemd on the same host):
+## CI/CD
 
-```bash
-cd docker/docker-local
-OGS_API_KEY=changeme docker compose up -d
-```
+Production-ready **Blue/Green deployment** via GitHub Actions: dual-slot topology (blue/green) managed by a watchdog, atomic Nginx reload on promotion, configurable baking window, and automatic rollback on health degradation.
 
-See [DEPLOY_GITHUB_ACTIONS.md](DEPLOY_GITHUB_ACTIONS.md) for full setup details including blue/green and CI/CD.
-
-## CI/CD Pipeline Architecture
-
-This repository includes a production-ready **Blue/Green Deployment** pipeline using GitHub Actions suitable for zero-downtime updates.
-
-### Deployment Strategy
-
-The system employs a dual-slot topology (Blue/Green) managed by a watchdog process:
-1.  **Nginx Proxy**: Routes traffic to the currently active slot.
-2.  **Atomic Switch**: The pipeline deploys the new version to the inactive slot, validates health, and performs an atomic reload of Nginx.
-3.  **Baking Window**: The old slot remains active for a configurable duration (default 10 minutes) to handle in-flight connections.
-4.  **Automatic Rollback**: A watchdog monitors the health of the active slot. If degradation is detected, it automatically reverts traffic to the previous stable slot.
-
-For detailed setup instructions, including required secrets, `sudoers` configuration, and host hardening steps, please refer to the deployment guide:
-
-**[GitHub Actions Deployment Guide (DEPLOY_GITHUB_ACTIONS.md)](DEPLOY_GITHUB_ACTIONS.md)**
+**[Full setup guide → DEPLOY_GITHUB_ACTIONS.md](DEPLOY_GITHUB_ACTIONS.md)**
 
 ## License
 

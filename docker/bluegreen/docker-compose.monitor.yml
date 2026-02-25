@@ -1,3 +1,13 @@
+# OGS-SWG — Watchdog / monitor
+#
+# Lightweight sidecar that manages the blue/green lifecycle:
+#   - Stops the old slot after the baking window expires
+#   - Polls the active slot health; rolls back to the previous slot on failure
+#   - Logs all events to EVENTS_FILE
+#
+# The monitor needs the Docker socket to start/stop app containers,
+# and read/write access to the deploy state files in DEPLOY_ROOT.
+
 services:
   ogs-swg-monitor:
     build:
@@ -5,25 +15,42 @@ services:
       dockerfile: Dockerfile
     container_name: ogs-swg-monitor
     restart: unless-stopped
-    mem_limit: 15m
+    mem_limit: 15m    # watchdog is intentionally lightweight
     cpus: 0.20
+
     environment:
+      # Root directory where blue/green state files are stored
       - DEPLOY_ROOT=/state
-      - ACTIVE_FILE=.bluegreen.active
-      - PREVIOUS_FILE=.bluegreen.previous
-      - BAKE_UNTIL_FILE=.bluegreen.bake_until
-      - EVENTS_FILE=.bluegreen.events.log
+
+      # State files (relative to DEPLOY_ROOT)
+      - ACTIVE_FILE=.bluegreen.active          # current live slot (blue|green)
+      - PREVIOUS_FILE=.bluegreen.previous      # previous slot (rollback target)
+      - BAKE_UNTIL_FILE=.bluegreen.bake_until  # unix timestamp; old slot stopped after this
+      - EVENTS_FILE=.bluegreen.events.log      # append-only incident log
+
+      # Nginx config paths (used to rewrite upstream on rollback)
       - NGINX_TEMPLATE=docker/bluegreen/nginx/default.conf.template
       - NGINX_CONF=docker/bluegreen/nginx/default.conf
-      - HEALTH_URL_PATH=/api/login
+
+      # Health probe — polled on the active slot container
+      - HEALTH_URL_PATH=/api/login             # endpoint path inside the app
       - HEALTH_METHOD=POST
       - HEALTH_BODY={"username":"invalid","password":"invalid"}
-      - HEALTH_EXPECT=401,405
+      - HEALTH_EXPECT=401,405                  # expected HTTP codes for a live app
+
+      # Polling interval in seconds
       - CHECK_INTERVAL_SEC=15
+
+      # Consecutive failures before triggering rollback
       - FAIL_THRESHOLD=4
+
     volumes:
+      # Docker socket — needed to start/stop blue and green containers
       - /var/run/docker.sock:/var/run/docker.sock
+
+      # Deploy root — state files and nginx config live here
       - ../../:/state
+
     networks:
       - ogs_bg_net
 
