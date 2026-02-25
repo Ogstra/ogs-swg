@@ -166,6 +166,8 @@ jobs:
               fi
             }
 
+            EXECUTION_MODE="${{ secrets.OGS_EXECUTION_MODE }}"
+
             # Navigate to deployment directory (create if missing)
             mkdir -p ${{ secrets.DEPLOY_PATH }}/config
             mkdir -p ${{ secrets.DEPLOY_PATH }}/data
@@ -180,10 +182,13 @@ jobs:
               flock -x 9
             fi
             
-            # Clean up potential directory conflict
+            # SSH key and known_hosts setup — SSH mode only.
+            # In docker_local mode the app runs on the same host; no agent SSH key is needed.
+            if [ "$EXECUTION_MODE" != "docker_local" ]; then
+
             rm -f config/ssh_key
             rm -f config/known_hosts
-            
+
             # Write runtime SSH key for app container.
             KEY_SECRET_SOURCE="OGS_AGENT_SSH_KEY_B64"
             if [ -z "${{ secrets.OGS_AGENT_SSH_KEY_B64 }}" ]; then
@@ -220,10 +225,21 @@ jobs:
             rm -f /tmp/ogs-known-hosts.input
             chmod 600 config/known_hosts
 
+            fi  # end SSH-only: key + known_hosts
+
             # Best-effort cleanup of legacy single-slot deployment container
             docker rm -f ogs-swg >/dev/null 2>&1 || true
             
             # Common env for blue/green app stacks + proxy
+            if [ "$EXECUTION_MODE" = "docker_local" ]; then
+            cat > .env.bluegreen <<EOF
+            OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
+            OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
+            OGS_API_KEY=${{ secrets.OGS_API_KEY }}
+            OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}
+            OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
+            EOF
+            else
             cat > .env.bluegreen <<EOF
             OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
             OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
@@ -234,7 +250,11 @@ jobs:
             OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}
             OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
             EOF
+            fi
             chmod 600 .env.bluegreen
+
+            # SSH runtime validation, sudoers provisioning, preflight — SSH mode only.
+            if [ "$EXECUTION_MODE" != "docker_local" ]; then
 
             # Validate required runtime SSH inputs before any rollout
             RUNTIME_SSH_USER="${{ secrets.OGS_AGENT_USER }}"
@@ -373,6 +393,8 @@ jobs:
               echo "OpenSSH client not found on VPS; skipping runtime SSH auth preflight."
             fi
 
+            fi  # end SSH-only: validation + sudoers + preflight
+
             PROXY_PORT="${{ secrets.OGS_PORT || '8080' }}"
             PORT_OWNERS="$(docker ps --filter "publish=${PROXY_PORT}" --format '{{.Names}}')"
             if [ -n "$PORT_OWNERS" ] && ! echo "$PORT_OWNERS" | grep -qx 'ogs-swg-proxy'; then
@@ -436,9 +458,13 @@ jobs:
             # Keep watchdog running; it handles post-bake GC and runtime rollback.
             docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.monitor.yml up -d --build
 
-            # Deploy target slot
-            docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml pull
-            if ! docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.${TARGET}.yml up -d; then
+            # Deploy target slot (use *-local.yml compose in docker_local mode)
+            COMPOSE_SLOT="docker/bluegreen/docker-compose.${TARGET}.yml"
+            if [ "$EXECUTION_MODE" = "docker_local" ]; then
+              COMPOSE_SLOT="docker/bluegreen/docker-compose.${TARGET}-local.yml"
+            fi
+            docker compose --env-file .env.bluegreen -f "${COMPOSE_SLOT}" pull
+            if ! docker compose --env-file .env.bluegreen -f "${COMPOSE_SLOT}" up -d; then
               echo "Target slot ogs-swg-${TARGET} did not stabilize on initial up; continuing with health probes."
             fi
 
@@ -470,7 +496,8 @@ jobs:
               exit 1
             fi
 
-            # Validate runtime SSH connectivity via diagnostic endpoint.
+            # Validate runtime SSH connectivity via diagnostic endpoint (SSH mode only).
+            if [ "$EXECUTION_MODE" != "docker_local" ]; then
             # Try API key first when provided, then fallback to admin login if available.
             DIAG_CODE=""
             DIAG_DETAIL=""
@@ -526,6 +553,8 @@ jobs:
               docker logs --tail 100 "ogs-swg-${TARGET}" || true
               exit 1
             fi
+
+            fi  # end SSH-only: diag check
 
             # Promote target slot by switching nginx upstream
             sed "s/__UPSTREAM__/ogs-swg-${TARGET}:8080/g" \
