@@ -63,6 +63,80 @@ Stable target after baking: `1 app active + 1 watchdog + 1 nginx proxy`.
 
 ---
 
+## Docker Local Mode
+
+Use this mode when the panel runs as a Docker container **on the same host** as the singbox and wg-quick systemd services. No SSH connection is needed — the container uses `nsenter -t 1` to reach host namespaces, and bind mounts expose service config files at the same paths.
+
+### Container requirements
+
+| Requirement | Compose key | Purpose |
+|-------------|------------|---------|
+| Host PID namespace | `pid: host` | `nsenter -t 1` targets the host init process |
+| `SYS_PTRACE` capability | `cap_add: [SYS_PTRACE]` | Required to enter host namespaces via nsenter |
+| `SYS_ADMIN` capability | `cap_add: [SYS_ADMIN]` | Required for sysctl writes |
+| Bind mounts | `volumes` | `/etc/sing-box` and `/etc/wireguard` at the same host paths |
+
+### Standalone deployment
+
+```bash
+cd docker/docker-local
+cp ../../config.json.example ../../data/config.json
+# Edit data/config.json — set execution_mode to "docker_local" (already set via env var)
+OGS_API_KEY=changeme docker compose up -d
+```
+
+The compose file at `docker/docker-local/docker-compose.yml` sets `OGS_EXECUTION_MODE=docker_local` automatically.
+
+### Blue/Green deployment (local mode)
+
+Use `docker-compose.blue-local.yml` / `docker-compose.green-local.yml` instead of the SSH variants:
+
+```bash
+# Deploy blue slot
+docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.blue-local.yml up -d
+```
+
+**Required `.env.bluegreen` keys** (SSH keys are NOT needed):
+
+```env
+OGS_IMAGE=yourusername/ogs-swg:<sha>
+OGS_PROXY_HTTP_PORT=8080
+OGS_API_KEY=<your-api-key>
+OGS_ADMIN_USER=<admin>
+OGS_ADMIN_PASSWORD=<password>
+```
+
+Keys **not required** for local mode: `OGS_SSH_HOST`, `OGS_SSH_PORT`, `OGS_SSH_USER`, `OGS_AGENT_SSH_KEY_B64`, `OGS_SSH_KNOWN_HOSTS_*`.
+
+### GitHub Actions CI/CD (local mode)
+
+The existing `deploy.yml` is designed for SSH mode. For Docker Local mode, the main differences are:
+
+- **Skip** the SSH key setup steps (`OGS_AGENT_SSH_KEY_B64`, known_hosts, sudoers provisioning).
+- **Skip** the `/api/diag/ssh` connectivity validation step (there is no SSH connection to validate).
+- Use `docker-compose.*-local.yml` files instead of `docker-compose.blue.yml` / `docker-compose.green.yml`.
+- Health validation still applies (the HTTP `401` login check is mode-agnostic).
+
+A dedicated `deploy-local.yml` workflow can be set up with the following simplified secrets:
+
+| Secret | Required |
+|--------|----------|
+| `DOCKER_USERNAME` | Yes |
+| `DOCKER_PASSWORD` | Yes |
+| `VPS_HOST` | Yes |
+| `VPS_PORT` | Yes |
+| `VPS_USER` | Yes |
+| `VPS_SSH_KEY` | Yes (deployment key for Actions → VPS) |
+| `OGS_API_KEY` | Yes |
+| `OGS_PORT` | Optional (default `8080`) |
+| `DEPLOY_ARCH` | Optional (default `linux/amd64,linux/arm64`) |
+
+### No sudoers configuration needed
+
+In Docker Local mode, privilege escalation is handled by Docker capabilities (`SYS_PTRACE`, `SYS_ADMIN`) rather than sudoers rules. No user account setup on the target host is required beyond Docker access.
+
+---
+
 ## Security Setup (Target Host)
 
 For **Remote Mode** to function securely (which is what the CI/CD pipeline deploys), a restricted user account must be configured on the server node. Do not use the root account directly.

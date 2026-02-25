@@ -1,0 +1,29 @@
+services:
+  ogs-swg-blue:
+    image: ${OGS_IMAGE}
+    container_name: ogs-swg-blue
+    restart: unless-stopped
+    # Required for nsenter to access host namespaces.
+    pid: host
+    cap_add:
+      - SYS_PTRACE  # nsenter
+      - SYS_ADMIN   # sysctl writes via nsenter
+    volumes:
+      - ../../data:/app/data
+      - /etc/sing-box:/etc/sing-box
+      - /etc/wireguard:/etc/wireguard
+    environment:
+      - OGS_LISTEN_ADDR=:8080
+      - OGS_DB_PATH=/app/data/stats.db
+      - OGS_ACCESS_LOG_PATH=/app/data/access.log
+      - OGS_EXECUTION_MODE=docker_local
+      - OGS_API_KEY=${OGS_API_KEY}
+      - OGS_ADMIN_USER=${OGS_ADMIN_USER}
+      - OGS_ADMIN_PASSWORD=${OGS_ADMIN_PASSWORD}
+    networks:
+      - ogs_bg_net
+
+networks:
+  ogs_bg_net:
+    external: true
+    name: ogs-bg-net
