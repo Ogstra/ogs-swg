@@ -1294,13 +1294,11 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 				activeUsersSB = int64(len(lst))
 			}
 		}
-		if !singboxAPILikelySelfTarget(s.config) {
-			if xc := core.NewSingboxClient(s.config.SingboxAPIAddr, s.executor); xc != nil {
-				if stats, err := xc.GetSysStats(); err == nil {
-					sysStats = stats
-				}
-				xc.Close()
+		if xc := core.NewSingboxClient(s.config.SingboxAPIAddr, s.executor); xc != nil {
+			if stats, err := xc.GetSysStats(); err == nil {
+				sysStats = stats
 			}
+			xc.Close()
 		}
 		if s.sampler != nil && s.sampler.IsPaused() {
 			samplerPaused = true

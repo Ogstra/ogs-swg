@@ -658,24 +658,20 @@ func StartServer(cfg *core.Config) *Server {
 	server := NewServer(store, cfg, executor)
 
 	if cfg.EnableSingbox {
-		if singboxAPILikelySelfTarget(cfg) {
-			log.Printf("sing-box sampler disabled: singbox_api_addr=%q points to this panel container in docker_local mode (listen_addr=%q). Set OGS_SINGBOX_API_ADDR to a host-reachable sing-box v2ray_api endpoint.", cfg.SingboxAPIAddr, cfg.ListenAddr)
+		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
+		if cfg.UseStatsSampler {
+			sampler := core.NewStatsSampler(sbClient, store, cfg)
+			sampler.Start()
+			server.sampler = sampler
 		} else {
-			sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
-			if cfg.UseStatsSampler {
-				sampler := core.NewStatsSampler(sbClient, store, cfg)
-				sampler.Start()
-				server.sampler = sampler
-			} else {
-				watcher := core.NewWatcher(cfg.AccessLogPath)
-				watcher.Start()
-				inboundTags := cfg.StatsInbounds
-				if len(inboundTags) == 0 {
-					inboundTags = cfg.ManagedInbounds
-				}
-				calc := core.NewCalculator(watcher, sbClient, store, inboundTags)
-				calc.Start()
+			watcher := core.NewWatcher(cfg.AccessLogPath)
+			watcher.Start()
+			inboundTags := cfg.StatsInbounds
+			if len(inboundTags) == 0 {
+				inboundTags = cfg.ManagedInbounds
 			}
+			calc := core.NewCalculator(watcher, sbClient, store, inboundTags)
+			calc.Start()
 		}
 	} else {
 		log.Printf("sing-box disabled via config; skipping watcher/sampler")
