@@ -51,10 +51,14 @@ func main() {
 		defer store.Close()
 
 		var executor core.SystemExecutor
-		if cfg.SSHHost != "" {
+		switch {
+		case cfg.SSHHost != "":
 			log.Printf("Initializing SSH Executor for host: %s", cfg.SSHHost)
 			executor = sys.NewSSHExecutor(cfg)
-		} else {
+		case cfg.ExecutionMode == "docker_local":
+			log.Printf("Initializing Docker Local Executor (nsenter mode)")
+			executor = sys.NewDockerLocalExecutor(cfg)
+		default:
 			log.Printf("Initializing Local Executor")
 			executor = sys.NewLocalExecutor()
 		}

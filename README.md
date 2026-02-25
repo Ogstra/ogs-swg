@@ -30,7 +30,8 @@ Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** bui
 
 | Mode | Trigger | Executor |
 |------|---------|----------|
-| **Local** | `ssh_host` empty | Runs `systemctl`, `wg`, `ip` directly on host |
+| **Local** | `ssh_host` empty, `execution_mode` unset | Runs `systemctl`, `wg`, `ip` directly on host (bare metal) |
+| **Docker Local** | `execution_mode: docker_local` | Panel runs in Docker on the same host; file ops via bind mounts, system commands via `nsenter -t 1` |
 | **Remote** | `ssh_host` set | Tunnels commands over SSH (Docker, ECS/Fargate) |
 
 ## Tech Stack
@@ -63,17 +64,18 @@ environment:
 
 ### Main Config (`config.json` / `.env`)
 
-Configuration parameters are merged from environment variables, `.env`, and `config.json`. The application automatically detects Local/Remote mode based on `ssh_host`.
+Configuration parameters are merged from environment variables, `.env`, and `config.json`. The execution mode is selected in this order:
 
-*   **Local Mode**: Leave `ssh_host` empty (`""`). The application will execute commands directly on the host machine.
-*   **Remote Mode**: Provide the `ssh_host` and corresponding SSH configuration.
+1.  **SSH Mode**: `ssh_host` is set — always takes priority.
+2.  **Docker Local Mode**: `execution_mode: "docker_local"` — panel in Docker on the same host as singbox/wg.
+3.  **Local Mode** (default): everything else — bare metal, commands run directly on the host.
 
 ```json
 {
   "listen_addr": ":8080",
   "api_key": "CHANGE_ME",
   "database_path": "./data/stats.db",
-  
+
   "singbox_config_path": "/etc/sing-box/config.json",
   "singbox_api_addr": "127.0.0.1:8080",
   "managed_inbounds": ["in-reality", "in-reality-2"],
@@ -82,7 +84,9 @@ Configuration parameters are merged from environment variables, `.env`, and `con
 
   "wireguard_config_path": "/etc/wireguard/wg0.conf",
 
-  "ssh_host": "10.0.0.5", 
+  "execution_mode": "",
+
+  "ssh_host": "10.0.0.5",
   "ssh_port": 22,
   "ssh_user": "ogs_agent",
   "ssh_key_path": "/app/secrets/ssh_key",
@@ -94,6 +98,15 @@ Configuration parameters are merged from environment variables, `.env`, and `con
   ]
 }
 ```
+
+**Docker Local quick-start** (panel in Docker, singbox/wg as systemd on the same host):
+
+```bash
+cd docker/docker-local
+OGS_API_KEY=changeme docker compose up -d
+```
+
+See [DEPLOY_GITHUB_ACTIONS.md](DEPLOY_GITHUB_ACTIONS.md) for full setup details including blue/green and CI/CD.
 
 ## CI/CD Pipeline Architecture
 

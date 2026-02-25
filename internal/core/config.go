@@ -42,6 +42,10 @@ type Config struct {
 	ConfigPath            string   `json:"-"`
 	APIKey                string   `json:"api_key" env:"OGS_API_KEY"`
 
+	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host), "ssh" (remote via SSH).
+	// If ssh_host is set, SSH mode is always used regardless of this field.
+	ExecutionMode string `json:"execution_mode" env:"OGS_EXECUTION_MODE"`
+
 	// SSH Configuration
 	SSHHost                  string `json:"ssh_host" env:"OGS_SSH_HOST"`
 	SSHPort                  int    `json:"ssh_port" env:"OGS_SSH_PORT" env-default:"22"`

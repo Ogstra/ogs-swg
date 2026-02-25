@@ -1,0 +1,25 @@
+services:
+  ogs-swg:
+    image: ${OGS_IMAGE:-yourusername/ogs-swg:latest}
+    container_name: ogs-swg
+    restart: unless-stopped
+    # Required for nsenter to access host namespaces.
+    pid: host
+    cap_add:
+      - SYS_PTRACE  # nsenter
+      - SYS_ADMIN   # sysctl writes via nsenter
+    volumes:
+      - ../../data:/app/data
+      # Bind-mount host service config directories at the same paths so
+      # LocalExecutor file operations work identically to bare-metal.
+      - /etc/sing-box:/etc/sing-box
+      - /etc/wireguard:/etc/wireguard
+    environment:
+      - OGS_LISTEN_ADDR=:8080
+      - OGS_DB_PATH=/app/data/stats.db
+      - OGS_EXECUTION_MODE=docker_local
+      - OGS_API_KEY=${OGS_API_KEY}
+      - OGS_ADMIN_USER=${OGS_ADMIN_USER:-}
+      - OGS_ADMIN_PASSWORD=${OGS_ADMIN_PASSWORD:-}
+    ports:
+      - "${OGS_PORT:-8080}:8080"
