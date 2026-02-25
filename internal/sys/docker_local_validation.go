@@ -23,36 +23,23 @@ func (e *DockerLocalExecutor) ValidateSingboxConfig(ctx context.Context, content
 	}
 	defer os.Remove(tmpPath)
 
-	candidates := e.resolveSingboxCheckCandidates(ctx)
+	bin, ok := e.resolveSingboxCheckBinary(ctx)
+	if !ok {
+		return nil
+	}
 
-	var lastOut []byte
-	var lastErr error
-	for _, bin := range candidates {
-		output, err := runViaSystemdRun(ctx, bin, "check", "-c", tmpPath)
-		if err == nil {
-			return nil
-		}
-		lastOut = output
-		lastErr = err
-
+	output, err := runViaSystemdRun(ctx, bin, "check", "-c", tmpPath)
+	if err != nil {
 		msg := strings.TrimSpace(string(output))
 		if msg == "" {
 			msg = err.Error()
 		}
-		if !isMissingExecutableMsg(msg) {
-			return fmt.Errorf("invalid config: %s", msg)
+		if isMissingExecutableMsg(msg) {
+			e.disableSingboxPreValidation([]string{bin}, msg)
+			return nil
 		}
+		return fmt.Errorf("invalid config: %s", msg)
 	}
-
-	msg := strings.TrimSpace(string(lastOut))
-	if msg == "" && lastErr != nil {
-		msg = lastErr.Error()
-	}
-
-	// In docker_local mode, binary discovery can fail even when service control
-	// works (host/container runtime differences). Do not block config saves in
-	// this specific case; service restart/apply will still surface real runtime errors.
-	log.Printf("docker_local: skipping sing-box pre-validation because executable could not be resolved (tried: %s). last error: %s", strings.Join(candidates, ", "), msg)
 	return nil
 }
 
@@ -61,6 +48,70 @@ func isMissingExecutableMsg(msg string) bool {
 	return strings.Contains(m, "failed to find executable") ||
 		strings.Contains(m, "no such file or directory") ||
 		strings.Contains(m, "executable file not found")
+}
+
+func (e *DockerLocalExecutor) resolveSingboxCheckBinary(ctx context.Context) (string, bool) {
+	e.singboxCheckMu.Lock()
+	if e.singboxCheckUnavailable {
+		e.singboxCheckMu.Unlock()
+		return "", false
+	}
+	if e.singboxCheckBinary != "" {
+		bin := e.singboxCheckBinary
+		e.singboxCheckMu.Unlock()
+		return bin, true
+	}
+	e.singboxCheckMu.Unlock()
+
+	candidates := e.resolveSingboxCheckCandidates(ctx)
+	lastErrMsg := ""
+	for _, bin := range candidates {
+		probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+		output, err := runViaSystemdRun(probeCtx, bin, "version")
+		cancel()
+
+		if err == nil {
+			e.singboxCheckMu.Lock()
+			e.singboxCheckBinary = bin
+			e.singboxCheckMu.Unlock()
+			return bin, true
+		}
+
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			msg = err.Error()
+		}
+		lastErrMsg = msg
+
+		// Non "missing executable" errors often mean the binary exists but the
+		// probe command failed; still use this candidate for real validation.
+		if !isMissingExecutableMsg(msg) {
+			e.singboxCheckMu.Lock()
+			e.singboxCheckBinary = bin
+			e.singboxCheckMu.Unlock()
+			return bin, true
+		}
+	}
+
+	e.disableSingboxPreValidation(candidates, lastErrMsg)
+	return "", false
+}
+
+func (e *DockerLocalExecutor) disableSingboxPreValidation(candidates []string, reason string) {
+	e.singboxCheckMu.Lock()
+	defer e.singboxCheckMu.Unlock()
+
+	if e.singboxCheckUnavailable {
+		return
+	}
+	e.singboxCheckUnavailable = true
+	e.singboxCheckBinary = ""
+
+	log.Printf(
+		"docker_local: skipping sing-box pre-validation because executable could not be resolved (tried: %s). reason: %s",
+		strings.Join(candidates, ", "),
+		reason,
+	)
 }
 
 func (e *DockerLocalExecutor) resolveSingboxCheckCandidates(ctx context.Context) []string {
