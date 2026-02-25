@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -669,9 +670,24 @@ func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
 		v2 = map[string]interface{}{}
 		exp["v2ray_api"] = v2
 	}
-	if _, ok := v2["listen"]; !ok || v2["listen"] == "" {
-		v2["listen"] = c.SingboxAPIAddr
+	listenAddr := strings.TrimSpace(c.SingboxAPIAddr)
+	if v, ok := v2["listen"].(string); ok && strings.TrimSpace(v) != "" {
+		listenAddr = strings.TrimSpace(v)
 	}
+	if c.ExecutionMode == "docker_local" {
+		if host, port, err := net.SplitHostPort(listenAddr); err == nil && port != "" {
+			h := strings.TrimSpace(strings.Trim(host, "[]"))
+			if h == "" || strings.EqualFold(h, "localhost") {
+				listenAddr = net.JoinHostPort("0.0.0.0", port)
+			} else if ip := net.ParseIP(h); ip != nil && ip.IsLoopback() {
+				listenAddr = net.JoinHostPort("0.0.0.0", port)
+			}
+		}
+	}
+	if listenAddr == "" {
+		listenAddr = c.SingboxAPIAddr
+	}
+	v2["listen"] = listenAddr
 	stats, ok := v2["stats"].(map[string]interface{})
 	if !ok {
 		stats = map[string]interface{}{}

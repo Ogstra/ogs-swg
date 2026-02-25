@@ -24,6 +24,14 @@ type DockerLocalExecutor struct {
 	singboxCheckMu          sync.Mutex
 	singboxCheckBinary      string
 	singboxCheckUnavailable bool
+
+	hostGatewayMu       sync.Mutex
+	hostGatewayAddr     string
+	hostGatewayResolved bool
+
+	wgBinaryMu       sync.Mutex
+	wgBinaryPath     string
+	wgBinaryResolved bool
 }
 
 func NewDockerLocalExecutor(cfg *core.Config) *DockerLocalExecutor {
@@ -141,7 +149,13 @@ func (e *DockerLocalExecutor) CheckConnectivity(ctx context.Context) error {
 }
 
 func (e *DockerLocalExecutor) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
-	return e.local.Dial(ctx, network, addr)
+	target := addr
+	if host, port, err := net.SplitHostPort(addr); err == nil && isLoopbackHost(host) {
+		if gw, gwErr := e.resolveHostGatewayAddr(); gwErr == nil && gw != "" {
+			target = net.JoinHostPort(gw, port)
+		}
+	}
+	return e.local.Dial(ctx, network, target)
 }
 
 func (e *DockerLocalExecutor) Close() error {
@@ -175,4 +189,53 @@ func runViaSystemdRun(ctx context.Context, name string, args ...string) ([]byte,
 		return out, ctx.Err()
 	}
 	return out, err
+}
+
+func isLoopbackHost(host string) bool {
+	h := strings.TrimSpace(strings.Trim(host, "[]"))
+	if h == "" || strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func (e *DockerLocalExecutor) resolveHostGatewayAddr() (string, error) {
+	e.hostGatewayMu.Lock()
+	defer e.hostGatewayMu.Unlock()
+
+	if e.hostGatewayResolved {
+		if e.hostGatewayAddr == "" {
+			return "", fmt.Errorf("host gateway not found")
+		}
+		return e.hostGatewayAddr, nil
+	}
+	e.hostGatewayResolved = true
+
+	data, err := os.ReadFile("/proc/net/route")
+	if err != nil {
+		return "", err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, ln := range lines[1:] { // skip header
+		fields := strings.Fields(ln)
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[1] != "00000000" { // default route
+			continue
+		}
+		gwHex := fields[2]
+		v, err := strconv.ParseUint(gwHex, 16, 32)
+		if err != nil {
+			continue
+		}
+		ip := net.IPv4(byte(v), byte(v>>8), byte(v>>16), byte(v>>24)).String()
+		if ip != "" && ip != "0.0.0.0" {
+			e.hostGatewayAddr = ip
+			return ip, nil
+		}
+	}
+	return "", fmt.Errorf("default route gateway not found")
 }
