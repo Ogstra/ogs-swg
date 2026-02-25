@@ -38,8 +38,8 @@ func (e *DockerLocalExecutor) ReadConfig(ctx context.Context, path string) ([]by
 	return e.local.ReadConfig(ctx, path)
 }
 
-// Service management: enter host mount + UTS + network namespaces so systemctl
-// can reach the host's systemd socket.
+// Service management: enter host mount namespace so systemctl
+// can reach the host's systemd D-Bus socket via the filesystem.
 
 func (e *DockerLocalExecutor) RestartService(ctx context.Context, name string) error {
 	return e.runNsenterSystemctl(ctx, "restart", name)
@@ -55,10 +55,18 @@ func (e *DockerLocalExecutor) StopService(ctx context.Context, name string) erro
 
 func (e *DockerLocalExecutor) IsServiceActive(ctx context.Context, name string) (bool, error) {
 	unit := resolveUnitName(name)
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "-u", "-n", "--", "systemctl", "is-active", unit)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() != 0 {
-			return false, nil
+	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--", "systemctl", "is-active", "--quiet", unit)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// systemctl is-active exits 0=active, 3=inactive/failed, 4=not found.
+			// Any other non-zero code (e.g. 1) means nsenter or systemctl itself failed.
+			code := exitErr.ExitCode()
+			if code == 3 || code == 4 {
+				return false, nil // service is inactive or unit not found — not an error
+			}
+			// code 1 (or other unexpected): nsenter/systemctl printed an error; surface it.
+			return false, fmt.Errorf("nsenter systemctl is-active %s (exit %d): %s", unit, code, strings.TrimSpace(string(out)))
 		}
 		return false, err
 	}
@@ -91,11 +99,11 @@ func (e *DockerLocalExecutor) GetSysctl(ctx context.Context, key string) (string
 	return strings.TrimSpace(string(output)), nil
 }
 
-// Journal: enter host mount + UTS namespaces to reach the host's journal files.
+// Journal: enter host mount namespace to reach the host's journal files and socket.
 
 func (e *DockerLocalExecutor) ReadJournal(ctx context.Context, unit string, limit int) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "-u", "--",
-		"journalctl", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
+	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--",
+		"journalctl", "--system", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, analyzeJournalError(out, err)
@@ -108,8 +116,8 @@ func (e *DockerLocalExecutor) SearchJournal(ctx context.Context, unit, query str
 	if fetchLimit > 5000 {
 		fetchLimit = 5000
 	}
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "-u", "--",
-		"journalctl", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
+	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--",
+		"journalctl", "--system", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, analyzeJournalError(out, err)
@@ -147,7 +155,7 @@ func (e *DockerLocalExecutor) Close() error {
 
 func (e *DockerLocalExecutor) runNsenterSystemctl(ctx context.Context, action, name string) error {
 	unit := resolveUnitName(name)
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "-u", "-n", "--", "systemctl", action, unit)
+	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--", "systemctl", action, unit)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("nsenter systemctl %s %s failed: %v, output: %s", action, unit, err, string(output))
 	}

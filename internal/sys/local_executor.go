@@ -211,7 +211,7 @@ func analyzeJournalError(out []byte, err error) error {
 	if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") {
 		return nil // Not strictly an error, just empty
 	}
-	return err
+	return fmt.Errorf("%w: %s", err, msg)
 }
 
 func parseJournalOutput(out []byte) []string {
