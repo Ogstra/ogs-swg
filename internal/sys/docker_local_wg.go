@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -34,21 +33,16 @@ func (e *DockerLocalExecutor) SyncWireGuard(ctx context.Context, interfaceName s
 // GetWireGuardStats runs WireGuard commands on the host via systemd-run and
 // parses the output. If host execution is unavailable, return empty stats.
 func (e *DockerLocalExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.PeerStats, error) {
-	wgBin, err := e.resolveWGBinary(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	statsCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	out, err := runViaSystemdRun(statsCtx, wgBin, "show", "all", "dump")
+	out, err := runViaSystemdRun(statsCtx, "/bin/sh", "-lc", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; wg show all dump")
 	if err == nil {
 		return parseWGDumpStats(out), nil
 	}
 
 	textCtx, textCancel := context.WithTimeout(ctx, 3*time.Second)
 	defer textCancel()
-	textOut, textErr := runViaSystemdRun(textCtx, wgBin, "show")
+	textOut, textErr := runViaSystemdRun(textCtx, "/bin/sh", "-lc", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; wg show")
 	if textErr != nil {
 		return nil, fmt.Errorf(
 			"failed to execute host wg show (dump err: %v, dump out: %s; text err: %v, text out: %s)",
@@ -59,56 +53,4 @@ func (e *DockerLocalExecutor) GetWireGuardStats(ctx context.Context) (map[string
 		)
 	}
 	return parseWGTextStats(textOut), nil
-}
-
-func (e *DockerLocalExecutor) resolveWGBinary(ctx context.Context) (string, error) {
-	e.wgBinaryMu.Lock()
-	path := e.wgBinaryPath
-	e.wgBinaryMu.Unlock()
-	if path != "" {
-		return path, nil
-	}
-
-	candidates := []string{
-		strings.TrimSpace(os.Getenv("OGS_WG_BINARY_PATH")),
-		"/usr/bin/wg",
-		"/usr/local/bin/wg",
-		"/usr/sbin/wg",
-		"/sbin/wg",
-		"/bin/wg",
-		"wg",
-	}
-	if out, err := runViaSystemdRun(ctx, "/bin/sh", "-lc", "command -v wg || true"); err == nil {
-		if v := strings.TrimSpace(string(out)); v != "" {
-			candidates = append([]string{v}, candidates...)
-		}
-	}
-
-	var lastMsg string
-	for _, bin := range candidates {
-		if bin == "" {
-			continue
-		}
-		probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
-		out, err := runViaSystemdRun(probeCtx, bin, "--version")
-		cancel()
-		if err == nil {
-			e.wgBinaryMu.Lock()
-			e.wgBinaryPath = bin
-			e.wgBinaryMu.Unlock()
-			return bin, nil
-		}
-		lastMsg = strings.TrimSpace(string(out))
-		if lastMsg == "" {
-			lastMsg = err.Error()
-		}
-		if !isMissingExecutableMsg(lastMsg) {
-			e.wgBinaryMu.Lock()
-			e.wgBinaryPath = bin
-			e.wgBinaryMu.Unlock()
-			return bin, nil
-		}
-	}
-
-	return "", fmt.Errorf("wg binary not found on host (tried: %s). last error: %s", strings.Join(candidates, ", "), lastMsg)
 }

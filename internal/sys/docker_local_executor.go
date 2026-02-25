@@ -31,9 +31,6 @@ type DockerLocalExecutor struct {
 	hostGatewayMu       sync.Mutex
 	hostGatewayAddr     string
 	hostGatewayResolved bool
-
-	wgBinaryMu   sync.Mutex
-	wgBinaryPath string
 }
 
 func NewDockerLocalExecutor(cfg *core.Config) *DockerLocalExecutor {
