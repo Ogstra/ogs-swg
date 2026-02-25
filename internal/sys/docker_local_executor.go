@@ -32,9 +32,8 @@ type DockerLocalExecutor struct {
 	hostGatewayAddr     string
 	hostGatewayResolved bool
 
-	wgBinaryMu       sync.Mutex
-	wgBinaryPath     string
-	wgBinaryResolved bool
+	wgBinaryMu   sync.Mutex
+	wgBinaryPath string
 }
 
 func NewDockerLocalExecutor(cfg *core.Config) *DockerLocalExecutor {
@@ -161,7 +160,17 @@ func (e *DockerLocalExecutor) Dial(ctx context.Context, network, addr string) (n
 			}
 		}
 	}
-	return e.local.Dial(ctx, network, target)
+	conn, err := e.local.Dial(ctx, network, target)
+	if err == nil || target == addr {
+		return conn, err
+	}
+	// In mixed deployments we may run with host networking but without the
+	// explicit host-network flag yet. Retry original loopback address before
+	// failing hard.
+	if isRetryableDialErr(err) {
+		return e.local.Dial(ctx, network, addr)
+	}
+	return nil, err
 }
 
 func (e *DockerLocalExecutor) Close() error {
@@ -254,4 +263,15 @@ func parseBoolLike(v string) bool {
 	default:
 		return false
 	}
+}
+
+func isRetryableDialErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no route to host") ||
+		strings.Contains(msg, "network is unreachable") ||
+		strings.Contains(msg, "i/o timeout")
 }
