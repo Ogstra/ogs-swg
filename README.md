@@ -31,12 +31,12 @@ Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** bui
 
 ## Execution Modes
 
-The mode is selected at startup — `ssh_host` always wins:
+The mode is selected at startup:
 
 | Priority | Condition | Mode |
 |----------|-----------|------|
-| 1 | `ssh_host` is set | **SSH** — tunnels commands over SSH to a remote host |
-| 2 | `execution_mode = docker_local` | **Docker Local** — panel in Docker on the same host as singbox/wg |
+| 1 | `execution_mode = docker_local` | **Docker Local** — panel in Docker on the same host as singbox/wg |
+| 2 | `ssh_host` is set (and not docker_local) | **SSH** — tunnels commands over SSH to a remote host |
 | 3 | *(default)* | **Local** — bare metal, commands run directly on the host |
 
 ### Local (bare metal)
@@ -49,21 +49,32 @@ No extra config. Run the binary directly on the host:
 
 ### Docker Local
 
-Panel runs as a Docker container on the same host as singbox and wg-quick (systemd). File operations use bind mounts; system commands go through `nsenter -t 1` into host namespaces. Required compose keys:
+Panel runs as a Docker container on the same host as singbox and wg-quick (systemd). File operations use bind mounts; service/log/sysctl/wg commands run through `systemd-run` using host runtime sockets.
+
+Required mounts:
 
 ```yaml
-pid: host
-cap_add:
-  - SYS_PTRACE   # nsenter
-  - SYS_ADMIN    # sysctl
 environment:
   - OGS_EXECUTION_MODE=docker_local
 volumes:
   - /etc/sing-box:/etc/sing-box
   - /etc/wireguard:/etc/wireguard
+  - /run/dbus:/run/dbus
+  - /run/systemd:/run/systemd
+  - /var/log/journal:/var/log/journal:ro
+  - /run/log/journal:/run/log/journal:ro
 ```
 
 Ready-to-use compose at [`docker/docker-local/docker-compose.yml`](docker/docker-local/docker-compose.yml).
+
+For blue/green local slots, use:
+
+```yaml
+network_mode: host
+environment:
+  - OGS_DOCKER_LOCAL_HOST_NETWORK=true
+  - OGS_LISTEN_ADDR=:18080   # blue (green uses :18081)
+```
 
 ### SSH (remote)
 

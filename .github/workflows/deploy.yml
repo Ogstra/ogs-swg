@@ -235,6 +235,9 @@ jobs:
             cat > .env.bluegreen <<EOF
             OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
             OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
+            OGS_EXECUTION_MODE=docker_local
+            OGS_SLOT_BLUE_PORT=18080
+            OGS_SLOT_GREEN_PORT=18081
             OGS_API_KEY=${{ secrets.OGS_API_KEY }}
             OGS_ADMIN_USER=${{ secrets.OGS_ADMIN_USER }}
             OGS_ADMIN_PASSWORD=${{ secrets.OGS_ADMIN_PASSWORD }}
@@ -243,6 +246,9 @@ jobs:
             cat > .env.bluegreen <<EOF
             OGS_IMAGE=${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
             OGS_PROXY_HTTP_PORT=${{ secrets.OGS_PORT || '8080' }}
+            OGS_EXECUTION_MODE=ssh
+            OGS_SLOT_BLUE_PORT=18080
+            OGS_SLOT_GREEN_PORT=18081
             OGS_SSH_HOST=${{ secrets.VPS_HOST }}
             OGS_SSH_PORT=${{ secrets.VPS_PORT || 22 }}
             OGS_SSH_USER=${{ secrets.OGS_AGENT_USER }}
@@ -443,14 +449,39 @@ jobs:
               fi
             fi
 
-            echo "ACTIVE=$ACTIVE TARGET=$TARGET FORCE_SLOT=$FORCE_SLOT"
+            SLOT_BLUE_PORT="${OGS_SLOT_BLUE_PORT:-18080}"
+            SLOT_GREEN_PORT="${OGS_SLOT_GREEN_PORT:-18081}"
+
+            slot_port() {
+              if [ "$1" = "blue" ]; then
+                printf '%s' "$SLOT_BLUE_PORT"
+              else
+                printf '%s' "$SLOT_GREEN_PORT"
+              fi
+            }
+
+            slot_upstream() {
+              local slot="$1"
+              if [ "$EXECUTION_MODE" = "docker_local" ]; then
+                printf 'host.docker.internal:%s' "$(slot_port "$slot")"
+              else
+                printf 'ogs-swg-%s:8080' "$slot"
+              fi
+            }
+
+            CURL_HOST_ARGS=()
+            if [ "$EXECUTION_MODE" = "docker_local" ]; then
+              CURL_HOST_ARGS=(--add-host host.docker.internal:host-gateway)
+            fi
+
+            echo "ACTIVE=$ACTIVE TARGET=$TARGET FORCE_SLOT=$FORCE_SLOT EXECUTION_MODE=$EXECUTION_MODE"
 
             # Render nginx upstream config for ACTIVE (or TARGET on first deploy)
             UPSTREAM_SLOT="$ACTIVE"
             if [ "$UPSTREAM_SLOT" = "none" ]; then
               UPSTREAM_SLOT="$TARGET"
             fi
-            sed "s/__UPSTREAM__/ogs-swg-${UPSTREAM_SLOT}:8080/g" \
+            sed "s/__UPSTREAM__/$(slot_upstream "$UPSTREAM_SLOT")/g" \
               docker/bluegreen/nginx/default.conf.template > docker/bluegreen/nginx/default.conf
 
             # Ensure proxy is up first (keeps current traffic path stable)
@@ -470,6 +501,7 @@ jobs:
 
             # Healthcheck target slot (expects 401 for invalid login)
             HEALTH_OK=0
+            TARGET_BASE_URL="http://$(slot_upstream "$TARGET")"
             for i in $(seq 1 60); do
               TARGET_STATE="$(docker inspect -f '{{.State.Status}}' "ogs-swg-${TARGET}" 2>/dev/null || true)"
               if [ "$TARGET_STATE" = "exited" ] || [ "$TARGET_STATE" = "dead" ]; then
@@ -477,9 +509,9 @@ jobs:
                 break
               fi
 
-              CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+              CODE="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
                 -s -o /dev/null -w '%{http_code}' \
-                -X POST "http://ogs-swg-${TARGET}:8080/api/login" \
+                -X POST "${TARGET_BASE_URL}/api/login" \
                 -H 'Content-Type: application/json' \
                 -d '{"username":"invalid","password":"invalid"}' || true)"
               if [ "$CODE" = "401" ] || [ "$CODE" = "405" ]; then
@@ -504,40 +536,40 @@ jobs:
             DIAG_DONE=0
             for i in $(seq 1 40); do
               if [ -n "${{ secrets.OGS_API_KEY }}" ]; then
-                DIAG_CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                DIAG_CODE="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
                   -s -o /dev/null -w '%{http_code}' \
                   -H "X-API-Key: ${{ secrets.OGS_API_KEY }}" \
-                  "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
+                  "${TARGET_BASE_URL}/api/diag/ssh" || true)"
                 if [ "$DIAG_CODE" = "200" ]; then
                   DIAG_DONE=1
                   DIAG_DETAIL=""
                   break
                 else
-                  DIAG_DETAIL="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                  DIAG_DETAIL="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
                     -s -H "X-API-Key: ${{ secrets.OGS_API_KEY }}" \
-                    "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
+                    "${TARGET_BASE_URL}/api/diag/ssh" || true)"
                 fi
               fi
 
               if [ "$DIAG_DONE" -ne 1 ] && [ -n "${{ secrets.OGS_ADMIN_USER }}" ] && [ -n "${{ secrets.OGS_ADMIN_PASSWORD }}" ]; then
-                AUTH_JSON="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
-                  -s -X POST "http://ogs-swg-${TARGET}:8080/api/login" \
+                AUTH_JSON="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
+                  -s -X POST "${TARGET_BASE_URL}/api/login" \
                   -H 'Content-Type: application/json' \
                   -d "{\"username\":\"${{ secrets.OGS_ADMIN_USER }}\",\"password\":\"${{ secrets.OGS_ADMIN_PASSWORD }}\"}" || true)"
                 TOKEN="$(printf '%s' "$AUTH_JSON" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
                 if [ -n "$TOKEN" ]; then
-                  DIAG_CODE="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                  DIAG_CODE="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
                     -s -o /dev/null -w '%{http_code}' \
                     -H "Authorization: Bearer ${TOKEN}" \
-                    "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
+                    "${TARGET_BASE_URL}/api/diag/ssh" || true)"
                   if [ "$DIAG_CODE" = "200" ]; then
                     DIAG_DONE=1
                     DIAG_DETAIL=""
                     break
                   else
-                    DIAG_DETAIL="$(docker run --rm --network ogs-bg-net curlimages/curl:8.12.1 \
+                    DIAG_DETAIL="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
                       -s -H "Authorization: Bearer ${TOKEN}" \
-                      "http://ogs-swg-${TARGET}:8080/api/diag/ssh" || true)"
+                      "${TARGET_BASE_URL}/api/diag/ssh" || true)"
                   fi
                 fi
               fi
@@ -557,7 +589,7 @@ jobs:
             fi  # end SSH-only: diag check
 
             # Promote target slot by switching nginx upstream
-            sed "s/__UPSTREAM__/ogs-swg-${TARGET}:8080/g" \
+            sed "s/__UPSTREAM__/$(slot_upstream "$TARGET")/g" \
               docker/bluegreen/nginx/default.conf.template > docker/bluegreen/nginx/default.conf
             docker exec ogs-swg-proxy nginx -t
             docker exec ogs-swg-proxy nginx -s reload

@@ -674,7 +674,7 @@ func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
 	if v, ok := v2["listen"].(string); ok && strings.TrimSpace(v) != "" {
 		listenAddr = strings.TrimSpace(v)
 	}
-	if c.ExecutionMode == "docker_local" {
+	if c.ExecutionMode == "docker_local" && !dockerLocalHostNetworkEnabled() {
 		if host, port, err := net.SplitHostPort(listenAddr); err == nil && port != "" {
 			h := strings.TrimSpace(strings.Trim(host, "[]"))
 			if h == "" || strings.EqualFold(h, "localhost") {
@@ -709,6 +709,15 @@ func toInterfaceSlice(list []string) []interface{} {
 		out = append(out, v)
 	}
 	return out
+}
+
+func dockerLocalHostNetworkEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("OGS_DOCKER_LOCAL_HOST_NETWORK"))) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeFlow(flow string) string {

@@ -101,17 +101,29 @@ ogs_agent ALL=(root) NOPASSWD: /usr/bin/journalctl -u sing-box *
 
 ## Docker Local Mode
 
-Panel runs as a Docker container on the **same host** as singbox and wg-quick (systemd). No SSH connection needed — file ops use bind mounts, system commands use `nsenter -t 1`.
+Panel runs as a Docker container on the **same host** as singbox and wg-quick (systemd). No runtime SSH connection is needed.
+
+- File ops: bind mounts at host-identical paths.
+- Service/log/sysctl/wg ops: `systemd-run` via host runtime sockets (`/run/dbus`, `/run/systemd`, journals).
 
 ### Container Requirements
 
 | Compose key | Value | Purpose |
 |-------------|-------|---------|
-| `pid` | `host` | `nsenter -t 1` targets the host init process |
-| `cap_add` | `SYS_PTRACE` | Enter host namespaces via nsenter |
-| `cap_add` | `SYS_ADMIN` | sysctl writes |
 | `volumes` | `/etc/sing-box:/etc/sing-box` | Bind-mount at same host path |
 | `volumes` | `/etc/wireguard:/etc/wireguard` | Bind-mount at same host path |
+| `volumes` | `/run/dbus:/run/dbus` | Host D-Bus socket for systemctl/systemd-run |
+| `volumes` | `/run/systemd:/run/systemd` | Host systemd runtime sockets |
+| `volumes` | `/var/log/journal:/var/log/journal:ro` | Persistent journal logs |
+| `volumes` | `/run/log/journal:/run/log/journal:ro` | Runtime journal logs |
+
+For blue/green local slots (`docker-compose.*-local.yml`):
+
+| Compose key | Value | Purpose |
+|-------------|-------|---------|
+| `network_mode` | `host` | Slot listens on host ports directly |
+| `environment` | `OGS_DOCKER_LOCAL_HOST_NETWORK=true` | Keep loopback API access (`127.0.0.1`) |
+| `environment` | `OGS_LISTEN_ADDR=:18080/:18081` | Blue/green dedicated ports |
 
 ### Standalone Deployment
 
@@ -133,6 +145,9 @@ docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.blue
 ```env
 OGS_IMAGE=yourusername/ogs-swg:<sha>
 OGS_PROXY_HTTP_PORT=8080
+OGS_EXECUTION_MODE=docker_local
+OGS_SLOT_BLUE_PORT=18080
+OGS_SLOT_GREEN_PORT=18081
 OGS_API_KEY=<your-api-key>
 OGS_ADMIN_USER=<admin>
 OGS_ADMIN_PASSWORD=<password>
@@ -140,7 +155,7 @@ OGS_ADMIN_PASSWORD=<password>
 
 ### GitHub Actions Secrets
 
-For a `deploy-local.yml` workflow. SSH keys and sudoers are not needed.
+For deploy workflow in `docker_local` mode. Runtime SSH secrets are not needed, but the Actions runner still needs SSH access to the VPS host to run Docker commands.
 
 | Secret | Required | Notes |
 |--------|----------|-------|

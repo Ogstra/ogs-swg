@@ -20,6 +20,9 @@ import (
 type DockerLocalExecutor struct {
 	local  *LocalExecutor
 	config *core.Config
+	// hostNetworkMode disables loopback-to-gateway rewrite when the container
+	// already shares the host network namespace (network_mode: host).
+	hostNetworkMode bool
 
 	singboxCheckMu          sync.Mutex
 	singboxCheckBinary      string
@@ -36,8 +39,9 @@ type DockerLocalExecutor struct {
 
 func NewDockerLocalExecutor(cfg *core.Config) *DockerLocalExecutor {
 	return &DockerLocalExecutor{
-		local:  NewLocalExecutor(),
-		config: cfg,
+		local:           NewLocalExecutor(),
+		config:          cfg,
+		hostNetworkMode: parseBoolLike(os.Getenv("OGS_DOCKER_LOCAL_HOST_NETWORK")),
 	}
 }
 
@@ -150,9 +154,11 @@ func (e *DockerLocalExecutor) CheckConnectivity(ctx context.Context) error {
 
 func (e *DockerLocalExecutor) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
 	target := addr
-	if host, port, err := net.SplitHostPort(addr); err == nil && isLoopbackHost(host) {
-		if gw, gwErr := e.resolveHostGatewayAddr(); gwErr == nil && gw != "" {
-			target = net.JoinHostPort(gw, port)
+	if !e.hostNetworkMode {
+		if host, port, err := net.SplitHostPort(addr); err == nil && isLoopbackHost(host) {
+			if gw, gwErr := e.resolveHostGatewayAddr(); gwErr == nil && gw != "" {
+				target = net.JoinHostPort(gw, port)
+			}
 		}
 	}
 	return e.local.Dial(ctx, network, target)
@@ -238,4 +244,14 @@ func (e *DockerLocalExecutor) resolveHostGatewayAddr() (string, error) {
 		}
 	}
 	return "", fmt.Errorf("default route gateway not found")
+}
+
+func parseBoolLike(v string) bool {
+	s := strings.TrimSpace(strings.ToLower(v))
+	switch s {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
 }
