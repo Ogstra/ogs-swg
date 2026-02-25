@@ -13,6 +13,8 @@ services:
     restart: unless-stopped
     ports:
       - "${OGS_PROXY_HTTP_PORT:-8080}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Generated from default.conf.template by the deploy script
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro

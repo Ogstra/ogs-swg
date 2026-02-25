@@ -11,6 +11,7 @@ services:
     image: ${OGS_IMAGE}
     container_name: ogs-swg-blue
     restart: unless-stopped
+    network_mode: host
 
     volumes:
       - ../../data:/app/data
@@ -24,22 +25,15 @@ services:
       - /run/log/journal:/run/log/journal:ro
 
     environment:
-      - OGS_LISTEN_ADDR=:8080
+      - OGS_LISTEN_ADDR=:${OGS_SLOT_BLUE_PORT:-18080}
       - OGS_DB_PATH=/app/data/stats.db
       - OGS_ACCESS_LOG_PATH=/app/data/access.log
 
       # Activates DockerLocalExecutor (host D-Bus mode)
       - OGS_EXECUTION_MODE=docker_local
+      - OGS_DOCKER_LOCAL_HOST_NETWORK=true
       - OGS_SINGBOX_BINARY_PATH=${OGS_SINGBOX_BINARY_PATH:-}
 
       - OGS_API_KEY=${OGS_API_KEY}
       - OGS_ADMIN_USER=${OGS_ADMIN_USER}
       - OGS_ADMIN_PASSWORD=${OGS_ADMIN_PASSWORD}
-
-    networks:
-      - ogs_bg_net
-
-networks:
-  ogs_bg_net:
-    external: true
-    name: ogs-bg-net

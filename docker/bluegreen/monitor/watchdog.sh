@@ -14,6 +14,9 @@ HEALTH_BODY="${HEALTH_BODY:-}"
 HEALTH_EXPECT="${HEALTH_EXPECT:-204}"
 CHECK_INTERVAL_SEC="${CHECK_INTERVAL_SEC:-15}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-4}"
+EXECUTION_MODE="${EXECUTION_MODE:-ssh}"
+SLOT_BLUE_PORT="${SLOT_BLUE_PORT:-18080}"
+SLOT_GREEN_PORT="${SLOT_GREEN_PORT:-18081}"
 
 IFS=',' read -r -a _EXPECTED_CODES <<< "$HEALTH_EXPECT"
 
@@ -23,6 +26,19 @@ log_event() {
 
 slot_container() {
   printf 'ogs-swg-%s' "$1"
+}
+
+slot_endpoint() {
+  local slot="$1"
+  if [ "$EXECUTION_MODE" = "docker_local" ]; then
+    if [ "$slot" = "blue" ]; then
+      printf 'host.docker.internal:%s' "$SLOT_BLUE_PORT"
+    else
+      printf 'host.docker.internal:%s' "$SLOT_GREEN_PORT"
+    fi
+  else
+    printf '%s:8080' "$(slot_container "$slot")"
+  fi
 }
 
 slot_exists() {
@@ -41,7 +57,7 @@ slot_health_ok() {
     -o /dev/null -w '%{http_code}' \
     -X "$HEALTH_METHOD" \
     "${_body_flags[@]}" \
-    "http://$(slot_container "$slot"):8080${HEALTH_URL_PATH}" 2>/dev/null || true)"
+    "http://$(slot_endpoint "$slot")${HEALTH_URL_PATH}" 2>/dev/null || true)"
 
   for expected in "${_EXPECTED_CODES[@]}"; do
     [ "$code" = "$expected" ] && return 0
@@ -51,7 +67,7 @@ slot_health_ok() {
 
 switch_proxy_to() {
   local slot="$1"
-  sed "s/__UPSTREAM__/$(slot_container "$slot"):8080/g" "$NGINX_TEMPLATE" > "$NGINX_CONF"
+  sed "s/__UPSTREAM__/$(slot_endpoint "$slot")/g" "$NGINX_TEMPLATE" > "$NGINX_CONF"
   docker exec ogs-swg-proxy nginx -t >/dev/null
   docker exec ogs-swg-proxy nginx -s reload >/dev/null
   printf '%s' "$slot" > "$ACTIVE_FILE"

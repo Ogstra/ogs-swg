@@ -19,6 +19,10 @@ services:
     cpus: 0.20
 
     environment:
+      - EXECUTION_MODE=${OGS_EXECUTION_MODE:-ssh}
+      - SLOT_BLUE_PORT=${OGS_SLOT_BLUE_PORT:-18080}
+      - SLOT_GREEN_PORT=${OGS_SLOT_GREEN_PORT:-18081}
+
       # Root directory where blue/green state files are stored
       - DEPLOY_ROOT=/state
 
@@ -50,6 +54,9 @@ services:
 
       # Deploy root — state files and nginx config live here
       - ../../:/state
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
     networks:
       - ogs_bg_net
