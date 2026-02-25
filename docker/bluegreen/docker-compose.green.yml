@@ -1,51 +1,31 @@
-# OGS-SWG — green slot (SSH mode)
+# OGS-SWG — green slot (docker_local mode)
 #
-# Panel connects to sing-box/wg on a remote host via SSH.
-# Used by the CI/CD pipeline (deploy.yml). Variables are
-# injected from .env.bluegreen at deploy time.
-#
-# See DEPLOY_GITHUB_ACTIONS.md for required secrets and host setup.
+# Compatibility alias kept for older automation. Runtime SSH mode was removed;
+# prefer docker-compose.green-local.yml for new deployments.
 
 services:
   ogs-swg-green:
     image: ${OGS_IMAGE}
     container_name: ogs-swg-green
     restart: unless-stopped
+    network_mode: host
 
     volumes:
       - ../../data:/app/data
-
-      # Runtime SSH credentials (written by deploy.yml from secrets)
-      - ../../config/ssh_key:/app/secrets/ssh_key:ro
-      - ../../config/known_hosts:/app/secrets/known_hosts:ro
-
-      # Bind-mount config dirs (same path as on the managed host)
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
+      - /run/dbus:/run/dbus
+      - /run/systemd:/run/systemd
+      - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
 
     environment:
-      - OGS_LISTEN_ADDR=:8080
+      - OGS_LISTEN_ADDR=:${OGS_SLOT_GREEN_PORT:-18081}
       - OGS_DB_PATH=/app/data/stats.db
       - OGS_ACCESS_LOG_PATH=/app/data/access.log
-
-      # SSH mode is activated automatically when OGS_SSH_HOST is set
-      - OGS_SSH_HOST=${OGS_SSH_HOST}
-      - OGS_SSH_PORT=${OGS_SSH_PORT}
-      - OGS_SSH_USER=${OGS_SSH_USER}
-      - OGS_SSH_KEY_PATH=/app/secrets/ssh_key
-      - OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts
-
+      - OGS_EXECUTION_MODE=docker_local
+      - OGS_DOCKER_LOCAL_HOST_NETWORK=true
+      - OGS_SINGBOX_BINARY_PATH=${OGS_SINGBOX_BINARY_PATH:-}
       - OGS_API_KEY=${OGS_API_KEY}
       - OGS_ADMIN_USER=${OGS_ADMIN_USER}
       - OGS_ADMIN_PASSWORD=${OGS_ADMIN_PASSWORD}
-
-    # Fix SSH key permissions at startup (required: openssh rejects world-readable keys)
-    command: ["/bin/sh", "-lc", "chmod 600 /app/secrets/ssh_key 2>/dev/null || true; exec /app/ogs-swg -config /app/data/config.json"]
-
-    networks:
-      - ogs_bg_net
-
-networks:
-  ogs_bg_net:
-    external: true
-    name: ogs-bg-net

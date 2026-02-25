@@ -1,4 +1,4 @@
-//go:build linux
+//go:build linux && cgo && systemd_journal
 
 package sys
 
@@ -8,6 +8,13 @@ import (
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 )
+
+// NOTE: this implementation is opt-in and requires:
+//   - CGO enabled
+//   - libsystemd headers (e.g. libsystemd-dev)
+//   - build tag: systemd_journal
+//
+// Default builds use local_executor_journal_linux_fallback.go.
 
 // journalRead reads up to limit matching lines from the systemd journal for unit.
 // If filter is non-empty, only lines containing filter (case-insensitive) are returned.

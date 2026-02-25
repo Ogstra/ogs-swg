@@ -7,7 +7,7 @@ import (
 )
 
 // SystemExecutor defines the interface for system-level operations.
-// It abstracts local and remote (SSH) execution.
+// It abstracts local host execution strategies (local, docker_local).
 type SystemExecutor interface {
 	// Service Management
 	RestartService(ctx context.Context, name string) error
@@ -44,7 +44,7 @@ type SystemExecutor interface {
 	GetWireGuardStats(ctx context.Context) (map[string]PeerStats, error)
 
 	// Lifecycle
-	// CheckConnectivity verifies if the underlying system (e.g. SSH connection) is reachable.
+	// CheckConnectivity verifies if the underlying system is reachable.
 	CheckConnectivity(ctx context.Context) error
 	// Close releases any resources held by the executor.
 	Close() error

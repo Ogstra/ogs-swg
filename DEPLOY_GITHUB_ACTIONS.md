@@ -1,44 +1,53 @@
-# OGS-SWG Deployment Guide
+# OGS-SWG Deployment Guide (GitHub Actions)
 
-## SSH Mode (Remote)
+The current pipeline deploys the panel in **docker_local** mode only:
+- GitHub Actions connects to the VPS over SSH (transport only).
+- The app itself manages sing-box/wireguard on the same host through Docker bind mounts + systemd runtime sockets.
 
-The panel runs in Docker and manages singbox/wg on a separate host over SSH. This is what the included `deploy.yml` pipeline uses.
-
-### GitHub Actions Secrets
+## Required Secrets
 
 | Secret | Required | Notes |
 |--------|----------|-------|
-| `DOCKER_USERNAME` | Yes | |
-| `DOCKER_PASSWORD` | Yes | |
+| `DOCKER_USERNAME` | Yes | Docker Hub namespace |
+| `DOCKER_PASSWORD` | Yes | Docker Hub token/password |
 | `VPS_HOST` | Yes | Target host |
-| `VPS_PORT` | Yes | |
-| `VPS_USER` | Yes | User with sudo on the VPS |
-| `VPS_SSH_KEY` | Yes | Deployment key for Actions → VPS |
-| `OGS_AGENT_SSH_KEY_B64` | Yes | Base64-encoded runtime private key |
-| `OGS_AGENT_USER` | Yes | Runtime SSH user on the target host |
-| `OGS_SSH_KNOWN_HOSTS_CONTENT_B64` | Yes | Base64 of known_hosts (preferred) |
-| `OGS_SSH_KNOWN_HOSTS_CONTENT` | Fallback | Plaintext known_hosts if B64 not set |
-| `OGS_API_KEY` | Recommended | Used by deploy to validate `/api/diag/ssh` |
-| `OGS_ADMIN_USER` / `OGS_ADMIN_PASSWORD` | Optional | Fallback if `OGS_API_KEY` not set |
-| `OGS_PORT` | Optional | Default `8080` |
-| `DEPLOY_ARCH` | Optional | Default `linux/amd64,linux/arm64` |
+| `VPS_PORT` | Yes | SSH port |
+| `VPS_USER` | Yes | SSH user used by Actions on VPS |
+| `VPS_SSH_KEY` | Yes | Deployment key for Actions -> VPS |
+| `DEPLOY_PATH` | Yes | Base path where blue/green files are stored |
+| `OGS_API_KEY` | Recommended | API key injected into app slots |
+| `OGS_ADMIN_USER` / `OGS_ADMIN_PASSWORD` | Optional | First-run bootstrap/fallback auth |
+| `OGS_PORT` | Optional | Public proxy port (default `8080`) |
+| `DEPLOY_ARCH` | Optional | Docker buildx target (default `linux/amd64,linux/arm64`) |
 
-### Deploy Behavior
+## Workflow Inputs
 
-- If `OGS_AGENT_USER` is not `root`, the workflow provisions `/etc/sudoers.d/ogs-swg-<user>` automatically on each deploy (idempotent).
-- Requires `VPS_USER` to be `root` or have passwordless sudo for `visudo`/`install` to `/etc/sudoers.d`.
-- Workflow syncs the runtime SSH public key into `OGS_AGENT_USER` `authorized_keys` on each deploy.
-
-### Manual Deploy Control
-
-In Actions → Build and Deploy → Run workflow:
+In Actions -> Build and Deploy -> Run workflow:
 
 | Input | Values | Default |
 |-------|--------|---------|
 | `force_slot` | `auto` / `blue` / `green` | `auto` |
 | `bake_seconds` | `60..86400` | `600` |
 
-### Runtime State Files
+## Host Prerequisites (docker_local)
+
+On the VPS where containers run:
+
+1. Docker + Compose plugin installed.
+2. `sing-box` managed by systemd.
+3. `wg-quick@wg0` managed by systemd.
+4. Directories exist:
+   - `/etc/sing-box`
+   - `/etc/wireguard`
+5. Systemd runtime paths available for mounts:
+   - `/run/dbus`
+   - `/run/systemd`
+   - `/var/log/journal`
+   - `/run/log/journal`
+
+The deployed slot containers use these mounts to perform service/log/sysctl/wg operations from inside Docker.
+
+## Runtime State Files
 
 Location: `${DEPLOY_PATH}` on VPS.
 
@@ -46,128 +55,11 @@ Location: `${DEPLOY_PATH}` on VPS.
 |------|---------|
 | `.bluegreen.active` | Current live slot |
 | `.bluegreen.previous` | Previous slot used for rollback |
-| `.bluegreen.bake_until` | Unix timestamp; when elapsed, old slot is stopped |
+| `.bluegreen.bake_until` | Unix timestamp; old slot is stopped after this |
 | `.bluegreen.events.log` | Watchdog events and recovered incidents |
 
-Stable memory target after baking: `1 app + 1 watchdog + 1 nginx`.
+## Notes
 
-### Host Security Setup
-
-Configure a restricted agent user on the target host. If `OGS_AGENT_USER=root`, skip this section — the pipeline handles it automatically for non-root users.
-
-**1. Create the agent user:**
-```bash
-sudo useradd -m -s /bin/bash ogs_agent
-```
-
-**2. Add the SSH public key:**
-```bash
-sudo mkdir -p /home/ogs_agent/.ssh
-echo "YOUR_PUBLIC_KEY" | sudo tee -a /home/ogs_agent/.ssh/authorized_keys
-sudo chown -R ogs_agent:ogs_agent /home/ogs_agent/.ssh
-sudo chmod 700 /home/ogs_agent/.ssh && sudo chmod 600 /home/ogs_agent/.ssh/authorized_keys
-```
-
-**3. Configure sudo (least privilege):**
-```bash
-sudo visudo -f /etc/sudoers.d/ogs_agent
-```
-
-```sudoers
-Defaults:ogs_agent !requiretty
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart sing-box
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop sing-box
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl start sing-box
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active sing-box
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl restart wg-quick@wg0
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl stop wg-quick@wg0
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl start wg-quick@wg0
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/systemctl is-active wg-quick@wg0
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg show
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg show all dump
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/wg syncconf *
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/cat /etc/wireguard/wg0.conf
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/install -m * /tmp/ogs-swg-*.tmp /etc/wireguard/wg0.conf
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/cat /etc/sing-box/config.json
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/install -m * /tmp/ogs-swg-*.tmp /etc/sing-box/config.json
-ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -w *
-ogs_agent ALL=(root) NOPASSWD: /usr/sbin/sysctl -n *
-ogs_agent ALL=(root) NOPASSWD: /usr/bin/journalctl -u sing-box *
-```
-
-*Sysctl and wg wildcards are validated server-side via a strict whitelist.*
-
----
-
-## Docker Local Mode
-
-Panel runs as a Docker container on the **same host** as singbox and wg-quick (systemd). No runtime SSH connection is needed.
-
-- File ops: bind mounts at host-identical paths.
-- Service/log/sysctl/wg ops: `systemd-run` via host runtime sockets (`/run/dbus`, `/run/systemd`, journals).
-
-### Container Requirements
-
-| Compose key | Value | Purpose |
-|-------------|-------|---------|
-| `volumes` | `/etc/sing-box:/etc/sing-box` | Bind-mount at same host path |
-| `volumes` | `/etc/wireguard:/etc/wireguard` | Bind-mount at same host path |
-| `volumes` | `/run/dbus:/run/dbus` | Host D-Bus socket for systemctl/systemd-run |
-| `volumes` | `/run/systemd:/run/systemd` | Host systemd runtime sockets |
-| `volumes` | `/var/log/journal:/var/log/journal:ro` | Persistent journal logs |
-| `volumes` | `/run/log/journal:/run/log/journal:ro` | Runtime journal logs |
-
-For blue/green local slots (`docker-compose.*-local.yml`):
-
-| Compose key | Value | Purpose |
-|-------------|-------|---------|
-| `network_mode` | `host` | Slot listens on host ports directly |
-| `environment` | `OGS_DOCKER_LOCAL_HOST_NETWORK=true` | Keep loopback API access (`127.0.0.1`) |
-| `environment` | `OGS_LISTEN_ADDR=:18080/:18081` | Blue/green dedicated ports |
-
-### Standalone Deployment
-
-```bash
-cd docker/docker-local
-OGS_API_KEY=changeme docker compose up -d
-```
-
-### Blue/Green Deployment
-
-Use the `-local` compose variants instead of the SSH ones:
-
-```bash
-docker compose --env-file .env.bluegreen -f docker/bluegreen/docker-compose.blue-local.yml up -d
-```
-
-**`.env.bluegreen` for local mode:**
-
-```env
-OGS_IMAGE=yourusername/ogs-swg:<sha>
-OGS_PROXY_HTTP_PORT=8080
-OGS_EXECUTION_MODE=docker_local
-OGS_SLOT_BLUE_PORT=18080
-OGS_SLOT_GREEN_PORT=18081
-OGS_API_KEY=<your-api-key>
-OGS_ADMIN_USER=<admin>
-OGS_ADMIN_PASSWORD=<password>
-```
-
-### GitHub Actions Secrets
-
-For deploy workflow in `docker_local` mode. Runtime SSH secrets are not needed, but the Actions runner still needs SSH access to the VPS host to run Docker commands.
-
-| Secret | Required | Notes |
-|--------|----------|-------|
-| `DOCKER_USERNAME` | Yes | |
-| `DOCKER_PASSWORD` | Yes | |
-| `VPS_HOST` | Yes | |
-| `VPS_PORT` | Yes | |
-| `VPS_USER` | Yes | |
-| `VPS_SSH_KEY` | Yes | Deployment key for Actions → VPS |
-| `OGS_API_KEY` | Yes | |
-| `OGS_EXECUTION_MODE` | Yes | Set to `docker_local` |
-| `OGS_PORT` | Optional | Default `8080` |
-| `DEPLOY_ARCH` | Optional | Default `linux/amd64,linux/arm64` |
-
-Differences from SSH mode pipeline: skip SSH key setup, known_hosts, sudoers provisioning, and `/api/diag/ssh` validation. Health check (`401` on invalid login) still applies.
+- Runtime SSH executor support was removed from the application.
+- Secrets like `OGS_AGENT_SSH_KEY_B64`, `OGS_AGENT_USER`, and `OGS_SSH_KNOWN_HOSTS_CONTENT*` are no longer used.
+- Health check still validates slots via `POST /api/login` expecting `401/405`.

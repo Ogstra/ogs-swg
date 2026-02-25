@@ -19,7 +19,7 @@ services:
     cpus: 0.20
 
     environment:
-      - EXECUTION_MODE=${OGS_EXECUTION_MODE:-ssh}
+      - EXECUTION_MODE=${OGS_EXECUTION_MODE:-docker_local}
       - SLOT_BLUE_PORT=${OGS_SLOT_BLUE_PORT:-18080}
       - SLOT_GREEN_PORT=${OGS_SLOT_GREEN_PORT:-18081}
 

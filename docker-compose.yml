@@ -7,13 +7,9 @@
 #                          or when testing without real singbox/wg services.
 #
 #   docker_local           Panel in Docker on the SAME host as sing-box/wg
-#                          (systemd). Needs pid:host + SYS_PTRACE/SYS_ADMIN.
-#                          Uncomment the relevant blocks below.
+#                          (systemd). Requires runtime socket/journal mounts.
+#                          Uncomment the relevant mounts below.
 #
-#   ssh                    Panel in Docker, sing-box/wg on a REMOTE host.
-#                          Set OGS_SSH_HOST and mount SSH key + known_hosts.
-#                          Uncomment the relevant blocks below.
-
 services:
   ogs-swg:
     build: .
@@ -23,14 +19,6 @@ services:
     ports:
       - "${OGS_PORT:-8080}:8080"
 
-    # ── docker_local mode ─────────────────────────────────────────────────
-    # Uncomment when OGS_EXECUTION_MODE=docker_local
-    # pid: host
-    # cap_add:
-    #   - SYS_PTRACE   # nsenter — enter host namespaces
-    #   - SYS_ADMIN    # sysctl writes via nsenter
-    # ──────────────────────────────────────────────────────────────────────
-
     volumes:
       - ./data:/app/data
       - ./config.json:/app/config.json
@@ -39,10 +27,11 @@ services:
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
 
-      # ── ssh mode ──────────────────────────────────────────────────────
-      # - ./config/ssh_key:/app/secrets/ssh_key:ro
-      # - ./config/known_hosts:/app/secrets/known_hosts:ro
-      # ──────────────────────────────────────────────────────────────────
+      # docker_local mode requires host runtime sockets for systemd/dbus/journal
+      # - /run/dbus:/run/dbus
+      # - /run/systemd:/run/systemd
+      # - /var/log/journal:/var/log/journal:ro
+      # - /run/log/journal:/run/log/journal:ro
 
     environment:
       - OGS_LISTEN_ADDR=:8080
@@ -57,15 +46,6 @@ services:
       # local (default): leave unset or empty
       - OGS_EXECUTION_MODE=${OGS_EXECUTION_MODE:-}
 
-      # docker_local: set to "docker_local" and uncomment pid/cap_add above
+      # docker_local: set to "docker_local" and enable runtime socket mounts above
       # - OGS_EXECUTION_MODE=docker_local
-
-      # ssh: OGS_SSH_HOST being set automatically activates SSH mode
-      #      (OGS_EXECUTION_MODE is ignored when OGS_SSH_HOST is set)
-      # - OGS_SSH_HOST=${OGS_SSH_HOST}
-      # - OGS_SSH_PORT=${OGS_SSH_PORT:-22}
-      # - OGS_SSH_USER=${OGS_SSH_USER:-ogs_agent}
-      # - OGS_SSH_KEY_PATH=/app/secrets/ssh_key
-      # - OGS_SSH_KNOWN_HOSTS=/app/secrets/known_hosts
-      # - OGS_SSH_KEY_PASS=${OGS_SSH_KEY_PASS:-}
       # ──────────────────────────────────────────────────────────────────
