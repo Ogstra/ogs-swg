@@ -40,12 +40,13 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, err
 	}
 
-	// Configure SQLite pragmas - these are important for performance and reliability
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL;",
 		"PRAGMA synchronous=NORMAL;",
 		"PRAGMA busy_timeout=5000;",
-		"PRAGMA auto_vacuum = INCREMENTAL;",
+		"PRAGMA auto_vacuum=INCREMENTAL;",
+		"PRAGMA mmap_size=30000000000;",
+		"PRAGMA temp_store=MEMORY;",
 	}
 	for _, pragma := range pragmas {
 		if _, err := db.Exec(pragma); err != nil {
@@ -183,7 +184,8 @@ func (s *Store) initSchema() error {
 
 	CREATE TABLE IF NOT EXISTS inbound_meta (
 		tag TEXT PRIMARY KEY,
-		external_port INTEGER DEFAULT 0
+		external_port INTEGER DEFAULT 0,
+		client_sni TEXT DEFAULT NULL
 	);
 	
 	CREATE TABLE IF NOT EXISTS daily_usage (
@@ -204,26 +206,8 @@ func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(query); err != nil {
 		return err
 	}
-	s.db.Exec("ALTER TABLE users ADD COLUMN enabled INTEGER DEFAULT 1;")
-	s.db.Exec("ALTER TABLE users ADD COLUMN vmess_security TEXT DEFAULT '';")
-	s.db.Exec("ALTER TABLE users ADD COLUMN vmess_alter_id INTEGER DEFAULT 0;")
-	s.db.Exec("ALTER TABLE wg_samples ADD COLUMN endpoint TEXT DEFAULT ''")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_users INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_users INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_wireguard INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_wireguard INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_config INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_config INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_settings INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_settings INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_panel_users INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_write_panel_users INTEGER NOT NULL DEFAULT 0;")
-	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs INTEGER NOT NULL DEFAULT 0;")
-	var colCheck string
-	_ = s.db.QueryRow("SELECT name FROM pragma_table_info('sampler_runs') WHERE name='source'").Scan(&colCheck)
-	if colCheck == "" {
-		s.db.Exec("ALTER TABLE sampler_runs ADD COLUMN source TEXT DEFAULT 'sing-box'")
-	}
+	// Upgrade path: add client_sni to existing inbound_meta tables that predate this column.
+	// Silently ignored if column already exists (fresh installs have it from CREATE TABLE above).
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN client_sni TEXT DEFAULT NULL;")
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
@@ -1178,6 +1162,50 @@ func (s *Store) InsertWGSamples(samples []WGSample) error {
 			return err
 		}
 	}
+	return tx.Commit()
+}
+
+// RunWGSampleTx persists a WireGuard sampling batch atomically: updates peer
+// handshake timestamps and inserts new traffic samples in a single transaction.
+func (s *Store) RunWGSampleTx(handshakes map[string]int64, samples []WGSample) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := s.Queries.WithTx(tx)
+
+	for key, ts := range handshakes {
+		if key == "" || ts <= 0 {
+			continue
+		}
+		if err := qtx.UpdateWGPeerHandshake(context.Background(), sqlcStore.UpdateWGPeerHandshakeParams{
+			LastHandshake: sql.NullInt64{Int64: ts, Valid: true},
+			PublicKey:     key,
+		}); err != nil {
+			return err
+		}
+	}
+
+	if len(samples) > 5000 {
+		samples = samples[:5000]
+	}
+	for _, smp := range samples {
+		if err := qtx.InsertWGSample(context.Background(), sqlcStore.InsertWGSampleParams{
+			PublicKey: smp.PublicKey,
+			Ts:        smp.Timestamp,
+			Rx:        smp.Rx,
+			Tx:        smp.Tx,
+			Endpoint: sql.NullString{
+				String: smp.Endpoint,
+				Valid:  smp.Endpoint != "",
+			},
+		}); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
 

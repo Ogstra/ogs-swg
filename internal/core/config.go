@@ -43,18 +43,8 @@ type Config struct {
 	ConfigPath            string   `json:"-"`
 	APIKey                string   `json:"api_key" env:"OGS_API_KEY"`
 
-	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host), "ssh" (remote via SSH).
-	// docker_local takes priority over ssh_host. SSH mode is used only when ssh_host is set and execution_mode is not "docker_local".
+	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host).
 	ExecutionMode string `json:"execution_mode" env:"OGS_EXECUTION_MODE"`
-
-	// SSH Configuration
-	SSHHost                  string `json:"ssh_host" env:"OGS_SSH_HOST"`
-	SSHPort                  int    `json:"ssh_port" env:"OGS_SSH_PORT" env-default:"22"`
-	SSHUser                  string `json:"ssh_user" env:"OGS_SSH_USER" env-default:"ogs_agent"`
-	SSHKeyPath               string `json:"ssh_key_path" env:"OGS_SSH_KEY_PATH"`
-	SSHKeyPassphrase         string `json:"ssh_key_passphrase" env:"OGS_SSH_KEY_PASS"`
-	SSHKnownHostsPath        string `json:"ssh_known_hosts_path" env:"OGS_SSH_KNOWN_HOSTS"`
-	SSHInsecureIgnoreHostKey bool   `json:"ssh_insecure_ignore_host_key" env:"OGS_SSH_INSECURE_IGNORE_HOST_KEY"`
 
 	// Sysctl Whitelist (Optional override)
 	SysctlWhitelist []string `json:"sysctl_whitelist" env:"OGS_SYSCTL_WHITELIST"`

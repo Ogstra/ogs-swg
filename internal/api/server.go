@@ -2,10 +2,8 @@ package api
 
 import (
 	"compress/gzip"
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -42,11 +40,6 @@ type Server struct {
 	wgSamplerStop    chan struct{}
 	wgSamplerPaused  bool
 	wgLast           map[string]core.WGSample
-}
-
-type qrEntry struct {
-	Config    string
-	ExpiresAt time.Time
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -173,305 +166,6 @@ func (s *Server) requireWireGuard(w http.ResponseWriter) bool {
 	return true
 }
 
-func (s *Server) reloadWireGuard() {
-	if !s.config.EnableWireGuard {
-		return
-	}
-	if err := runSystemCtl("restart", "wireguard"); err != nil {
-		log.Printf("Failed to reload/restart WireGuard: %v", err)
-	}
-}
-
-func (s *Server) markWireGuardPending() {
-	if s.config.EnableWireGuard {
-		s.wgPendingRestart = true
-	}
-}
-
-func (s *Server) clearWireGuardPending() {
-	s.wgPendingRestart = false
-}
-
-func (s *Server) startWireGuardSampler() {
-	go func() {
-		for {
-			select {
-			case <-s.wgSamplerTicker.C:
-				s.wgMux.RLock()
-				paused := s.wgSamplerPaused
-				s.wgMux.RUnlock()
-				if !paused {
-					s.runWireGuardSample()
-				}
-			case <-s.wgSamplerStop:
-				s.wgMux.Lock()
-				if s.wgSamplerTicker != nil {
-					s.wgSamplerTicker.Stop()
-				}
-				s.wgMux.Unlock()
-				return
-			}
-		}
-	}()
-}
-
-func (s *Server) runWireGuardSample() {
-	s.wgMux.Lock()
-	defer s.wgMux.Unlock()
-
-	var stats map[string]core.PeerStats
-	var err error
-
-	if s.executor != nil {
-		stats, err = s.executor.GetWireGuardStats(context.Background())
-	} else {
-		// Fallback (should typically have executor)
-		stats, err = core.GetWireGuardStats()
-	}
-
-	if err != nil {
-		log.Printf("wg sampler: failed to read stats: %v", err)
-		return
-	}
-	if s.store != nil {
-		handshakes := make(map[string]int64, len(stats))
-		for _, st := range stats {
-			if st.LatestHandshake > 0 {
-				handshakes[st.PublicKey] = st.LatestHandshake
-			}
-		}
-		if err := s.store.UpdateWGPeerHandshakes(handshakes); err != nil {
-			log.Printf("wg sampler: failed to store handshakes: %v", err)
-		}
-	}
-	var samples []core.WGSample
-	now := time.Now().Unix()
-	for _, st := range stats {
-		prev, ok := s.wgLast[st.PublicKey]
-
-		// If we have previous stats, check if they changed
-		hasChanged := false
-		if !ok {
-			// First run for this peer: treat as changed so we establish a baseline
-			log.Printf("DEBUG: Peer %s new/reset. Init sample.", st.PublicKey[:8])
-			hasChanged = true
-		} else {
-			if st.TransferRx != prev.Rx || st.TransferTx != prev.Tx {
-				log.Printf("DEBUG: Peer %s changed. Rx: %d->%d, Tx: %d->%d", st.PublicKey[:8], prev.Rx, st.TransferRx, prev.Tx, st.TransferTx)
-				hasChanged = true
-			}
-		}
-
-		if hasChanged {
-			samples = append(samples, core.WGSample{
-				PublicKey: st.PublicKey,
-				Timestamp: now,
-				Rx:        st.TransferRx,
-				Tx:        st.TransferTx,
-				Endpoint:  st.Endpoint,
-			})
-		}
-
-		// Update cache with current absolute values
-		s.wgLast[st.PublicKey] = core.WGSample{
-			PublicKey: st.PublicKey,
-			Rx:        st.TransferRx,
-			Tx:        st.TransferTx,
-		}
-	}
-
-	if s.store != nil {
-		start := time.Now()
-		if len(samples) > 0 {
-			if err := s.store.InsertWGSamples(samples); err != nil {
-				log.Printf("wg sampler: insert error: %v", err)
-				s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), err.Error(), "wireguard")
-			} else {
-				s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(samples)), "", "wireguard")
-			}
-		} else {
-			// Log empty run for visibility
-			s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), 0, "", "wireguard")
-		}
-	}
-}
-
-func (s *Server) syncWireGuardConfig(wgConfig *core.WireGuardConfig) bool {
-	if !s.config.EnableWireGuard {
-		return false
-	}
-
-	// If no config provided, load from disk (or remote via ReadConfig? No, LoadWireGuardConfig reads from file path)
-	// core.LoadWireGuardConfig uses os.ReadFile. This works for LOCAL only?
-	// If remote, LoadWireGuardConfig logic needs to be aware.
-	// But `wgConfig` argument allows bypassing load.
-
-	if wgConfig == nil {
-		// If remote, we can't easily use core.LoadWireGuardConfig if it uses os.ReadFile
-		// But let's assume if we are here, we might have keys in memory or we just read it in handler.
-		// Handlers use s.executor.ReadConfig now.
-		// If called from StartServer or background, we might need to read it.
-		// Let's rely on executor to read it if needed.
-
-		if s.executor != nil {
-			_, err := s.executor.ReadConfig(context.Background(), s.config.WireGuardConfigPath)
-			if err == nil {
-				// Parse logic placeholder
-			}
-		}
-
-		// Fallback for now to keeping existing logic but maybe warning?
-		// Actually, syncWireGuardConfig is called from handlers which pass nil often.
-		// We should update handlers to pass config if possible, or support reading via executor here.
-		// For simplicity in this specific chunk, I will implement the Sync logic assuming wgConfig is prepared or we read it raw.
-		// Actually, `writeSyncConf` generates the file content.
-
-		// Let's do this:
-		// 1. Generate the sync config content (using existing logic, maybe reading file via executor if needed)
-		// 2. Call executor.SyncWireGuard
-	}
-
-	// Logic to generate sync config content
-	// writeSyncConf uses os.CreateTemp. This creates LOCAL temp file.
-	// This is fine! We generate the config locally (the "desired state").
-	// Then we read this local temp file and pass its CONTENT to executor.SyncWireGuard.
-	// Executor takes bytes and handles remote writing.
-
-	syncPath, cleanup, err := s.writeSyncConf(wgConfig)
-	if err != nil {
-		log.Printf("wg syncconf prepare failed: %v", err)
-		return false
-	}
-	defer cleanup()
-
-	// Read the generated content
-	syncContent, err := os.ReadFile(syncPath)
-	if err != nil {
-		log.Printf("wg syncconf read generated failed: %v", err)
-		return false
-	}
-
-	iface := strings.TrimSuffix(filepath.Base(s.config.WireGuardConfigPath), filepath.Ext(s.config.WireGuardConfigPath))
-	if iface == "" {
-		iface = "wg0"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // 30s timeout for sync
-	defer cancel()
-
-	if s.executor != nil {
-		if err := s.executor.SyncWireGuard(ctx, iface, syncContent); err != nil {
-			log.Printf("wg syncconf failed: %v", err)
-			return false
-		}
-	} else {
-		// Should not happen if initialized
-		log.Printf("wg syncconf skipped: executor nil")
-		return false
-	}
-
-	s.clearWireGuardPending()
-	return true
-}
-
-func (s *Server) writeSyncConf(wgConfig *core.WireGuardConfig) (string, func(), error) {
-	if wgConfig == nil {
-		cfg, err := s.loadWireGuardConfig(context.Background())
-		if err != nil {
-			return "", func() {}, err
-		}
-		wgConfig = cfg
-	}
-
-	tmpFile, err := os.CreateTemp("", "wg-sync-*.conf")
-	if err != nil {
-		return "", func() {}, err
-	}
-
-	cleanup := func() {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
-	}
-
-	var b strings.Builder
-	b.WriteString("[Interface]\n")
-	if wgConfig.Interface.PrivateKey != "" {
-		fmt.Fprintf(&b, "PrivateKey = %s\n", wgConfig.Interface.PrivateKey)
-	}
-	if wgConfig.Interface.ListenPort != 0 {
-		fmt.Fprintf(&b, "ListenPort = %d\n", wgConfig.Interface.ListenPort)
-	}
-	if wgConfig.Interface.MTU != 0 {
-		fmt.Fprintf(&b, "MTU = %d\n", wgConfig.Interface.MTU)
-	}
-	b.WriteString("\n")
-
-	for _, p := range wgConfig.Peers {
-		fmt.Fprintf(&b, "[Peer]\n")
-		fmt.Fprintf(&b, "PublicKey = %s\n", p.PublicKey)
-		fmt.Fprintf(&b, "AllowedIPs = %s\n", p.AllowedIPs)
-		if p.Endpoint != "" {
-			fmt.Fprintf(&b, "Endpoint = %s\n", p.Endpoint)
-		}
-		if p.PresharedKey != "" {
-			fmt.Fprintf(&b, "PresharedKey = %s\n", p.PresharedKey)
-		}
-		fmt.Fprintf(&b, "\n")
-	}
-
-	if _, err := tmpFile.WriteString(b.String()); err != nil {
-		cleanup()
-		return "", func() {}, err
-	}
-	if err := tmpFile.Sync(); err != nil {
-		cleanup()
-		return "", func() {}, err
-	}
-
-	return tmpFile.Name(), cleanup, nil
-}
-
-func (s *Server) storeQRConfig(pubKey, cfg string, ttl time.Duration) {
-	if pubKey == "" || cfg == "" {
-		return
-	}
-
-	s.wgQRCacheMutex.Lock()
-	defer s.wgQRCacheMutex.Unlock()
-	s.cleanupQRCache()
-	s.wgQRCache[pubKey] = qrEntry{
-		Config:    cfg,
-		ExpiresAt: time.Now().Add(ttl),
-	}
-}
-
-func (s *Server) fetchQRConfig(pubKey string) (string, bool) {
-	s.wgQRCacheMutex.Lock()
-	defer s.wgQRCacheMutex.Unlock()
-	s.cleanupQRCache()
-	if entry, ok := s.wgQRCache[pubKey]; ok {
-		if time.Now().Before(entry.ExpiresAt) {
-			return entry.Config, true
-		}
-		delete(s.wgQRCache, pubKey)
-	}
-	return "", false
-}
-
-func (s *Server) hasQRConfig(pubKey string) bool {
-	_, ok := s.fetchQRConfig(pubKey)
-	return ok
-}
-
-func (s *Server) cleanupQRCache() {
-	now := time.Now()
-	for k, v := range s.wgQRCache {
-		if now.After(v.ExpiresAt) {
-			delete(s.wgQRCache, k)
-		}
-	}
-}
-
 func (s *Server) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
@@ -520,8 +214,6 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
-	protected.HandleFunc("GET /api/diag/ssh", s.secure(s.handleDiagSSH))
-
 	// WireGuard
 	protected.HandleFunc("GET /api/wireguard/peers", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardPeers)))
 	protected.HandleFunc("POST /api/wireguard/peers", s.secure(s.requirePerm(canWriteWG, s.handleCreateWireGuardPeer)))
@@ -632,16 +324,10 @@ func StartServer(cfg *core.Config) *Server {
 	}
 
 	var executor core.SystemExecutor
-	switch {
-	case cfg.ExecutionMode == "docker_local":
-		// docker_local takes priority: OGS_EXECUTION_MODE=docker_local is an explicit
-		// override even if a persisted config.json has ssh_host from a previous deployment.
+	if cfg.ExecutionMode == "docker_local" {
 		log.Printf("Initializing Docker Local Executor (host D-Bus mode)")
 		executor = sys.NewDockerLocalExecutor(cfg)
-	case cfg.SSHHost != "":
-		log.Printf("Initializing SSH Executor for host: %s", cfg.SSHHost)
-		executor = sys.NewSSHExecutor(cfg)
-	default:
+	} else {
 		log.Printf("Initializing Local Executor")
 		executor = sys.NewLocalExecutor()
 	}

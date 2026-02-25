@@ -8,9 +8,7 @@ require (
 	github.com/google/uuid v1.3.1
 	github.com/ilyakaznacheev/cleanenv v1.5.0
 	github.com/joho/godotenv v1.5.1
-	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51
 	github.com/o1egl/paseto v1.0.0
-	github.com/pkg/sftp v1.13.10
 	github.com/xtls/xray-core v1.8.4
 	golang.org/x/crypto v0.48.0
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
@@ -18,7 +16,13 @@ require (
 	modernc.org/sqlite v1.28.0
 )
 
-require github.com/cespare/xxhash/v2 v2.2.0 // indirect
+require (
+	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
+)
 
 require (
 	github.com/BurntSushi/toml v1.2.1 // indirect
@@ -33,7 +37,6 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/josharian/native v1.1.0 // indirect
-	github.com/kr/fs v0.1.0 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/mdlayher/genetlink v1.3.2 // indirect
