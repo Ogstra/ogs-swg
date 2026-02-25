@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS panel_users (
 
 CREATE TABLE IF NOT EXISTS inbound_meta (
 	tag TEXT PRIMARY KEY,
-	external_port INTEGER DEFAULT 0
+	external_port INTEGER DEFAULT 0,
+	client_sni TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS daily_usage (

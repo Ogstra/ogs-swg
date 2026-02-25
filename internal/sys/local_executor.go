@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
-	"strconv"
 	"strings"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	"github.com/coreos/go-systemd/v22/dbus"
 	"golang.zx2c4.com/wireguard/wgctrl"
 )
 
@@ -31,34 +30,34 @@ func NewLocalExecutor() *LocalExecutor {
 }
 
 func (e *LocalExecutor) RestartService(ctx context.Context, name string) error {
-	return runSystemCtl(ctx, "restart", name)
+	return dbusServiceAction(ctx, "restart", name)
 }
 
 func (e *LocalExecutor) StartService(ctx context.Context, name string) error {
-	return runSystemCtl(ctx, "start", name)
+	return dbusServiceAction(ctx, "start", name)
 }
 
 func (e *LocalExecutor) StopService(ctx context.Context, name string) error {
-	return runSystemCtl(ctx, "stop", name)
+	return dbusServiceAction(ctx, "stop", name)
 }
 
 func (e *LocalExecutor) IsServiceActive(ctx context.Context, name string) (bool, error) {
-	unitName := resolveUnitName(name)
-	cmd := exec.CommandContext(ctx, "systemctl", "is-active", unitName)
-	if err := cmd.Run(); err != nil {
-		if exitError, ok := err.(*exec.ExitError); ok {
-			// standard failure usually means inactive
-			if exitError.ExitCode() != 0 {
-				return false, nil
-			}
-		}
-		return false, err
+	conn, err := dbus.NewSystemConnectionContext(ctx)
+	if err != nil {
+		return false, fmt.Errorf("D-Bus connect: %v", err)
 	}
-	return true, nil
+	defer conn.Close()
+
+	unit := resolveUnitName(name)
+	prop, err := conn.GetUnitPropertyContext(ctx, unit, "ActiveState")
+	if err != nil {
+		return false, nil // unit not found or not loaded
+	}
+	state, _ := prop.Value.Value().(string)
+	return state == "active", nil
 }
 
-func (e *LocalExecutor) WriteConfig(ctx context.Context, path string, content []byte, fileMode os.FileMode) error {
-	// Atomic write: write to temp file then rename
+func (e *LocalExecutor) WriteConfig(_ context.Context, path string, content []byte, fileMode os.FileMode) error {
 	tmpPath := path + ".tmp"
 	if err := os.WriteFile(tmpPath, content, fileMode); err != nil {
 		return err
@@ -66,76 +65,43 @@ func (e *LocalExecutor) WriteConfig(ctx context.Context, path string, content []
 	return os.Rename(tmpPath, path)
 }
 
-func (e *LocalExecutor) ReadConfig(ctx context.Context, path string) ([]byte, error) {
+func (e *LocalExecutor) ReadConfig(_ context.Context, path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-func (e *LocalExecutor) ApplySysctl(ctx context.Context, key, value string) error {
+func (e *LocalExecutor) ApplySysctl(_ context.Context, key, value string) error {
 	if !AllowedSysctlKeys[key] {
 		return fmt.Errorf("sysctl key '%s' is not in the whitelist", key)
 	}
-	cmd := exec.CommandContext(ctx, "sysctl", "-w", fmt.Sprintf("%s=%s", key, value))
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to apply sysctl %s: %v, output: %s", key, err, string(output))
+	path := "/proc/sys/" + strings.ReplaceAll(key, ".", "/")
+	if err := os.WriteFile(path, []byte(value+"\n"), 0644); err != nil {
+		return fmt.Errorf("failed to apply sysctl %s: %v", key, err)
 	}
 	return nil
 }
 
-func (e *LocalExecutor) GetSysctl(ctx context.Context, key string) (string, error) {
+func (e *LocalExecutor) GetSysctl(_ context.Context, key string) (string, error) {
 	if !AllowedSysctlKeys[key] {
 		return "", fmt.Errorf("sysctl key '%s' is not in the whitelist", key)
 	}
-	cmd := exec.CommandContext(ctx, "sysctl", "-n", key)
-	output, err := cmd.CombinedOutput()
+	path := "/proc/sys/" + strings.ReplaceAll(key, ".", "/")
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to get sysctl %s: %v", key, err)
 	}
-	return strings.TrimSpace(string(output)), nil
+	return strings.TrimSpace(string(data)), nil
 }
 
-func (e *LocalExecutor) ReadJournal(ctx context.Context, unit string, limit int) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, analyzeJournalError(out, err)
-	}
-	return parseJournalOutput(out), nil
+func (e *LocalExecutor) ReadJournal(_ context.Context, unit string, limit int) ([]string, error) {
+	return journalRead(unit, limit, "")
 }
 
-func (e *LocalExecutor) SearchJournal(ctx context.Context, unit, query string, limit int) ([]string, error) {
-	// Using --grep might not be available on all systemd versions, falling back to basic grep logic if needed
-	// But let's assume modern systemd for now or just fetch and filter.
-	// Fetching and filtering is safer for compatibility.
-	// We fetch slightly more to filter locally.
-	fetchLimit := limit * 5
-	if fetchLimit > 5000 {
-		fetchLimit = 5000
-	}
-
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, analyzeJournalError(out, err)
-	}
-
-	lines := parseJournalOutput(out)
-	var filtered []string
-	q := strings.ToLower(query)
-	for i := len(lines) - 1; i >= 0 && len(filtered) < limit; i-- {
-		if strings.Contains(strings.ToLower(lines[i]), q) {
-			filtered = append(filtered, lines[i])
-		}
-	}
-	// Reverse back to chronological order
-	for i, j := 0, len(filtered)-1; i < j; i, j = i+1, j-1 {
-		filtered[i], filtered[j] = filtered[j], filtered[i]
-	}
-	return filtered, nil
+func (e *LocalExecutor) SearchJournal(_ context.Context, unit, query string, limit int) ([]string, error) {
+	return journalRead(unit, limit, query)
 }
 
-func (e *LocalExecutor) CheckConnectivity(ctx context.Context) error {
-	return nil // Local is always connected
+func (e *LocalExecutor) CheckConnectivity(_ context.Context) error {
+	return nil
 }
 
 func (e *LocalExecutor) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -143,18 +109,15 @@ func (e *LocalExecutor) Dial(ctx context.Context, network, addr string) (net.Con
 	return d.DialContext(ctx, network, addr)
 }
 
-func (e *LocalExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.PeerStats, error) {
+func (e *LocalExecutor) GetWireGuardStats(_ context.Context) (map[string]core.PeerStats, error) {
 	stats := make(map[string]core.PeerStats)
 
 	c, err := wgctrl.New()
 	if err != nil {
-		// If fails to open (e.g. not root, or kernel module not loaded), return empty or error
-		// Log/return empty to avoid crashing sampler
 		return stats, err
 	}
 	defer c.Close()
 
-	// wgctrl operations are not context-aware by default, but they are fast local calls.
 	devices, err := c.Devices()
 	if err != nil {
 		return stats, err
@@ -166,7 +129,6 @@ func (e *LocalExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.
 			if peer.Endpoint != nil {
 				endpoint = peer.Endpoint.String()
 			}
-
 			handshake := peer.LastHandshakeTime.Unix()
 			if peer.LastHandshakeTime.IsZero() || handshake < 0 {
 				handshake = 0
@@ -188,13 +150,41 @@ func (e *LocalExecutor) Close() error {
 	return nil
 }
 
-// Helpers
+// --- Helpers ---
 
-func runSystemCtl(ctx context.Context, action, service string) error {
-	unitName := resolveUnitName(service)
-	cmd := exec.CommandContext(ctx, "systemctl", action, unitName)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("systemctl %s %s failed: %v, output: %s", action, unitName, err, string(output))
+// dbusServiceAction executes a systemd unit action (start/stop/restart) via D-Bus.
+func dbusServiceAction(ctx context.Context, action, service string) error {
+	conn, err := dbus.NewSystemConnectionContext(ctx)
+	if err != nil {
+		return fmt.Errorf("D-Bus connect: %v", err)
+	}
+	defer conn.Close()
+
+	unit := resolveUnitName(service)
+	ch := make(chan string, 1)
+
+	var opErr error
+	switch action {
+	case "restart":
+		_, opErr = conn.RestartUnitContext(ctx, unit, "replace", ch)
+	case "start":
+		_, opErr = conn.StartUnitContext(ctx, unit, "replace", ch)
+	case "stop":
+		_, opErr = conn.StopUnitContext(ctx, unit, "replace", ch)
+	default:
+		return fmt.Errorf("unknown systemctl action: %s", action)
+	}
+	if opErr != nil {
+		return fmt.Errorf("systemctl %s %s: %v", action, unit, opErr)
+	}
+
+	select {
+	case result := <-ch:
+		if result != "done" {
+			return fmt.Errorf("systemctl %s %s: job result=%s", action, unit, result)
+		}
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	return nil
 }
@@ -204,20 +194,4 @@ func resolveUnitName(service string) string {
 		return "wg-quick@wg0"
 	}
 	return service
-}
-
-func analyzeJournalError(out []byte, err error) error {
-	msg := strings.TrimSpace(string(out))
-	if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") {
-		return nil // Not strictly an error, just empty
-	}
-	return fmt.Errorf("%w: %s", err, msg)
-}
-
-func parseJournalOutput(out []byte) []string {
-	data := strings.TrimSpace(string(out))
-	if data == "" {
-		return []string{}
-	}
-	return strings.Split(data, "\n")
 }

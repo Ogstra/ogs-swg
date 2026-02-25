@@ -272,3 +272,22 @@ func isRetryableDialErr(err error) bool {
 		strings.Contains(msg, "network is unreachable") ||
 		strings.Contains(msg, "i/o timeout")
 }
+
+func analyzeJournalError(out []byte, err error) error {
+	if s := strings.TrimSpace(string(out)); s != "" {
+		return fmt.Errorf("journalctl: %v: %s", err, s)
+	}
+	return fmt.Errorf("journalctl: %v", err)
+}
+
+func parseJournalOutput(out []byte) []string {
+	var lines []string
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line == "" || strings.HasPrefix(line, "-- ") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}

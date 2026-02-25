@@ -33,13 +33,12 @@ func main() {
 
 	log.Printf("Starting OGS XWG...")
 	log.Printf(
-		"Config loaded: listen=%s db=%s singbox=%t wireguard=%t ssh_host_set=%t ssh_user=%s",
+		"Config loaded: listen=%s db=%s singbox=%t wireguard=%t execution_mode=%s",
 		cfg.ListenAddr,
 		cfg.DatabasePath,
 		cfg.EnableSingbox,
 		cfg.EnableWireGuard,
-		cfg.SSHHost != "",
-		cfg.SSHUser,
+		cfg.ExecutionMode,
 	)
 
 	if *samplerOnly {
@@ -51,14 +50,10 @@ func main() {
 		defer store.Close()
 
 		var executor core.SystemExecutor
-		switch {
-		case cfg.ExecutionMode == "docker_local":
+		if cfg.ExecutionMode == "docker_local" {
 			log.Printf("Initializing Docker Local Executor (host D-Bus mode)")
 			executor = sys.NewDockerLocalExecutor(cfg)
-		case cfg.SSHHost != "":
-			log.Printf("Initializing SSH Executor for host: %s", cfg.SSHHost)
-			executor = sys.NewSSHExecutor(cfg)
-		default:
+		} else {
 			log.Printf("Initializing Local Executor")
 			executor = sys.NewLocalExecutor()
 		}
