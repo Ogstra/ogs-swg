@@ -3,7 +3,6 @@ package sys
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -21,10 +20,9 @@ func (e *DockerLocalExecutor) SyncWireGuard(ctx context.Context, interfaceName s
 	}
 	unit := fmt.Sprintf("wg-quick@%s", iface)
 
-	cmd := exec.CommandContext(ctx, "systemctl", "restart", unit)
-	output, err := cmd.CombinedOutput()
+	output, err := runViaSystemdRun(ctx, "systemctl", "--system", "restart", unit)
 	if err != nil {
-		return fmt.Errorf("systemctl restart %s failed: %v, output: %s", unit, err, string(output))
+		return fmt.Errorf("host systemctl restart %s failed: %v, output: %s", unit, err, string(output))
 	}
 	return nil
 }

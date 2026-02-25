@@ -21,6 +21,7 @@ services:
       - /run/dbus:/run/dbus
       - /run/systemd:/run/systemd
       - /var/log/journal:/var/log/journal:ro
+      - /run/log/journal:/run/log/journal:ro
 
     environment:
       - OGS_LISTEN_ADDR=:8080
