@@ -2,8 +2,7 @@
 #
 # Use when the panel runs as a Docker container on the SAME host as
 # sing-box and wg-quick (systemd). File operations use bind mounts;
-# system commands (systemctl, sysctl, journalctl, wg) are executed in
-# host namespaces via `nsenter -t 1`.
+# service/log operations use host D-Bus and systemd journal runtime mounts.
 #
 # Prerequisites on the host:
 #   - sing-box installed and running as a systemd service
@@ -19,13 +18,6 @@ services:
     container_name: ogs-swg
     restart: unless-stopped
 
-    # Host PID namespace — required so nsenter -t 1 targets the host init process
-    pid: host
-
-    cap_add:
-      - SYS_PTRACE   # required for nsenter to enter host namespaces
-      - SYS_ADMIN    # required for sysctl writes via nsenter
-
     volumes:
       - ../../data:/app/data
 
@@ -33,12 +25,15 @@ services:
       # work identically to bare-metal (LocalExecutor delegates these directly)
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
+      - /run/dbus:/run/dbus
+      - /run/systemd:/run/systemd
+      - /var/log/journal:/var/log/journal:ro
 
     environment:
       - OGS_LISTEN_ADDR=:8080
       - OGS_DB_PATH=/app/data/stats.db
 
-      # Activates DockerLocalExecutor (nsenter-based)
+      # Activates DockerLocalExecutor (host D-Bus mode)
       - OGS_EXECUTION_MODE=docker_local
 
       - OGS_API_KEY=${OGS_API_KEY}

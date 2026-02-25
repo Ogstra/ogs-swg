@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 // ValidateSingboxConfig writes a temp file into the same directory as the
-// sing-box config (which is bind-mounted, so the path is identical on the
-// host). nsenter -m then enters the host's mount namespace where both the
-// sing-box binary and the temp file are visible at the same path.
+// sing-box config (which is bind-mounted and visible on the host), then asks
+// host systemd to run `sing-box check` through systemd-run.
 func (e *DockerLocalExecutor) ValidateSingboxConfig(ctx context.Context, content []byte) error {
 	dir := filepath.Dir(e.config.SingboxConfigPath)
 	tmpPath := filepath.Join(dir, fmt.Sprintf("ogs-validate-%d.json", time.Now().UnixNano()))
@@ -22,10 +21,13 @@ func (e *DockerLocalExecutor) ValidateSingboxConfig(ctx context.Context, content
 	}
 	defer os.Remove(tmpPath)
 
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-m", "--", "sing-box", "check", "-c", tmpPath)
-	output, err := cmd.CombinedOutput()
+	output, err := runViaSystemdRun(ctx, "sing-box", "check", "-c", tmpPath)
 	if err != nil {
-		return fmt.Errorf("invalid config: %s", string(output))
+		msg := strings.TrimSpace(string(output))
+		if msg == "" {
+			return fmt.Errorf("failed to run host sing-box check: %v", err)
+		}
+		return fmt.Errorf("invalid config: %s", msg)
 	}
 	return nil
 }

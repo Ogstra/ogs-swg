@@ -3,54 +3,43 @@ package sys
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
-// SyncWireGuard writes the config to a container-local temp file, then uses
-// nsenter -n to run wg syncconf inside the host's network namespace.
-// Because only the network namespace is entered, the container's filesystem
-// (including /tmp) remains visible to the command.
+// SyncWireGuard assumes config content has already been persisted by the caller.
+// In docker_local mode we reload wg-quick for the target interface through host
+// systemd (via the host D-Bus bind mount).
 func (e *DockerLocalExecutor) SyncWireGuard(ctx context.Context, interfaceName string, configContent []byte) error {
-	tmpFile, err := os.CreateTemp("", "wg-sync-*.conf")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %v", err)
-	}
-	defer func() {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
-	}()
+	_ = configContent
 
-	if _, err := tmpFile.Write(configContent); err != nil {
-		return fmt.Errorf("failed to write temp file: %v", err)
+	iface := strings.TrimSpace(strings.TrimSuffix(interfaceName, ".conf"))
+	if iface == "" {
+		iface = "wg0"
 	}
-	if err := tmpFile.Sync(); err != nil {
-		return fmt.Errorf("failed to sync temp file: %v", err)
-	}
+	unit := fmt.Sprintf("wg-quick@%s", iface)
 
-	cmd := exec.CommandContext(ctx, "nsenter", "-t", "1", "-n", "--",
-		"wg", "syncconf", interfaceName, tmpFile.Name())
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", unit)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("nsenter wg syncconf failed: %v, output: %s", err, string(output))
+		return fmt.Errorf("systemctl restart %s failed: %v, output: %s", unit, err, string(output))
 	}
 	return nil
 }
 
-// GetWireGuardStats runs wg show all dump inside the host's network namespace
-// and parses the output. Reuses parseWGDumpStats/parseWGTextStats from ssh_executor.go.
+// GetWireGuardStats runs WireGuard commands on the host via systemd-run and
+// parses the output. If host execution is unavailable, return empty stats.
 func (e *DockerLocalExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.PeerStats, error) {
-	out, err := exec.CommandContext(ctx, "nsenter", "-t", "1", "-n", "--", "wg", "show", "all", "dump").CombinedOutput()
+	out, err := runViaSystemdRun(ctx, "wg", "show", "all", "dump")
 	if err == nil {
 		return parseWGDumpStats(out), nil
 	}
 
-	// Fallback: wg show (text format) for environments where dump is unavailable.
-	textOut, textErr := exec.CommandContext(ctx, "nsenter", "-t", "1", "-n", "--", "wg", "show").CombinedOutput()
+	textOut, textErr := runViaSystemdRun(ctx, "wg", "show")
 	if textErr != nil {
-		return nil, fmt.Errorf("failed to execute wg show (dump=%v, text=%v)", err, textErr)
+		return map[string]core.PeerStats{}, nil
 	}
 	return parseWGTextStats(textOut), nil
 }

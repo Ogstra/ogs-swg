@@ -53,7 +53,7 @@ func main() {
 		var executor core.SystemExecutor
 		switch {
 		case cfg.ExecutionMode == "docker_local":
-			log.Printf("Initializing Docker Local Executor (nsenter mode)")
+			log.Printf("Initializing Docker Local Executor (host D-Bus mode)")
 			executor = sys.NewDockerLocalExecutor(cfg)
 		case cfg.SSHHost != "":
 			log.Printf("Initializing SSH Executor for host: %s", cfg.SSHHost)
