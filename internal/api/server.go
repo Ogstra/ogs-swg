@@ -633,12 +633,14 @@ func StartServer(cfg *core.Config) *Server {
 
 	var executor core.SystemExecutor
 	switch {
+	case cfg.ExecutionMode == "docker_local":
+		// docker_local takes priority: OGS_EXECUTION_MODE=docker_local is an explicit
+		// override even if a persisted config.json has ssh_host from a previous deployment.
+		log.Printf("Initializing Docker Local Executor (nsenter mode)")
+		executor = sys.NewDockerLocalExecutor(cfg)
 	case cfg.SSHHost != "":
 		log.Printf("Initializing SSH Executor for host: %s", cfg.SSHHost)
 		executor = sys.NewSSHExecutor(cfg)
-	case cfg.ExecutionMode == "docker_local":
-		log.Printf("Initializing Docker Local Executor (nsenter mode)")
-		executor = sys.NewDockerLocalExecutor(cfg)
 	default:
 		log.Printf("Initializing Local Executor")
 		executor = sys.NewLocalExecutor()

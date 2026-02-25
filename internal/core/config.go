@@ -43,7 +43,7 @@ type Config struct {
 	APIKey                string   `json:"api_key" env:"OGS_API_KEY"`
 
 	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host), "ssh" (remote via SSH).
-	// If ssh_host is set, SSH mode is always used regardless of this field.
+	// docker_local takes priority over ssh_host. SSH mode is used only when ssh_host is set and execution_mode is not "docker_local".
 	ExecutionMode string `json:"execution_mode" env:"OGS_EXECUTION_MODE"`
 
 	// SSH Configuration
