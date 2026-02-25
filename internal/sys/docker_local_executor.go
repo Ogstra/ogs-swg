@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
@@ -19,6 +20,10 @@ import (
 type DockerLocalExecutor struct {
 	local  *LocalExecutor
 	config *core.Config
+
+	singboxCheckMu          sync.Mutex
+	singboxCheckBinary      string
+	singboxCheckUnavailable bool
 }
 
 func NewDockerLocalExecutor(cfg *core.Config) *DockerLocalExecutor {
@@ -147,7 +152,15 @@ func (e *DockerLocalExecutor) Close() error {
 
 func (e *DockerLocalExecutor) runSystemctl(ctx context.Context, action, name string) error {
 	unit := resolveUnitName(name)
-	output, err := runViaSystemdRun(ctx, "systemctl", "--system", action, unit)
+	args := []string{"--system", action}
+	switch action {
+	case "restart", "start", "stop":
+		// Avoid blocking API requests on long-running unit jobs.
+		args = append(args, "--no-block")
+	}
+	args = append(args, unit)
+
+	output, err := runViaSystemdRun(ctx, "systemctl", args...)
 	if err != nil {
 		return fmt.Errorf("host systemctl %s %s failed: %v, output: %s", action, unit, err, string(output))
 	}

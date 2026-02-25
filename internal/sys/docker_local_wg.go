@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
@@ -20,7 +21,9 @@ func (e *DockerLocalExecutor) SyncWireGuard(ctx context.Context, interfaceName s
 	}
 	unit := fmt.Sprintf("wg-quick@%s", iface)
 
-	output, err := runViaSystemdRun(ctx, "systemctl", "--system", "restart", unit)
+	restartCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	output, err := runViaSystemdRun(restartCtx, "systemctl", "--system", "restart", "--no-block", unit)
 	if err != nil {
 		return fmt.Errorf("host systemctl restart %s failed: %v, output: %s", unit, err, string(output))
 	}
@@ -30,12 +33,16 @@ func (e *DockerLocalExecutor) SyncWireGuard(ctx context.Context, interfaceName s
 // GetWireGuardStats runs WireGuard commands on the host via systemd-run and
 // parses the output. If host execution is unavailable, return empty stats.
 func (e *DockerLocalExecutor) GetWireGuardStats(ctx context.Context) (map[string]core.PeerStats, error) {
-	out, err := runViaSystemdRun(ctx, "wg", "show", "all", "dump")
+	statsCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := runViaSystemdRun(statsCtx, "wg", "show", "all", "dump")
 	if err == nil {
 		return parseWGDumpStats(out), nil
 	}
 
-	textOut, textErr := runViaSystemdRun(ctx, "wg", "show")
+	textCtx, textCancel := context.WithTimeout(ctx, 3*time.Second)
+	defer textCancel()
+	textOut, textErr := runViaSystemdRun(textCtx, "wg", "show")
 	if textErr != nil {
 		return map[string]core.PeerStats{}, nil
 	}
