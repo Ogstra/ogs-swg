@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { execSync } from 'child_process'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -44,9 +45,19 @@ const getApiTarget = (mode: string) => {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
     const apiTarget = getApiTarget(mode)
+    const commitHash = process.env.VITE_APP_COMMIT || (() => {
+        try {
+            return execSync('git rev-parse --short HEAD').toString().trim()
+        } catch {
+            return 'unknown'
+        }
+    })()
 
     return {
         plugins: [react()],
+        define: {
+            'import.meta.env.VITE_APP_COMMIT': JSON.stringify(commitHash),
+        },
         server: {
             proxy: {
                 '/api': {

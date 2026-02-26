@@ -236,6 +236,8 @@ export default function Settings() {
                     serviceStatus={serviceStatus}
                     publicIP={publicIP}
                     setPublicIP={setPublicIP}
+                    canWriteSettings={canWriteSettings}
+                    canWriteConfig={canWriteConfig}
                 />
             )
         },
@@ -382,6 +384,8 @@ function GeneralTab({
     serviceStatus,
     publicIP,
     setPublicIP,
+    canWriteSettings,
+    canWriteConfig,
 }: {
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
@@ -391,6 +395,8 @@ function GeneralTab({
     serviceStatus: ServiceStatus
     publicIP: string
     setPublicIP: Dispatch<SetStateAction<string>>
+    canWriteSettings: boolean
+    canWriteConfig: boolean
 }) {
     return (
         <div className="space-y-6">
@@ -398,7 +404,7 @@ function GeneralTab({
             <Card
                 title="System Features"
                 action={
-                    <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />}>
+                    <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
                         Save Changes
                     </Button>
                 }
@@ -410,6 +416,7 @@ function GeneralTab({
                                 type="checkbox"
                                 checked={features.enable_singbox}
                                 onChange={e => setFeatures(prev => ({ ...prev, enable_singbox: e.target.checked }))}
+                                disabled={!canWriteSettings}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -421,6 +428,7 @@ function GeneralTab({
                                 type="checkbox"
                                 checked={features.enable_wireguard}
                                 onChange={e => setFeatures(prev => ({ ...prev, enable_wireguard: e.target.checked }))}
+                                disabled={!canWriteSettings}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -432,6 +440,7 @@ function GeneralTab({
                                 type="checkbox"
                                 checked={!!features.retention_enabled}
                                 onChange={e => setFeatures(prev => ({ ...prev, retention_enabled: e.target.checked }))}
+                                disabled={!canWriteSettings}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -444,6 +453,7 @@ function GeneralTab({
                                 type="checkbox"
                                 checked={!!features.aggregation_enabled}
                                 onChange={e => setFeatures(prev => ({ ...prev, aggregation_enabled: e.target.checked }))}
+                                disabled={!canWriteSettings}
                                 className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                             />
                             <div>
@@ -466,6 +476,7 @@ function GeneralTab({
                             type="text"
                             value={publicIP}
                             onChange={e => setPublicIP(e.target.value)}
+                            disabled={!canWriteSettings}
                             placeholder="Auto-detected or enter manually"
                             className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
                         />
@@ -474,7 +485,7 @@ function GeneralTab({
                         </p>
                     </div>
                     <div className="flex justify-end">
-                        <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />}>
+                        <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
                             Save Public IP
                         </Button>
                     </div>
@@ -501,7 +512,7 @@ function GeneralTab({
                             <div className="flex gap-2">
                                 <Button
                                     onClick={() => handleServiceAction('sing-box', 'restart')}
-                                    disabled={!features.enable_singbox}
+                                    disabled={!features.enable_singbox || !canWriteConfig}
                                     variant="secondary"
                                     size="sm"
                                     className="flex-1"
@@ -510,7 +521,7 @@ function GeneralTab({
                                 </Button>
                                 <Button
                                     onClick={() => handleServiceAction('sing-box', serviceStatus.singbox ? 'stop' : 'start')}
-                                    disabled={!features.enable_singbox}
+                                    disabled={!features.enable_singbox || !canWriteConfig}
                                     variant={serviceStatus.singbox ? 'danger' : 'primary'}
                                     size="sm"
                                     className="flex-1"
@@ -532,7 +543,7 @@ function GeneralTab({
                             <div className="flex gap-2">
                                 <Button
                                     onClick={() => handleServiceAction('wireguard', 'restart')}
-                                    disabled={!features.enable_wireguard}
+                                    disabled={!features.enable_wireguard || !canWriteConfig}
                                     variant="secondary"
                                     size="sm"
                                     className="flex-1"
@@ -541,7 +552,7 @@ function GeneralTab({
                                 </Button>
                                 <Button
                                     onClick={() => handleServiceAction('wireguard', serviceStatus.wireguard ? 'stop' : 'start')}
-                                    disabled={!features.enable_wireguard}
+                                    disabled={!features.enable_wireguard || !canWriteConfig}
                                     variant={serviceStatus.wireguard ? 'danger' : 'primary'}
                                     size="sm"
                                     className="flex-1"

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
 import { api } from '../services/api'
 import { useAuth } from '../context/AuthContext'
 import { RawEditorPanel } from '../components/raw/RawEditorPanel'
@@ -181,13 +180,6 @@ export default function RawConfig() {
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">Raw Config</h1>
                 </div>
-                <button
-                    onClick={loadCurrentConfig}
-                    className={`p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition-all border border-slate-700 ${loading ? 'animate-spin' : ''}`}
-                    title="Refresh current config"
-                >
-                    <RefreshCw size={18} />
-                </button>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex-1 min-h-0 flex flex-col">
