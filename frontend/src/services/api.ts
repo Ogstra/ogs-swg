@@ -576,6 +576,14 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update username');
     },
+    updatePanelUserPassword: async (username: string, new_password: string): Promise<void> => {
+        const res = await fetch('/api/panel-users/password', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ username, new_password }),
+        });
+        await handleResponse(res, 'Failed to update password');
+    },
     deletePanelUser: async (username: string): Promise<void> => {
         const res = await fetch(`/api/panel-users?username=${encodeURIComponent(username)}`, {
             method: 'DELETE',

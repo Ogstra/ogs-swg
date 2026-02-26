@@ -1,30 +1,26 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { api, FeatureFlags } from '../services/api'
-import { Save, RefreshCw, Lock, User, UserCog } from 'lucide-react'
+import { Save, RefreshCw, UserCog } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import SingboxConfigEditor from '../components/SingboxConfigEditor'
 import { Tabs } from '../components/ui/Tabs'
-import { Database, Shield, Settings as SettingsIcon, Server } from 'lucide-react'
+import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './PanelUsers'
 
 type ServiceStatus = { singbox: boolean; wireguard: boolean }
 type DbInfo = { rows: number; sizeMB: number }
-type PasswordData = { current: string; new: string; confirm: string }
-type UsernameData = { password: string; newUsername: string }
 type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string }
 
 export default function Settings() {
     const { success, error: toastError } = useToast()
-    const { logout, permissions } = useAuth()
+    const { permissions } = useAuth()
     const canWriteSettings = !!permissions?.can_write_settings
     const canWriteConfig = !!permissions?.can_write_config
-    const navigate = useNavigate()
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<{ rows: number; sizeMB: number }>({ rows: 0, sizeMB: 0 })
@@ -44,8 +40,6 @@ export default function Settings() {
     })
     const [historyLimit, setHistoryLimit] = useState(10)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean; wireguard: boolean }>({ singbox: false, wireguard: false })
-    const [passwordData, setPasswordData] = useState({ current: '', new: '', confirm: '' })
-    const [usernameData, setUsernameData] = useState({ password: '', newUsername: '' })
     const [publicIP, setPublicIP] = useState<string>('')
     const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>({
         defaultService: 'singbox',
@@ -228,50 +222,6 @@ export default function Settings() {
         }
     }
 
-    const handleChangeUsername = async () => {
-        if (!canWriteSettings) {
-            toastError('No write permission for settings')
-            return
-        }
-        if (!usernameData.password || !usernameData.newUsername) {
-            toastError("All fields are required")
-            return
-        }
-        try {
-            await api.updateUsername(usernameData.password, usernameData.newUsername)
-            success('Username updated successfully. Please login again.')
-            setUsernameData({ password: '', newUsername: '' })
-            // Logout and redirect to login
-            logout()
-            navigate('/login')
-        } catch (err) {
-            toastError('Failed to update username: ' + err)
-        }
-    }
-
-    const handleChangePassword = async () => {
-        if (!passwordData.current || !passwordData.new || !passwordData.confirm) {
-            toastError("All fields are required")
-            return
-        }
-        if (passwordData.new !== passwordData.confirm) {
-            toastError("New passwords do not match")
-            return
-        }
-        if (passwordData.new.length < 8) {
-            toastError("New password must be at least 8 characters")
-            return
-        }
-        try {
-            await api.updatePassword(passwordData.current, passwordData.new)
-            success('Password updated successfully')
-            setPasswordData({ current: '', new: '', confirm: '' })
-        } catch (err) {
-            toastError('Failed to update password: ' + err)
-        }
-    }
-
-
     const tabs = [
         {
             id: 'general',
@@ -298,20 +248,6 @@ export default function Settings() {
                     dashboardPrefs={dashboardPrefs}
                     setDashboardPrefs={setDashboardPrefs}
                     success={success}
-                />
-            )
-        },
-        {
-            id: 'security',
-            label: <span className="flex items-center gap-2"><Shield size={16} /> Security</span>,
-            content: (
-                <SecurityTab
-                    passwordData={passwordData}
-                    setPasswordData={setPasswordData}
-                    usernameData={usernameData}
-                    setUsernameData={setUsernameData}
-                    handleChangePassword={handleChangePassword}
-                    handleChangeUsername={handleChangeUsername}
                 />
             )
         },
@@ -615,106 +551,6 @@ function GeneralTab({
                         </div>
                     </div>
                 )}
-            </Card>
-        </div>
-    )
-}
-
-function SecurityTab({
-    handleChangePassword,
-    passwordData,
-    setPasswordData,
-    handleChangeUsername,
-    usernameData,
-    setUsernameData,
-}: {
-    handleChangePassword: () => void
-    passwordData: PasswordData
-    setPasswordData: Dispatch<SetStateAction<PasswordData>>
-    handleChangeUsername: () => void
-    usernameData: UsernameData
-    setUsernameData: Dispatch<SetStateAction<UsernameData>>
-}) {
-    return (
-        <div className="space-y-6">
-            <Card title="Account Security">
-                <div className="space-y-6">
-                    {/* Change Password */}
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-medium text-white">Change Password</h3>
-                            <Button onClick={handleChangePassword} size="sm" icon={<Lock size={16} />}>
-                                Update Password
-                            </Button>
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-400">Current Password</label>
-                            <input
-                                type="password"
-                                value={passwordData.current}
-                                onChange={e => setPasswordData(prev => ({ ...prev, current: e.target.value }))}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                                placeholder="Enter current password"
-                            />
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                                <label className="text-xs font-medium text-slate-400">New Password</label>
-                                <input
-                                    type="password"
-                                    value={passwordData.new}
-                                    onChange={e => setPasswordData(prev => ({ ...prev, new: e.target.value }))}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                                    placeholder="Min 8 characters"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-medium text-slate-400">Confirm New Password</label>
-                                <input
-                                    type="password"
-                                    value={passwordData.confirm}
-                                    onChange={e => setPasswordData(prev => ({ ...prev, confirm: e.target.value }))}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                                    placeholder="Confirm new password"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="w-full h-px bg-slate-800/50" />
-
-                    {/* Change Username */}
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-medium text-white">Change Username</h3>
-                            <Button onClick={handleChangeUsername} size="sm" icon={<User size={16} />}>
-                                Update Username
-                            </Button>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                                <label className="text-xs font-medium text-slate-400">Current Password</label>
-                                <input
-                                    type="password"
-                                    value={usernameData.password}
-                                    onChange={e => setUsernameData(prev => ({ ...prev, password: e.target.value }))}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                                    placeholder="Required to change username"
-                                />
-                            </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-medium text-slate-400">New Username</label>
-                                <input
-                                    type="text"
-                                    value={usernameData.newUsername}
-                                    onChange={e => setUsernameData(prev => ({ ...prev, newUsername: e.target.value }))}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                                    placeholder="Enter new username"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </Card>
         </div>
     )

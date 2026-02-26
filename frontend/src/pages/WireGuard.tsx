@@ -527,7 +527,7 @@ export default function WireGuard() {
                                             onClick={() => setShowPeerModal(true)}
                                             className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm transition-colors"
                                         >
-                                            Create your first peer
+                                            Create peer
                                         </button>
                                     </td>
                                 </tr>

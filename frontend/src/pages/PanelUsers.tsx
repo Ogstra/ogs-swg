@@ -2,21 +2,57 @@ import React, { useEffect, useState } from 'react';
 import { api, type PanelUserInfo, type CreatePanelUserRequest } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { useAuth, type PanelUserPermissions } from '../context/AuthContext';
-import { Plus, Trash2, Save, RefreshCw, Eye, EyeOff } from 'lucide-react';
+import { Plus, Trash2, Save, RefreshCw, Edit } from 'lucide-react';
 
-const PERM_LABELS: { key: keyof PanelUserPermissions; label: string; description: string }[] = [
-    { key: 'can_read_users', label: 'Read Sing-box Users', description: 'View users, links and usage reports' },
-    { key: 'can_write_users', label: 'Write Sing-box Users', description: 'Create, update and delete Sing-box users' },
-    { key: 'can_read_wireguard', label: 'Read WireGuard', description: 'View peers, traffic and interface info' },
-    { key: 'can_write_wireguard', label: 'Write WireGuard', description: 'Create, update and delete WireGuard peers/config' },
-    { key: 'can_read_config', label: 'Read Config', description: 'View raw config and sing-box config sections' },
-    { key: 'can_write_config', label: 'Write Config', description: 'Edit/apply config and execute service actions' },
-    { key: 'can_read_settings', label: 'Read Settings', description: 'View settings and sampler history' },
-    { key: 'can_write_settings', label: 'Write Settings', description: 'Change settings and run maintenance actions' },
-    { key: 'can_read_panel_users', label: 'Read Admin Users', description: 'View panel users and permission sets' },
-    { key: 'can_write_panel_users', label: 'Write Admin Users', description: 'Create, edit and delete panel users' },
-    { key: 'can_read_logs', label: 'Read Logs', description: 'View and search sing-box logs' },
-];
+const PERMISSION_GROUPS: {
+    id: string
+    label: string
+    description: string
+    readKey?: keyof PanelUserPermissions
+    writeKey?: keyof PanelUserPermissions
+}[] = [
+        {
+            id: 'singbox',
+            label: 'Sing-box Users',
+            description: '',
+            readKey: 'can_read_users',
+            writeKey: 'can_write_users',
+        },
+        {
+            id: 'wireguard',
+            label: 'WireGuard',
+            description: '',
+            readKey: 'can_read_wireguard',
+            writeKey: 'can_write_wireguard',
+        },
+        {
+            id: 'config',
+            label: 'Raw Config',
+            description: '',
+            readKey: 'can_read_config',
+            writeKey: 'can_write_config',
+        },
+        {
+            id: 'settings',
+            label: 'Settings',
+            description: '',
+            readKey: 'can_read_settings',
+            writeKey: 'can_write_settings',
+        },
+        {
+            id: 'panel-users',
+            label: 'Admin Users',
+            description: 'Manage panel users',
+            readKey: 'can_read_panel_users',
+            writeKey: 'can_write_panel_users',
+        },
+        {
+            id: 'logs',
+            label: 'Logs',
+            description: '',
+            readKey: 'can_read_logs',
+        },
+    ];
 
 const emptyPerms = (): PanelUserPermissions => ({
     can_read_users: false,
@@ -66,27 +102,19 @@ const PanelUsers: React.FC = () => {
     const canWritePanelUsers = !!myPerms?.can_write_panel_users;
     const [users, setUsers] = useState<PanelUserInfo[]>([]);
     const [loading, setLoading] = useState(true);
-    const [showCreateModal, setShowCreateModal] = useState(false);
-    const [editingPerms, setEditingPerms] = useState<Record<string, PanelUserPermissions>>({});
-    const [savingPerms, setSavingPerms] = useState<Record<string, boolean>>({});
+    const [editorMode, setEditorMode] = useState<'create' | 'edit' | null>(null);
+    const [editorOriginalUsername, setEditorOriginalUsername] = useState<string | null>(null);
+    const [editorUsername, setEditorUsername] = useState('');
+    const [editorPassword, setEditorPassword] = useState('');
+    const [editorPerms, setEditorPerms] = useState<PanelUserPermissions>(emptyPerms());
+    const [savingEditor, setSavingEditor] = useState(false);
     const [deletingUser, setDeletingUser] = useState<string | null>(null);
-
-    // Create form state
-    const [newUsername, setNewUsername] = useState('');
-    const [newPassword, setNewPassword] = useState('');
-    const [showPassword, setShowPassword] = useState(false);
-    const [newPerms, setNewPerms] = useState<PanelUserPermissions>(emptyPerms());
-    const [creating, setCreating] = useState(false);
 
     const load = async () => {
         setLoading(true);
         try {
             const data = await api.getPanelUsers();
             setUsers(data ?? []);
-            // Seed editing state
-            const permsMap: Record<string, PanelUserPermissions> = {};
-            (data ?? []).forEach(u => { permsMap[u.username] = { ...u.permissions }; });
-            setEditingPerms(permsMap);
         } catch {
             error('Failed to load panel users');
         } finally {
@@ -95,20 +123,6 @@ const PanelUsers: React.FC = () => {
     };
 
     useEffect(() => { load(); }, []);
-
-    const handleSavePerms = async (username: string) => {
-        if (!canWritePanelUsers) return;
-        setSavingPerms(prev => ({ ...prev, [username]: true }));
-        try {
-            await api.updatePanelUserPermissions(username, editingPerms[username]);
-            success('Permissions updated');
-            await load();
-        } catch (e: any) {
-            error(e.message || 'Failed to update permissions');
-        } finally {
-            setSavingPerms(prev => ({ ...prev, [username]: false }));
-        }
-    };
 
     const handleDelete = async (username: string) => {
         if (!canWritePanelUsers) return;
@@ -125,40 +139,95 @@ const PanelUsers: React.FC = () => {
         }
     };
 
-    const handleCreate = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!canWritePanelUsers) return;
-        if (!newUsername.trim() || !newPassword) return;
-        setCreating(true);
+    const openCreateModal = () => {
+        setEditorMode('create');
+        setEditorOriginalUsername(null);
+        setEditorUsername('');
+        setEditorPassword('');
+        setEditorPerms(emptyPerms());
+    };
+
+    const openEditModal = (user: PanelUserInfo) => {
+        setEditorMode('edit');
+        setEditorOriginalUsername(user.username);
+        setEditorUsername(user.username);
+        setEditorPassword('');
+        setEditorPerms({ ...user.permissions });
+    };
+
+    const closeEditorModal = () => {
+        setEditorMode(null);
+        setEditorOriginalUsername(null);
+        setEditorUsername('');
+        setEditorPassword('');
+        setEditorPerms(emptyPerms());
+    };
+
+    const toggleEditorPerm = (key: keyof PanelUserPermissions) => {
+        setEditorPerms(prev => applyPermissionToggle(prev, key, !prev[key]));
+    };
+
+    const handleSaveEditor = async () => {
+        if (!canWritePanelUsers || !editorMode) return;
+
+        const trimmedUsername = editorUsername.trim();
+        const trimmedPassword = editorPassword.trim();
+
+        if (editorMode === 'create') {
+            if (!trimmedUsername || !trimmedPassword) {
+                error('Username and password are required');
+                return;
+            }
+            if (trimmedPassword.length < 8) {
+                error('Password must be at least 8 characters');
+                return;
+            }
+        }
+
+        if (editorMode === 'edit' && trimmedPassword && trimmedPassword.length < 8) {
+            error('Password must be at least 8 characters');
+            return;
+        }
+
         try {
-            const req: CreatePanelUserRequest = {
-                username: newUsername.trim(),
-                password: newPassword,
-                permissions: newPerms,
-            };
-            await api.createPanelUser(req);
-            success('Panel user created');
-            setShowCreateModal(false);
-            setNewUsername('');
-            setNewPassword('');
-            setNewPerms(emptyPerms());
+            setSavingEditor(true);
+
+            if (editorMode === 'create') {
+                const req: CreatePanelUserRequest = {
+                    username: trimmedUsername,
+                    password: trimmedPassword,
+                    permissions: editorPerms,
+                };
+                await api.createPanelUser(req);
+                success('Panel user created');
+                closeEditorModal();
+                await load();
+                return;
+            }
+
+            if (!editorOriginalUsername) return;
+
+            await api.updatePanelUserPermissions(editorOriginalUsername, editorPerms);
+
+            let targetUsername = editorOriginalUsername;
+            const hasUsernameChange = !!trimmedUsername && trimmedUsername !== editorOriginalUsername;
+            if (hasUsernameChange) {
+                await api.updatePanelUserUsername(editorOriginalUsername, trimmedUsername);
+                targetUsername = trimmedUsername;
+            }
+
+            if (trimmedPassword) {
+                await api.updatePanelUserPassword(targetUsername, trimmedPassword);
+            }
+
+            success('Panel user updated');
+            closeEditorModal();
             await load();
         } catch (e: any) {
-            error(e.message || 'Failed to create panel user');
+            error(e.message || 'Failed to save panel user');
         } finally {
-            setCreating(false);
+            setSavingEditor(false);
         }
-    };
-
-    const toggleNewPerm = (key: keyof PanelUserPermissions) => {
-        setNewPerms(prev => applyPermissionToggle(prev, key, !prev[key]));
-    };
-
-    const toggleEditPerm = (username: string, key: keyof PanelUserPermissions) => {
-        setEditingPerms(prev => ({
-            ...prev,
-            [username]: applyPermissionToggle(prev[username] ?? emptyPerms(), key, !(prev[username]?.[key] ?? false)),
-        }));
     };
 
     if (loading) {
@@ -174,12 +243,11 @@ const PanelUsers: React.FC = () => {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-white">Panel Users</h1>
-                    <p className="text-slate-400 text-sm mt-1">Manage admin accounts and their permissions</p>
                 </div>
                 <button
-                    onClick={() => canWritePanelUsers && setShowCreateModal(true)}
+                    onClick={() => canWritePanelUsers && openCreateModal()}
                     disabled={!canWritePanelUsers}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     <Plus size={16} />
                     New User
@@ -188,66 +256,34 @@ const PanelUsers: React.FC = () => {
 
             <div className="space-y-4">
                 {users.map(user => (
-                    <div key={user.username} className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-                        <div className="flex items-center justify-between mb-4">
-                            <div>
-                                <span className="text-white font-semibold text-base">{user.username}</span>
+                    <div key={user.username} className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <div className="text-white font-semibold text-base truncate">{user.username}</div>
                                 {user.created_at > 0 && (
-                                    <span className="ml-3 text-xs text-slate-500">
+                                    <div className="text-xs text-slate-500">
                                         Created {new Date(user.created_at * 1000).toLocaleDateString()}
-                                    </span>
+                                    </div>
                                 )}
                             </div>
-                            <button
-                                onClick={() => handleDelete(user.username)}
-                                disabled={!canWritePanelUsers || deletingUser === user.username}
-                                className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
-                                title="Delete user"
-                            >
-                                <Trash2 size={16} />
-                            </button>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
-                            {PERM_LABELS.map(({ key, label, description }) => {
-                                const checked = editingPerms[user.username]?.[key] ?? false;
-                                const disabled = !canWritePanelUsers;
-                                return (
-                                    <label
-                                        key={key}
-                                        className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer
-                                            ${checked
-                                                ? 'bg-blue-600/10 border-blue-600/40'
-                                                : 'bg-slate-800/50 border-slate-700/50'}
-                                            ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-slate-600'}`}
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={checked}
-                                            disabled={disabled}
-                                            onChange={() => toggleEditPerm(user.username, key)}
-                                            className="mt-0.5 accent-blue-500"
-                                        />
-                                        <div>
-                                            <div className="text-sm font-medium text-slate-200">{label}</div>
-                                            <div className="text-xs text-slate-500 mt-0.5">{description}</div>
-                                        </div>
-                                    </label>
-                                );
-                            })}
-                        </div>
-
-                        <div className="flex justify-end">
-                            <button
-                                onClick={() => handleSavePerms(user.username)}
-                                disabled={!canWritePanelUsers || savingPerms[user.username]}
-                                className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                            >
-                                {savingPerms[user.username]
-                                    ? <RefreshCw size={14} className="animate-spin" />
-                                    : <Save size={14} />}
-                                Save Permissions
-                            </button>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={() => openEditModal(user)}
+                                    disabled={!canWritePanelUsers}
+                                    className="p-2 text-slate-300 hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50"
+                                    title="Edit user permissions"
+                                >
+                                    <Edit size={16} />
+                                </button>
+                                <button
+                                    onClick={() => handleDelete(user.username)}
+                                    disabled={!canWritePanelUsers || deletingUser === user.username}
+                                    className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                                    title="Delete user"
+                                >
+                                    <Trash2 size={16} />
+                                </button>
+                            </div>
                         </div>
                     </div>
                 ))}
@@ -257,97 +293,113 @@ const PanelUsers: React.FC = () => {
                 )}
             </div>
 
-            {/* Create Modal */}
-            {showCreateModal && (
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-lg shadow-xl">
-                        <div className="p-5 border-b border-slate-800">
-                            <h2 className="text-lg font-semibold text-white">Create Panel User</h2>
+            <div className={editorMode ? '' : 'hidden'}>
+                <div className="fixed inset-0 bg-black/60 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+                    <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-xl max-h-[90vh] flex flex-col my-6">
+                        <div className="p-5 border-b border-slate-800 shrink-0">
+                            <h2 className="text-lg font-semibold text-white">
+                                {editorMode === 'create' ? 'Create Panel User' : `Edit Panel User: ${editorOriginalUsername}`}
+                            </h2>
                         </div>
-                        <form onSubmit={handleCreate} className="p-5 space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-1">Username</label>
-                                <input
-                                    type="text"
-                                    value={newUsername}
-                                    onChange={e => setNewUsername(e.target.value)}
-                                    required
-                                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                                    placeholder="username"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-1">Password</label>
-                                <div className="relative">
+                        <div className="p-5 overflow-y-auto">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">
+                                        {editorMode === 'create' ? '' : 'Change'} Username 
+                                    </label>
                                     <input
-                                        type={showPassword ? 'text' : 'password'}
-                                        value={newPassword}
-                                        onChange={e => setNewPassword(e.target.value)}
-                                        required
-                                        minLength={8}
-                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 pr-10 text-white text-sm focus:outline-none focus:border-blue-500"
-                                        placeholder="min. 8 characters"
+                                        type="text"
+                                        value={editorUsername}
+                                        onChange={e => setEditorUsername(e.target.value)}
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                                        placeholder={editorOriginalUsername || 'username'}
                                     />
-                                    <button
-                                        type="button"
-                                        onClick={() => setShowPassword(p => !p)}
-                                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                                    >
-                                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                                    </button>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-300 mb-1">
+                                        {editorMode === 'create' ? 'Password' : 'Change Password'}
+                                    </label>
+                                    <input
+                                        type="password"
+                                        value={editorPassword}
+                                        onChange={e => setEditorPassword(e.target.value)}
+                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                                        placeholder={editorMode === 'create' ? 'min. 8 characters' : 'Empty to keep current password'}
+                                    />
                                 </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-300 mb-2">Permissions</label>
-                                <div className="space-y-2">
-                                    {PERM_LABELS.map(({ key, label, description }) => {
-                                        const disabled = !canWritePanelUsers;
-                                        return (
-                                            <label
-                                                key={key}
-                                                className={`flex items-start gap-3 p-3 rounded-lg border transition-colors cursor-pointer
-                                                    ${newPerms[key]
-                                                        ? 'bg-blue-600/10 border-blue-600/40'
-                                                        : 'bg-slate-800/50 border-slate-700/50'}
-                                                    ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:border-slate-600'}`}
-                                            >
-                                                <input
-                                                    type="checkbox"
-                                                    checked={newPerms[key]}
-                                                    disabled={disabled}
-                                                    onChange={() => toggleNewPerm(key)}
-                                                    className="mt-0.5 accent-blue-500"
-                                                />
-                                                <div>
-                                                    <div className="text-sm font-medium text-slate-200">{label}</div>
-                                                    <div className="text-xs text-slate-500 mt-0.5">{description}</div>
-                                                </div>
-                                            </label>
-                                        );
-                                    })}
+                            <div className="rounded-lg border border-slate-700/50 overflow-hidden">
+                                <div className="grid grid-cols-[1fr_80px_80px] bg-slate-800/60 border-b border-slate-700/50 px-3 py-2 text-xs font-semibold text-slate-300">
+                                    <div>Resource</div>
+                                    <div className="text-center">Read</div>
+                                    <div className="text-center">Write</div>
                                 </div>
+                                {PERMISSION_GROUPS.map(({ id, label, description, readKey, writeKey }) => {
+                                    const disabled = !canWritePanelUsers;
+                                    const current = editorPerms;
+                                    return (
+                                        <div
+                                            key={id}
+                                            className="grid grid-cols-[1fr_80px_80px] items-center px-3 py-3 border-b border-slate-800/70 last:border-b-0 bg-slate-900/40"
+                                        >
+                                            <div>
+                                                <div className="text-sm font-medium text-slate-200">{label}</div>
+                                                <div className="text-xs text-slate-500 mt-0.5">{description}</div>
+                                            </div>
+                                            <div className="flex justify-center">
+                                                {readKey ? (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={current[readKey]}
+                                                        disabled={disabled}
+                                                        onChange={() => toggleEditorPerm(readKey)}
+                                                        className="accent-blue-500"
+                                                    />
+                                                ) : (
+                                                    <span className="text-slate-600">-</span>
+                                                )}
+                                            </div>
+                                            <div className="flex justify-center">
+                                                {writeKey ? (
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={current[writeKey]}
+                                                        disabled={disabled}
+                                                        onChange={() => toggleEditorPerm(writeKey)}
+                                                        className="accent-blue-500"
+                                                    />
+                                                ) : (
+                                                    <span className="text-slate-600">-</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                            <div className="flex justify-end gap-3 pt-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setShowCreateModal(false)}
-                                    className="px-4 py-2 text-slate-300 hover:text-white text-sm transition-colors"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={!canWritePanelUsers || creating}
-                                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                                >
-                                    {creating && <RefreshCw size={14} className="animate-spin" />}
-                                    Create User
-                                </button>
-                            </div>
-                        </form>
+                        </div>
+                        <div className="p-5 border-t border-slate-800 bg-slate-950/50 rounded-b-xl flex justify-end gap-3 shrink-0">
+                            <button
+                                type="button"
+                                onClick={closeEditorModal}
+                                className="px-4 py-2 text-slate-300 hover:text-white text-sm transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleSaveEditor}
+                                disabled={!canWritePanelUsers || !editorMode || savingEditor}
+                                className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
+                            >
+                                {savingEditor
+                                    ? <RefreshCw size={14} className="animate-spin" />
+                                    : <Save size={14} />}
+                                {editorMode === 'create' ? 'Create User' : 'Save Changes'}
+                            </button>
+                        </div>
                     </div>
                 </div>
-            )}
+            </div>
         </div>
     );
 };

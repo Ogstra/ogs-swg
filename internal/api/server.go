@@ -267,6 +267,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.handleCreatePanelUser)))
 	protected.HandleFunc("PUT /api/panel-users/permissions", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserPermissions)))
 	protected.HandleFunc("PUT /api/panel-users/username", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserUsername)))
+	protected.HandleFunc("PUT /api/panel-users/password", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserPassword)))
 	protected.HandleFunc("DELETE /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.handleDeletePanelUser)))
 
 	// Mount protected routes under /api/

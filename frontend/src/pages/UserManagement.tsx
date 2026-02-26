@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, UserStatus, CreateUserRequest } from '../services/api'
-import { Users, Plus, Trash2, RefreshCw, Edit, QrCode, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check } from 'lucide-react'
+import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
@@ -429,6 +429,23 @@ export default function UserManagement() {
             .catch(err => {
                 console.error('Failed to load user inbounds', err)
             })
+    }
+
+    const handleDeleteClick = (user: UserStatus) => {
+        if (!canWriteUsers) return
+        if (user.inbound_tags && user.inbound_tags.length > 1) {
+            setSelectedInboundsToRemove(new Set(user.inbound_tags))
+            setModalState({ type: 'select_inbounds', data: user })
+            return
+        }
+        if (confirm(`Delete user "${user.name}"?`)) {
+            api.deleteUser(user.name)
+                .then(() => {
+                    success('User deleted')
+                    fetchUsers()
+                })
+                .catch(err => toastError('Failed to delete: ' + err))
+        }
     }
 
     const handleSaveUser = async () => {
@@ -914,31 +931,7 @@ export default function UserManagement() {
                                                         <Edit size={16} />
                                                     </button>
                                                     <button
-                                                        onClick={() => setModalState({ type: 'qr', data: user })}
-                                                        className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 transition-all"
-                                                        title="QR Code"
-                                                    >
-                                                        <QrCode size={16} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => {
-                                                            if (!canWriteUsers) return
-                                                            if (user.inbound_tags && user.inbound_tags.length > 1) {
-                                                                // Show inbound selection modal
-                                                                setSelectedInboundsToRemove(new Set(user.inbound_tags))
-                                                                setModalState({ type: 'select_inbounds', data: user })
-                                                            } else {
-                                                                // Delete immediately
-                                                                if (confirm(`Delete user "${user.name}"?`)) {
-                                                                    api.deleteUser(user.name)
-                                                                        .then(() => {
-                                                                            success('User deleted')
-                                                                            fetchUsers()
-                                                                        })
-                                                                        .catch(err => toastError('Failed to delete: ' + err))
-                                                                }
-                                                            }
-                                                        }}
+                                                        onClick={() => handleDeleteClick(user)}
                                                         disabled={!canWriteUsers}
                                                         className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                                                         title="Delete User"
@@ -955,7 +948,7 @@ export default function UserManagement() {
                     </table>
                 </div>
 
-                {/* Mobile Cards (Matching WireGuard) */}
+                {/* Mobile List */}
                 <div className="md:hidden divide-y divide-slate-800">
                     {(sortedUsers || []).map(user => {
                         const isExceeded = user.quota_limit ? user.total > user.quota_limit : false
@@ -989,22 +982,27 @@ export default function UserManagement() {
                         }
 
                         return (
-                            <div key={user.name} className={`p-4 space-y-4 ${isSelected ? 'bg-blue-900/10' : ''}`}>
-                                <div className="flex items-start justify-between">
-                                    <div className="flex items-start gap-3">
+                            <div key={user.name} className={`p-3 ${isSelected ? 'bg-blue-900/10' : ''}`}>
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-3 min-w-0 flex-1">
                                         <input
                                             type="checkbox"
                                             checked={isSelected}
                                             onChange={() => handleSelectUser(user.name)}
                                             disabled={!canWriteUsers}
-                                            className="mt-1 rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer h-4 w-4"
+                                            className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer h-4 w-4"
                                         />
-                                        <div className="space-y-1">
-                                            <div className="font-bold text-slate-200">{user.name}</div>
-                                            <div className="flex items-center gap-2">
+                                        <div className="min-w-0">
+                                            <div className="font-semibold text-slate-200 truncate">{user.name}</div>
+                                            <div className="flex items-center gap-2 text-[11px]">
                                                 <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
                                                 <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
                                                     {statusText}
+                                                </span>
+                                                <span className="text-slate-600">•</span>
+                                                <span className="text-slate-500 font-mono truncate">
+                                                    {formatBytes(user.total)}
+                                                    {user.quota_limit ? ` / ${formatBytes(user.quota_limit)}` : ' / ∞'}
                                                 </span>
                                             </div>
                                         </div>
@@ -1018,73 +1016,12 @@ export default function UserManagement() {
                                             <Edit size={16} />
                                         </button>
                                         <button
-                                            onClick={() => setModalState({ type: 'qr', data: user })}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700"
-                                        >
-                                            <QrCode size={16} />
-                                        </button>
-                                        <button
-                                            onClick={async () => {
-                                                if (!canWriteUsers) return
-                                                if (confirm(`Delete user ${user.name}?`)) {
-                                                    try {
-                                                        await api.deleteUser(user.name)
-                                                        success('User deleted')
-                                                        fetchUsers()
-                                                    } catch (e) { toastError(String(e)) }
-                                                }
-                                            }}
+                                            onClick={() => handleDeleteClick(user)}
                                             disabled={!canWriteUsers}
                                             className="p-2 rounded-lg bg-slate-800 text-red-400 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <Trash2 size={16} />
                                         </button>
-                                    </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4 text-xs">
-                                    <div className="col-span-2">
-                                        <div className="col-span-2">
-                                            {user.quota_limit ? (
-                                                <div className="w-full">
-                                                    <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
-                                                        <span>{formatBytes(user.total)}</span>
-                                                        <span>{formatBytes(user.quota_limit)}</span>
-                                                    </div>
-                                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                                        <div
-                                                            className={`h-full rounded-full transition-all duration-500 ${(user.total / user.quota_limit) > 1 ? 'bg-red-500' :
-                                                                (user.total / user.quota_limit) > 0.8 ? 'bg-amber-500' :
-                                                                    'bg-blue-500'
-                                                                }`}
-                                                            style={{ width: `${Math.min((user.total / user.quota_limit) * 100, 100)}%` }}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <div className="w-full">
-                                                    <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
-                                                        <span>{formatBytes(user.total)}</span>
-                                                        <span className="text-xl leading-none">∞</span>
-                                                    </div>
-                                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                                        <div className="h-full bg-slate-700/50 w-full rounded-full" />
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                </div>
-
-                                <div className="bg-slate-950/50 rounded-lg p-3 grid grid-cols-2 gap-2">
-                                    <div className="flex items-center gap-2 text-emerald-400 text-xs font-mono">
-                                        <ArrowUp size={14} />
-                                        {formatBytes(user.uplink)}
-                                    </div>
-                                    <div className="flex items-center gap-2 text-blue-400 text-xs font-mono">
-                                        <ArrowDown size={14} />
-                                        {formatBytes(user.downlink)}
                                     </div>
                                 </div>
                             </div>
