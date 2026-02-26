@@ -8,7 +8,10 @@ type TabId = 'raw-singbox' | 'raw-wireguard'
 
 export default function RawConfig() {
     const { permissions } = useAuth()
+    const canReadConfig = !!permissions?.can_read_config
     const canWriteConfig = !!permissions?.can_write_config
+    const canReadWireguard = !!permissions?.can_read_wireguard
+    const canWriteWireguard = !!permissions?.can_write_wireguard
     const [activeTab, setActiveTab] = useState<TabId>('raw-singbox')
     const [loading, setLoading] = useState(false)
     const [saving, setSaving] = useState(false)
@@ -39,6 +42,7 @@ export default function RawConfig() {
     }
 
     const loadCurrentConfig = async () => {
+        if (!canReadConfig) return
         setLoading(true)
         try {
             if (activeTab === 'raw-singbox') {
@@ -46,7 +50,7 @@ export default function RawConfig() {
                 const normalized = normalizeJson(content)
                 setSingboxConfig(normalized)
                 setOriginalSingboxConfig(normalized)
-            } else {
+            } else if (canReadWireguard) {
                 const content = await api.getWireGuardConfig()
                 setWireguardConfig(content)
                 setOriginalWireguardConfig(content)
@@ -60,17 +64,33 @@ export default function RawConfig() {
     }
 
     const loadAll = async () => {
+        if (!canReadConfig) return
         setLoading(true)
         try {
-            const [singboxRaw, wgRaw] = await Promise.all([
-                api.getSingboxConfig(),
-                api.getWireGuardConfig(),
-            ])
-            const normalized = normalizeJson(singboxRaw)
-            setSingboxConfig(normalized)
-            setOriginalSingboxConfig(normalized)
-            setWireguardConfig(wgRaw)
-            setOriginalWireguardConfig(wgRaw)
+            try {
+                const singboxRaw = await api.getSingboxConfig()
+                const normalized = normalizeJson(singboxRaw)
+                setSingboxConfig(normalized)
+                setOriginalSingboxConfig(normalized)
+            } catch (err) {
+                console.error('Failed to load sing-box config', err)
+                // Keep previous state on transient/permission errors instead of blanking editor.
+            }
+
+            if (canReadWireguard) {
+                try {
+                    const wgRaw = await api.getWireGuardConfig()
+                    setWireguardConfig(wgRaw)
+                    setOriginalWireguardConfig(wgRaw)
+                } catch (err) {
+                    console.error('Failed to load WireGuard config', err)
+                    // Keep previous WG state on errors.
+                }
+            } else {
+                setWireguardConfig('')
+                setOriginalWireguardConfig('')
+            }
+
             await loadBackupMeta()
         } catch (err) {
             console.error('Failed to load configs', err)
@@ -81,7 +101,13 @@ export default function RawConfig() {
 
     useEffect(() => {
         loadAll()
-    }, [])
+    }, [canReadConfig, canReadWireguard])
+
+    useEffect(() => {
+        if (!canReadWireguard && activeTab === 'raw-wireguard') {
+            setActiveTab('raw-singbox')
+        }
+    }, [canReadWireguard, activeTab])
 
     const handleSave = async () => {
         setSaving(true)
@@ -90,7 +116,7 @@ export default function RawConfig() {
                 JSON.parse(singboxConfig)
                 await api.updateSingboxConfig(singboxConfig)
                 setOriginalSingboxConfig(singboxConfig)
-            } else {
+            } else if (canReadWireguard) {
                 await api.updateWireGuardConfig(wireguardConfig)
                 setOriginalWireguardConfig(wireguardConfig)
             }
@@ -106,7 +132,7 @@ export default function RawConfig() {
         try {
             if (activeTab === 'raw-singbox') {
                 await api.backupConfig()
-            } else {
+            } else if (canReadWireguard) {
                 await api.backupWireGuardConfig()
             }
             await loadBackupMeta()
@@ -124,7 +150,7 @@ export default function RawConfig() {
                 const normalized = JSON.stringify(restored, null, 2)
                 setSingboxConfig(normalized)
                 setOriginalSingboxConfig(normalized)
-            } else {
+            } else if (canReadWireguard) {
                 const restored = await api.restoreWireGuardConfig()
                 setWireguardConfig(restored)
                 setOriginalWireguardConfig(restored)
@@ -139,6 +165,15 @@ export default function RawConfig() {
     const currentValue = activeTab === 'raw-singbox' ? singboxConfig : wireguardConfig
     const currentOriginal = activeTab === 'raw-singbox' ? originalSingboxConfig : originalWireguardConfig
     const currentLastBackup = activeTab === 'raw-singbox' ? lastBackup.singbox : lastBackup.wireguard
+    const canWriteCurrent = activeTab === 'raw-singbox' ? canWriteConfig : canWriteWireguard
+
+    if (!canReadConfig) {
+        return (
+            <div className="h-full min-h-0 flex items-center justify-center">
+                <div className="text-sm text-slate-400">You do not have permission to read raw config.</div>
+            </div>
+        )
+    }
 
     return (
         <div className="h-full min-h-0 flex flex-col gap-4">
@@ -163,12 +198,14 @@ export default function RawConfig() {
                     >
                         sing-box (config.json)
                     </button>
-                    <button
-                        onClick={() => setActiveTab('raw-wireguard')}
-                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'raw-wireguard' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
-                    >
-                        WireGuard (wg0.conf)
-                    </button>
+                    {canReadWireguard && (
+                        <button
+                            onClick={() => setActiveTab('raw-wireguard')}
+                            className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'raw-wireguard' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                        >
+                            WireGuard (wg0.conf)
+                        </button>
+                    )}
                 </div>
 
                 <div className="flex-1 min-h-0 bg-slate-950 overflow-hidden flex flex-col">
@@ -182,7 +219,7 @@ export default function RawConfig() {
                         onRestore={handleRestore}
                         loading={loading}
                         saving={saving}
-                        canWrite={canWriteConfig}
+                        canWrite={canWriteCurrent}
                         lastBackupText={currentLastBackup ? new Date(currentLastBackup).toLocaleString() : ''}
                         language={activeTab === 'raw-singbox' ? 'json' : 'ini'}
                         textareaId={activeTab === 'raw-singbox' ? 'raw-editor-singbox' : 'raw-editor-wireguard'}

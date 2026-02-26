@@ -4,10 +4,13 @@ import { api } from '../services/api'
 import InboundList from './singbox/InboundList'
 import { Card } from './ui/Card'
 import { RawEditorPanel } from './raw/RawEditorPanel'
+import { useAuth } from '../context/AuthContext'
 
 type TabId = 'inbounds' | 'rules' | 'raw'
 
 export default function SingboxConfigEditor() {
+    const { permissions } = useAuth()
+    const canWriteConfig = !!permissions?.can_write_config
     const [activeTab, setActiveTab] = useState<TabId>('inbounds')
     const [config, setConfig] = useState('')
     const [originalConfig, setOriginalConfig] = useState('')
@@ -254,7 +257,7 @@ export default function SingboxConfigEditor() {
                             onRestore={handleRestore}
                             loading={loading}
                             saving={saving}
-                            canWrite={true}
+                            canWrite={canWriteConfig}
                             lastBackupText={lastBackup}
                             language="json"
                             textareaId="singbox-raw-editor"
@@ -271,6 +274,7 @@ export default function SingboxConfigEditor() {
                                     preservedCount={preservedRulesCount}
                                     loading={rulesLoading}
                                     saving={rulesSaving}
+                                    canWrite={canWriteConfig}
                                     reload={loadRules}
                                     save={saveRules}
                                 />
@@ -291,6 +295,7 @@ function RulesTab({
     preservedCount,
     loading,
     saving,
+    canWrite,
     reload,
     save,
 }: {
@@ -301,14 +306,22 @@ function RulesTab({
     preservedCount: number
     loading: boolean
     saving: boolean
+    canWrite: boolean
     reload: () => void
     save: () => void
 }) {
-    const addRule = () => setRules(prev => [...prev, { inbound: '', outbound: '', ipVersion: '' }])
+    const addRule = () => {
+        if (!canWrite) return
+        setRules(prev => [...prev, { inbound: '', outbound: '', ipVersion: '' }])
+    }
     const updateRule = (idx: number, patch: Partial<{ inbound: string; outbound: string; ipVersion?: string }>) => {
+        if (!canWrite) return
         setRules(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
     }
-    const removeRule = (idx: number) => setRules(prev => prev.filter((_, i) => i !== idx))
+    const removeRule = (idx: number) => {
+        if (!canWrite) return
+        setRules(prev => prev.filter((_, i) => i !== idx))
+    }
 
     const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
 
@@ -334,8 +347,8 @@ function RulesTab({
                     </button>
                     <button
                         onClick={save}
-                        disabled={saving || hasInvalid}
-                        className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm font-medium transition-colors ${saving || hasInvalid
+                        disabled={!canWrite || saving || hasInvalid}
+                        className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!canWrite || saving || hasInvalid
                             ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                             : 'bg-blue-600 hover:bg-blue-500 text-white'
                             }`}
@@ -357,6 +370,7 @@ function RulesTab({
                                 <select
                                     className="select-field w-full h-[38px] bg-slate-950 border border-slate-800 rounded-lg px-3 text-white outline-none focus:border-blue-500/50 transition-colors"
                                     value={rule.inbound}
+                                    disabled={!canWrite}
                                     onChange={e => updateRule(idx, { inbound: e.target.value })}
                                 >
                                     <option value="">Select inbound</option>
@@ -371,6 +385,7 @@ function RulesTab({
                                 <select
                                     className="select-field w-full h-[38px] bg-slate-950 border border-slate-800 rounded-lg px-3 text-white outline-none focus:border-blue-500/50 transition-colors"
                                     value={rule.outbound}
+                                    disabled={!canWrite}
                                     onChange={e => updateRule(idx, { outbound: e.target.value })}
                                 >
                                     <option value="">Select outbound</option>
@@ -385,6 +400,7 @@ function RulesTab({
                                 <select
                                     className="select-field w-full h-[38px] bg-slate-950 border border-slate-800 rounded-lg px-3 text-white outline-none focus:border-blue-500/50 transition-colors"
                                     value={rule.ipVersion || ''}
+                                    disabled={!canWrite}
                                     onChange={e => updateRule(idx, { ipVersion: e.target.value })}
                                 >
                                     <option value="">Any</option>
@@ -395,6 +411,7 @@ function RulesTab({
                             <div className="flex md:justify-end">
                                 <button
                                     onClick={() => removeRule(idx)}
+                                    disabled={!canWrite}
                                     className="w-full md:w-auto h-[38px] px-3 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
                                 >
                                     Remove
@@ -407,6 +424,7 @@ function RulesTab({
 
             <button
                 onClick={addRule}
+                disabled={!canWrite}
                 className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
             >
                 Add Rule

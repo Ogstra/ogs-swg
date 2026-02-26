@@ -1095,6 +1095,9 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if shouldRedactConfigReadOnly(r) {
+		content = redactSingboxJSON(content)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(content))
 }
