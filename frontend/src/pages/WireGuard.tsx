@@ -325,7 +325,7 @@ export default function WireGuard() {
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">WireGuard</h1>
+                    <h1 className="text-2xl font-bold text-white hidden sm:block">WireGuard</h1>
                 </div>
                 {pendingRestart && (
                     <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 px-4 py-2 rounded-lg">
@@ -339,7 +339,7 @@ export default function WireGuard() {
                         </button>
                     </div>
                 )}
-                <div className="flex flex-wrap gap-3">
+                <div className="grid grid-cols-2 gap-3 w-full md:w-auto md:flex md:flex-wrap">
                     <button
                         onClick={() => {
                             if (!canWriteWireguard) return
@@ -347,7 +347,7 @@ export default function WireGuard() {
                             setShowInterfaceModal(true)
                         }}
                         disabled={!canWriteWireguard}
-                        className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors font-medium text-sm border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors font-medium text-sm border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Settings size={16} />
                         Interface Config
@@ -362,7 +362,7 @@ export default function WireGuard() {
                             setShowPeerModal(true)
                         }}
                         disabled={!canWriteWireguard}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium text-sm shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium text-sm shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Plus size={16} />
                         Add Peer
@@ -427,7 +427,7 @@ export default function WireGuard() {
             </div>
 
             {/* Peers Table */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto hidden md:block">
                     <table className="w-full min-w-[960px] text-left border-collapse table-fixed">
                         <thead>
@@ -450,11 +450,11 @@ export default function WireGuard() {
                                 <th className="p-4 font-semibold text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800">
+                        <tbody>
                             {(sortedPeers || []).map(peer => {
                                 const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 180 // 3 mins
                                 return (
-                                    <tr key={peer.public_key} className="hover:bg-slate-800/30 transition-colors">
+                                    <tr key={peer.public_key} className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
                                                 <div className={`w-2.5 h-2.5 rounded-full ring-2 ring-slate-900 ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-slate-700'}`}></div>

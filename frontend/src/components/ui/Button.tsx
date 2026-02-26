@@ -44,7 +44,7 @@ export function Button({
             disabled={disabled || isLoading}
             {...props}
         >
-            {isLoading && <RotateCw className="mr-2 h-4 w-4 animate-spin" />}
+            {isLoading && <RotateCw className={`${children ? 'mr-2' : ''} h-4 w-4 animate-spin`} />}
             {!isLoading && icon && <span className={`${children ? 'mr-2' : ''}`}>{icon}</span>}
             {children}
         </button>

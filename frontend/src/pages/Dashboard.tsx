@@ -200,7 +200,7 @@ export default function Dashboard() {
                         <span className="text-slate-500 text-xs hidden sm:inline">Updated {lastUpdated.toLocaleTimeString()}</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-3 flex-wrap">
+                <div className="w-full sm:w-auto flex items-center gap-3 flex-wrap justify-end">
                     <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm">
                         <Clock size={14} className="text-slate-500" />
                         <select

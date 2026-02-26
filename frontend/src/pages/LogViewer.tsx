@@ -92,7 +92,7 @@ export default function LogViewer() {
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">sing-box Logs</h1>
+                    <h1 className="text-2xl font-bold text-white hidden sm:block">sing-box Logs</h1>
                     <div className="flex items-center gap-2 mt-1">
                         <span className={`text-xs px-2 py-0.5 rounded border ${logSource === 'journal' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
                             {logSource === 'journal' ? 'journalctl' : 'File'}
