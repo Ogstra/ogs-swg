@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
+import { ActionIconButton } from '../components/ui/ActionIconButton'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 
@@ -769,41 +770,39 @@ export default function UserManagement() {
                 )}
 
                 <div className="overflow-x-auto hidden md:block">
-                    <table className="w-full min-w-[1100px] text-left border-collapse table-fixed">
+                    <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[1100px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                                <th className="p-4 w-10">
-                                    <input
-                                        type="checkbox"
-                                        onChange={handleSelectAll}
-                                        checked={users.length > 0 && selectedUsers.size === users.length}
-                                        disabled={!canWriteUsers}
-                                        className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer"
-                                    />
-                                </th>
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('status')}>
                                     Last Seen {renderSortIcon('status')}
                                 </th>
-                                <th className="p-4 w-48 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
                                     Name/Alias {renderSortIcon('user')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
+                                <th className="p-4 min-w-[140px] font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
                                     Quota {renderSortIcon('quota')}
                                 </th>
 
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('usage')}>
                                     Data Usage {renderSortIcon('usage')}
                                 </th>
-                                <th className="p-4 w-64 font-semibold text-left">Inbound</th>
+                                <th className="p-4 font-semibold text-left">Inbound</th>
                                 <th className="p-4 font-semibold text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800">
-                            {users.length === 0 ? (
+                            {sortedUsers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={8} className="p-12 text-center text-slate-500">
+                                    <td colSpan={6} className="p-12 text-center text-slate-500">
                                         <Users size={48} className="mx-auto mb-4 opacity-20" />
                                         <p>No users found.</p>
+                                        <button
+                                            onClick={() => canWriteUsers && setModalState({ type: 'create' })}
+                                            disabled={!canWriteUsers}
+                                            className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            Create user
+                                        </button>
                                     </td>
                                 </tr>
                             ) : (
@@ -846,15 +845,6 @@ export default function UserManagement() {
                                             className={`hover:bg-slate-800/30 transition-colors ${isSelected ? 'bg-blue-900/10' : ''}`}
                                         >
                                             <td className="p-4">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={isSelected}
-                                                    onChange={() => handleSelectUser(user.name)}
-                                                    disabled={!canWriteUsers}
-                                                    className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer"
-                                                />
-                                            </td>
-                                            <td className="p-4">
                                                 <div className="flex items-center gap-3">
                                                     <div className={`w-2.5 h-2.5 rounded-full ring-2 ring-slate-900 ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
                                                     <span className={`text-xs font-medium ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
@@ -867,12 +857,12 @@ export default function UserManagement() {
                                             </td>
                                             <td className="p-4 align-middle">
                                                 {user.quota_limit ? (
-                                                    <div className="w-1/2 min-w-[140px]">
+                                                    <div className="">
                                                         <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
                                                             <span>{formatBytes(user.total)}</span>
                                                             <span>{formatBytes(user.quota_limit)}</span>
                                                         </div>
-                                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                                        <div className="pr-2 h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                                             <div
                                                                 className={`h-full rounded-full transition-all duration-500 ${(user.total / user.quota_limit) > 1 ? 'bg-red-500' :
                                                                     (user.total / user.quota_limit) > 0.8 ? 'bg-amber-500' :
@@ -907,8 +897,8 @@ export default function UserManagement() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="p-4">
-                                                <div className="flex flex-wrap gap-1 max-w-full">
+                                            <td className="p-2">
+                                                <div className="flex flex-wrap gap-2 max-w-full">
                                                     {(user.inbound_tags && user.inbound_tags.length > 0) ? (
                                                         user.inbound_tags.map(tag => (
                                                             <Badge key={tag} variant="info" className="max-w-[160px] truncate">
@@ -922,22 +912,22 @@ export default function UserManagement() {
                                             </td>
                                             <td className="p-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">
-                                                    <button
+                                                    <ActionIconButton
                                                         onClick={() => handleEditClick(user)}
                                                         disabled={!canWriteUsers}
-                                                        className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-blue-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        tone="primary"
                                                         title="Edit User"
                                                     >
                                                         <Edit size={16} />
-                                                    </button>
-                                                    <button
+                                                    </ActionIconButton>
+                                                    <ActionIconButton
                                                         onClick={() => handleDeleteClick(user)}
                                                         disabled={!canWriteUsers}
-                                                        className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        tone="danger"
                                                         title="Delete User"
                                                     >
                                                         <Trash2 size={16} />
-                                                    </button>
+                                                    </ActionIconButton>
                                                 </div>
                                             </td>
                                         </tr>
@@ -1008,20 +998,20 @@ export default function UserManagement() {
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
-                                        <button
+                                        <ActionIconButton
                                             onClick={() => handleEditClick(user)}
                                             disabled={!canWriteUsers}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            tone="primary"
                                         >
                                             <Edit size={16} />
-                                        </button>
-                                        <button
+                                        </ActionIconButton>
+                                        <ActionIconButton
                                             onClick={() => handleDeleteClick(user)}
                                             disabled={!canWriteUsers}
-                                            className="p-2 rounded-lg bg-slate-800 text-red-400 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            tone="danger"
                                         >
                                             <Trash2 size={16} />
-                                        </button>
+                                        </ActionIconButton>
                                     </div>
                                 </div>
                             </div>
@@ -1031,6 +1021,13 @@ export default function UserManagement() {
                         <div className="p-8 text-center text-slate-500">
                             <Users size={48} className="mx-auto mb-4 opacity-20" />
                             <p>No users found.</p>
+                            <button
+                                onClick={() => canWriteUsers && setModalState({ type: 'create' })}
+                                disabled={!canWriteUsers}
+                                className="mt-4 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Create user
+                            </button>
                         </div>
                     )}
                 </div>

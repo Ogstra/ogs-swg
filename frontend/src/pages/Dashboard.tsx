@@ -455,7 +455,7 @@ export default function Dashboard() {
                     title="Top Consumers"
                     className="h-full"
                     action={
-                        <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                        <div className="flex flex-wrap bg-slate-950 p-0.5 rounded-lg border border-slate-800">
                             <button
                                 onClick={() => setChartMode('singbox')}
                                 className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
@@ -471,7 +471,7 @@ export default function Dashboard() {
                         </div>
                     }
                 >
-                    <div className="space-y-4 mt-2 max-h-72 overflow-y-auto pr-2">
+                    <div className="space-y-4 mt-2 max-h-72 overflow-y-auto">
                         {topConsumers.length === 0 ? (
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
                         ) : (

@@ -232,9 +232,51 @@ export default function RawConfig() {
                         WireGuard (wg0.conf)
                     </button>
                 </div>
-
+<div className="flex place-content-between bg-slate-900 border-b border-slate-800">
+                {/* Search Bar */}
+                <div className="flex items-center gap-2 p-2">
+                    <div className="relative flex-1 max-w-sm">
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={e => {
+                                setSearchTerm(e.target.value)
+                                setSearchCursor(0)
+                            }}
+                            onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    performFind(e.shiftKey ? 'prev' : 'next', true)
+                                }
+                            }}
+                            placeholder="Find in config..."
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-3 pr-20 py-1.5 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                            ref={searchInputRef}
+                        />
+                        <div className="absolute pr-0.5     pt-0.5 right-1 top-1 flex gap-0.5">
+                            <button
+                                onClick={() => performFind('prev')}
+                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                                title="Previous (Shift+Enter)"
+                            >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+                            </button>
+                            <button
+                                onClick={() => performFind('next')}
+                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                                title="Next (Enter)"
+                            >
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div>
                 {/* Toolbar */}
-                <div className="flex items-center justify-between p-2 border-b border-slate-800 bg-slate-900 overflow-x-auto gap-4 custom-scrollbar">
+                <div className="flex items-center justify-between p-2 overflow-x-auto gap-4 custom-scrollbar">
+                    <div className="text-[12px] text-slate-500 font-mono whitespace-nowrap px-2">
+                        Last Backup: {currentLastBackup ? new Date(currentLastBackup).toLocaleString() : 'Never'}
+                    </div>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => setShowDiff(!showDiff)}
@@ -258,17 +300,6 @@ export default function RawConfig() {
                             Restore
                         </button>
                     </div>
-                    <div className="text-[10px] text-slate-500 font-mono whitespace-nowrap px-2">
-                        Last Backup: {currentLastBackup ? new Date(currentLastBackup).toLocaleString() : 'Never'}
-                    </div>
-                </div>
-
-                <div className="flex items-start gap-3 p-4 bg-amber-500/5 border-b border-amber-500/10 text-amber-400/80 text-xs">
-                    <AlertTriangle size={16} className="shrink-0 mt-0.5 opacity-70" />
-                    <div>
-                        <p className="font-bold">Caution</p>
-                        <p className="opacity-80 leading-relaxed">Editing raw configurations can break your service. Validate syntax before saving.</p>
-                    </div>
                 </div>
 
                 {showDiff && (
@@ -288,49 +319,8 @@ export default function RawConfig() {
                         ))}
                     </div>
                 )}
-
-                {/* Search Bar */}
-                <div className="flex items-center gap-2 p-2 bg-slate-900 border-b border-slate-800">
-                    <div className="relative flex-1 max-w-sm">
-                        <input
-                            type="text"
-                            value={searchTerm}
-                            onChange={e => {
-                                setSearchTerm(e.target.value)
-                                setSearchCursor(0)
-                            }}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                    e.preventDefault()
-                                    performFind(e.shiftKey ? 'prev' : 'next', true)
-                                }
-                            }}
-                            placeholder="Find in config..."
-                            className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-3 pr-20 py-1.5 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
-                            ref={searchInputRef}
-                        />
-                        <div className="absolute right-1 top-1 flex gap-0.5">
-                            <button
-                                onClick={() => performFind('prev')}
-                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
-                                title="Previous (Shift+Enter)"
-                            >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
-                            </button>
-                            <button
-                                onClick={() => performFind('next')}
-                                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
-                                title="Next (Enter)"
-                            >
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div className="text-[10px] text-slate-600 font-medium hidden sm:block">
-                        Ctrl+F to focus • F3 Next
-                    </div>
-                </div>
-
+</div>
+</div>
                 <div
                     className="flex-1 min-h-0 bg-slate-950 raw-editor-shell overflow-auto"
                     onKeyDown={handleKeyDown}
