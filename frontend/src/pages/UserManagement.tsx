@@ -681,79 +681,85 @@ export default function UserManagement() {
 
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">User Management</h1>
+                    <h1 className="text-2xl font-bold text-white hidden sm:block">User Management</h1>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-col md:flex-row md:flex-wrap gap-2 w-full md:w-auto">
                     {canWriteUsers && selectedUsers.size > 0 && (
                         <Button
                             onClick={handleDeleteSelected}
                             variant="danger"
                             icon={<Trash2 size={16} />}
+                            className="w-full md:w-auto"
                         >
                             Delete ({selectedUsers.size})
                         </Button>
                     )}
-                    <Button
-                        onClick={() => {
-                            if (!canWriteUsers) return
-                            setIsEditing(false)
-                            const nextType = getDefaultUserType()
-                            setUserType(nextType)
-                            setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
-                            setOriginalInboundTags([])
-                            setNewUser({
-                                name: '',
-                                uuid: '',
-                                flow: 'xtls-rprx-vision',
-                                vmess_security: 'auto',
-                                vmess_alter_id: 0,
-                                quota_limit: 0,
-                                quota_period: 'monthly',
-                                reset_day: 1,
-                                enabled: true,
-                                inbound_tag: getFirstInboundTagForType(getDefaultUserType())
-                            })
-                            setQuotaInput('')
-                            setModalState({ type: 'create' })
-                        }}
-                        icon={<Plus size={16} />}
-                        variant="primary"
-                        disabled={!canWriteUsers}
-                    >
-                        Create User
-                    </Button>
-                    <Button
-                        onClick={() => canWriteUsers && setModalState({ type: 'bulk' })}
-                        variant="secondary"
-                        icon={<Users size={16} />}
-                        disabled={!canWriteUsers}
-                    >
-                        Bulk Create
-                    </Button>
-                    <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700">
-                        <select
-                            value={filterInbound}
-                            onChange={(e) => setFilterInbound(e.target.value)}
-                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none"
+                    <div className="grid grid-cols-2 gap-2 w-full md:w-auto md:flex md:flex-wrap md:items-center">
+                        <Button
+                            onClick={() => {
+                                if (!canWriteUsers) return
+                                setIsEditing(false)
+                                const nextType = getDefaultUserType()
+                                setUserType(nextType)
+                                setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
+                                setOriginalInboundTags([])
+                                setNewUser({
+                                    name: '',
+                                    uuid: '',
+                                    flow: 'xtls-rprx-vision',
+                                    vmess_security: 'auto',
+                                    vmess_alter_id: 0,
+                                    quota_limit: 0,
+                                    quota_period: 'monthly',
+                                    reset_day: 1,
+                                    enabled: true,
+                                    inbound_tag: getFirstInboundTagForType(getDefaultUserType())
+                                })
+                                setQuotaInput('')
+                                setModalState({ type: 'create' })
+                            }}
+                            icon={<Plus size={16} />}
+                            variant="primary"
+                            disabled={!canWriteUsers}
+                            className="w-full md:w-auto justify-center"
                         >
-                            <option value="">All Inbounds</option>
-                            {inbounds.map((inb) => (
-                                <option key={inb.tag} value={inb.tag}>{inb.tag}</option>
-                            ))}
-                        </select>
+                            Create User
+                        </Button>
+                        <Button
+                            onClick={() => canWriteUsers && setModalState({ type: 'bulk' })}
+                            variant="secondary"
+                            icon={<Users size={16} />}
+                            disabled={!canWriteUsers}
+                            className="w-full md:w-auto justify-center"
+                        >
+                            Bulk Create
+                        </Button>
+                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
+                            <select
+                                value={filterInbound}
+                                onChange={(e) => setFilterInbound(e.target.value)}
+                                className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
+                            >
+                                <option value="">All Inbounds</option>
+                                {inbounds.map((inb) => (
+                                    <option key={inb.tag} value={inb.tag}>{inb.tag}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <Button
+                            onClick={() => setModalState({ type: 'usage' })}
+                            variant="secondary"
+                            icon={<RefreshCw size={16} />}
+                            className="w-full md:w-auto justify-center"
+                        >
+                            Usage Report
+                        </Button>
                     </div>
-                    <Button
-                        onClick={() => setModalState({ type: 'usage' })}
-                        variant="secondary"
-                        icon={<RefreshCw size={16} />}
-                    >
-                        Usage Report
-                    </Button>
                 </div>
             </div>
 
             {/* Users Table Container - Matching WireGuard Style */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
 
                 {/* Checkbox Header (Custom addition to match WireGuard container but keep bulk actions) */}
                 {users.length > 0 && (
@@ -790,7 +796,7 @@ export default function UserManagement() {
                                 <th className="p-4 font-semibold text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800">
+                        <tbody>
                             {sortedUsers.length === 0 ? (
                                 <tr>
                                     <td colSpan={6} className="p-12 text-center text-slate-500">
@@ -842,7 +848,7 @@ export default function UserManagement() {
                                     return (
                                         <tr
                                             key={user.name}
-                                            className={`hover:bg-slate-800/30 transition-colors ${isSelected ? 'bg-blue-900/10' : ''}`}
+                                            className={`border-b border-slate-800 hover:bg-slate-800/30 transition-colors ${isSelected ? 'bg-blue-900/10' : ''}`}
                                         >
                                             <td className="p-4">
                                                 <div className="flex items-center gap-3">

@@ -101,8 +101,8 @@ export const Layout: React.FC = () => {
                     <div className="w-8"></div>
                 </header>
 
-                <main className="flex-1 overflow-y-auto p-4 lg:p-8 scroll-smooth">
-                    <div className="max-w-7xl mx-auto">
+                <main className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-8 scroll-smooth">
+                    <div className="max-w-7xl mx-auto h-full min-h-0 flex flex-col">
                         <Outlet />
                     </div>
                 </main>

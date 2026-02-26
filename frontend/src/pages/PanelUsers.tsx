@@ -354,7 +354,7 @@ const PanelUsers: React.FC = () => {
                                                         checked={current[readKey]}
                                                         disabled={disabled}
                                                         onChange={() => toggleEditorPerm(readKey)}
-                                                        className="accent-blue-500"
+                                                        className="h-4 w-4 accent-blue-500"
                                                     />
                                                 ) : (
                                                     <span className="text-slate-600">-</span>
@@ -367,7 +367,7 @@ const PanelUsers: React.FC = () => {
                                                         checked={current[writeKey]}
                                                         disabled={disabled}
                                                         onChange={() => toggleEditorPerm(writeKey)}
-                                                        className="accent-blue-500"
+                                                        className="h-4 w-4 accent-blue-500"
                                                     />
                                                 ) : (
                                                     <span className="text-slate-600">-</span>

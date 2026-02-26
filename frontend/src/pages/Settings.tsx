@@ -279,10 +279,10 @@ export default function Settings() {
     ]
 
     return (
-        <div className="space-y-6">
+        <div className="h-full min-h-0 flex flex-col gap-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold text-white">Settings</h1>
+                    <h1 className="text-2xl font-bold text-white hidden sm:block">Settings</h1>
                 </div>
                 <div className="flex gap-3">
                     <Button
@@ -296,7 +296,7 @@ export default function Settings() {
                 </div>
             </div>
 
-            <Tabs tabs={tabs} />
+            <Tabs tabs={tabs} className="flex-1 min-h-0" />
         </div>
     )
 }

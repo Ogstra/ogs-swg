@@ -18,8 +18,8 @@ export function Tabs({ tabs, defaultTab, className }: TabsProps) {
     const [activeTab, setActiveTab] = useState(defaultTab || tabs[0]?.id)
 
     return (
-        <div className={twMerge("w-full", className)}>
-            <div className="flex border-b border-slate-800 bg-slate-950/50 mb-6 overflow-x-auto">
+        <div className={twMerge("w-full h-full min-h-0 flex flex-col", className)}>
+            <div className="flex border-b border-slate-800 bg-slate-950/50 mb-6 overflow-x-auto shrink-0">
                 {tabs.map((tab) => (
                     <button
                         key={tab.id}
@@ -35,7 +35,7 @@ export function Tabs({ tabs, defaultTab, className }: TabsProps) {
                     </button>
                 ))}
             </div>
-            <div className="w-full">
+            <div className="w-full flex-1 min-h-0">
                 {tabs.find(t => t.id === activeTab)?.content}
             </div>
         </div>
