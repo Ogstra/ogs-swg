@@ -5,9 +5,12 @@ import { useToast } from '../../context/ToastContext'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import InboundModal from './InboundModal'
+import { useAuth } from '../../context/AuthContext'
 
 export default function InboundList() {
     const { success, error: toastError } = useToast()
+    const { permissions } = useAuth()
+    const canWriteConfig = !!permissions?.can_write_config
     const [inbounds, setInbounds] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
     const [isModalOpen, setIsModalOpen] = useState(false)
@@ -31,6 +34,7 @@ export default function InboundList() {
     }
 
     const handleDelete = async (tag: string) => {
+        if (!canWriteConfig) return
         if (!confirm(`Are you sure you want to delete inbound "${tag}"?`)) return
         try {
             await api.deleteSingboxInbound(tag)
@@ -42,11 +46,13 @@ export default function InboundList() {
     }
 
     const handleEdit = (inbound: any) => {
+        if (!canWriteConfig) return
         setEditingInbound(inbound)
         setIsModalOpen(true)
     }
 
     const handleAdd = () => {
+        if (!canWriteConfig) return
         setEditingInbound(null)
         setIsModalOpen(true)
     }
@@ -71,7 +77,7 @@ export default function InboundList() {
         <div className="space-y-6">
             <div className="flex justify-between items-center">
                 <h3 className="text-lg font-semibold text-white">Configured Inbounds</h3>
-                <Button onClick={handleAdd} size="sm" icon={<Plus size={16} />}>
+                <Button onClick={handleAdd} size="sm" icon={<Plus size={16} />} disabled={!canWriteConfig}>
                     Add Inbound
                 </Button>
             </div>
@@ -95,6 +101,7 @@ export default function InboundList() {
 
                                         <button
                                             onClick={() => handleEdit(inbound)}
+                                            disabled={!canWriteConfig}
                                             className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors"
                                             title="Edit"
                                         >
@@ -102,6 +109,7 @@ export default function InboundList() {
                                         </button>
                                         <button
                                             onClick={() => handleDelete(inbound.tag)}
+                                            disabled={!canWriteConfig}
                                             className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors"
                                             title="Delete"
                                         >

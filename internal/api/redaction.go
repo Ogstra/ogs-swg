@@ -11,7 +11,7 @@ import (
 
 const maskedValue = "********"
 
-var iniSensitiveLine = regexp.MustCompile(`(?im)^(\s*(?:PrivateKey|PublicKey)\s*=\s*).*$`)
+var iniSensitiveLine = regexp.MustCompile(`(?im)^(\s*(?:PrivateKey|PublicKey|PresharedKey)\s*=\s*).*$`)
 
 func shouldRedactConfigReadOnly(r *http.Request) bool {
 	perms := getPermissions(r)
@@ -21,6 +21,11 @@ func shouldRedactConfigReadOnly(r *http.Request) bool {
 func shouldRedactWireGuardReadOnly(r *http.Request) bool {
 	perms := getPermissions(r)
 	return perms != nil && perms.CanReadWireguard && !perms.CanWriteWireguard
+}
+
+func shouldRedactUsersReadOnly(r *http.Request) bool {
+	perms := getPermissions(r)
+	return perms != nil && perms.CanReadUsers && !perms.CanWriteUsers
 }
 
 func redactSingboxJSON(raw string) string {
@@ -62,7 +67,7 @@ func redactJSONValue(v any) any {
 
 func isSensitiveJSONKey(k string) bool {
 	switch strings.ToLower(strings.TrimSpace(k)) {
-	case "private_key", "public_key", "uuid", "short_id":
+	case "private_key", "public_key", "uuid", "short_id", "password", "preshared_key":
 		return true
 	default:
 		return false

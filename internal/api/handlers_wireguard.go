@@ -42,6 +42,7 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 	storedPeers, _ := s.store.GetWGPeerMeta()
 
 	response := make([]PeerWithStats, 0)
+	redactWG := shouldRedactWireGuardReadOnly(r)
 	for _, p := range wgConfig.Peers {
 		if p.Alias == "" && p.Email != "" {
 			p.Alias = p.Email
@@ -61,8 +62,17 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 		}
 		// Never expose peer private keys in list responses.
 		ps.WireGuardPeer.PrivateKey = ""
+		if redactWG && strings.TrimSpace(ps.WireGuardPeer.PresharedKey) != "" {
+			ps.WireGuardPeer.PresharedKey = maskedValue
+		}
+		if redactWG && strings.TrimSpace(ps.WireGuardPeer.PublicKey) != "" {
+			ps.WireGuardPeer.PublicKey = maskedValue
+		}
 		if s, ok := stats[p.PublicKey]; ok {
 			ps.Stats = s
+			if redactWG && strings.TrimSpace(ps.Stats.PublicKey) != "" {
+				ps.Stats.PublicKey = maskedValue
+			}
 			if ps.Stats.LatestHandshake <= 0 {
 				if meta, ok := storedPeers[p.PublicKey]; ok {
 					ps.Stats.LatestHandshake = meta.LastHandshake
@@ -72,6 +82,9 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 			ps.Stats = core.PeerStats{
 				PublicKey:       p.PublicKey,
 				LatestHandshake: meta.LastHandshake,
+			}
+			if redactWG && strings.TrimSpace(ps.Stats.PublicKey) != "" {
+				ps.Stats.PublicKey = maskedValue
 			}
 		}
 		response = append(response, ps)
@@ -764,13 +777,18 @@ func (s *Server) handleGetWireGuardTraffic(w http.ResponseWriter, r *http.Reques
 	}
 
 	result := make(map[string]map[string]int64)
-	for _, p := range wgConfig.Peers {
+	redactWG := shouldRedactWireGuardReadOnly(r)
+	for i, p := range wgConfig.Peers {
 		rx, tx, err := s.store.GetWGTrafficDelta(p.PublicKey, start, end)
 		if err != nil {
 			http.Error(w, "Failed to read traffic: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result[p.PublicKey] = map[string]int64{
+		key := p.PublicKey
+		if redactWG {
+			key = fmt.Sprintf("peer_%d", i+1)
+		}
+		result[key] = map[string]int64{
 			"rx": rx,
 			"tx": tx,
 		}
@@ -830,7 +848,8 @@ func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.
 	}
 
 	result := make(map[string][]core.WGSample)
-	for _, p := range wgConfig.Peers {
+	redactWG := shouldRedactWireGuardReadOnly(r)
+	for i, p := range wgConfig.Peers {
 		if filterKey != "" && p.PublicKey != filterKey {
 			continue
 		}
@@ -839,7 +858,16 @@ func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.
 			http.Error(w, "Failed to read traffic series: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result[p.PublicKey] = series
+		key := p.PublicKey
+		if redactWG {
+			key = fmt.Sprintf("peer_%d", i+1)
+			for j := range series {
+				if strings.TrimSpace(series[j].PublicKey) != "" {
+					series[j].PublicKey = maskedValue
+				}
+			}
+		}
+		result[key] = series
 	}
 
 	w.Header().Set("Content-Type", "application/json")

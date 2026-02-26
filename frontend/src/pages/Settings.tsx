@@ -259,6 +259,7 @@ export default function Settings() {
                     features={features}
                     setFeatures={setFeatures}
                     dbInfo={dbInfo}
+                    canWriteSettings={canWriteSettings}
                     handlePruneNow={handlePruneNow}
                     handleRunSampler={handleRunSampler}
                     handleTogglePause={handleTogglePause}
@@ -560,6 +561,7 @@ function DatabaseTab({
     features,
     setFeatures,
     dbInfo,
+    canWriteSettings,
     handlePruneNow,
     handleRunSampler,
     handleTogglePause,
@@ -573,6 +575,7 @@ function DatabaseTab({
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
     dbInfo: DbInfo
+    canWriteSettings: boolean
     handlePruneNow: () => void
     handleRunSampler: () => void
     handleTogglePause: () => void
@@ -605,7 +608,7 @@ function DatabaseTab({
                     className="h-full flex flex-col"
                     action={
                         <div className="flex gap-2">
-                            <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />}>
+                            <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
                                 Save Changes
                             </Button>
                             <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
@@ -633,6 +636,7 @@ function DatabaseTab({
                                     min={1}
                                     value={features.retention_days ?? 90}
                                     onChange={e => setFeatures(prev => ({ ...prev, retention_days: parseInt(e.target.value) }))}
+                                    disabled={!canWriteSettings}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />
                             </div>
@@ -643,6 +647,7 @@ function DatabaseTab({
                                     min={1}
                                     value={features.wg_retention_days ?? 30}
                                     onChange={e => setFeatures(prev => ({ ...prev, wg_retention_days: parseInt(e.target.value) }))}
+                                    disabled={!canWriteSettings}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />
                             </div>
@@ -653,6 +658,7 @@ function DatabaseTab({
                                     min={15}
                                     value={features.sampler_interval_sec ?? 120}
                                     onChange={e => setFeatures(prev => ({ ...prev, sampler_interval_sec: parseInt(e.target.value) }))}
+                                    disabled={!canWriteSettings}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />
                             </div>
@@ -663,6 +669,7 @@ function DatabaseTab({
                                     min={15}
                                     value={features.wg_sampler_interval_sec ?? 60}
                                     onChange={e => setFeatures(prev => ({ ...prev, wg_sampler_interval_sec: parseInt(e.target.value) }))}
+                                    disabled={!canWriteSettings}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />
                             </div>
@@ -673,6 +680,7 @@ function DatabaseTab({
                                     min={1}
                                     value={features.aggregation_days ?? 7}
                                     onChange={e => setFeatures(prev => ({ ...prev, aggregation_days: parseInt(e.target.value) }))}
+                                    disabled={!canWriteSettings}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />
                             </div>
@@ -684,6 +692,7 @@ function DatabaseTab({
                                 min={0}
                                 value={features.active_threshold_bytes ?? 1024}
                                 onChange={e => setFeatures(prev => ({ ...prev, active_threshold_bytes: parseInt(e.target.value) }))}
+                                disabled={!canWriteSettings}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                             />
                         </div>
@@ -692,7 +701,7 @@ function DatabaseTab({
                     <div className="space-y-3">
                         <Button
                             onClick={handlePruneNow}
-                            disabled={!features.retention_enabled}
+                            disabled={!canWriteSettings || !features.retention_enabled}
                             variant="secondary"
                             className="w-full"
                         >
@@ -701,7 +710,7 @@ function DatabaseTab({
                         <div className="flex gap-2">
                             <Button
                                 onClick={handleRunSampler}
-                                disabled={samplerRunning}
+                                disabled={!canWriteSettings || samplerRunning}
                                 className="flex-1"
                                 isLoading={samplerRunning}
                                 variant="primary"
@@ -710,6 +719,7 @@ function DatabaseTab({
                             </Button>
                             <Button
                                 onClick={handleTogglePause}
+                                disabled={!canWriteSettings}
                                 variant="secondary"
                                 className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
                             >
