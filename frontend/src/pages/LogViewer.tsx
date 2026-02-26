@@ -15,8 +15,6 @@ export default function LogViewer() {
     const [searchLimit, setSearchLimit] = useState(200)
     const [searching, setSearching] = useState(false)
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
-    const [searchPage, setSearchPage] = useState(1)
-    const [searchHasMore, setSearchHasMore] = useState(false)
     const [tailLimit, setTailLimit] = useState<number>(50)
 
     const fetchLogs = (forceTail = false) => {
@@ -63,22 +61,18 @@ export default function LogViewer() {
         setAutoScroll(atBottom)
     }
 
-    const handleSearch = async (page = 1) => {
+    const handleSearch = async () => {
         const q = searchQuery.trim()
         if (!q) {
             setLines(['Ingresa un término para buscar'])
             setViewMode('search')
-            setSearchHasMore(false)
-            setSearchPage(1)
             return
         }
         setSearching(true)
         try {
-            const res = await api.searchLogs(q, searchLimit, page)
+            const res = await api.searchLogs(q, searchLimit, 1)
             setLines(res.logs || [])
             setViewMode('search')
-            setSearchPage(res.page || page)
-            setSearchHasMore(!!res.has_more)
         } catch (err: any) {
             setLines([`Search failed: ${err.message}`])
             setViewMode('search')
@@ -194,7 +188,6 @@ export default function LogViewer() {
                                 value={searchQuery}
                                 onChange={e => {
                                     setSearchQuery(e.target.value)
-                                    setSearchPage(1)
                                 }}
                                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
                                 placeholder="Search query..."
@@ -209,7 +202,6 @@ export default function LogViewer() {
                                     value={searchLimit}
                                     onChange={e => {
                                         setSearchLimit(parseInt(e.target.value))
-                                        setSearchPage(1)
                                     }}
                                     className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 >
