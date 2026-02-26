@@ -74,6 +74,13 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 			}
 		}
 	}
+	if shouldRedactConfigReadOnly(r) {
+		for i, inbound := range inbounds {
+			if redacted, ok := redactJSONValue(inbound).(map[string]any); ok {
+				inbounds[i] = redacted
+			}
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inbounds)
@@ -122,6 +129,13 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if shouldRedactUsersReadOnly(r) {
+		for i := range inbounds {
+			if strings.TrimSpace(inbounds[i].UUID) != "" {
+				inbounds[i].UUID = maskedValue
+			}
+		}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(inbounds)
@@ -129,6 +143,10 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
+		return
+	}
+	if shouldRedactUsersReadOnly(r) || shouldRedactConfigReadOnly(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -148,6 +166,10 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 
 func (s *Server) handleGetUserLink(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
+		return
+	}
+	if shouldRedactUsersReadOnly(r) || shouldRedactConfigReadOnly(r) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
 

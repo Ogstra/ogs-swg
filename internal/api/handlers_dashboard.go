@@ -274,6 +274,17 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		topSB = topSB[:topLimit]
 	}
 
+	if shouldRedactWireGuardReadOnly(r) {
+		for i := range topWG {
+			topWG[i].Key = maskedValue
+		}
+	}
+	if shouldRedactUsersReadOnly(r) {
+		for i := range topSB {
+			topSB[i].Key = maskedValue
+		}
+	}
+
 	var totalSBUplink, totalSBDownlink int64
 	var totalWGTx, totalWGRx int64
 	// Use the final accumulator values for Singbox totals (matches chart)

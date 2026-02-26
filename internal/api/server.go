@@ -200,8 +200,8 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/users", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUser)))
 	protected.HandleFunc("DELETE /api/users", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteUser)))
 	protected.HandleFunc("GET /api/users/{name}/inbounds", s.secure(s.requirePerm(canReadUsers, s.handleGetUserInbounds)))
-	protected.HandleFunc("GET /api/users/{name}/vless", s.secure(s.requirePerm(canReadUsers, s.handleGetUserVLESSLink)))
-	protected.HandleFunc("GET /api/users/{name}/link", s.secure(s.requirePerm(canReadUsers, s.handleGetUserLink)))
+	protected.HandleFunc("GET /api/users/{name}/vless", s.secure(s.requirePerm(canWriteUsers, s.handleGetUserVLESSLink)))
+	protected.HandleFunc("GET /api/users/{name}/link", s.secure(s.requirePerm(canWriteUsers, s.handleGetUserLink)))
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleRemoveUserFromInbound)))
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserInInbound)))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.handleBulkCreateUsers)))
@@ -246,7 +246,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/config/backup", s.secure(s.requirePerm(canWriteConfig, s.handleBackupConfig)))
 	protected.HandleFunc("POST /api/config/restore", s.secure(s.requirePerm(canWriteConfig, s.handleRestoreConfig)))
 	protected.HandleFunc("GET /api/config/backup/meta", s.secure(s.requirePerm(canReadConfig, s.handleGetBackupMeta)))
-	protected.HandleFunc("GET /api/tools/reality-keys", s.secure(s.requirePerm(canReadConfig, s.handleGenerateRealityKeys)))
+	protected.HandleFunc("GET /api/tools/reality-keys", s.secure(s.requirePerm(canWriteConfig, s.handleGenerateRealityKeys)))
 	protected.HandleFunc("POST /api/tools/self-signed-cert", s.secure(s.requirePerm(canWriteConfig, s.handleGenerateSelfSignedCert)))
 	protected.HandleFunc("GET /api/sysctl", s.secure(s.requirePerm(canReadConfig, s.handleGetSysctl)))
 	protected.HandleFunc("POST /api/sysctl", s.secure(s.requirePerm(canWriteConfig, s.handleApplySysctl)))
@@ -670,6 +670,14 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	if shouldRedactUsersReadOnly(r) {
+		for i := range result {
+			if strings.TrimSpace(result[i].UUID) != "" {
+				result[i].UUID = maskedValue
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
@@ -989,6 +997,7 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := []UserStatus{}
+	redactUsers := shouldRedactUsersReadOnly(r)
 	for _, user := range users {
 		samples, err := s.store.GetCombinedReport(user.Name, start, end)
 		if err != nil {
@@ -999,9 +1008,13 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 			up += smp.Uplink
 			down += smp.Downlink
 		}
+		uuid := user.UUID
+		if redactUsers && strings.TrimSpace(uuid) != "" {
+			uuid = maskedValue
+		}
 		result = append(result, UserStatus{
 			Name:     user.Name,
-			UUID:     user.UUID,
+			UUID:     uuid,
 			Flow:     user.Flow,
 			Uplink:   up,
 			Downlink: down,
