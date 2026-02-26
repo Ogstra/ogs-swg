@@ -15,6 +15,18 @@ body {
     color: #f8fafc;
 }
 
+/* Unified disabled style for all app buttons */
+button:disabled,
+button[disabled],
+button[aria-disabled='true'] {
+    background-color: #1e293b !important; /* slate-800 */
+    border-color: #334155 !important; /* slate-700 */
+    color: #64748b !important; /* slate-500 */
+    opacity: 0.6 !important;
+    cursor: not-allowed !important;
+    box-shadow: none !important;
+}
+
 /* Normalize select arrow spacing across the app */
 select.select-field {
     -webkit-appearance: none;

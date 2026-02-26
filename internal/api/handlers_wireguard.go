@@ -59,6 +59,8 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 			WireGuardPeer: p,
 			QRAvailable:   s.hasQRConfig(p.PublicKey),
 		}
+		// Never expose peer private keys in list responses.
+		ps.WireGuardPeer.PrivateKey = ""
 		if s, ok := stats[p.PublicKey]; ok {
 			ps.Stats = s
 			if ps.Stats.LatestHandshake <= 0 {
@@ -455,6 +457,8 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	redact := shouldRedactWireGuardReadOnly(r)
+
 	if s.executor != nil {
 		content, err := s.executor.ReadConfig(r.Context(), s.config.WireGuardConfigPath)
 		if err != nil {
@@ -468,6 +472,10 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain")
+		if redact {
+			w.Write([]byte(redactWireGuardConfigText(string(content))))
+			return
+		}
 		w.Write(content)
 		return
 	}
@@ -485,6 +493,10 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
+	if redact {
+		w.Write([]byte(redactWireGuardConfigText(string(content))))
+		return
+	}
 	w.Write(content)
 }
 
@@ -530,6 +542,9 @@ func (s *Server) handleGetWireGuardInterface(w http.ResponseWriter, r *http.Requ
 		if pk, err := wgtypes.ParseKey(wgConfig.Interface.PrivateKey); err == nil {
 			wgConfig.Interface.PublicKey = pk.PublicKey().String()
 		}
+	}
+	if shouldRedactWireGuardReadOnly(r) {
+		redactWireGuardInterfaceSecret(&wgConfig.Interface)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -659,6 +674,9 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 	}
 
 	if cfgText, ok := s.fetchQRConfig(pubKey); ok {
+		if shouldRedactWireGuardReadOnly(r) {
+			cfgText = redactWireGuardConfigText(cfgText)
+		}
 		response := map[string]string{
 			"config": cfgText,
 		}
@@ -692,6 +710,9 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 			return
 		}
 		s.storeQRConfig(pubKey, cfgText, time.Hour)
+		if shouldRedactWireGuardReadOnly(r) {
+			cfgText = redactWireGuardConfigText(cfgText)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"config": cfgText})
 		return

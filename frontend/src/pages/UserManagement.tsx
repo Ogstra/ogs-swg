@@ -36,6 +36,7 @@ function parseGbToBytes(input: string) {
 export default function UserManagement() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
+    const canReadConfig = !!permissions?.can_read_config
     const canWriteUsers = !!permissions?.can_write_users
     const canWriteConfig = !!permissions?.can_write_config
 
@@ -115,10 +116,22 @@ export default function UserManagement() {
     const [qrError, setQrError] = useState<string>('')
     const [qrLinkCache, setQrLinkCache] = useState<Record<string, string>>({})
 
+    const inferInboundsFromUsers = (userList: UserStatus[]) => {
+        const uniqueTags = Array.from(
+            new Set(
+                userList.flatMap(u => (u.inbound_tags || []).map(tag => tag.trim()).filter(Boolean))
+            )
+        )
+        return uniqueTags.map(tag => ({ tag, type: '' }))
+    }
+
     const fetchUsers = () => {
         api.getUsers()
             .then(data => {
                 setUsers(data)
+                if (!canReadConfig) {
+                    setInbounds(inferInboundsFromUsers(data))
+                }
                 // Prune selected users that no longer exist
                 setSelectedUsers(prev => {
                     const allowed = new Set(data.map(u => u.name))
@@ -133,12 +146,23 @@ export default function UserManagement() {
     }
 
     const fetchInbounds = () => {
+        if (!canReadConfig) {
+            return
+        }
         api.getSingboxInbounds()
             .then(data => {
                 // API returns all inbounds; user type selection filters later.
                 setInbounds(data)
             })
-            .catch(err => toastError(`Failed to fetch inbounds: ${err}`))
+            .catch(err => {
+                const msg = String(err || '')
+                if (msg.toLowerCase().includes('forbidden') || msg.includes('403')) {
+                    // Users without config-read can still manage existing users.
+                    setInbounds(inferInboundsFromUsers(users))
+                    return
+                }
+                toastError(`Failed to fetch inbounds: ${err}`)
+            })
     }
 
     const inboundTypeByTag = new Map(
