@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Save, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Save, RefreshCw } from 'lucide-react'
 import Editor from 'react-simple-code-editor'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
