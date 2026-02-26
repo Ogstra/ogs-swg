@@ -51,6 +51,19 @@ select.select-field:focus {
     outline: none;
 }
 
+/* Keep select/textarea heights consistent inside create/edit modals */
+.modal-form-uniform input:not([type='checkbox']):not([type='radio']) {
+    height: 2.625rem; /* 42px */
+}
+
+.modal-form-uniform select.select-field {
+    height: 2.625rem; /* 42px */
+}
+
+.modal-form-uniform textarea {
+    min-height: 2.625rem;
+}
+
 /* Simple Utility Classes */
 @layer components {
     .panel {

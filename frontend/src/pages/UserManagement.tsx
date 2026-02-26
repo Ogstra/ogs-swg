@@ -52,7 +52,6 @@ export default function UserManagement() {
     }
 
     const [users, setUsers] = useState<UserStatus[]>([])
-    const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set())
     const [inbounds, setInbounds] = useState<any[]>([])
     type UserType = 'vless' | 'vmess' | 'trojan'
     const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan']
@@ -61,7 +60,7 @@ export default function UserManagement() {
 
     // Modals state
     const [modalState, setModalState] = useState<{
-        type: 'create' | 'bulk' | 'qr' | 'usage' | 'delete_confirm' | 'select_inbounds' | null,
+        type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | null,
         data?: any
     }>({ type: null })
     const [selectedInboundsToRemove, setSelectedInboundsToRemove] = useState<Set<string>>(new Set())
@@ -89,6 +88,7 @@ export default function UserManagement() {
         quota_limit: 0,
         quota_period: 'monthly',
         reset_day: 1,
+        enabled: true,
         inbound_tag: ''
     })
     const [quotaInput, setQuotaInput] = useState<string>('')
@@ -105,7 +105,6 @@ export default function UserManagement() {
         flow: 'xtls-rprx-vision',
         quota_limit: 0,
         quota_period: 'monthly',
-        reset_day: 1,
         inbound_tag: ''
     })
     const [bulkQuotaInput, setBulkQuotaInput] = useState<string>('')
@@ -132,15 +131,6 @@ export default function UserManagement() {
                 if (!canReadConfig) {
                     setInbounds(inferInboundsFromUsers(data))
                 }
-                // Prune selected users that no longer exist
-                setSelectedUsers(prev => {
-                    const allowed = new Set(data.map(u => u.name))
-                    const next = new Set<string>()
-                    prev.forEach(name => {
-                        if (allowed.has(name)) next.add(name)
-                    })
-                    return next
-                })
             })
             .catch(err => toastError(`Failed to fetch users: ${err}`))
     }
@@ -290,24 +280,6 @@ export default function UserManagement() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
-    const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.checked) {
-            setSelectedUsers(new Set(users.map(u => u.name)))
-        } else {
-            setSelectedUsers(new Set())
-        }
-    }
-
-    const handleSelectUser = (name: string) => {
-        const newSelected = new Set(selectedUsers)
-        if (newSelected.has(name)) {
-            newSelected.delete(name)
-        } else {
-            newSelected.add(name)
-        }
-        setSelectedUsers(newSelected)
-    }
-
     const fetchUsage = async () => {
         setLoadingUsage(true)
         try {
@@ -321,50 +293,6 @@ export default function UserManagement() {
         } finally {
             setLoadingUsage(false)
         }
-    }
-
-    const handleDeleteSelected = async () => {
-        if (!canWriteUsers) {
-            toastError('No write permission for sing-box users')
-            return
-        }
-        setModalState({ type: 'delete_confirm' }) // Keep modal open until confirmed
-    }
-
-    const confirmDeleteSelected = async () => {
-        if (!canWriteUsers) {
-            toastError('No write permission for sing-box users')
-            return
-        }
-        // Check if any selected user is in multiple inbounds
-        const multiInboundUsers = Array.from(selectedUsers).filter(name => {
-            const user = users.find(u => u.name === name)
-            return user && user.inbound_tags && user.inbound_tags.length > 1
-        })
-
-        if (multiInboundUsers.length > 0) {
-            setModalState({ type: null })
-            toastError(`User "${multiInboundUsers[0]}" exists in multiple inbounds. Please delete manually.`)
-            return
-        }
-
-        setModalState({ type: null })
-        let failed = 0;
-        for (const name of selectedUsers) {
-            try {
-                await api.deleteUser(name)
-            } catch (err) {
-                console.error(`Failed to delete ${name}`, err)
-                failed++;
-            }
-        }
-        if (failed > 0) {
-            toastError(`Failed to delete ${failed} users.`)
-        } else {
-            success(`Deleted ${selectedUsers.size} users successfully.`)
-        }
-        setSelectedUsers(new Set())
-        fetchUsers()
     }
 
     const handleRemoveFromSelectedInbounds = async () => {
@@ -414,7 +342,7 @@ export default function UserManagement() {
             vmess_alter_id: user.vmess_alter_id ?? 0,
             quota_limit: user.quota_limit,
             quota_period: user.quota_period,
-            reset_day: user.reset_day,
+            reset_day: 1,
             enabled: user.enabled,
             inbound_tag: inboundTags[0] || ''
         })
@@ -503,6 +431,7 @@ export default function UserManagement() {
                     flow: userType === 'vless' ? normalizedRows[0].flow : '',
                     vmess_security: vmessSecurity,
                     vmess_alter_id: vmessAlterID,
+                    reset_day: 1,
                 }
                 if (!payload.uuid) payload.uuid = uuidv4()
 
@@ -548,6 +477,7 @@ export default function UserManagement() {
                     ...newUser,
                     vmess_security: userType === 'vmess' ? newUser.vmess_security || '' : '',
                     vmess_alter_id: userType === 'vmess' ? (newUser.vmess_alter_id || 0) : 0,
+                    reset_day: 1,
                 }
                 if (!payload.uuid) payload.uuid = uuidv4()
                 for (const row of normalizedRows) {
@@ -570,6 +500,7 @@ export default function UserManagement() {
                 quota_limit: 0,
                 quota_period: 'monthly',
                 reset_day: 1,
+                enabled: true,
                 inbound_tag: getFirstInboundTagForType(getDefaultUserType())
             })
             setQuotaInput('')
@@ -624,7 +555,7 @@ export default function UserManagement() {
                     vmess_alter_id: bulkVmessAlterID,
                     quota_limit: bulkConfig.quota_limit,
                     quota_period: bulkConfig.quota_period,
-                    reset_day: bulkConfig.reset_day,
+                    reset_day: 1,
                     inbound_tag: bulkConfig.inbound_tag
                 })
             }
@@ -703,102 +634,75 @@ export default function UserManagement() {
                 </div>
             )}
 
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">User Management</h1>
                 </div>
-                <div className="flex flex-col md:flex-row md:flex-wrap gap-2 w-full md:w-auto">
-                    {canWriteUsers && selectedUsers.size > 0 && (
-                        <Button
-                            onClick={handleDeleteSelected}
-                            variant="danger"
-                            icon={<Trash2 size={16} />}
-                            className="w-full md:w-auto"
+                <div className="grid grid-cols-2 gap-3 w-full md:w-auto md:flex md:flex-wrap">
+                    <Button
+                        onClick={() => {
+                            if (!canWriteUsers) return
+                            setIsEditing(false)
+                            const nextType = getDefaultUserType()
+                            setUserType(nextType)
+                            setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
+                            setOriginalInboundTags([])
+                            setNewUser({
+                                name: '',
+                                uuid: '',
+                                flow: 'xtls-rprx-vision',
+                                vmess_security: 'auto',
+                                vmess_alter_id: 0,
+                                quota_limit: 0,
+                                quota_period: 'monthly',
+                                reset_day: 1,
+                                enabled: true,
+                                inbound_tag: getFirstInboundTagForType(getDefaultUserType())
+                            })
+                            setQuotaInput('')
+                            setModalState({ type: 'create' })
+                        }}
+                        icon={<Plus size={16} />}
+                        variant="primary"
+                        disabled={!canWriteUsers}
+                        className="w-full md:w-auto justify-center"
+                    >
+                        Create User
+                    </Button>
+                    <Button
+                        onClick={() => canWriteUsers && setModalState({ type: 'bulk' })}
+                        variant="secondary"
+                        icon={<Users size={16} />}
+                        disabled={!canWriteUsers}
+                        className="w-full md:w-auto justify-center"
+                    >
+                        Bulk Create
+                    </Button>
+                    <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
+                        <select
+                            value={filterInbound}
+                            onChange={(e) => setFilterInbound(e.target.value)}
+                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
                         >
-                            Delete ({selectedUsers.size})
-                        </Button>
-                    )}
-                    <div className="grid grid-cols-2 gap-2 w-full md:w-auto md:flex md:flex-wrap md:items-center">
-                        <Button
-                            onClick={() => {
-                                if (!canWriteUsers) return
-                                setIsEditing(false)
-                                const nextType = getDefaultUserType()
-                                setUserType(nextType)
-                                setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
-                                setOriginalInboundTags([])
-                                setNewUser({
-                                    name: '',
-                                    uuid: '',
-                                    flow: 'xtls-rprx-vision',
-                                    vmess_security: 'auto',
-                                    vmess_alter_id: 0,
-                                    quota_limit: 0,
-                                    quota_period: 'monthly',
-                                    reset_day: 1,
-                                    enabled: true,
-                                    inbound_tag: getFirstInboundTagForType(getDefaultUserType())
-                                })
-                                setQuotaInput('')
-                                setModalState({ type: 'create' })
-                            }}
-                            icon={<Plus size={16} />}
-                            variant="primary"
-                            disabled={!canWriteUsers}
-                            className="w-full md:w-auto justify-center"
-                        >
-                            Create User
-                        </Button>
-                        <Button
-                            onClick={() => canWriteUsers && setModalState({ type: 'bulk' })}
-                            variant="secondary"
-                            icon={<Users size={16} />}
-                            disabled={!canWriteUsers}
-                            className="w-full md:w-auto justify-center"
-                        >
-                            Bulk Create
-                        </Button>
-                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
-                            <select
-                                value={filterInbound}
-                                onChange={(e) => setFilterInbound(e.target.value)}
-                                className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
-                            >
-                                <option value="">All Inbounds</option>
-                                {inbounds.map((inb) => (
-                                    <option key={inb.tag} value={inb.tag}>{inb.tag}</option>
-                                ))}
-                            </select>
-                        </div>
-                        <Button
-                            onClick={() => setModalState({ type: 'usage' })}
-                            variant="secondary"
-                            icon={<RefreshCw size={16} />}
-                            className="w-full md:w-auto justify-center"
-                        >
-                            Usage Report
-                        </Button>
+                            <option value="">All Inbounds</option>
+                            {inbounds.map((inb) => (
+                                <option key={inb.tag} value={inb.tag}>{inb.tag}</option>
+                            ))}
+                        </select>
                     </div>
+                    <Button
+                        onClick={() => setModalState({ type: 'usage' })}
+                        variant="secondary"
+                        icon={<RefreshCw size={16} />}
+                        className="w-full md:w-auto justify-center"
+                    >
+                        Usage Report
+                    </Button>
                 </div>
             </div>
 
             {/* Users Table Container - Matching WireGuard Style */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
-
-                {/* Checkbox Header (Custom addition to match WireGuard container but keep bulk actions) */}
-                {users.length > 0 && (
-                    <div className="p-3 bg-slate-950/30 border-b border-slate-800 flex items-center gap-3 md:hidden">
-                        <input
-                            type="checkbox"
-                            onChange={handleSelectAll}
-                            checked={users.length > 0 && selectedUsers.size === users.length}
-                            disabled={!canWriteUsers}
-                            className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer h-4 w-4"
-                        />
-                        <span className="text-xs text-slate-400 font-medium">Select All</span>
-                    </div>
-                )}
-
                 <div className="overflow-x-auto hidden md:block">
                     <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[1100px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
                         <thead>
@@ -838,7 +742,6 @@ export default function UserManagement() {
                             ) : (
                                 sortedUsers.map(user => {
                                     const isExceeded = user.quota_limit ? user.total > user.quota_limit : false
-                                    const isSelected = selectedUsers.has(user.name)
 
                                     // Status Logic
                                     let statusColor = "bg-slate-600" // Default offline
@@ -872,7 +775,7 @@ export default function UserManagement() {
                                     return (
                                         <tr
                                             key={user.name}
-                                            className={`border-b border-slate-800 hover:bg-slate-800/30 transition-colors ${isSelected ? 'bg-blue-900/10' : ''}`}
+                                            className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors"
                                         >
                                             <td className="p-4">
                                                 <div className="flex items-center gap-3">
@@ -887,12 +790,12 @@ export default function UserManagement() {
                                             </td>
                                             <td className="p-4 align-middle">
                                                 {user.quota_limit ? (
-                                                    <div className="">
+                                                    <div className="w-1/2 min-w-[140px]">
                                                         <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
                                                             <span>{formatBytes(user.total)}</span>
                                                             <span>{formatBytes(user.quota_limit)}</span>
                                                         </div>
-                                                        <div className="pr-2 h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                                             <div
                                                                 className={`h-full rounded-full transition-all duration-500 ${(user.total / user.quota_limit) > 1 ? 'bg-red-500' :
                                                                     (user.total / user.quota_limit) > 0.8 ? 'bg-amber-500' :
@@ -972,7 +875,8 @@ export default function UserManagement() {
                 <div className="md:hidden divide-y divide-slate-800">
                     {(sortedUsers || []).map(user => {
                         const isExceeded = user.quota_limit ? user.total > user.quota_limit : false
-                        const isSelected = selectedUsers.has(user.name)
+                        const quotaRatio = user.quota_limit ? (user.total / user.quota_limit) : 0
+                        const quotaPercent = user.quota_limit ? `${Math.round(quotaRatio * 100)}%` : ''
 
                         let statusColor = "bg-slate-600"
                         let statusText = "Never"
@@ -1002,29 +906,15 @@ export default function UserManagement() {
                         }
 
                         return (
-                            <div key={user.name} className={`p-3 ${isSelected ? 'bg-blue-900/10' : ''}`}>
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                                        <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            onChange={() => handleSelectUser(user.name)}
-                                            disabled={!canWriteUsers}
-                                            className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer h-4 w-4"
-                                        />
-                                        <div className="min-w-0">
-                                            <div className="font-semibold text-slate-200 truncate">{user.name}</div>
-                                            <div className="flex items-center gap-2 text-[11px]">
-                                                <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                                <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
-                                                    {statusText}
-                                                </span>
-                                                <span className="text-slate-600">•</span>
-                                                <span className="text-slate-500 font-mono truncate">
-                                                    {formatBytes(user.total)}
-                                                    {user.quota_limit ? ` / ${formatBytes(user.quota_limit)}` : ' / ∞'}
-                                                </span>
-                                            </div>
+                            <div key={user.name} className="p-4 space-y-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1 space-y-1">
+                                        <div className="font-bold text-slate-200 truncate">{user.name}</div>
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                            <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                                {statusText}
+                                            </span>
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
@@ -1044,10 +934,38 @@ export default function UserManagement() {
                                         </ActionIconButton>
                                     </div>
                                 </div>
+
+                                <div className="text-xs">
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {(user.inbound_tags && user.inbound_tags.length > 0) ? (
+                                            user.inbound_tags.map(tag => (
+                                                <Badge key={tag} variant="info" className="max-w-[120px] truncate">
+                                                    {tag}
+                                                </Badge>
+                                            ))
+                                        ) : (
+                                            <Badge variant="neutral">All</Badge>
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="bg-slate-950/50 rounded-lg p-3">
+                                    <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                                        <span>{formatBytes(user.total)}</span>
+                                        <span className="text-center text-slate-300">{quotaPercent}</span>
+                                        <span className="text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
+                                    </div>
+                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                        <div
+                                            className={`h-full rounded-full transition-all duration-500 ${user.quota_limit ? (quotaRatio > 1 ? 'bg-red-500' : quotaRatio > 0.8 ? 'bg-amber-500' : 'bg-blue-500') : 'bg-slate-700/50'}`}
+                                            style={{ width: `${user.quota_limit ? Math.min(quotaRatio * 100, 100) : 100}%` }}
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         )
                     })}
-                    {users.length === 0 && (
+                    {sortedUsers.length === 0 && (
                         <div className="p-8 text-center text-slate-500">
                             <Users size={48} className="mx-auto mb-4 opacity-20" />
                             <p>No users found.</p>
@@ -1081,7 +999,7 @@ export default function UserManagement() {
                     </>
                 }
             >
-                <div className="space-y-6">
+                <div className="space-y-6 modal-form-uniform">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Username</label>
@@ -1094,7 +1012,7 @@ export default function UserManagement() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">{userType === 'trojan' ? 'Password' : 'UUID'} (shared across inbounds)</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{userType === 'trojan' ? 'Password' : 'UUID'}</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
@@ -1107,7 +1025,7 @@ export default function UserManagement() {
                                     type="button"
                                     variant="icon"
                                     size="icon"
-                                    className="aspect-square"
+                                    className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
                                     onClick={() => {
                                         const uuid = crypto.randomUUID ? crypto.randomUUID() :
                                             'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -1124,7 +1042,7 @@ export default function UserManagement() {
                             </div>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4 items-end">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">User Type</label>
                             <select
@@ -1149,6 +1067,17 @@ export default function UserManagement() {
                             {!hasTypeInbounds && (
                                 <p className="text-xs text-amber-400 mt-1">No inbounds available for this type.</p>
                             )}
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Account Status</label>
+                            <select
+                                value={(newUser.enabled ?? true) ? 'enabled' : 'disabled'}
+                                onChange={e => setNewUser({ ...newUser, enabled: e.target.value === 'enabled' })}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                            >
+                                <option value="enabled">Enabled</option>
+                                <option value="disabled">Disabled</option>
+                            </select>
                         </div>
                     </div>
                     {userType === 'vmess' && (
@@ -1258,33 +1187,6 @@ export default function UserManagement() {
                         )}
                     </div>
 
-                    {isEditing && (
-                        <div className="flex items-center gap-2">
-                            <input
-                                type="checkbox"
-                                checked={newUser.enabled !== false}
-                                onChange={e => setNewUser({ ...newUser, enabled: e.target.checked })}
-                                className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-offset-slate-900 cursor-pointer h-4 w-4"
-                                id="user-enabled"
-                            />
-                            <label htmlFor="user-enabled" className="text-sm font-medium text-slate-400 cursor-pointer select-none">
-                                Account Enabled
-                            </label>
-                        </div>
-                    )}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Quota Period</label>
-                            <select
-                                value={newUser.quota_period}
-                                onChange={e => setNewUser({ ...newUser, quota_period: e.target.value })}
-                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                            >
-                                <option value="monthly">Monthly</option>
-                                <option value="total">Total (One-time)</option>
-                            </select>
-                        </div>
-                    </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Quota (GB)</label>
@@ -1302,15 +1204,15 @@ export default function UserManagement() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Traffic Reset Day</label>
-                            <input
-                                type="number"
-                                min="1" max="31"
-                                value={newUser.reset_day}
-                                onChange={e => setNewUser({ ...newUser, reset_day: parseInt(e.target.value) })}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                            />
-                            <p className="text-[10px] text-slate-500 mt-1">Day of month (1-31)</p>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Quota Period</label>
+                            <select
+                                value={newUser.quota_period}
+                                onChange={e => setNewUser({ ...newUser, quota_period: e.target.value })}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            >
+                                <option value="monthly">Monthly</option>
+                                <option value="total">Total (One-time)</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -1328,7 +1230,7 @@ export default function UserManagement() {
                     </>
                 }
             >
-                <div className="space-y-6">
+                <div className="space-y-6 modal-form-uniform">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* Column 1: Naming & Count */}
                         <div className="space-y-4">
@@ -1430,17 +1332,6 @@ export default function UserManagement() {
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                                     placeholder="0 for unlimited"
                                 />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Traffic Reset Day</label>
-                                <input
-                                    type="number"
-                                    min="1" max="31"
-                                    value={bulkConfig.reset_day}
-                                    onChange={e => setBulkConfig({ ...bulkConfig, reset_day: parseInt(e.target.value) })}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                />
-                                <p className="text-[10px] text-slate-500 mt-1">Day of month (1-31)</p>
                             </div>
                         </div>
                     </div>
@@ -1606,30 +1497,6 @@ export default function UserManagement() {
                             </div>
                         </>
                     )}
-                </div>
-            </Modal >
-
-            {/* Delete Confirmation Modal */}
-            < Modal
-                isOpen={modalState.type === 'delete_confirm'}
-                onClose={() => setModalState({ type: null })}
-                title="Confirm Deletion"
-                size="sm"
-                footer={
-                    <>
-                        <Button variant="ghost" onClick={() => setModalState({ type: null })}>Cancel</Button>
-                        <Button variant="danger" onClick={confirmDeleteSelected} disabled={!canWriteUsers}>Delete Users</Button>
-                    </>
-                }
-            >
-                <div className="flex flex-col items-center text-center p-4">
-                    <div className="w-12 h-12 rounded-full bg-red-900/20 text-red-500 flex items-center justify-center mb-4">
-                        <Trash2 size={24} />
-                    </div>
-                    <h3 className="text-lg font-semibold text-white mb-2">Delete {selectedUsers.size} Users?</h3>
-                    <p className="text-slate-400 text-sm">
-                        This action cannot be undone. All selected users will be permanently removed from the system.
-                    </p>
                 </div>
             </Modal >
 

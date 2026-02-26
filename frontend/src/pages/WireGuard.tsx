@@ -246,6 +246,7 @@ export default function WireGuard() {
             await api.updateWireGuardInterface(editInterface)
             setInterfaceConfig(editInterface)
             setShowInterfaceModal(false)
+            fetchData()
         } catch (err) {
             toastError('Failed to update interface: ' + err)
         }
@@ -633,7 +634,7 @@ export default function WireGuard() {
                         </h2>
 
                         {editingPeer ? (
-                            <div className="space-y-4">
+                            <div className="space-y-4 modal-form-uniform">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Public Key</label>
                                     <input
@@ -703,7 +704,7 @@ export default function WireGuard() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="space-y-4">
+                            <div className="space-y-4 modal-form-uniform">
                                 <div>
                                     <label className="block text-sm font-medium text-slate-400 mb-1">Alias</label>
                                     <input
@@ -923,7 +924,7 @@ export default function WireGuard() {
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
                     <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-md p-6 shadow-xl">
                         <h2 className="text-xl font-bold text-white mb-4">Interface Settings</h2>
-                        <div className="space-y-4">
+                        <div className="space-y-4 modal-form-uniform">
                             <div>
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Address</label>
                                 <input
