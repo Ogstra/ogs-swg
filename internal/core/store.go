@@ -209,6 +209,8 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add client_sni to existing inbound_meta tables that predate this column.
 	// Silently ignored if column already exists (fresh installs have it from CREATE TABLE above).
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN client_sni TEXT DEFAULT NULL;")
+	// Reset day is now fixed to 1 for all users.
+	s.db.Exec("UPDATE users SET reset_day = 1 WHERE COALESCE(reset_day, 1) != 1;")
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -853,6 +855,8 @@ func (s *Store) SaveUserMetadata(meta UserMetadata) error {
 	if meta.Enabled {
 		enabled = 1
 	}
+	// Reset day is fixed to day 1 of each month.
+	resetDay := int64(1)
 	return s.Queries.UpsertUser(context.Background(), sqlcStore.UpsertUserParams{
 		Email: meta.Email,
 		QuotaLimit: sql.NullInt64{
@@ -864,7 +868,7 @@ func (s *Store) SaveUserMetadata(meta UserMetadata) error {
 			Valid:  true,
 		},
 		ResetDay: sql.NullInt64{
-			Int64: int64(meta.ResetDay),
+			Int64: resetDay,
 			Valid: true,
 		},
 		Enabled: sql.NullInt64{
