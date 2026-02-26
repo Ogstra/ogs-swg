@@ -150,6 +150,30 @@ func (s *Server) handleUpdatePanelUserUsername(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusOK)
 }
 
+type updatePanelUserPasswordRequest struct {
+	Username    string `json:"username" validate:"required"`
+	NewPassword string `json:"new_password" validate:"required,min=8"`
+}
+
+func (s *Server) handleUpdatePanelUserPassword(w http.ResponseWriter, r *http.Request) {
+	var req updatePanelUserPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.UpdatePanelUserPassword(req.Username, req.NewPassword); err != nil {
+		http.Error(w, "Failed to update password: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleDeletePanelUser(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 	if username == "" {
