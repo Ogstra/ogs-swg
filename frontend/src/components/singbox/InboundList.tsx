@@ -58,6 +58,7 @@ export default function InboundList() {
     }
 
     const handleSave = async (config: any) => {
+        if (!canWriteConfig) return
         try {
             if (editingInbound) {
                 await api.updateSingboxInbound(editingInbound.tag, config)
@@ -102,7 +103,7 @@ export default function InboundList() {
                                         <button
                                             onClick={() => handleEdit(inbound)}
                                             disabled={!canWriteConfig}
-                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors"
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:text-slate-300"
                                             title="Edit"
                                         >
                                             <Edit size={17} strokeWidth={1.6} />
@@ -110,7 +111,7 @@ export default function InboundList() {
                                         <button
                                             onClick={() => handleDelete(inbound.tag)}
                                             disabled={!canWriteConfig}
-                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors"
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:text-slate-300"
                                             title="Delete"
                                         >
                                             <Trash2 size={17} strokeWidth={1.6} />
@@ -148,6 +149,7 @@ export default function InboundList() {
                 onClose={() => setIsModalOpen(false)}
                 initialData={editingInbound}
                 onSave={handleSave}
+                canWrite={canWriteConfig}
             />
         </div>
     )

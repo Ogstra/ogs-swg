@@ -9,6 +9,7 @@ interface InboundModalProps {
     onClose: () => void
     initialData?: any
     onSave: (data: any) => void
+    canWrite?: boolean
 }
 
 const DEFAULT_VLESS = {
@@ -89,7 +90,7 @@ const DEFAULT_BY_TYPE: Record<string, any> = {
     trojan: DEFAULT_TROJAN
 }
 
-export default function InboundModal({ isOpen, onClose, initialData, onSave }: InboundModalProps) {
+export default function InboundModal({ isOpen, onClose, initialData, onSave, canWrite = true }: InboundModalProps) {
     const [formData, setFormData] = useState<any>(DEFAULT_VLESS)
     const [validationError, setValidationError] = useState<string>('')
     const [certLoading, setCertLoading] = useState(false)
@@ -148,6 +149,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
     }
 
     const handleSubmit = () => {
+        if (!canWrite) return
         const tlsEnabled = !!formData.tls?.enabled
         const realityEnabled = !!formData.tls?.reality?.enabled
         const hasCert = !!formData.tls?.certificate_path && !!formData.tls?.key_path
@@ -229,11 +231,11 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
             footer={
                 <>
                     <Button variant="secondary" onClick={onClose}>Cancel</Button>
-                    <Button onClick={handleSubmit} icon={<Save size={16} />}>Save Inbound</Button>
+                    <Button onClick={handleSubmit} icon={<Save size={16} />} disabled={!canWrite}>Save Inbound</Button>
                 </>
             }
         >
-            <div className="space-y-6">
+            <fieldset disabled={!canWrite} className={`space-y-6 ${!canWrite ? 'opacity-80' : ''}`}>
                 {validationError && (
                     <div className="bg-red-900/30 border border-red-700/60 text-red-200 text-xs rounded-lg px-3 py-2">
                         {validationError}
@@ -571,7 +573,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave }: I
                     )}
                 </div>
 
-            </div>
+            </fieldset>
         </Modal>
     )
 }

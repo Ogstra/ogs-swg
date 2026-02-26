@@ -11,6 +11,7 @@ export const Login: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const { login, isAuthenticated } = useAuth();
     const navigate = useNavigate();
+    const commitHash = (import.meta.env.VITE_APP_COMMIT || 'unknown').trim();
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -33,7 +34,7 @@ export const Login: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4">
+        <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4 relative">
             <div className="w-full max-w-md">
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-white mb-2">OGS-SWG</h1>
@@ -86,6 +87,9 @@ export const Login: React.FC = () => {
                         </button>
                     </form>
                 </Card>
+            </div>
+            <div className="pointer-events-none absolute bottom-3 right-4 text-[11px] text-slate-500 font-mono">
+                {`${commitHash}`}
             </div>
         </div>
     );

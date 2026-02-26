@@ -88,7 +88,7 @@ export default function LogViewer() {
     }
 
     return (
-        <div className="space-y-6">
+        <div className="h-full min-h-0 flex flex-col gap-4">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
@@ -99,7 +99,15 @@ export default function LogViewer() {
                         </span>
                     </div>
                 </div>
-                <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={() => fetchLogs(true)}
+                        className="sm:hidden w-11 h-11 shrink-0 flex items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 text-xs border border-slate-700 transition-colors"
+                        title="Refresh Now"
+                    >
+                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                    </button>
+                    <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
                     <button
                         onClick={() => setViewMode('tail')}
                         className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'tail' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
@@ -112,6 +120,7 @@ export default function LogViewer() {
                     >
                         Search History
                     </button>
+                    </div>
                 </div>
             </div>
 
@@ -130,7 +139,7 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="flex items-center gap-3 border-l border-slate-800 pl-4">
+                        <div className="w-full flex items-center flex-nowrap gap-3 sm:border-l sm:border-slate-800 sm:pl-4">
                             <div className="flex items-center gap-2">
                                 <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Lines</span>
                                 <select
@@ -160,17 +169,19 @@ export default function LogViewer() {
 
                             <button
                                 onClick={() => fetchLogs(true)}
-                                className={`p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 text-xs border border-slate-700 transition-all ${loading ? 'animate-spin' : ''}`}
+                                className="hidden sm:flex w-9 h-9 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 text-xs border border-slate-700 transition-colors"
                                 title="Refresh Now"
                             >
-                                <RefreshCw size={16} />
+                                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
                             </button>
 
                             <button
                                 onClick={() => fetchLogs(true)}
-                                className="px-3 py-2 bg-blue-600/10 text-blue-400 hover:bg-blue-600/20 border border-blue-600/20 rounded-lg text-xs font-medium transition-colors"
+                                disabled={loading}
+                                className="ml-auto h-[34px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
-                                Apply Filter
+                                {loading ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
+                                Search
                             </button>
                         </div>
                     </>
@@ -191,7 +202,7 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="flex items-center gap-3 border-l border-slate-800 pl-4">
+                        <div className="w-full flex items-center gap-3 sm:border-l sm:border-slate-800 sm:pl-4">
                             <div className="flex items-center gap-2">
                                 <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Limit</span>
                                 <select
@@ -212,36 +223,19 @@ export default function LogViewer() {
                             <button
                                 onClick={() => handleSearch()}
                                 disabled={searching}
-                                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                className="ml-auto h-[34px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
                                 {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
                                 {searching ? 'Searching...' : 'Search'}
                             </button>
 
-                            <div className="py-1 flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5">
-                                <button
-                                    onClick={() => handleSearch(Math.max(1, searchPage - 1))}
-                                    disabled={searchPage <= 1 || searching}
-                                    className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
-                                </button>
-                                <span className="text-xs font-mono text-slate-500 px-2 min-w-[3ch] text-center">{searchPage}</span>
-                                <button
-                                    onClick={() => handleSearch(searchPage + 1)}
-                                    disabled={!searchHasMore || searching}
-                                    className="px-2 py-1 text-slate-400 hover:text-white disabled:opacity-30 transition-colors"
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
-                                </button>
-                            </div>
                         </div>
                     </>
                 )}
             </div>
 
             {/* Log Terminal */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col h-[70vh]">
+            <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col flex-1 min-h-0">
                 <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800">
                     <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
                         <Terminal size={14} className="text-emerald-400" />

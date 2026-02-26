@@ -393,36 +393,40 @@ export default function WireGuard() {
             )}
 
             {/* Interface Info Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-400">
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+                <div className="col-span-2 md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 shrink-0 bg-slate-950 border border-slate-800 rounded-lg text-slate-400 flex items-center justify-center">
                             <Shield size={20} />
                         </div>
-                        <p className="text-sm font-medium text-slate-400">Interface Address</p>
-                    </div>
-                    <div>
-                        <p className="text-xl text-white font-bold font-mono tracking-tight">{interfaceConfig?.address || '-'}</p>
-                        {interfaceConfig?.bind_address && <p className="text-xs text-slate-500 mt-1 font-mono">Bind: {interfaceConfig.bind_address}</p>}
+                        <div className="flex flex-col justify-center min-w-0">
+                            <p className="text-sm font-medium text-slate-400 leading-tight">Interface Address</p>
+                            <p className="text-xl text-white font-bold font-mono tracking-tight leading-tight mt-1 truncate">{interfaceConfig?.address || '-'}</p>
+                            {interfaceConfig?.bind_address && <p className="text-xs text-slate-500 mt-1 font-mono truncate">Bind: {interfaceConfig.bind_address}</p>}
+                        </div>
                     </div>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-400">
+                    <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 shrink-0 bg-slate-950 border border-slate-800 rounded-lg text-slate-400 flex items-center justify-center">
                             <Settings size={20} />
                         </div>
-                        <p className="text-sm font-medium text-slate-400">Port</p>
+                        <div className="flex flex-col justify-center">
+                            <p className="text-sm font-medium text-slate-400 leading-tight">Port</p>
+                            <p className="text-xl text-white font-bold font-mono tracking-tight leading-tight mt-1">{interfaceConfig?.listen_port || 51820}</p>
+                        </div>
                     </div>
-                    <p className="text-xl text-white font-bold font-mono tracking-tight">{interfaceConfig?.listen_port || 51820}</p>
                 </div>
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="p-2 bg-slate-950 border border-slate-800 rounded-lg text-slate-400">
+                    <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 shrink-0 bg-slate-950 border border-slate-800 rounded-lg text-slate-400 flex items-center justify-center">
                             <ArrowUpDown size={20} />
                         </div>
-                        <p className="text-sm font-medium text-slate-400">MTU</p>
+                        <div className="flex flex-col justify-center">
+                            <p className="text-sm font-medium text-slate-400 leading-tight">MTU</p>
+                            <p className="text-xl text-white font-bold font-mono tracking-tight leading-tight mt-1">{interfaceConfig?.mtu || 1420}</p>
+                        </div>
                     </div>
-                    <p className="text-xl text-white font-bold font-mono tracking-tight">{interfaceConfig?.mtu || 1420}</p>
                 </div>
             </div>
 
@@ -939,29 +943,31 @@ export default function WireGuard() {
                                     placeholder=""
                                 />
                             </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Listen Port</label>
-                                <input
-                                    type="number"
-                                    value={editInterface.listen_port}
-                                    onChange={e => setEditInterface({ ...editInterface, listen_port: parseInt(e.target.value) })}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">MTU</label>
-                                <input
-                                    type="number"
-                                    value={editInterface.mtu ?? ''}
-                                    onChange={e => {
-                                        const raw = e.target.value
-                                        setEditInterface({
-                                            ...editInterface,
-                                            mtu: raw === '' ? undefined : Number(raw)
-                                        })
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                                />
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">Listen Port</label>
+                                    <input
+                                        type="number"
+                                        value={editInterface.listen_port}
+                                        onChange={e => setEditInterface({ ...editInterface, listen_port: parseInt(e.target.value) })}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-400 mb-1">MTU</label>
+                                    <input
+                                        type="number"
+                                        value={editInterface.mtu ?? ''}
+                                        onChange={e => {
+                                            const raw = e.target.value
+                                            setEditInterface({
+                                                ...editInterface,
+                                                mtu: raw === '' ? undefined : Number(raw)
+                                            })
+                                        }}
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                                    />
+                                </div>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-400 mb-1">Post Up Script</label>

@@ -27,6 +27,15 @@ button[aria-disabled='true'] {
     box-shadow: none !important;
 }
 
+/* Keep system logs pagination arrows transparent even when disabled */
+button.logs-pager-btn:disabled,
+button.logs-pager-btn[disabled],
+button.logs-pager-btn[aria-disabled='true'] {
+    background-color: transparent !important;
+    border-color: transparent !important;
+    box-shadow: none !important;
+}
+
 /* Normalize select arrow spacing across the app */
 select.select-field {
     -webkit-appearance: none;
