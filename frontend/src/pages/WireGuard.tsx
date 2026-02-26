@@ -4,6 +4,7 @@ import { Plus, Trash2, Settings, Edit, ArrowUp, ArrowDown, Shield, ArrowUpDown, 
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
+import { ActionIconButton } from '../components/ui/ActionIconButton'
 
 interface WireGuardPeer {
     public_key: string
@@ -485,34 +486,34 @@ export default function WireGuard() {
                                         </td>
                                         <td className="p-4 text-right">
                                             <div className="flex items-center justify-end gap-2">
-                                                <button
+                                                <ActionIconButton
                                                     onClick={() => {
                                                         if (!canWriteWireguard) return
                                                         setEditingPeer(peer)
                                                         setShowPeerModal(true)
                                                     }}
                                                     disabled={!canWriteWireguard}
-                                                    className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-blue-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    tone="primary"
                                                     title="Edit Peer"
                                                 >
                                                     <Edit size={16} />
-                                                </button>
-                                        <button
-                                            onClick={() => openConfigModal(peer)}
-                                                    className={`p-2 rounded-lg border transition-all ${peer.qr_available ? 'bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border-slate-700' : 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'}`}
+                                                </ActionIconButton>
+                                                <ActionIconButton
+                                                    onClick={() => openConfigModal(peer)}
+                                                    className={peer.qr_available ? '' : '!bg-slate-900 !text-slate-600 !border-slate-800 cursor-not-allowed hover:!bg-slate-900'}
                                                     title="View config / QR"
                                                     disabled={!peer.qr_available}
                                                 >
                                                     <QrCode size={16} />
-                                                </button>
-                                                <button
+                                                </ActionIconButton>
+                                                <ActionIconButton
                                                     onClick={() => handleDeletePeer(peer.public_key)}
                                                     disabled={!canWriteWireguard}
-                                                    className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-red-400 hover:bg-slate-700 border border-slate-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    tone="danger"
                                                     title="Delete Peer"
                                                 >
                                                     <Trash2 size={16} />
-                                                </button>
+                                                </ActionIconButton>
                                             </div>
                                         </td>
                                     </tr>
@@ -553,35 +554,31 @@ export default function WireGuard() {
                                         </div>
                                     </div>
                                     <div className="flex gap-2">
-                                        <button
+                                        <ActionIconButton
                                             onClick={() => {
                                                 if (!canWriteWireguard) return
                                                 setEditingPeer(peer)
                                                 setShowPeerModal(true)
                                             }}
                                             disabled={!canWriteWireguard}
-                                            className="p-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            tone="primary"
                                         >
                                             <Edit size={16} />
-                                        </button>
-                                        <button
+                                        </ActionIconButton>
+                                        <ActionIconButton
                                             onClick={() => openConfigModal(peer)}
-                                            className={`p-2 rounded-lg border transition-all ${
-                                                peer.qr_available
-                                                    ? 'bg-slate-800 text-slate-300 border-slate-700'
-                                                    : 'bg-slate-900 text-slate-600 border-slate-800 cursor-not-allowed'
-                                            }`}
+                                            className={peer.qr_available ? '' : '!bg-slate-900 !text-slate-600 !border-slate-800 cursor-not-allowed hover:!bg-slate-900'}
                                             disabled={!peer.qr_available}
                                         >
                                             <QrCode size={16} />
-                                        </button>
-                                        <button
+                                        </ActionIconButton>
+                                        <ActionIconButton
                                             onClick={() => handleDeletePeer(peer.public_key)}
                                             disabled={!canWriteWireguard}
-                                            className="p-2 rounded-lg bg-slate-800 text-red-400 border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            tone="danger"
                                         >
                                             <Trash2 size={16} />
-                                        </button>
+                                        </ActionIconButton>
                                     </div>
                                 </div>
 

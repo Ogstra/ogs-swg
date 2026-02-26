@@ -3,6 +3,7 @@ import { api, type PanelUserInfo, type CreatePanelUserRequest } from '../service
 import { useToast } from '../context/ToastContext';
 import { useAuth, type PanelUserPermissions } from '../context/AuthContext';
 import { Plus, Trash2, Save, RefreshCw, Edit } from 'lucide-react';
+import { ActionIconButton } from '../components/ui/ActionIconButton';
 
 const PERMISSION_GROUPS: {
     id: string
@@ -266,23 +267,23 @@ const PanelUsers: React.FC = () => {
                                     </div>
                                 )}
                             </div>
-                            <div className="flex items-center gap-1">
-                                <button
+                            <div className="flex items-center gap-2">
+                                <ActionIconButton
                                     onClick={() => openEditModal(user)}
                                     disabled={!canWritePanelUsers}
-                                    className="p-2 text-slate-300 hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50"
+                                    tone="primary"
                                     title="Edit user permissions"
                                 >
                                     <Edit size={16} />
-                                </button>
-                                <button
+                                </ActionIconButton>
+                                <ActionIconButton
                                     onClick={() => handleDelete(user.username)}
                                     disabled={!canWritePanelUsers || deletingUser === user.username}
-                                    className="p-2 text-red-400 hover:bg-red-500/10 rounded-lg transition-colors disabled:opacity-50"
+                                    tone="danger"
                                     title="Delete user"
                                 >
                                     <Trash2 size={16} />
-                                </button>
+                                </ActionIconButton>
                             </div>
                         </div>
                     </div>

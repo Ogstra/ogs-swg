@@ -102,13 +102,13 @@ export default function LogViewer() {
                 <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
                     <button
                         onClick={() => setViewMode('tail')}
-                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'tail' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'tail' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                         Live Tail
                     </button>
                     <button
                         onClick={() => setViewMode('search')}
-                        className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${viewMode === 'search' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'search' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
                     >
                         Search History
                     </button>
@@ -136,7 +136,7 @@ export default function LogViewer() {
                                 <select
                                     value={tailLimit}
                                     onChange={e => setTailLimit(parseInt(e.target.value))}
-                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 >
                                     <option value={50}>50</option>
                                     <option value={100}>100</option>
@@ -149,7 +149,7 @@ export default function LogViewer() {
                                 <select
                                     value={refreshInterval}
                                     onChange={e => setRefreshInterval(parseInt(e.target.value))}
-                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 >
                                     <option value={2000}>2s</option>
                                     <option value={5000}>5s</option>
@@ -168,7 +168,7 @@ export default function LogViewer() {
 
                             <button
                                 onClick={() => fetchLogs(true)}
-                                className="px-3 py-1.5 bg-blue-600/10 text-blue-400 hover:bg-blue-600/20 border border-blue-600/20 rounded-lg text-xs font-medium transition-colors"
+                                className="px-3 py-2 bg-blue-600/10 text-blue-400 hover:bg-blue-600/20 border border-blue-600/20 rounded-lg text-xs font-medium transition-colors"
                             >
                                 Apply Filter
                             </button>
@@ -200,7 +200,7 @@ export default function LogViewer() {
                                         setSearchLimit(parseInt(e.target.value))
                                         setSearchPage(1)
                                     }}
-                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-1.5 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 >
                                     <option value={100}>100</option>
                                     <option value={500}>500</option>
@@ -212,13 +212,13 @@ export default function LogViewer() {
                             <button
                                 onClick={() => handleSearch()}
                                 disabled={searching}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
                                 {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
                                 {searching ? 'Searching...' : 'Search'}
                             </button>
 
-                            <div className="flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5">
+                            <div className="py-1 flex items-center rounded-lg bg-slate-950 border border-slate-800 p-0.5">
                                 <button
                                     onClick={() => handleSearch(Math.max(1, searchPage - 1))}
                                     disabled={searchPage <= 1 || searching}
