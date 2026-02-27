@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../services/api'
 import { Plus, Trash2, Settings, Edit, ArrowUp, ArrowDown, Shield, ArrowUpDown, QrCode, RotateCcw } from 'lucide-react'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
 import { useAuth } from '../context/AuthContext'
 import { ActionIconButton } from '../components/ui/ActionIconButton'
+import { ConfirmModal } from '../components/ui/ConfirmModal'
 
 interface WireGuardPeer {
     public_key: string
@@ -59,10 +61,9 @@ function formatTimeAgo(timestamp: number) {
 export default function WireGuard() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
+    const queryClient = useQueryClient()
     const canWriteWireguard = !!permissions?.can_write_wireguard
     const canWriteConfig = !!permissions?.can_write_config
-    const [peers, setPeers] = useState<WireGuardPeer[]>([])
-    const [interfaceConfig, setInterfaceConfig] = useState<WireGuardInterface | null>(null)
     const [showPeerModal, setShowPeerModal] = useState(false)
     const [showInterfaceModal, setShowInterfaceModal] = useState(false)
 
@@ -85,55 +86,50 @@ export default function WireGuard() {
     const [configExpiry, setConfigExpiry] = useState<string>('')
     const [configPrivateKey, setConfigPrivateKey] = useState<string>('')
     const [copiedConfig, setCopiedConfig] = useState(false)
-    const [pendingRestart, setPendingRestart] = useState(false)
-    const [systemctlAvailable, setSystemctlAvailable] = useState<boolean | undefined>(undefined)
     const [confirmDeletePeer, setConfirmDeletePeer] = useState<WireGuardPeer | null>(null)
     const [lastDeletedPeer, setLastDeletedPeer] = useState<WireGuardPeer | null>(null)
 
-    const fetchData = useCallback(() => {
-        api.getWireGuardPeers()
-            .then(data => {
-                setPeers(Array.isArray(data) ? data : [])
-            })
-            .catch(err => {
-                console.error(err)
-                setPeers([])
-                toastError('Failed to fetch peers: ' + err)
-            })
+    const peersQuery = useQuery({
+        queryKey: ['wireguard-peers'],
+        queryFn: () => api.getWireGuardPeers(),
+        refetchInterval: 5000,
+        placeholderData: previousData => previousData,
+    })
+    const peers = Array.isArray(peersQuery.data) ? (peersQuery.data as WireGuardPeer[]) : []
 
-        api.getWireGuardInterface()
-            .then(cfg => setInterfaceConfig(cfg || null))
-            .catch(err => {
-                console.error(err)
-                setInterfaceConfig(null)
-                toastError('Failed to fetch interface: ' + err)
-            })
+    const interfaceQuery = useQuery({
+        queryKey: ['wireguard-interface'],
+        queryFn: () => api.getWireGuardInterface(),
+        refetchInterval: 5000,
+        placeholderData: previousData => previousData,
+    })
+    const interfaceConfig = (interfaceQuery.data as WireGuardInterface | null) || null
 
-        api.getSystemStatus()
-            .then(status => {
-                setPendingRestart(!!status.wireguard_pending_restart)
-                setSystemctlAvailable(status.systemctl_available)
-            })
-            .catch(err => {
-                console.error(err)
-                setPendingRestart(false)
-            })
-    }, [])
+    const statusQuery = useQuery({
+        queryKey: ['system-status-wireguard'],
+        queryFn: () => api.getSystemStatus(),
+        refetchInterval: 5000,
+        placeholderData: previousData => previousData,
+    })
+    const pendingRestart = !!statusQuery.data?.wireguard_pending_restart
+    const systemctlAvailable = statusQuery.data?.systemctl_available
 
-    useEffect(() => {
-        fetchData()
-        const interval = setInterval(fetchData, 5000) // Refresh stats every 5s
-        return () => clearInterval(interval)
-    }, [fetchData])
+    const refreshData = async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['wireguard-peers'] }),
+            queryClient.invalidateQueries({ queryKey: ['wireguard-interface'] }),
+            queryClient.invalidateQueries({ queryKey: ['system-status-wireguard'] }),
+        ])
+    }
 
     const openConfigModal = (peer: WireGuardPeer) => {
         setGeneratedTab('qr')
-        setConfigModalPeer(peer)
-        setConfigText('')
         setConfigLoading(true)
+        setConfigText('')
         setConfigExpiry('')
         setConfigPrivateKey(peer.private_key || '')
         setCopiedConfig(false)
+        setConfigModalPeer(peer)
         api.getWireGuardPeerConfig(peer.public_key)
             .then(res => {
                 setConfigText(res.config)
@@ -167,7 +163,7 @@ export default function WireGuard() {
             setGeneratedTab('qr')
             setShowPeerModal(false)
             openConfigModal(peer)
-            fetchData()
+            await refreshData()
         } catch (err) {
             toastError('Failed to create peer: ' + err)
         }
@@ -184,7 +180,7 @@ export default function WireGuard() {
             await api.updateWireGuardPeer(editingPeer.public_key, rest)
             setEditingPeer(null)
             setShowPeerModal(false)
-            fetchData()
+            await refreshData()
         } catch (err) {
             toastError('Failed to update peer: ' + err)
         }
@@ -208,7 +204,7 @@ export default function WireGuard() {
             await api.deleteWireGuardPeer(target.public_key)
             setLastDeletedPeer(target)
             success('Peer deleted')
-            fetchData()
+            await refreshData()
         } catch (err) {
             toastError('Failed to delete peer: ' + err)
         }
@@ -230,7 +226,7 @@ export default function WireGuard() {
             })
             success('Peer restored')
             setLastDeletedPeer(null)
-            fetchData()
+            await refreshData()
         } catch (err) {
             toastError('Failed to restore peer: ' + err)
         }
@@ -244,9 +240,8 @@ export default function WireGuard() {
         if (!editInterface) return
         try {
             await api.updateWireGuardInterface(editInterface)
-            setInterfaceConfig(editInterface)
             setShowInterfaceModal(false)
-            fetchData()
+            await refreshData()
         } catch (err) {
             toastError('Failed to update interface: ' + err)
         }
@@ -314,8 +309,7 @@ export default function WireGuard() {
         }
         try {
             await api.restartService('wireguard')
-            setPendingRestart(false)
-            fetchData()
+            await refreshData()
         } catch (err) {
             alert('Failed to restart WireGuard: ' + err)
         }
@@ -780,10 +774,7 @@ export default function WireGuard() {
                             </button>
                         </div>
 
-                        {configLoading ? (
-                            <div className="text-slate-400 text-sm">Loading config...</div>
-                        ) : (
-                            <div className="space-y-4">
+                        <div className="space-y-4">
                                 <div className="flex gap-2">
                                     <button
                                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-semibold border ${
@@ -815,14 +806,21 @@ export default function WireGuard() {
                                                 Cache until {configExpiry || '--:--'}
                                             </span>
                                         </div>
-                                        {configText ? (
-                                            <div className="bg-white rounded-lg p-4 w-full">
+                                        {configText || configLoading ? (
+                                            <div className="relative bg-white rounded-lg p-4 w-full">
+                                                <div className={configLoading ? 'blur-sm opacity-70' : ''}>
                                                 <QRCode
                                                     size={256}
                                                     style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                                    value={configText}
+                                                    value={configText || 'loading-placeholder'}
                                                     viewBox={`0 0 256 256`}
                                                 />
+                                                </div>
+                                                {configLoading && (
+                                                    <div className="absolute inset-0 flex items-center justify-center">
+                                                        <div className="w-8 h-8 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
+                                                    </div>
+                                                )}
                                             </div>
                                         ) : (
                                             <div className="text-sm text-slate-500">Config not available.</div>
@@ -914,7 +912,6 @@ export default function WireGuard() {
                                     </button>
                                 </div>
                             </div>
-                        )}
                     </div>
                 </div>
             )}
@@ -1020,33 +1017,21 @@ export default function WireGuard() {
                 </div>
             )}
 
-            {confirmDeletePeer && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-sm p-5 shadow-xl space-y-4">
-                        <div>
-                            <h3 className="text-lg font-semibold text-white">Delete peer?</h3>
-                            <p className="text-sm text-slate-400 mt-1">
-                                {confirmDeletePeer.alias || primaryAllowedIp(confirmDeletePeer.allowed_ips) || 'Peer'}
-                            </p>
-                        </div>
-                        <p className="text-sm text-slate-400">This removes the peer from WireGuard.</p>
-                        <div className="flex justify-end gap-2">
-                            <button
-                                onClick={() => setConfirmDeletePeer(null)}
-                                className="px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 text-sm"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={confirmDelete}
-                                className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-semibold"
-                            >
-                                Delete
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ConfirmModal
+                isOpen={!!confirmDeletePeer}
+                onClose={() => setConfirmDeletePeer(null)}
+                onConfirm={confirmDelete}
+                title="Delete peer?"
+                message="This removes the peer from WireGuard."
+                confirmLabel="Delete"
+                confirmTone="danger"
+            >
+                {confirmDeletePeer && (
+                    <p className="text-sm text-slate-400">
+                        {confirmDeletePeer.alias || primaryAllowedIp(confirmDeletePeer.allowed_ips) || 'Peer'}
+                    </p>
+                )}
+            </ConfirmModal>
         </div>
     )
 }

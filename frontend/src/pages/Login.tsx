@@ -11,7 +11,8 @@ export const Login: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const { login, isAuthenticated } = useAuth();
     const navigate = useNavigate();
-    const commitHash = (import.meta.env.VITE_APP_COMMIT || 'unknown').trim();
+    const rawCommit = (import.meta.env.VITE_APP_COMMIT as string | undefined) || '';
+    const commitLabel = rawCommit ? rawCommit.slice(0, 7) : 'local';
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -89,7 +90,7 @@ export const Login: React.FC = () => {
                 </Card>
             </div>
             <div className="pointer-events-none absolute bottom-3 right-4 text-[11px] text-slate-500 font-mono">
-                {`${commitHash}`}
+                {commitLabel}
             </div>
         </div>
     );

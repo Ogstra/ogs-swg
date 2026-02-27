@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UserStatus, CreateUserRequest } from '../services/api'
-import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check } from 'lucide-react'
+import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check, QrCode as QrCodeIcon } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
@@ -9,6 +10,7 @@ import { Button } from '../components/ui/Button'
 import { Badge } from '../components/ui/Badge'
 import { Modal } from '../components/ui/Modal'
 import { ActionIconButton } from '../components/ui/ActionIconButton'
+import { ConfirmModal } from '../components/ui/ConfirmModal'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 
@@ -51,19 +53,17 @@ export default function UserManagement() {
         return `${Math.floor(hours / 24)}d ago`
     }
 
-    const [users, setUsers] = useState<UserStatus[]>([])
-    const [inbounds, setInbounds] = useState<any[]>([])
+    const queryClient = useQueryClient()
     type UserType = 'vless' | 'vmess' | 'trojan'
     const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan']
     const [userType, setUserType] = useState<UserType>('vless')
-    const [singboxPendingChanges, setSingboxPendingChanges] = useState(false)
-
     // Modals state
     const [modalState, setModalState] = useState<{
         type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | null,
         data?: any
     }>({ type: null })
     const [selectedInboundsToRemove, setSelectedInboundsToRemove] = useState<Set<string>>(new Set())
+    const [confirmDeleteUser, setConfirmDeleteUser] = useState<UserStatus | null>(null)
 
     const [isEditing, setIsEditing] = useState(false)
     const [sortKey, setSortKey] = useState<'user' | 'quota' | 'usage' | 'status' | 'last_seen'>('user')
@@ -115,6 +115,15 @@ export default function UserManagement() {
     const [qrError, setQrError] = useState<string>('')
     const [qrLinkCache, setQrLinkCache] = useState<Record<string, string>>({})
 
+    const openQrModal = (user: UserStatus) => {
+        setQrLoading(true)
+        setQrLink('')
+        setQrError('')
+        setSelectedQrInbound(user.inbound_tags?.[0] || '')
+        setQrLinkCache({})
+        setModalState({ type: 'qr', data: user })
+    }
+
     const inferInboundsFromUsers = (userList: UserStatus[]) => {
         const uniqueTags = Array.from(
             new Set(
@@ -124,35 +133,49 @@ export default function UserManagement() {
         return uniqueTags.map(tag => ({ tag, type: '' }))
     }
 
-    const fetchUsers = () => {
-        api.getUsers()
-            .then(data => {
-                setUsers(data)
-                if (!canReadConfig) {
-                    setInbounds(inferInboundsFromUsers(data))
-                }
-            })
-            .catch(err => toastError(`Failed to fetch users: ${err}`))
-    }
+    const usersQuery = useQuery({
+        queryKey: ['users'],
+        queryFn: () => api.getUsers(),
+        initialData: () => queryClient.getQueryData<UserStatus[]>(['users']),
+        placeholderData: previousData => previousData,
+    })
 
-    const fetchInbounds = () => {
-        if (!canReadConfig) {
+    const users = usersQuery.data || []
+
+    const inboundsQuery = useQuery({
+        queryKey: ['singbox-inbounds'],
+        queryFn: () => api.getSingboxInbounds(),
+        enabled: canReadConfig,
+        placeholderData: previousData => previousData,
+    })
+
+    useEffect(() => {
+        if (usersQuery.error) {
+            toastError(`Failed to fetch users: ${usersQuery.error}`)
+        }
+    }, [usersQuery.error, toastError])
+
+    useEffect(() => {
+        if (!canReadConfig || !inboundsQuery.error) return
+        const msg = String(inboundsQuery.error || '')
+        if (msg.toLowerCase().includes('forbidden') || msg.includes('403')) {
             return
         }
-        api.getSingboxInbounds()
-            .then(data => {
-                // API returns all inbounds; user type selection filters later.
-                setInbounds(data)
-            })
-            .catch(err => {
-                const msg = String(err || '')
-                if (msg.toLowerCase().includes('forbidden') || msg.includes('403')) {
-                    // Users without config-read can still manage existing users.
-                    setInbounds(inferInboundsFromUsers(users))
-                    return
-                }
-                toastError(`Failed to fetch inbounds: ${err}`)
-            })
+        toastError(`Failed to fetch inbounds: ${inboundsQuery.error}`)
+    }, [canReadConfig, inboundsQuery.error, toastError])
+
+    const inbounds = canReadConfig ? (inboundsQuery.data || []) : inferInboundsFromUsers(users)
+
+    const pendingChangesQuery = useQuery({
+        queryKey: ['dashboard-pending-changes'],
+        queryFn: () => api.getDashboardData(),
+        refetchInterval: 10000,
+        placeholderData: previousData => previousData,
+    })
+    const singboxPendingChanges = !!pendingChangesQuery.data?.singbox_pending_changes
+
+    const refreshUsersData = async () => {
+        await queryClient.invalidateQueries({ queryKey: ['users'] })
     }
 
     const inboundTypeByTag = new Map(
@@ -172,25 +195,6 @@ export default function UserManagement() {
         }
         return supportedUserTypes[0] || 'vless'
     }
-
-    useEffect(() => {
-        fetchUsers()
-        fetchInbounds()
-
-        // Fetch singbox_pending_changes status
-        api.getDashboardData().then(data => {
-            setSingboxPendingChanges(data.singbox_pending_changes || false)
-        }).catch(err => console.error('Failed to fetch pending changes:', err))
-
-        // Poll for pending changes every 10 seconds
-        const interval = setInterval(() => {
-            api.getDashboardData().then(data => {
-                setSingboxPendingChanges(data.singbox_pending_changes || false)
-            }).catch(() => { })
-        }, 10000)
-
-        return () => clearInterval(interval)
-    }, [])
 
     useEffect(() => {
         if (modalState.type === 'qr' && modalState.data?.inbound_tags?.length > 0) {
@@ -320,7 +324,7 @@ export default function UserManagement() {
                 }
                 success(`User removed from ${inboundsToRemove.length} inbound(s)`)
             }
-            fetchUsers()
+            await refreshUsersData()
         } catch (err) {
             toastError('Failed to remove user: ' + err)
         }
@@ -391,13 +395,19 @@ export default function UserManagement() {
             setModalState({ type: 'select_inbounds', data: user })
             return
         }
-        if (confirm(`Delete user "${user.name}"?`)) {
-            api.deleteUser(user.name)
-                .then(() => {
-                    success('User deleted')
-                    fetchUsers()
-                })
-                .catch(err => toastError('Failed to delete: ' + err))
+        setConfirmDeleteUser(user)
+    }
+
+    const confirmDeleteSingleUser = async () => {
+        if (!canWriteUsers || !confirmDeleteUser) return
+        const target = confirmDeleteUser
+        setConfirmDeleteUser(null)
+        try {
+            await api.deleteUser(target.name)
+            success('User deleted')
+            await refreshUsersData()
+        } catch (err) {
+            toastError('Failed to delete: ' + err)
         }
     }
 
@@ -508,7 +518,7 @@ export default function UserManagement() {
             setIsEditing(false)
             setInboundRows([])
             setOriginalInboundTags([])
-            fetchUsers()
+            await refreshUsersData()
         } catch (err) {
             toastError('Failed to save user: ' + err)
         }
@@ -563,7 +573,7 @@ export default function UserManagement() {
             await api.bulkCreateUsers(usersToCreate)
             success(`Bulk created ${usersToCreate.length} users successfully`)
             setModalState({ type: null })
-            fetchUsers()
+            await refreshUsersData()
         } catch (err) {
             toastError('Failed to bulk create: ' + err)
         }
@@ -602,7 +612,7 @@ export default function UserManagement() {
         }
         try {
             await api.applySingboxChanges()
-            setSingboxPendingChanges(false)
+            await pendingChangesQuery.refetch()
             success('Sing-box configuration applied successfully')
         } catch (err) {
             toastError('Failed to apply changes. Please try again.')
@@ -725,7 +735,7 @@ export default function UserManagement() {
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedUsers.length === 0 ? (
+                            {usersQuery.isSuccess && sortedUsers.length === 0 ? (
                                 <tr>
                                     <td colSpan={6} className="p-12 text-center text-slate-500">
                                         <Users size={48} className="mx-auto mb-4 opacity-20" />
@@ -854,6 +864,13 @@ export default function UserManagement() {
                                                         <Edit size={16} />
                                                     </ActionIconButton>
                                                     <ActionIconButton
+                                                        onClick={() => openQrModal(user)}
+                                                        disabled={!canWriteUsers}
+                                                        title="Show QR / Link"
+                                                    >
+                                                        <QrCodeIcon size={16} />
+                                                    </ActionIconButton>
+                                                    <ActionIconButton
                                                         onClick={() => handleDeleteClick(user)}
                                                         disabled={!canWriteUsers}
                                                         tone="danger"
@@ -926,6 +943,13 @@ export default function UserManagement() {
                                             <Edit size={16} />
                                         </ActionIconButton>
                                         <ActionIconButton
+                                            onClick={() => openQrModal(user)}
+                                            disabled={!canWriteUsers}
+                                            title="Show QR / Link"
+                                        >
+                                            <QrCodeIcon size={16} />
+                                        </ActionIconButton>
+                                        <ActionIconButton
                                             onClick={() => handleDeleteClick(user)}
                                             disabled={!canWriteUsers}
                                             tone="danger"
@@ -965,7 +989,7 @@ export default function UserManagement() {
                             </div>
                         )
                     })}
-                    {sortedUsers.length === 0 && (
+                    {usersQuery.isSuccess && sortedUsers.length === 0 && (
                         <div className="p-8 text-center text-slate-500">
                             <Users size={48} className="mx-auto mb-4 opacity-20" />
                             <p>No users found.</p>
@@ -1218,6 +1242,16 @@ export default function UserManagement() {
                 </div>
             </Modal>
 
+            <ConfirmModal
+                isOpen={!!confirmDeleteUser}
+                onClose={() => setConfirmDeleteUser(null)}
+                onConfirm={confirmDeleteSingleUser}
+                title="Delete user?"
+                message={confirmDeleteUser ? `This will delete "${confirmDeleteUser.name}".` : 'This action cannot be undone.'}
+                confirmLabel="Delete"
+                confirmTone="danger"
+            />
+
             {/* Bulk Create Modal */}
             <Modal
                 isOpen={modalState.type === 'bulk'}
@@ -1230,109 +1264,116 @@ export default function UserManagement() {
                     </>
                 }
             >
-                <div className="space-y-6 modal-form-uniform">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {/* Column 1: Naming & Count */}
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Inbound (Required)</label>
-                                <select
-                                    value={bulkConfig.inbound_tag || ''}
-                                    onChange={e => setBulkConfig({ ...bulkConfig, inbound_tag: e.target.value })}
-                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                >
-                                    <option value="">Select Inbound</option>
-                                    {inbounds.map((inb: any) => (
-                                        <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">Prefix</label>
-                                    <input
-                                        type="text"
-                                        value={bulkConfig.prefix}
-                                        onChange={e => setBulkConfig({ ...bulkConfig, prefix: e.target.value })}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                        placeholder="user"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">Suffix (Optional)</label>
-                                    <input
-                                        type="text"
-                                        value={bulkConfig.suffix}
-                                        onChange={e => setBulkConfig({ ...bulkConfig, suffix: e.target.value })}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                        placeholder="@example.com"
-                                    />
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">Count</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        value={bulkConfig.count}
-                                        onChange={e => setBulkConfig({ ...bulkConfig, count: parseInt(e.target.value) })}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-400 mb-1">Start Index</label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        value={bulkConfig.start_index}
-                                        onChange={e => setBulkConfig({ ...bulkConfig, start_index: parseInt(e.target.value) })}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                        disabled={bulkConfig.mode !== 'sequential'}
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Pattern</label>
-                                <select
-                                    value={bulkConfig.mode}
-                                    onChange={e => setBulkConfig({ ...bulkConfig, mode: e.target.value })}
-                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                >
-                                    <option value="sequential">Sequential (prefix-1...)</option>
-                                    <option value="random">Random Suffix (prefix-xyz...)</option>
-                                </select>
-                            </div>
+                <div className="space-y-4 modal-form-uniform">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Inbound (Required)</label>
+                            <select
+                                value={bulkConfig.inbound_tag || ''}
+                                onChange={e => setBulkConfig({ ...bulkConfig, inbound_tag: e.target.value })}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            >
+                                <option value="">Select Inbound</option>
+                                {inbounds.map((inb: any) => (
+                                    <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
+                                ))}
+                            </select>
                         </div>
-
-                        {/* Column 2: User Settings */}
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
-                                <select
-                                    value={bulkConfig.flow}
-                                    onChange={e => setBulkConfig({ ...bulkConfig, flow: e.target.value })}
-                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                >
-                                    <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                                    <option value="">none</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-400 mb-1">Quota (GB)</label>
-                                <input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={bulkQuotaInput}
-                                    onChange={e => {
-                                        const val = e.target.value
-                                        setBulkQuotaInput(val)
-                                        setBulkConfig({ ...bulkConfig, quota_limit: parseGbToBytes(val) })
-                                    }}
-                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                                    placeholder="0 for unlimited"
-                                />
-                            </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
+                            <select
+                                value={bulkConfig.flow}
+                                onChange={e => setBulkConfig({ ...bulkConfig, flow: e.target.value })}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            >
+                                <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                                <option value="">none</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Prefix</label>
+                            <input
+                                type="text"
+                                value={bulkConfig.prefix}
+                                onChange={e => setBulkConfig({ ...bulkConfig, prefix: e.target.value })}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                placeholder="user"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Suffix (Optional)</label>
+                            <input
+                                type="text"
+                                value={bulkConfig.suffix}
+                                onChange={e => setBulkConfig({ ...bulkConfig, suffix: e.target.value })}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                placeholder="@example.com"
+                            />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                        <div className="sm:col-span-1">
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Count</label>
+                            <input
+                                type="number"
+                                min="1"
+                                value={bulkConfig.count}
+                                onChange={e => setBulkConfig({ ...bulkConfig, count: parseInt(e.target.value) })}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            />
+                        </div>
+                        <div className="sm:col-span-1">
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Start Index</label>
+                            <input
+                                type="number"
+                                min="0"
+                                value={bulkConfig.start_index}
+                                onChange={e => setBulkConfig({ ...bulkConfig, start_index: parseInt(e.target.value) })}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                disabled={bulkConfig.mode !== 'sequential'}
+                            />
+                        </div>
+                        <div className="sm:col-span-2">
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Pattern</label>
+                            <select
+                                value={bulkConfig.mode}
+                                onChange={e => setBulkConfig({ ...bulkConfig, mode: e.target.value })}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            >
+                                <option value="sequential">Sequential (prefix-1...)</option>
+                                <option value="random">Random Suffix (prefix-xyz...)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Quota (GB)</label>
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                value={bulkQuotaInput}
+                                onChange={e => {
+                                    const val = e.target.value
+                                    setBulkQuotaInput(val)
+                                    setBulkConfig({ ...bulkConfig, quota_limit: parseGbToBytes(val) })
+                                }}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                placeholder="0 for unlimited"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Quota Period</label>
+                            <select
+                                value={bulkConfig.quota_period}
+                                onChange={e => setBulkConfig({ ...bulkConfig, quota_period: e.target.value as 'monthly' | 'daily' | 'none' })}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            >
+                                <option value="monthly">Monthly</option>
+                                <option value="daily">Daily</option>
+                                <option value="none">None</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -1459,18 +1500,25 @@ export default function UserManagement() {
                                     ))}
                                 </div>
                             )}
-                            {qrError ? (
+                            {qrError && !qrLoading ? (
                                 <div className="w-full bg-red-900/20 border border-red-700/40 rounded-lg p-3 text-xs text-red-300">
                                     {qrError}
                                 </div>
                             ) : (
-                                <div className="p-4 bg-white rounded-xl shadow-lg w-full">
-                                    <QRCode
-                                        size={256}
-                                        style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                        value={qrLink || ' '}
-                                        viewBox={`0 0 256 256`}
-                                    />
+                                <div className="relative p-4 bg-white rounded-xl shadow-lg w-full">
+                                    <div className={qrLoading ? 'blur-sm opacity-70' : ''}>
+                                        <QRCode
+                                            size={256}
+                                            style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                                            value={qrLink || 'loading-placeholder'}
+                                            viewBox={`0 0 256 256`}
+                                        />
+                                    </div>
+                                    {qrLoading && (
+                                        <div className="absolute inset-0 flex items-center justify-center">
+                                            <div className="w-8 h-8 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
+                                        </div>
+                                    )}
                                 </div>
                             )}
                             <div className="w-full space-y-2">
@@ -1478,7 +1526,7 @@ export default function UserManagement() {
                                 <div className="flex gap-2">
                                     <input
                                         readOnly
-                                        value={qrLink}
+                                        value={qrLoading ? 'Loading link...' : qrLink}
                                         className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-400 font-mono focus:outline-none"
                                     />
                                     <Button
@@ -1491,9 +1539,6 @@ export default function UserManagement() {
                                         {copied ? 'Copied' : 'Copy'}
                                     </Button>
                                 </div>
-                                {qrLoading && (
-                                    <div className="text-[10px] text-slate-500">Loading link...</div>
-                                )}
                             </div>
                         </>
                     )}
