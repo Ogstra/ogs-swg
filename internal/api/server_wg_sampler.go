@@ -20,11 +20,13 @@ type qrEntry struct {
 func (s *Server) markWireGuardPending() {
 	if s.config.EnableWireGuard {
 		s.wgPendingRestart = true
+		s.cache.Del("api:status")
 	}
 }
 
 func (s *Server) clearWireGuardPending() {
 	s.wgPendingRestart = false
+	s.cache.Del("api:status")
 }
 
 func (s *Server) startWireGuardSampler() {

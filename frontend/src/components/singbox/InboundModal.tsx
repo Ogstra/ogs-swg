@@ -251,7 +251,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 type="text"
                                 value={formData.tag}
                                 onChange={e => setFormData({ ...formData, tag: e.target.value })}
-                                disabled={!!initialData} // Tag is ID, cannot change on edit generally unless we handle rename logic
+                                disabled={!canWrite}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-50"
                                 placeholder="e.g. vless-in"
                             />

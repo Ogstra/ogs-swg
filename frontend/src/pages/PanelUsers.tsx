@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { api, type PanelUserInfo, type CreatePanelUserRequest } from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { useAuth, type PanelUserPermissions } from '../context/AuthContext';
-import { Plus, Trash2, Save, RefreshCw, Edit } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Edit } from 'lucide-react';
 import { ActionIconButton } from '../components/ui/ActionIconButton';
+import { Modal } from '../components/ui/Modal';
+import { Button } from '../components/ui/Button';
 
 const PERMISSION_GROUPS: {
     id: string
@@ -294,113 +296,103 @@ const PanelUsers: React.FC = () => {
                 )}
             </div>
 
-            <div className={editorMode ? '' : 'hidden'}>
-                <div className="fixed inset-0 bg-black/60 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
-                    <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-xl shadow-xl max-h-[90vh] flex flex-col my-6">
-                        <div className="p-5 border-b border-slate-800 shrink-0">
-                            <h2 className="text-lg font-semibold text-white">
-                                {editorMode === 'create' ? 'Create Panel User' : `Edit Panel User: ${editorOriginalUsername}`}
-                            </h2>
+            <Modal
+                isOpen={!!editorMode}
+                onClose={closeEditorModal}
+                title={editorMode === 'create' ? 'Create Panel User' : `Edit Panel User: ${editorOriginalUsername}`}
+                size="lg"
+                footer={
+                    <>
+                        <Button variant="ghost" onClick={closeEditorModal}>Cancel</Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSaveEditor}
+                            disabled={!canWritePanelUsers || !editorMode}
+                            isLoading={savingEditor}
+                        >
+                            {editorMode === 'create' ? 'Create User' : 'Save Changes'}
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">
+                                {editorMode === 'create' ? 'Username' : 'Change Username'}
+                            </label>
+                            <input
+                                type="text"
+                                value={editorUsername}
+                                onChange={e => setEditorUsername(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-blue-500/50"
+                                placeholder={editorOriginalUsername || 'username'}
+                            />
                         </div>
-                        <div className="p-5 overflow-y-auto">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">
-                                        {editorMode === 'create' ? '' : 'Change'} Username 
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={editorUsername}
-                                        onChange={e => setEditorUsername(e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                                        placeholder={editorOriginalUsername || 'username'}
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-slate-300 mb-1">
-                                        {editorMode === 'create' ? 'Password' : 'Change Password'}
-                                    </label>
-                                    <input
-                                        type="password"
-                                        value={editorPassword}
-                                        onChange={e => setEditorPassword(e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
-                                        placeholder={editorMode === 'create' ? 'min. 8 characters' : 'Empty to keep current password'}
-                                    />
-                                </div>
-                            </div>
-                            <div className="rounded-lg border border-slate-700/50 overflow-hidden">
-                                <div className="grid grid-cols-[1fr_80px_80px] bg-slate-800/60 border-b border-slate-700/50 px-3 py-2 text-xs font-semibold text-slate-300">
-                                    <div>Resource</div>
-                                    <div className="text-center">Read</div>
-                                    <div className="text-center">Write</div>
-                                </div>
-                                {PERMISSION_GROUPS.map(({ id, label, description, readKey, writeKey }) => {
-                                    const disabled = !canWritePanelUsers;
-                                    const current = editorPerms;
-                                    return (
-                                        <div
-                                            key={id}
-                                            className="grid grid-cols-[1fr_80px_80px] items-center px-3 py-3 border-b border-slate-800/70 last:border-b-0 bg-slate-900/40"
-                                        >
-                                            <div>
-                                                <div className="text-sm font-medium text-slate-200">{label}</div>
-                                                <div className="text-xs text-slate-500 mt-0.5">{description}</div>
-                                            </div>
-                                            <div className="flex justify-center">
-                                                {readKey ? (
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={current[readKey]}
-                                                        disabled={disabled}
-                                                        onChange={() => toggleEditorPerm(readKey)}
-                                                        className="h-4 w-4 accent-blue-500"
-                                                    />
-                                                ) : (
-                                                    <span className="text-slate-600">-</span>
-                                                )}
-                                            </div>
-                                            <div className="flex justify-center">
-                                                {writeKey ? (
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={current[writeKey]}
-                                                        disabled={disabled}
-                                                        onChange={() => toggleEditorPerm(writeKey)}
-                                                        className="h-4 w-4 accent-blue-500"
-                                                    />
-                                                ) : (
-                                                    <span className="text-slate-600">-</span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                        <div className="p-5 border-t border-slate-800 bg-slate-950/50 rounded-b-xl flex justify-end gap-3 shrink-0">
-                            <button
-                                type="button"
-                                onClick={closeEditorModal}
-                                className="px-4 py-2 text-slate-300 hover:text-white text-sm transition-colors"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleSaveEditor}
-                                disabled={!canWritePanelUsers || !editorMode || savingEditor}
-                                className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50"
-                            >
-                                {savingEditor
-                                    ? <RefreshCw size={14} className="animate-spin" />
-                                    : <Save size={14} />}
-                                {editorMode === 'create' ? 'Create User' : 'Save Changes'}
-                            </button>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">
+                                {editorMode === 'create' ? 'Password' : 'Change Password'}
+                            </label>
+                            <input
+                                type="password"
+                                value={editorPassword}
+                                onChange={e => setEditorPassword(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white text-sm outline-none focus:border-blue-500/50"
+                                placeholder={editorMode === 'create' ? 'min. 8 characters' : 'Empty to keep current password'}
+                            />
                         </div>
                     </div>
+
+                    <div className="rounded-lg border border-slate-800 overflow-hidden">
+                        <div className="grid grid-cols-[1fr_80px_80px] bg-slate-950/50 border-b border-slate-800 px-3 py-2 text-xs font-semibold text-slate-400">
+                            <div>Resource</div>
+                            <div className="text-center">Read</div>
+                            <div className="text-center">Write</div>
+                        </div>
+                        {PERMISSION_GROUPS.map(({ id, label, description, readKey, writeKey }) => {
+                            const disabled = !canWritePanelUsers;
+                            const current = editorPerms;
+                            return (
+                                <div
+                                    key={id}
+                                    className="grid grid-cols-[1fr_80px_80px] items-center px-3 py-3 border-b border-slate-800 last:border-b-0 bg-slate-900/40"
+                                >
+                                    <div>
+                                        <div className="text-sm font-medium text-slate-200">{label}</div>
+                                        <div className="text-xs text-slate-500 mt-0.5">{description}</div>
+                                    </div>
+                                    <div className="flex justify-center">
+                                        {readKey ? (
+                                            <input
+                                                type="checkbox"
+                                                checked={current[readKey]}
+                                                disabled={disabled}
+                                                onChange={() => toggleEditorPerm(readKey)}
+                                                className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                            />
+                                        ) : (
+                                            <span className="text-slate-600">-</span>
+                                        )}
+                                    </div>
+                                    <div className="flex justify-center">
+                                        {writeKey ? (
+                                            <input
+                                                type="checkbox"
+                                                checked={current[writeKey]}
+                                                disabled={disabled}
+                                                onChange={() => toggleEditorPerm(writeKey)}
+                                                className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                            />
+                                        ) : (
+                                            <span className="text-slate-600">-</span>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
                 </div>
-            </div>
+            </Modal>
         </div>
     );
 };

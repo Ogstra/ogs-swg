@@ -568,7 +568,6 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		var inboundTags []string
 		var limit int64
 		var period string = "monthly"
-		var resetDay int = 1
 		var enabled bool = true
 
 		if isActive {
@@ -582,7 +581,6 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		if hasMeta {
 			limit = meta.QuotaLimit
 			period = meta.QuotaPeriod
-			resetDay = meta.ResetDay
 			enabled = meta.Enabled
 			if vmessSecurity == "" && meta.VmessSecurity != "" {
 				vmessSecurity = meta.VmessSecurity
@@ -649,7 +647,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			Total:         up + down,
 			QuotaLimit:    limit,
 			QuotaPeriod:   period,
-			ResetDay:      resetDay,
+			ResetDay:      1,
 			Enabled:       enabled,
 			LastSeen:      lastSeen,
 			InboundTags:   inboundTags,
@@ -724,7 +722,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Email:         req.Name,
 		QuotaLimit:    req.QuotaLimit,
 		QuotaPeriod:   req.QuotaPeriod,
-		ResetDay:      req.ResetDay,
+		ResetDay:      1,
 		Enabled:       enabled,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
@@ -796,7 +794,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Email:         req.Name,
 		QuotaLimit:    req.QuotaLimit,
 		QuotaPeriod:   req.QuotaPeriod,
-		ResetDay:      req.ResetDay,
+		ResetDay:      1,
 		Enabled:       enabled,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
@@ -934,7 +932,7 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 			Email:         req.Name,
 			QuotaLimit:    req.QuotaLimit,
 			QuotaPeriod:   req.QuotaPeriod,
-			ResetDay:      req.ResetDay,
+			ResetDay:      1,
 			Enabled:       enabled,
 			VmessSecurity: req.VmessSecurity,
 			VmessAlterID:  req.VmessAlterID,
