@@ -615,25 +615,11 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		// If strictly disabled in metadata, but active in config, we still show as enabled=false (logic in handleUpdateUser handles sync)
 		// But in UI we verify state.
 
-		// Stats calculation
+		// Stats calculation for user table indicators:
+		// always show current calendar month usage.
 		now := time.Now()
-		var startOfPeriod time.Time
-
-		if resetDay < 1 {
-			resetDay = 1
-		}
-		if resetDay > 31 {
-			resetDay = 31
-		}
-
-		if now.Day() < resetDay {
-			lastMonth := now.AddDate(0, -1, 0)
-			startOfPeriod = time.Date(lastMonth.Year(), lastMonth.Month(), resetDay, 0, 0, 0, 0, now.Location())
-		} else {
-			startOfPeriod = time.Date(now.Year(), now.Month(), resetDay, 0, 0, 0, 0, now.Location())
-		}
-
-		samples, err := s.store.GetSamples(name, startOfPeriod.Unix(), now.Unix())
+		startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+		samples, err := s.store.GetSamples(name, startOfMonth.Unix(), now.Unix())
 		var up, down int64
 		lastSeen := int64(0)
 		if err == nil {
