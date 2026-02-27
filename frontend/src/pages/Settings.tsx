@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { api, FeatureFlags } from '../services/api'
 import { Save, RefreshCw, UserCog } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
@@ -12,7 +13,7 @@ import { Tabs } from '../components/ui/Tabs'
 import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './PanelUsers'
 
-type ServiceStatus = { singbox: boolean; wireguard: boolean }
+type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
 type DbInfo = { rows: number; sizeMB: number }
 type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string }
 
@@ -39,15 +40,38 @@ export default function Settings() {
         aggregation_days: 7,
     })
     const [historyLimit, setHistoryLimit] = useState(10)
-    const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean; wireguard: boolean }>({ singbox: false, wireguard: false })
+    const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
     const [publicIP, setPublicIP] = useState<string>('')
     const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>({
         defaultService: 'singbox',
         refreshMs: 10000,
         defaultRange: '24h'
     })
+    const featuresQuery = useQuery({
+        queryKey: ['settings-features'],
+        queryFn: () => api.getFeatures(),
+        placeholderData: previousData => previousData,
+    })
+
+    const statusQuery = useQuery({
+        queryKey: ['settings-system-status'],
+        queryFn: () => api.getSystemStatus(),
+        placeholderData: previousData => previousData,
+    })
+
+    const samplerHistoryQuery = useQuery({
+        queryKey: ['settings-sampler-history', historyLimit],
+        queryFn: () => api.getSamplerHistory(historyLimit),
+        placeholderData: previousData => previousData,
+    })
+
+    const publicIPQuery = useQuery({
+        queryKey: ['settings-public-ip'],
+        queryFn: () => api.getPublicIP(),
+        placeholderData: previousData => previousData,
+    })
+
     useEffect(() => {
-        loadAll()
         const savedPrefs = localStorage.getItem('dashboard_prefs')
         if (savedPrefs) {
             try {
@@ -61,60 +85,65 @@ export default function Settings() {
                 // ignore parse errors
             }
         }
-    }, [historyLimit])
+    }, [])
 
-    const loadAll = async () => {
-        setLoading(true)
-        await Promise.all([loadFeatures(), loadDbStats(), loadSamplerHistory()])
+    useEffect(() => {
+        if (!featuresQuery.data) return
+        setFeatures(featuresQuery.data)
+    }, [featuresQuery.data])
 
-        // Load public IP
-        try {
-            const ip = await api.getPublicIP()
-            setPublicIP(ip || '')
-        } catch (err) {
-            console.error('Failed to load public IP:', err)
+    useEffect(() => {
+        const status = statusQuery.data
+        if (!status) return
+        const sizeBytes = status.db_size_bytes ?? 0
+        const rows = status.samples_count ?? 0
+        setDbInfo({ rows, sizeMB: parseFloat((sizeBytes / (1024 * 1024)).toFixed(2)) })
+        if (status.sampler_paused !== undefined) {
+            setFeatures(f => ({ ...f, sampler_paused: status.sampler_paused }))
         }
+        if (status.wg_sample_interval_sec) {
+            setFeatures(f => ({ ...f, wg_sampler_interval_sec: status.wg_sample_interval_sec }))
+        }
+        setServiceStatus({
+            singbox: status.singbox ?? null,
+            wireguard: status.wireguard ?? null
+        })
+    }, [statusQuery.data])
 
-        setLoading(false)
-    }
+    useEffect(() => {
+        const h = samplerHistoryQuery.data
+        if (!h) return
+        setSamplerHistory(Array.isArray(h) ? h : [])
+    }, [samplerHistoryQuery.data])
+
+    useEffect(() => {
+        if (typeof publicIPQuery.data !== 'string') return
+        setPublicIP(publicIPQuery.data || '')
+    }, [publicIPQuery.data])
 
     const loadFeatures = async () => {
-        try {
-            const f = await api.getFeatures()
-            setFeatures(f)
-        } catch (err) {
-            console.error(err)
-        }
+        await featuresQuery.refetch()
     }
 
     const loadDbStats = async () => {
-        try {
-            const status = await api.getSystemStatus()
-            const sizeBytes = status.db_size_bytes ?? 0
-            const rows = status.samples_count ?? 0
-            setDbInfo({ rows, sizeMB: parseFloat((sizeBytes / (1024 * 1024)).toFixed(2)) })
-            if (status.sampler_paused !== undefined) {
-                setFeatures(f => ({ ...f, sampler_paused: status.sampler_paused }))
-            }
-            if (status.wg_sample_interval_sec) {
-                setFeatures(f => ({ ...f, wg_sampler_interval_sec: status.wg_sample_interval_sec }))
-            }
-            setServiceStatus({
-                singbox: !!status.singbox,
-                wireguard: !!status.wireguard
-            })
-        } catch (err) {
-            console.error(err)
-        }
+        await statusQuery.refetch()
     }
 
     const loadSamplerHistory = async () => {
+        await samplerHistoryQuery.refetch()
+    }
+
+    const loadAll = async () => {
+        setLoading(true)
         try {
-            const h = await api.getSamplerHistory(historyLimit)
-            setSamplerHistory(Array.isArray(h) ? h : [])
-        } catch (err) {
-            console.error(err)
-            setSamplerHistory([])
+            await Promise.all([
+                loadFeatures(),
+                loadDbStats(),
+                loadSamplerHistory(),
+                publicIPQuery.refetch(),
+            ])
+        } finally {
+            setLoading(false)
         }
     }
 
@@ -504,9 +533,9 @@ function GeneralTab({
                         <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_singbox ? 'opacity-50' : ''}`}>
                             <div className="flex items-center justify-between">
                                 <div className="font-semibold text-white">sing-box</div>
-                                <Badge variant={serviceStatus.singbox ? 'success' : 'error'}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.singbox ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                    {serviceStatus.singbox ? 'Running' : 'Stopped'}
+                                <Badge variant={serviceStatus.singbox === true ? 'success' : serviceStatus.singbox === false ? 'error' : 'neutral'}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.singbox === true ? 'bg-emerald-500' : serviceStatus.singbox === false ? 'bg-red-500' : 'bg-slate-500'}`} />
+                                    {serviceStatus.singbox === true ? 'Running' : serviceStatus.singbox === false ? 'Stopped' : 'Unknown'}
                                 </Badge>
                             </div>
                             <div className="flex gap-2">
@@ -535,9 +564,9 @@ function GeneralTab({
                         <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_wireguard ? 'opacity-50' : ''}`}>
                             <div className="flex items-center justify-between">
                                 <div className="font-semibold text-white">WireGuard</div>
-                                <Badge variant={serviceStatus.wireguard ? 'success' : 'error'}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.wireguard ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                                    {serviceStatus.wireguard ? 'Running' : 'Stopped'}
+                                <Badge variant={serviceStatus.wireguard === true ? 'success' : serviceStatus.wireguard === false ? 'error' : 'neutral'}>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.wireguard === true ? 'bg-emerald-500' : serviceStatus.wireguard === false ? 'bg-red-500' : 'bg-slate-500'}`} />
+                                    {serviceStatus.wireguard === true ? 'Running' : serviceStatus.wireguard === false ? 'Stopped' : 'Unknown'}
                                 </Badge>
                             </div>
                             <div className="flex gap-2">

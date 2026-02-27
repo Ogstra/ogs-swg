@@ -132,7 +132,7 @@ export function RawEditorPanel({
                             }
                         }}
                         placeholder="Find in config..."
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-3 pr-20 py-1.5 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                        className="w-full h-9 bg-slate-950 border border-slate-700 rounded-lg pl-3 pr-20 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
                         ref={searchInputRef}
                     />
                     <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5">

@@ -133,7 +133,7 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="w-full flex items-center flex-nowrap gap-3 sm:border-l sm:border-slate-800 sm:pl-4">
+                        <div className="w-full flex items-center flex-nowrap gap-3  sm:border-slate-800 sm:pl-2">
                             <div className="flex items-center gap-2">
                                 <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Lines</span>
                                 <select
@@ -195,7 +195,7 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="w-full flex items-center gap-3 sm:border-l sm:border-slate-800 sm:pl-4">
+                        <div className="w-full flex items-center gap-3 sm:border-slate-800 sm:pl-2">
                             <div className="flex items-center gap-2">
                                 <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Limit</span>
                                 <select
@@ -259,8 +259,8 @@ export default function LogViewer() {
                         </div>
                     ) : (
                         lines.map((line, i) => (
-                            <div key={i} className="flex gap-3 hover:bg-white/5 py-0.5 px-2 rounded -mx-2 group">
-                                <span className="text-slate-700 select-none w-[3ch] text-right shrink-0 opacity-50 text-[10px] pt-0.5">{i + 1}</span>
+                            <div key={i} className="flex items-center gap-2 hover:bg-white/5 py-0.5 rounded -mx-2 group">
+                                <span className="text-slate-400 select-none w-[3ch] text-center shrink-0 opacity-50 text-[10px]">{i + 1}</span>
                                 <span className="text-slate-300 break-all whitespace-pre-wrap">{line}</span>
                             </div>
                         ))

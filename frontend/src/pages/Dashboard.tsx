@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -53,33 +54,10 @@ function formatBytes(bytes: number, decimals = 2) {
 }
 
 export default function Dashboard() {
-    const [loading, setLoading] = useState(true)
-    const [lastUpdated, setLastUpdated] = useState<Date>(new Date())
     const [timeRange, setTimeRange] = useState('24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [refreshInterval, setRefreshInterval] = useState<number>(10000)
     const [prefsLoaded, setPrefsLoaded] = useState(false)
-
-    // Data States
-    const [chartData, setChartData] = useState<UnifiedChartPoint[]>([])
-    const [chartDomain, setChartDomain] = useState<[number, number] | undefined>(undefined)
-    const [statsCards, setStatsCards] = useState<Record<string, TrafficStats>>({
-        singbox: { uplink: 0, downlink: 0 },
-        wireguard: { uplink: 0, downlink: 0 }
-    })
-    const [topConsumersMap, setTopConsumersMap] = useState<Record<string, Consumer[]>>({
-        singbox: [],
-        wireguard: []
-    })
-    const [status, setStatus] = useState<any>({
-        singbox: false,
-        wireguard: false,
-        active_users_singbox: 0,
-        active_users_wireguard: 0,
-        active_users_singbox_list: [],
-        active_users_wireguard_list: []
-    })
-    const [singboxPendingChanges, setSingboxPendingChanges] = useState(false)
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
@@ -100,45 +78,6 @@ export default function Dashboard() {
         }
     }
 
-    const fetchData = async () => {
-        setLoading(true)
-        try {
-            let start: string | undefined
-            let end: string | undefined
-            let domainStart: number
-            let domainEnd: number
-
-            if (timeRange === 'custom') {
-                domainStart = Math.floor(new Date(customStart).getTime() / 1000)
-                domainEnd = Math.floor(new Date(customEnd).getTime() / 1000) + 24 * 60 * 60
-                start = domainStart.toString()
-                end = domainEnd.toString()
-            } else {
-                const range = computeRangeSeconds(timeRange)
-                domainStart = range.start
-                domainEnd = range.end
-                start = domainStart.toString()
-                end = domainEnd.toString()
-            }
-
-            setChartDomain([domainStart, domainEnd])
-
-            const data = await api.getDashboardData(timeRange === 'custom' ? 'custom' : timeRange, start, end)
-
-            setChartData(data.chart_data || [])
-            setStatsCards(data.stats_cards || { singbox: { uplink: 0, downlink: 0 }, wireguard: { uplink: 0, downlink: 0 } })
-            setTopConsumersMap(data.top_consumers || { singbox: [], wireguard: [] })
-            setStatus(data.status || {})
-            setSingboxPendingChanges(data.singbox_pending_changes || false)
-
-            setLastUpdated(new Date())
-        } catch (err) {
-            console.error(err)
-        } finally {
-            setLoading(false)
-        }
-    }
-
     useEffect(() => {
         const prefs = loadDashboardPrefs()
         if (prefs.defaultService === 'wireguard') setChartMode('wireguard')
@@ -147,19 +86,51 @@ export default function Dashboard() {
         setPrefsLoaded(true)
     }, [])
 
-    useEffect(() => {
-        if (!prefsLoaded) return
-        fetchData()
-        const interval = setInterval(fetchData, refreshInterval)
-        return () => clearInterval(interval)
-    }, [prefsLoaded, timeRange, customStart, customEnd, refreshInterval])
+    const requestWindow = useMemo(() => {
+        if (timeRange === 'custom') {
+            const start = Math.floor(new Date(customStart).getTime() / 1000)
+            const end = Math.floor(new Date(customEnd).getTime() / 1000) + 24 * 60 * 60
+            return { start, end, startText: String(start), endText: String(end), range: 'custom' as const }
+        }
+        const range = computeRangeSeconds(timeRange)
+        return { start: range.start, end: range.end, startText: String(range.start), endText: String(range.end), range: timeRange }
+    }, [timeRange, customStart, customEnd])
+
+    const chartDomain: [number, number] = [requestWindow.start, requestWindow.end]
+
+    const dashboardQuery = useQuery({
+        queryKey: ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText],
+        queryFn: () => api.getDashboardData(requestWindow.range, requestWindow.startText, requestWindow.endText),
+        enabled: prefsLoaded,
+        refetchInterval: refreshInterval,
+        placeholderData: previousData => previousData,
+    })
+
+    const loading = dashboardQuery.isFetching
+    const lastUpdated = dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt) : new Date()
+    const chartData: UnifiedChartPoint[] = dashboardQuery.data?.chart_data || []
+    const statsCards: Record<string, TrafficStats> = dashboardQuery.data?.stats_cards || {
+        singbox: { uplink: 0, downlink: 0 },
+        wireguard: { uplink: 0, downlink: 0 }
+    }
+    const topConsumersMap: Record<string, Consumer[]> = dashboardQuery.data?.top_consumers || {
+        singbox: [],
+        wireguard: []
+    }
+    const status = dashboardQuery.data?.status || {
+        singbox: null,
+        wireguard: null,
+        active_users_singbox: 0,
+        active_users_wireguard: 0,
+        active_users_singbox_list: [],
+        active_users_wireguard_list: []
+    }
+    const singboxPendingChanges = !!dashboardQuery.data?.singbox_pending_changes
 
     const handleApplySingboxChanges = async () => {
         try {
             await api.applySingboxChanges()
-            setSingboxPendingChanges(false)
-            // Refresh data to reflect changes
-            fetchData()
+            await dashboardQuery.refetch()
         } catch (err) {
             console.error('Failed to apply Sing-box changes:', err)
             alert('Failed to apply changes. Please try again.')
@@ -237,7 +208,7 @@ export default function Dashboard() {
                     )}
 
                     <Button
-                        onClick={fetchData}
+                        onClick={() => dashboardQuery.refetch()}
                         isLoading={loading}
                         variant="icon"
                         size="icon"
@@ -249,16 +220,16 @@ export default function Dashboard() {
             {/* Unified Service & Traffic Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* sing-box Card */}
-                <Card className={`transition-all ${status.singbox ? 'bg-slate-900 border-slate-800' : 'bg-red-900/10 border-red-900/20'}`}>
+                <Card className={`transition-all ${status.singbox === true ? 'bg-slate-900 border-slate-800' : status.singbox === false ? 'bg-red-900/10 border-red-900/20' : 'bg-slate-900 border-slate-800'}`}>
                     <div className="flex items-start justify-between mb-6">
                         <div className="flex items-center gap-4">
-                            <div className={`p-3 rounded-xl ${status.singbox ? 'bg-slate-800 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                            <div className={`p-3 rounded-xl ${status.singbox === true ? 'bg-slate-800 text-emerald-400' : status.singbox === false ? 'bg-red-500/10 text-red-400' : 'bg-slate-800 text-slate-400'}`}>
                                 <SingBoxIcon className="w-6 h-6" />
                             </div>
                             <div>
                                 <div className="flex items-center gap-2">
                                     <h3 className="text-lg font-bold text-white">sing-box</h3>
-                                    <span className={`w-2 h-2 rounded-full ${status.singbox ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                                    <span className={`w-2 h-2 rounded-full ${status.singbox === true ? 'bg-emerald-500' : status.singbox === false ? 'bg-red-500' : 'bg-slate-500'}`}></span>
                                 </div>
                             </div>
                         </div>
@@ -303,16 +274,16 @@ export default function Dashboard() {
                 </Card>
 
                 {/* WireGuard Card */}
-                <Card className={`transition-all ${status.wireguard ? 'bg-slate-900 border-slate-800' : 'bg-red-900/10 border-red-900/20'}`}>
+                <Card className={`transition-all ${status.wireguard === true ? 'bg-slate-900 border-slate-800' : status.wireguard === false ? 'bg-red-900/10 border-red-900/20' : 'bg-slate-900 border-slate-800'}`}>
                     <div className="flex items-start justify-between mb-6">
                         <div className="flex items-center gap-4">
-                            <div className={`p-3 rounded-xl ${status.wireguard ? 'bg-slate-800 text-blue-400' : 'bg-red-500/10 text-red-400'}`}>
+                            <div className={`p-3 rounded-xl ${status.wireguard === true ? 'bg-slate-800 text-blue-400' : status.wireguard === false ? 'bg-red-500/10 text-red-400' : 'bg-slate-800 text-slate-400'}`}>
                                 <WireGuardIcon className="w-6 h-6" />
                             </div>
                             <div>
                                 <div className="flex items-center gap-2">
                                     <h3 className="text-lg font-bold text-white">WireGuard</h3>
-                                    <span className={`w-2 h-2 rounded-full ${status.wireguard ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+                                    <span className={`w-2 h-2 rounded-full ${status.wireguard === true ? 'bg-emerald-500' : status.wireguard === false ? 'bg-red-500' : 'bg-slate-500'}`}></span>
                                 </div>
                             </div>
                         </div>
@@ -383,7 +354,7 @@ export default function Dashboard() {
                     >
                         <div className="h-[300px] w-full mt-4">
                             <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData}>
+                                <AreaChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
                                     <defs>
                                         <linearGradient id="colorUp" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -416,6 +387,7 @@ export default function Dashboard() {
                                         tickFormatter={(bytes) => formatBytes(bytes, 0)}
                                         stroke="#64748b"
                                         fontSize={12}
+                                        width={40}
                                         tickMargin={10}
                                         axisLine={false}
                                         tickLine={false}
@@ -432,6 +404,7 @@ export default function Dashboard() {
                                         name={chartMode === 'singbox' ? "Received" : "Sent"}
                                         stroke={chartMode === 'singbox' ? "#3b82f6" : "#10b981"}
                                         strokeWidth={2}
+                                        isAnimationActive={false}
                                         fillOpacity={1}
                                         fill={chartMode === 'singbox' ? "url(#colorUp)" : "url(#colorDown)"}
                                     />
@@ -441,6 +414,7 @@ export default function Dashboard() {
                                         name={chartMode === 'singbox' ? "Sent" : "Received"}
                                         stroke={chartMode === 'singbox' ? "#10b981" : "#3b82f6"}
                                         strokeWidth={2}
+                                        isAnimationActive={false}
                                         fillOpacity={1}
                                         fill={chartMode === 'singbox' ? "url(#colorDown)" : "url(#colorUp)"}
                                     />
