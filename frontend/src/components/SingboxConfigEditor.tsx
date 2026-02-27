@@ -206,14 +206,9 @@ export default function SingboxConfigEditor() {
     }
 
     return (
-        <div className="h-full min-h-0 flex flex-col gap-4">
+        <div className="h-full min-h-0 flex flex-col">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h2 className="text-xl font-bold text-white flex items-center gap-2 hidden sm:flex">
-                        Sing-box Configuration
-                    </h2>
-                </div>
                 <div />
             </div>
 
