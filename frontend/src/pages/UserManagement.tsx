@@ -621,7 +621,7 @@ export default function UserManagement() {
 
 
     return (
-        <div className="space-y-4 sm:space-y-6">
+        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Pending Changes Banner */}
             {singboxPendingChanges && (
                 <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-4 flex items-center justify-between">

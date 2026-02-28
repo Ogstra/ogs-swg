@@ -141,7 +141,7 @@ export default function Dashboard() {
     const topConsumers = (topConsumersMap[chartMode] || []).slice(0, 20)
 
     return (
-        <div className="space-y-4 sm:space-y-6">
+        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Pending Changes Banner */}
             {singboxPendingChanges && (
                 <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-4 flex items-center justify-between">
@@ -462,9 +462,6 @@ export default function Dashboard() {
                                     </div>
                                     <div className="text-right">
                                         <div className="font-mono text-sm text-blue-400">{formatBytes(u.total)}</div>
-                                        <div className="text-[10px] text-slate-500">
-                                            {u.quota_limit ? `${((u.total / u.quota_limit) * 100).toFixed(1)}%` : '∞'}
-                                        </div>
                                     </div>
                                 </div>
                             ))
