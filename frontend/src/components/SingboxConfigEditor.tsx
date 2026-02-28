@@ -208,7 +208,7 @@ export default function SingboxConfigEditor() {
     return (
         <div className="h-full min-h-0 flex flex-col">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
                 <div />
             </div>
 
