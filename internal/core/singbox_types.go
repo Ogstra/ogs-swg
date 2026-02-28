@@ -1,7 +1,3 @@
-// Package core - sing-box typed struct definitions.
-// Source: https://sing-box.sagernet.org/configuration/
-// Generated for Phase 1 of the type safety refactor.
-// DO NOT add map[string]interface{} or interface{} fields to this file.
 package core
 
 import "encoding/json"
@@ -28,32 +24,23 @@ type ListenFields struct {
 	Detour               string          `json:"detour,omitempty"`
 }
 
-// VlessUser is the user entry in a VLESS inbound.
-// Source: https://sing-box.sagernet.org/configuration/inbound/vless/
 type VlessUser struct {
 	Name string `json:"name"`
 	UUID string `json:"uuid"`
 	Flow string `json:"flow,omitempty"` // "xtls-rprx-vision" or empty
 }
 
-// VmessUser is the user entry in a VMess inbound.
-// Source: https://sing-box.sagernet.org/configuration/inbound/vmess/
-// NOTE: alterId uses camelCase JSON key per current sing-box docs.
-// The existing code reads "alter_id" (snake_case) - that is a Phase 3 migration concern.
 type VmessUser struct {
 	Name    string `json:"name"`
 	UUID    string `json:"uuid"`
 	AlterID int    `json:"alterId,omitempty"`
 }
 
-// TrojanUser is the user entry in a Trojan inbound.
-// Source: https://sing-box.sagernet.org/configuration/inbound/trojan/
 type TrojanUser struct {
 	Name     string `json:"name"`
 	Password string `json:"password"` // NOT uuid - Trojan uses password
 }
 
-// VlessInbound is a typed VLESS inbound configuration.
 type VlessInbound struct {
 	InboundBase
 	ListenFields
@@ -63,7 +50,6 @@ type VlessInbound struct {
 	Transport json.RawMessage `json:"transport,omitempty"`
 }
 
-// VmessInbound is a typed VMess inbound configuration.
 type VmessInbound struct {
 	InboundBase
 	ListenFields
@@ -73,7 +59,6 @@ type VmessInbound struct {
 	Transport json.RawMessage `json:"transport,omitempty"`
 }
 
-// TrojanInbound is a typed Trojan inbound configuration.
 type TrojanInbound struct {
 	InboundBase
 	ListenFields
@@ -83,8 +68,6 @@ type TrojanInbound struct {
 	Transport json.RawMessage `json:"transport,omitempty"`
 }
 
-// V2RayStats is the stats sub-configuration within V2RayAPI.
-// Source: https://sing-box.sagernet.org/configuration/experimental/v2ray-api/
 type V2RayStats struct {
 	Enabled   bool     `json:"enabled"` // NO omitempty - must always be written explicitly
 	Inbounds  []string `json:"inbounds,omitempty"`
@@ -92,24 +75,17 @@ type V2RayStats struct {
 	Users     []string `json:"users,omitempty"`
 }
 
-// V2RayAPI is the experimental.v2ray_api configuration.
 type V2RayAPI struct {
 	Listen string      `json:"listen,omitempty"`
 	Stats  *V2RayStats `json:"stats,omitempty"`
 }
 
-// Experimental is the top-level experimental configuration block.
-// Only v2ray_api is typed; other experimental features use RawMessage.
 type Experimental struct {
 	V2RayAPI  *V2RayAPI       `json:"v2ray_api,omitempty"`
 	ClashAPI  json.RawMessage `json:"clash_api,omitempty"`
 	CacheFile json.RawMessage `json:"cache_file,omitempty"`
 }
 
-// SingboxConfig is the top-level sing-box configuration envelope.
-// Source: https://sing-box.sagernet.org/configuration/
-// Inbounds and Experimental are typed; all other sections are opaque RawMessage
-// to guarantee round-trip fidelity (no data loss for fields the panel doesn't own).
 type SingboxConfig struct {
 	Log          json.RawMessage `json:"log,omitempty"`
 	DNS          json.RawMessage `json:"dns,omitempty"`
