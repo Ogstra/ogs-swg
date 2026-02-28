@@ -68,6 +68,41 @@ type TrojanInbound struct {
 	Transport json.RawMessage `json:"transport,omitempty"`
 }
 
+type ManagedInbound interface {
+	Base() InboundBase
+	UserNames() []string
+}
+
+func (v *VlessInbound) Base() InboundBase { return v.InboundBase }
+
+func (v *VlessInbound) UserNames() []string {
+	names := make([]string, len(v.Users))
+	for i, u := range v.Users {
+		names[i] = u.Name
+	}
+	return names
+}
+
+func (v *VmessInbound) Base() InboundBase { return v.InboundBase }
+
+func (v *VmessInbound) UserNames() []string {
+	names := make([]string, len(v.Users))
+	for i, u := range v.Users {
+		names[i] = u.Name
+	}
+	return names
+}
+
+func (t *TrojanInbound) Base() InboundBase { return t.InboundBase }
+
+func (t *TrojanInbound) UserNames() []string {
+	names := make([]string, len(t.Users))
+	for i, u := range t.Users {
+		names[i] = u.Name
+	}
+	return names
+}
+
 type V2RayStats struct {
 	Enabled   bool     `json:"enabled"` // NO omitempty - must always be written explicitly
 	Inbounds  []string `json:"inbounds,omitempty"`
@@ -161,4 +196,10 @@ type SingboxConfig struct {
 	Route        json.RawMessage `json:"route,omitempty"`
 	Services     json.RawMessage `json:"services,omitempty"`
 	Experimental *Experimental   `json:"experimental,omitempty"`
+}
+
+type SingboxInboundMeta struct {
+	Tag        string `json:"tag"`
+	Type       string `json:"type"`
+	ListenPort int    `json:"listen_port,omitempty"`
 }

@@ -105,15 +105,12 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 
 	if len(inbounds) > 0 {
 		tagTypes := map[string]string{}
-		if allInbounds, err := s.config.GetSingboxInbounds(); err == nil {
-			for _, inbound := range allInbounds {
-				tag, _ := inbound["tag"].(string)
-				if tag == "" {
+		if allInboundMetas, err := s.config.GetSingboxInboundMetas(); err == nil {
+			for _, inboundMeta := range allInboundMetas {
+				if inboundMeta.Tag == "" {
 					continue
 				}
-				if t, ok := inbound["type"].(string); ok {
-					tagTypes[tag] = strings.ToLower(strings.TrimSpace(t))
-				}
+				tagTypes[inboundMeta.Tag] = inboundMeta.Type
 			}
 		}
 		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
@@ -209,33 +206,29 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		return "", "", fmt.Errorf("User credential missing for inbound")
 	}
 
-	inbounds, err := s.config.GetSingboxInbounds()
+	inboundMeta, err := s.config.GetSingboxInboundMeta(tag)
 	if err != nil {
-		return "", "", fmt.Errorf("Failed to get inbounds: %w", err)
+		return "", "", fmt.Errorf("Failed to get inbound metadata: %w", err)
 	}
 
-	var inbound map[string]interface{}
-	for _, inb := range inbounds {
-		if inbTag, ok := inb["tag"].(string); ok && inbTag == tag {
-			inbound = inb
-			break
-		}
-	}
-	if inbound == nil {
-		return "", "", fmt.Errorf("Inbound config not found")
+	inbound, err := s.config.GetSingboxInboundByTag(tag)
+	if err != nil {
+		return "", "", fmt.Errorf("Failed to get inbound config: %w", err)
 	}
 
-	inbType := ""
-	if rawType, ok := inbound["type"].(string); ok {
-		inbType = strings.ToLower(strings.TrimSpace(rawType))
-	}
+	inbType := inboundMeta.Type
 	if inbType == "" {
 		inbType = "vless"
 	}
 
-	port, err := extractInboundPort(inbound)
-	if err != nil {
-		return "", "", err
+	port := ""
+	if inboundMeta.ListenPort > 0 {
+		port = strconv.Itoa(inboundMeta.ListenPort)
+	} else {
+		port, err = extractInboundPort(inbound)
+		if err != nil {
+			return "", "", err
+		}
 	}
 
 	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil && meta.ExternalPort > 0 {

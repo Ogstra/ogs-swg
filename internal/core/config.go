@@ -73,13 +73,6 @@ func isUserInboundType(inbType string) bool {
 	}
 }
 
-func inboundTypeFromMap(inbound map[string]interface{}) string {
-	if inbType, ok := inbound["type"].(string); ok {
-		return strings.ToLower(strings.TrimSpace(inbType))
-	}
-	return ""
-}
-
 var vmessLegacyAlterIDWarnOnce sync.Once
 
 func parseAlterIDValue(raw interface{}) int {
@@ -99,34 +92,23 @@ func parseAlterIDValue(raw interface{}) int {
 	return 0
 }
 
-func extractVmessAlterID(userMap map[string]interface{}) int {
-	if alterRaw, ok := userMap["alterId"]; ok {
-		return parseAlterIDValue(alterRaw)
+func (u *VmessUser) UnmarshalJSON(data []byte) error {
+	type alias VmessUser
+	var tmp struct {
+		alias
+		LegacyAlterID interface{} `json:"alter_id"`
 	}
-	if alterRaw, ok := userMap["alter_id"]; ok {
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*u = VmessUser(tmp.alias)
+	if u.AlterID == 0 && tmp.LegacyAlterID != nil {
 		vmessLegacyAlterIDWarnOnce.Do(func() {
 			log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
 		})
-		return parseAlterIDValue(alterRaw)
+		u.AlterID = parseAlterIDValue(tmp.LegacyAlterID)
 	}
-	return 0
-}
-
-func normalizeVmessUserMap(user map[string]interface{}) {
-	if user == nil {
-		return
-	}
-	if _, hasAlterID := user["alterId"]; hasAlterID {
-		delete(user, "alter_id")
-		return
-	}
-	if legacy, ok := user["alter_id"]; ok {
-		user["alterId"] = legacy
-		delete(user, "alter_id")
-		vmessLegacyAlterIDWarnOnce.Do(func() {
-			log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
-		})
-	}
+	return nil
 }
 
 func LoadConfig(path ...string) *Config {
@@ -191,7 +173,8 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 			continue
 		}
 
-		inbType := inboundTypeFromMap(inbound)
+		inbType, _ := inbound["type"].(string)
+		inbType = strings.ToLower(strings.TrimSpace(inbType))
 		if !isUserInboundType(inbType) {
 			continue
 		}
@@ -210,7 +193,15 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 			uuid, _ := userMapData["uuid"].(string)
 			flow, _ := userMapData["flow"].(string)
 			vmessSecurity, _ := userMapData["security"].(string)
-			vmessAlterID := extractVmessAlterID(userMapData)
+			vmessAlterID := 0
+			if alterRaw, ok := userMapData["alterId"]; ok {
+				vmessAlterID = parseAlterIDValue(alterRaw)
+			} else if alterRaw, ok := userMapData["alter_id"]; ok {
+				vmessLegacyAlterIDWarnOnce.Do(func() {
+					log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
+				})
+				vmessAlterID = parseAlterIDValue(alterRaw)
+			}
 			if inbType == "trojan" {
 				uuid, _ = userMapData["password"].(string)
 				flow = ""
@@ -280,69 +271,59 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 		if err != nil {
 			return err
 		}
-		inbounds := inboundsResult.inbounds
-		if len(inbounds) == 0 {
+		if len(inboundsResult.inbounds) == 0 {
 			return os.ErrInvalid
 		}
 
-		// Find the specific inbound
-		var targetInbound map[string]interface{}
-		for _, inbound := range inbounds {
-			if tag, ok := inbound["tag"].(string); ok && tag == inboundTag {
-				targetInbound = inbound
-				break
+		for _, inbound := range inboundsResult.inbounds {
+			if inbound.Base().Tag != inboundTag {
+				continue
 			}
-		}
-
-		if targetInbound == nil {
-			return fmt.Errorf("inbound '%s' not found or not managed", inboundTag)
-		}
-
-		inbType := inboundTypeFromMap(targetInbound)
-		if !isUserInboundType(inbType) {
-			return fmt.Errorf("unsupported inbound type: %s", inbType)
-		}
-
-		users := ensureUsers(targetInbound)
-		if inbType == "vmess" {
-			sanitizeVmessUsers(users)
-		}
-		for _, u := range users {
-			if um, ok := u.(map[string]interface{}); ok {
-				if um["name"] == name {
-					return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
+			switch inb := inbound.(type) {
+			case *VlessInbound:
+				for _, u := range inb.Users {
+					if u.Name == name {
+						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
+					}
 				}
+				inb.Users = append(inb.Users, VlessUser{
+					Name: name,
+					UUID: uuid,
+					Flow: normalizeFlow(flow),
+				})
+			case *VmessInbound:
+				for _, u := range inb.Users {
+					if u.Name == name {
+						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
+					}
+				}
+				inb.Users = append(inb.Users, VmessUser{
+					Name:    name,
+					UUID:    uuid,
+					AlterID: vmessAlterID,
+				})
+			case *TrojanInbound:
+				for _, u := range inb.Users {
+					if u.Name == name {
+						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
+					}
+				}
+				inb.Users = append(inb.Users, TrojanUser{
+					Name:     name,
+					Password: uuid,
+				})
+			default:
+				return fmt.Errorf("unsupported inbound type: %s", inbound.Base().Type)
 			}
+
+			if err := inboundsResult.commit(cfg); err != nil {
+				return err
+			}
+			c.syncStatsUsers(cfg)
+			return nil
 		}
 
-		user := map[string]interface{}{
-			"name": name,
-		}
-		switch inbType {
-		case "vless":
-			user["uuid"] = uuid
-			flow = normalizeFlow(flow)
-			if flow != "" {
-				user["flow"] = flow
-			}
-		case "vmess":
-			user["uuid"] = uuid
-			if vmessAlterID != 0 {
-				user["alterId"] = vmessAlterID
-			}
-		case "trojan":
-			user["password"] = uuid
-		default:
-			return fmt.Errorf("unsupported inbound type: %s", inbType)
-		}
-		users = append(users, user)
-		targetInbound["users"] = users
-
-		if err := inboundsResult.commit(cfg); err != nil {
-			return err
-		}
-		c.syncStatsUsers(cfg)
-		return nil
+		return fmt.Errorf("inbound '%s' not found or not managed", inboundTag)
 	})
 }
 
@@ -352,22 +333,36 @@ func (c *Config) RemoveUser(name string) error {
 		if err != nil {
 			return err
 		}
-		inbounds := inboundsResult.inbounds
-		if len(inbounds) == 0 {
+		if len(inboundsResult.inbounds) == 0 {
 			return os.ErrInvalid
 		}
-		for _, inbound := range inbounds {
-			users := ensureUsers(inbound)
-			newUsers := []interface{}{}
-			for _, u := range users {
-				if um, ok := u.(map[string]interface{}); ok {
-					if um["name"] == name {
-						continue
+		for _, inbound := range inboundsResult.inbounds {
+			switch inb := inbound.(type) {
+			case *VlessInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name != name {
+						filtered = append(filtered, u)
 					}
 				}
-				newUsers = append(newUsers, u)
+				inb.Users = filtered
+			case *VmessInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name != name {
+						filtered = append(filtered, u)
+					}
+				}
+				inb.Users = filtered
+			case *TrojanInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name != name {
+						filtered = append(filtered, u)
+					}
+				}
+				inb.Users = filtered
 			}
-			inbound["users"] = newUsers
 		}
 		if err := inboundsResult.commit(cfg); err != nil {
 			return err
@@ -377,44 +372,58 @@ func (c *Config) RemoveUser(name string) error {
 	})
 }
 
-// RemoveUserFromInbound removes a user from a specific inbound only
 func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
 	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
 		inboundsResult, err := c.findManagedInbounds(cfg)
 		if err != nil {
 			return err
 		}
-		inbounds := inboundsResult.inbounds
-		if len(inbounds) == 0 {
+		if len(inboundsResult.inbounds) == 0 {
 			return os.ErrInvalid
 		}
 
 		found := false
-		for _, inbound := range inbounds {
-			// Only process the specified inbound
-			tag, _ := inbound["tag"].(string)
-			if tag != inboundTag {
+		for _, inbound := range inboundsResult.inbounds {
+			if inbound.Base().Tag != inboundTag {
 				continue
 			}
-
-			users := ensureUsers(inbound)
-			newUsers := []interface{}{}
-			for _, u := range users {
-				if um, ok := u.(map[string]interface{}); ok {
-					if um["name"] == name {
+			switch inb := inbound.(type) {
+			case *VlessInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name == name {
 						found = true
 						continue
 					}
+					filtered = append(filtered, u)
 				}
-				newUsers = append(newUsers, u)
+				inb.Users = filtered
+			case *VmessInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name == name {
+						found = true
+						continue
+					}
+					filtered = append(filtered, u)
+				}
+				inb.Users = filtered
+			case *TrojanInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name == name {
+						found = true
+						continue
+					}
+					filtered = append(filtered, u)
+				}
+				inb.Users = filtered
 			}
-			inbound["users"] = newUsers
 		}
 
 		if !found {
 			return fmt.Errorf("user %s not found in inbound %s", name, inboundTag)
 		}
-
 		if err := inboundsResult.commit(cfg); err != nil {
 			return err
 		}
@@ -423,56 +432,44 @@ func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
 	})
 }
 
-// UpdateUserInInbound updates uuid/flow for a user in a specific inbound.
 func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity string, vmessAlterID int) error {
 	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
 		inboundsResult, err := c.findManagedInbounds(cfg)
 		if err != nil {
 			return err
 		}
-		inbounds := inboundsResult.inbounds
-		if len(inbounds) == 0 {
+		if len(inboundsResult.inbounds) == 0 {
 			return os.ErrInvalid
 		}
 
 		found := false
-		for _, inbound := range inbounds {
-			tag, _ := inbound["tag"].(string)
-			if tag != inboundTag {
+		for _, inbound := range inboundsResult.inbounds {
+			if inbound.Base().Tag != inboundTag {
 				continue
 			}
-
-			inbType := inboundTypeFromMap(inbound)
-			if !isUserInboundType(inbType) {
-				continue
-			}
-
-			users := ensureUsers(inbound)
-			if inbType == "vmess" {
-				sanitizeVmessUsers(users)
-			}
-			for _, u := range users {
-				if um, ok := u.(map[string]interface{}); ok {
-					if um["name"] == name {
-						switch inbType {
-						case "vless":
-							um["uuid"] = uuid
-							flow = normalizeFlow(flow)
-							if flow != "" {
-								um["flow"] = flow
-							} else {
-								delete(um, "flow")
-							}
-						case "vmess":
-							um["uuid"] = uuid
-							delete(um, "flow")
-							delete(um, "security")
-							um["alterId"] = vmessAlterID
-							delete(um, "alter_id")
-						case "trojan":
-							um["password"] = uuid
-							delete(um, "flow")
-						}
+			switch inb := inbound.(type) {
+			case *VlessInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].UUID = uuid
+						inb.Users[i].Flow = normalizeFlow(flow)
+						found = true
+						break
+					}
+				}
+			case *VmessInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].UUID = uuid
+						inb.Users[i].AlterID = vmessAlterID
+						found = true
+						break
+					}
+				}
+			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
 						found = true
 						break
 					}
@@ -483,7 +480,6 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity
 		if !found {
 			return fmt.Errorf("user %s not found in inbound %s", name, inboundTag)
 		}
-
 		if err := inboundsResult.commit(cfg); err != nil {
 			return err
 		}
@@ -498,57 +494,47 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 		if err != nil {
 			return err
 		}
-		inbounds := inboundsResult.inbounds
-		if len(inbounds) == 0 {
+		if len(inboundsResult.inbounds) == 0 {
 			return os.ErrInvalid
 		}
 
 		targetType := ""
 		if inboundTag != "" {
-			for _, inbound := range inbounds {
-				if tag, ok := inbound["tag"].(string); ok && tag == inboundTag {
-					targetType = inboundTypeFromMap(inbound)
+			for _, inbound := range inboundsResult.inbounds {
+				if inbound.Base().Tag == inboundTag {
+					targetType = strings.ToLower(inbound.Base().Type)
 					break
 				}
 			}
 		}
 
 		found := false
-		for _, inbound := range inbounds {
-			inbType := inboundTypeFromMap(inbound)
-			if !isUserInboundType(inbType) {
-				continue
-			}
+		for _, inbound := range inboundsResult.inbounds {
+			inbType := strings.ToLower(inbound.Base().Type)
 			if targetType != "" && inbType != targetType {
 				continue
 			}
-
-			users := ensureUsers(inbound)
-			if inbType == "vmess" {
-				sanitizeVmessUsers(users)
-			}
-			for _, u := range users {
-				if um, ok := u.(map[string]interface{}); ok {
-					if um["name"] == name {
-						switch inbType {
-						case "vless":
-							um["uuid"] = uuid
-							flow = normalizeFlow(flow)
-							if flow != "" {
-								um["flow"] = flow
-							} else {
-								delete(um, "flow")
-							}
-						case "vmess":
-							um["uuid"] = uuid
-							delete(um, "flow")
-							delete(um, "security")
-							um["alterId"] = vmessAlterID
-							delete(um, "alter_id")
-						case "trojan":
-							um["password"] = uuid
-							delete(um, "flow")
-						}
+			switch inb := inbound.(type) {
+			case *VlessInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].UUID = uuid
+						inb.Users[i].Flow = normalizeFlow(flow)
+						found = true
+					}
+				}
+			case *VmessInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].UUID = uuid
+						inb.Users[i].AlterID = vmessAlterID
+						found = true
+					}
+				}
+			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
 						found = true
 					}
 				}
@@ -558,7 +544,6 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 		if !found {
 			return fmt.Errorf("user %s not found", name)
 		}
-
 		if err := inboundsResult.commit(cfg); err != nil {
 			return err
 		}
@@ -566,7 +551,6 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 	})
 }
 
-// RenameUser renames a user across all managed inbounds where it exists.
 func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity string, vmessAlterID int) error {
 	if originalName == "" || newName == "" {
 		return fmt.Errorf("user name is required")
@@ -580,55 +564,44 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 		if err != nil {
 			return err
 		}
-		inbounds := inboundsResult.inbounds
-		if len(inbounds) == 0 {
+		if len(inboundsResult.inbounds) == 0 {
 			return os.ErrInvalid
 		}
 
-		found := false
-		for _, inbound := range inbounds {
-			inbType := inboundTypeFromMap(inbound)
-			if !isUserInboundType(inbType) {
-				continue
-			}
-
-			tag, _ := inbound["tag"].(string)
-			users := ensureUsers(inbound)
-			if inbType == "vmess" {
-				sanitizeVmessUsers(users)
-			}
-
-			for _, u := range users {
-				if um, ok := u.(map[string]interface{}); ok {
-					if um["name"] == newName {
-						return fmt.Errorf("user %s already exists in inbound %s", newName, tag)
-					}
+		for _, inbound := range inboundsResult.inbounds {
+			for _, n := range inbound.UserNames() {
+				if n == newName {
+					return fmt.Errorf("user %s already exists in inbound %s", newName, inbound.Base().Tag)
 				}
 			}
+		}
 
-			for _, u := range users {
-				if um, ok := u.(map[string]interface{}); ok {
-					if um["name"] == originalName {
-						um["name"] = newName
-						switch inbType {
-						case "vless":
-							um["uuid"] = uuid
-							flow = normalizeFlow(flow)
-							if flow != "" {
-								um["flow"] = flow
-							} else {
-								delete(um, "flow")
-							}
-						case "vmess":
-							um["uuid"] = uuid
-							delete(um, "flow")
-							delete(um, "security")
-							um["alterId"] = vmessAlterID
-							delete(um, "alter_id")
-						case "trojan":
-							um["password"] = uuid
-							delete(um, "flow")
-						}
+		found := false
+		for _, inbound := range inboundsResult.inbounds {
+			switch inb := inbound.(type) {
+			case *VlessInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == originalName {
+						inb.Users[i].Name = newName
+						inb.Users[i].UUID = uuid
+						inb.Users[i].Flow = normalizeFlow(flow)
+						found = true
+					}
+				}
+			case *VmessInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == originalName {
+						inb.Users[i].Name = newName
+						inb.Users[i].UUID = uuid
+						inb.Users[i].AlterID = vmessAlterID
+						found = true
+					}
+				}
+			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == originalName {
+						inb.Users[i].Name = newName
+						inb.Users[i].Password = uuid
 						found = true
 					}
 				}
@@ -638,7 +611,6 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 		if !found {
 			return fmt.Errorf("user %s not found", originalName)
 		}
-
 		if err := inboundsResult.commit(cfg); err != nil {
 			return err
 		}
@@ -650,7 +622,7 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 type managedInbounds struct {
 	rawList  []json.RawMessage
 	indices  []int
-	inbounds []map[string]interface{}
+	inbounds []ManagedInbound
 }
 
 func (m *managedInbounds) commit(cfg *SingboxConfig) error {
@@ -670,6 +642,35 @@ func (m *managedInbounds) commit(cfg *SingboxConfig) error {
 	}
 	cfg.Inbounds = encoded
 	return nil
+}
+
+func decodeTypedInbound(raw json.RawMessage) (ManagedInbound, error) {
+	var base InboundBase
+	if err := json.Unmarshal(raw, &base); err != nil {
+		return nil, fmt.Errorf("decode inbound base: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(base.Type)) {
+	case "vless":
+		var inbound VlessInbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode vless inbound: %w", err)
+		}
+		return &inbound, nil
+	case "vmess":
+		var inbound VmessInbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode vmess inbound: %w", err)
+		}
+		return &inbound, nil
+	case "trojan":
+		var inbound TrojanInbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode trojan inbound: %w", err)
+		}
+		return &inbound, nil
+	default:
+		return nil, fmt.Errorf("unsupported inbound type: %q", base.Type)
+	}
 }
 
 func (c *Config) findManagedInbounds(cfg *SingboxConfig) (*managedInbounds, error) {
@@ -692,45 +693,29 @@ func (c *Config) findManagedInbounds(cfg *SingboxConfig) (*managedInbounds, erro
 	result := &managedInbounds{
 		rawList:  rawList,
 		indices:  make([]int, 0, len(rawList)),
-		inbounds: make([]map[string]interface{}, 0, len(rawList)),
+		inbounds: make([]ManagedInbound, 0, len(rawList)),
 	}
 	for i, rawInbound := range rawList {
-		inboundMap := map[string]interface{}{}
-		if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+		var base InboundBase
+		if err := json.Unmarshal(rawInbound, &base); err != nil {
 			return nil, err
 		}
-		if !isUserInboundType(inboundTypeFromMap(inboundMap)) {
+		inbType := strings.ToLower(strings.TrimSpace(base.Type))
+		if !isUserInboundType(inbType) {
 			continue
 		}
-		if len(tagFilter) > 0 {
-			if tag, ok := inboundMap["tag"].(string); ok && tagFilter[tag] {
-				result.indices = append(result.indices, i)
-				result.inbounds = append(result.inbounds, inboundMap)
-			}
+		if len(tagFilter) > 0 && !tagFilter[base.Tag] {
 			continue
+		}
+		inbound, err := decodeTypedInbound(rawInbound)
+		if err != nil {
+			return nil, err
 		}
 		result.indices = append(result.indices, i)
-		result.inbounds = append(result.inbounds, inboundMap)
+		result.inbounds = append(result.inbounds, inbound)
 	}
 
 	return result, nil
-}
-
-func ensureUsers(inbound map[string]interface{}) []interface{} {
-	clients, ok := inbound["users"].([]interface{})
-	if !ok {
-		clients = []interface{}{}
-	}
-	return clients
-}
-
-func sanitizeVmessUsers(users []interface{}) {
-	for _, u := range users {
-		if um, ok := u.(map[string]interface{}); ok {
-			delete(um, "security")
-			normalizeVmessUserMap(um)
-		}
-	}
 }
 
 func (c *Config) syncStatsUsers(cfg *SingboxConfig) {
@@ -745,25 +730,25 @@ func (c *Config) syncStatsUsers(cfg *SingboxConfig) {
 	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
 	if err == nil {
 		for _, rawInbound := range rawInbounds {
-			inboundMap := map[string]interface{}{}
-			if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+			var base InboundBase
+			if err := json.Unmarshal(rawInbound, &base); err != nil {
 				continue
 			}
-			if !isUserInboundType(inboundTypeFromMap(inboundMap)) {
+			inbType := strings.ToLower(strings.TrimSpace(base.Type))
+			if !isUserInboundType(inbType) {
 				continue
 			}
-			if len(tagFilter) > 0 {
-				if tag, ok := inboundMap["tag"].(string); ok && !tagFilter[tag] {
-					continue
-				}
+			if len(tagFilter) > 0 && !tagFilter[base.Tag] {
+				continue
 			}
-			users := ensureUsers(inboundMap)
-			for _, u := range users {
-				if um, ok := u.(map[string]interface{}); ok {
-					if name, ok := um["name"].(string); ok && name != "" && !seen[name] {
-						names = append(names, name)
-						seen[name] = true
-					}
+			inbound, err := decodeTypedInbound(rawInbound)
+			if err != nil {
+				continue
+			}
+			for _, name := range inbound.UserNames() {
+				if name != "" && !seen[name] {
+					names = append(names, name)
+					seen[name] = true
 				}
 			}
 		}
