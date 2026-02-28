@@ -81,9 +81,73 @@ type V2RayAPI struct {
 }
 
 type Experimental struct {
-	V2RayAPI  *V2RayAPI       `json:"v2ray_api,omitempty"`
-	ClashAPI  json.RawMessage `json:"clash_api,omitempty"`
-	CacheFile json.RawMessage `json:"cache_file,omitempty"`
+	V2RayAPI  *V2RayAPI                  `json:"v2ray_api,omitempty"`
+	ClashAPI  json.RawMessage            `json:"clash_api,omitempty"`
+	CacheFile json.RawMessage            `json:"cache_file,omitempty"`
+	Extra     map[string]json.RawMessage `json:"-"`
+}
+
+func (e *Experimental) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*e = Experimental{}
+		return nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	var next Experimental
+	if v, ok := raw["v2ray_api"]; ok && len(v) > 0 && string(v) != "null" {
+		var api V2RayAPI
+		if err := json.Unmarshal(v, &api); err != nil {
+			return err
+		}
+		next.V2RayAPI = &api
+	}
+	if v, ok := raw["clash_api"]; ok {
+		next.ClashAPI = append(json.RawMessage(nil), v...)
+	}
+	if v, ok := raw["cache_file"]; ok {
+		next.CacheFile = append(json.RawMessage(nil), v...)
+	}
+
+	delete(raw, "v2ray_api")
+	delete(raw, "clash_api")
+	delete(raw, "cache_file")
+	if len(raw) > 0 {
+		next.Extra = make(map[string]json.RawMessage, len(raw))
+		for key, value := range raw {
+			next.Extra[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+
+	*e = next
+	return nil
+}
+
+func (e Experimental) MarshalJSON() ([]byte, error) {
+	raw := make(map[string]json.RawMessage, len(e.Extra)+3)
+	for key, value := range e.Extra {
+		raw[key] = append(json.RawMessage(nil), value...)
+	}
+
+	if e.V2RayAPI != nil {
+		data, err := json.Marshal(e.V2RayAPI)
+		if err != nil {
+			return nil, err
+		}
+		raw["v2ray_api"] = data
+	}
+	if len(e.ClashAPI) > 0 {
+		raw["clash_api"] = append(json.RawMessage(nil), e.ClashAPI...)
+	}
+	if len(e.CacheFile) > 0 {
+		raw["cache_file"] = append(json.RawMessage(nil), e.CacheFile...)
+	}
+
+	return json.Marshal(raw)
 }
 
 type SingboxConfig struct {

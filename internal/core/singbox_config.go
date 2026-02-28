@@ -1,18 +1,16 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
+	"reflect"
 	"strings"
 	"time"
 )
-
-// SingboxConfigRaw is a helper to parse config as a map
-type SingboxConfigRaw map[string]interface{}
 
 // GetSingboxConfig reads the raw config file content
 func (c *Config) GetSingboxConfig() (string, error) {
@@ -34,23 +32,162 @@ func (c *Config) GetSingboxConfig() (string, error) {
 	return string(content), nil
 }
 
+func (c *Config) readSingboxConfigLocked() ([]byte, error) {
+	if c.executor != nil {
+		return c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
+	}
+	return os.ReadFile(c.SingboxConfigPath)
+}
+
+func (c *Config) writeSingboxConfigLocked(data []byte) error {
+	if c.executor != nil {
+		return c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644)
+	}
+	return os.WriteFile(c.SingboxConfigPath, data, 0644)
+}
+
+func decodeInboundRawList(raw json.RawMessage) ([]json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return []json.RawMessage{}, nil
+	}
+	var list []json.RawMessage
+	if err := json.Unmarshal(trimmed, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+func encodeInboundRawList(list []json.RawMessage) (json.RawMessage, error) {
+	if list == nil {
+		list = []json.RawMessage{}
+	}
+	data, err := json.Marshal(list)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+func compactJSONBytes(data []byte) []byte {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil
+	}
+	var out bytes.Buffer
+	if err := json.Compact(&out, trimmed); err != nil {
+		return trimmed
+	}
+	return out.Bytes()
+}
+
+func normalizedRawMessage(raw json.RawMessage) []byte {
+	return compactJSONBytes(raw)
+}
+
+func rawMessageEqual(left, right json.RawMessage) bool {
+	return bytes.Equal(normalizedRawMessage(left), normalizedRawMessage(right))
+}
+
+func jsonSemanticallyEqual(left, right []byte) bool {
+	var leftAny interface{}
+	var rightAny interface{}
+	if err := json.Unmarshal(left, &leftAny); err != nil {
+		return bytes.Equal(compactJSONBytes(left), compactJSONBytes(right))
+	}
+	if err := json.Unmarshal(right, &rightAny); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftAny, rightAny)
+}
+
+func parseRawObject(data json.RawMessage) (map[string]json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return map[string]json.RawMessage{}, nil
+	}
+	out := map[string]json.RawMessage{}
+	if err := json.Unmarshal(trimmed, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func assertExperimentalAllowedChanges(before, after json.RawMessage) error {
+	beforeMap, err := parseRawObject(before)
+	if err != nil {
+		return fmt.Errorf("invalid original experimental section: %w", err)
+	}
+	afterMap, err := parseRawObject(after)
+	if err != nil {
+		return fmt.Errorf("invalid updated experimental section: %w", err)
+	}
+
+	seen := make(map[string]struct{}, len(beforeMap)+len(afterMap))
+	for key := range beforeMap {
+		seen[key] = struct{}{}
+	}
+	for key := range afterMap {
+		seen[key] = struct{}{}
+	}
+
+	for key := range seen {
+		if key == "v2ray_api" {
+			continue
+		}
+		if !rawMessageEqual(beforeMap[key], afterMap[key]) {
+			return fmt.Errorf("subsection %q changed outside allowed scope", key)
+		}
+	}
+	return nil
+}
+
+func assertAllowedScopeChanges(before, after []byte) error {
+	beforeTop := map[string]json.RawMessage{}
+	afterTop := map[string]json.RawMessage{}
+	if err := json.Unmarshal(before, &beforeTop); err != nil {
+		return fmt.Errorf("invalid original config json: %w", err)
+	}
+	if err := json.Unmarshal(after, &afterTop); err != nil {
+		return fmt.Errorf("invalid updated config json: %w", err)
+	}
+
+	seen := make(map[string]struct{}, len(beforeTop)+len(afterTop))
+	for key := range beforeTop {
+		seen[key] = struct{}{}
+	}
+	for key := range afterTop {
+		seen[key] = struct{}{}
+	}
+
+	for key := range seen {
+		switch key {
+		case "inbounds":
+			continue
+		case "experimental":
+			if err := assertExperimentalAllowedChanges(beforeTop[key], afterTop[key]); err != nil {
+				return fmt.Errorf("experimental changed outside allowed scope: %w", err)
+			}
+		default:
+			if !rawMessageEqual(beforeTop[key], afterTop[key]) {
+				return fmt.Errorf("top-level section %q changed outside allowed scope", key)
+			}
+		}
+	}
+	return nil
+}
+
 // GetSingboxConfigMap reads the raw config file content as a map
 func (c *Config) GetSingboxConfigMap() (map[string]interface{}, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var content []byte
-	var err error
-	if c.executor != nil {
-		content, err = c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
-	} else {
-		content, err = os.ReadFile(c.SingboxConfigPath)
-	}
+	content, err := c.readSingboxConfigLocked()
 	if err != nil {
 		return nil, err
 	}
 
-	var rawConfig SingboxConfigRaw
+	var rawConfig map[string]interface{}
 	if err := json.Unmarshal(content, &rawConfig); err != nil {
 		return nil, err
 	}
@@ -90,55 +227,58 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 }
 
 // ModifySingboxConfig safely modifies the configuration using a callback
-func (c *Config) ModifySingboxConfig(modifier func(SingboxConfigRaw) error) error {
+func (c *Config) ModifySingboxConfig(modifier func(*SingboxConfig) error) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.modifySingboxConfig(modifier)
+}
 
-	// 1. Read
-	var content []byte
-	var err error
-	if c.executor != nil {
-		content, err = c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
-	} else {
-		content, err = os.ReadFile(c.SingboxConfigPath)
-	}
+func (c *Config) modifySingboxConfig(modifier func(*SingboxConfig) error) error {
+	content, err := c.readSingboxConfigLocked()
 	if err != nil {
 		return err
 	}
 
-	var rawConfig SingboxConfigRaw
-	if err := json.Unmarshal(content, &rawConfig); err != nil {
+	var cfg SingboxConfig
+	if err := json.Unmarshal(content, &cfg); err != nil {
 		return err
 	}
 
-	// 2. Modify
-	if err := modifier(rawConfig); err != nil {
-		return err
-	}
-
-	// 3. Write
-	data, err := json.MarshalIndent(rawConfig, "", "  ")
+	beforeTyped, err := json.Marshal(&cfg)
 	if err != nil {
 		return err
 	}
 
-	// 4. Validate
+	if err := modifier(&cfg); err != nil {
+		return err
+	}
+
+	afterTyped, err := json.Marshal(&cfg)
+	if err != nil {
+		return err
+	}
+
+	if jsonSemanticallyEqual(beforeTyped, afterTyped) {
+		return nil
+	}
+
+	data, err := json.MarshalIndent(&cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	if err := assertAllowedScopeChanges(content, data); err != nil {
+		return err
+	}
+
 	if err := c.ValidateConfig(data); err != nil {
 		return fmt.Errorf("sing-box validation failed: %v", err)
 	}
 
-	// 5. Save
-	if c.executor != nil {
-		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644); err != nil {
-			return err
-		}
-	} else {
-		if err := os.WriteFile(c.SingboxConfigPath, data, 0644); err != nil {
-			return err
-		}
+	if err := c.writeSingboxConfigLocked(data); err != nil {
+		return err
 	}
 
-	// 6. Mark pending restart (lock already held)
 	c.SingboxPendingChanges = true
 	return nil
 }
@@ -148,32 +288,31 @@ func (c *Config) GetSingboxInbounds() ([]map[string]interface{}, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var content []byte
-	var err error
-	if c.executor != nil {
-		content, err = c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
-	} else {
-		content, err = os.ReadFile(c.SingboxConfigPath)
-	}
+	content, err := c.readSingboxConfigLocked()
 	if err != nil {
 		return nil, err
 	}
 
-	var rawConfig SingboxConfigRaw
-	if err := json.Unmarshal(content, &rawConfig); err != nil {
+	var cfg SingboxConfig
+	if err := json.Unmarshal(content, &cfg); err != nil {
 		return nil, err
 	}
 
-	inbounds, ok := rawConfig["inbounds"].([]interface{})
-	if !ok {
+	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
+	if err != nil {
+		return nil, err
+	}
+	if len(rawInbounds) == 0 {
 		return []map[string]interface{}{}, nil
 	}
 
-	result := make([]map[string]interface{}, 0, len(inbounds))
-	for _, inb := range inbounds {
-		if inbMap, ok := inb.(map[string]interface{}); ok {
-			result = append(result, inbMap)
+	result := make([]map[string]interface{}, 0, len(rawInbounds))
+	for _, rawInbound := range rawInbounds {
+		inboundMap := map[string]interface{}{}
+		if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+			return nil, err
 		}
+		result = append(result, inboundMap)
 	}
 
 	return result, nil
@@ -226,21 +365,7 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 						flow = ""
 					}
 					vmessSecurity, _ := um["security"].(string)
-					vmessAlterID := 0
-					if alterRaw, ok := um["alter_id"]; ok {
-						switch v := alterRaw.(type) {
-						case float64:
-							vmessAlterID = int(v)
-						case int:
-							vmessAlterID = v
-						case int64:
-							vmessAlterID = int(v)
-						case string:
-							if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-								vmessAlterID = parsed
-							}
-						}
-					}
+					vmessAlterID := extractVmessAlterID(um)
 					result = append(result, UserInboundInfo{
 						Tag:           tag,
 						UUID:          uuid,
@@ -257,27 +382,32 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 
 // AddSingboxInbound appends a new inbound block
 func (c *Config) AddSingboxInbound(newInbound map[string]interface{}) error {
-	err := c.ModifySingboxConfig(func(rawConfig SingboxConfigRaw) error {
-		inbounds, ok := rawConfig["inbounds"].([]interface{})
-		if !ok {
-			inbounds = []interface{}{}
+	err := c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inbounds, err := decodeInboundRawList(cfg.Inbounds)
+		if err != nil {
+			return err
 		}
 
-		// Check for duplicate tag
 		newTag, _ := newInbound["tag"].(string)
 		if newTag != "" {
-			for _, inb := range inbounds {
-				if inbMap, ok := inb.(map[string]interface{}); ok {
-					if tag, _ := inbMap["tag"].(string); tag == newTag {
-						return fmt.Errorf("inbound with tag '%s' already exists", newTag)
-					}
+			for _, rawInbound := range inbounds {
+				inboundMap := map[string]interface{}{}
+				if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+					return err
+				}
+				if tag, _ := inboundMap["tag"].(string); tag == newTag {
+					return fmt.Errorf("inbound with tag '%s' already exists", newTag)
 				}
 			}
 		}
 
-		inbounds = append(inbounds, newInbound)
-		rawConfig["inbounds"] = inbounds
-		return nil
+		newInboundRaw, err := json.Marshal(newInbound)
+		if err != nil {
+			return err
+		}
+		inbounds = append(inbounds, newInboundRaw)
+		cfg.Inbounds, err = encodeInboundRawList(inbounds)
+		return err
 	})
 
 	if err != nil {
@@ -294,20 +424,27 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
 
-	err := c.ModifySingboxConfig(func(rawConfig SingboxConfigRaw) error {
-		inbounds, ok := rawConfig["inbounds"].([]interface{})
-		if !ok {
-			return fmt.Errorf("no inbounds found")
+	err := c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inbounds, err := decodeInboundRawList(cfg.Inbounds)
+		if err != nil {
+			return err
+		}
+
+		updatedRaw, err := json.Marshal(updatedInbound)
+		if err != nil {
+			return err
 		}
 
 		found := false
-		for i, inb := range inbounds {
-			if inbMap, ok := inb.(map[string]interface{}); ok {
-				if currentTag, _ := inbMap["tag"].(string); currentTag == tag {
-					inbounds[i] = updatedInbound
-					found = true
-					break
-				}
+		for i, rawInbound := range inbounds {
+			inboundMap := map[string]interface{}{}
+			if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+				return err
+			}
+			if currentTag, _ := inboundMap["tag"].(string); currentTag == tag {
+				inbounds[i] = updatedRaw
+				found = true
+				break
 			}
 		}
 
@@ -315,8 +452,8 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 			return fmt.Errorf("inbound with tag '%s' not found", tag)
 		}
 
-		rawConfig["inbounds"] = inbounds
-		return nil
+		cfg.Inbounds, err = encodeInboundRawList(inbounds)
+		return err
 	})
 
 	if err != nil {
@@ -336,30 +473,32 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 
 // DeleteSingboxInbound removes an inbound by tag
 func (c *Config) DeleteSingboxInbound(tag string) error {
-	err := c.ModifySingboxConfig(func(rawConfig SingboxConfigRaw) error {
-		inbounds, ok := rawConfig["inbounds"].([]interface{})
-		if !ok {
-			return nil
+	err := c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inbounds, err := decodeInboundRawList(cfg.Inbounds)
+		if err != nil {
+			return err
 		}
 
-		newInbounds := []interface{}{}
+		newInbounds := make([]json.RawMessage, 0, len(inbounds))
 		found := false
-		for _, inb := range inbounds {
-			if inbMap, ok := inb.(map[string]interface{}); ok {
-				if currentTag, _ := inbMap["tag"].(string); currentTag == tag {
-					found = true
-					continue
-				}
+		for _, rawInbound := range inbounds {
+			inboundMap := map[string]interface{}{}
+			if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+				return err
 			}
-			newInbounds = append(newInbounds, inb)
+			if currentTag, _ := inboundMap["tag"].(string); currentTag == tag {
+				found = true
+				continue
+			}
+			newInbounds = append(newInbounds, rawInbound)
 		}
 
 		if !found {
 			return fmt.Errorf("inbound with tag '%s' not found", tag)
 		}
 
-		rawConfig["inbounds"] = newInbounds
-		return nil
+		cfg.Inbounds, err = encodeInboundRawList(newInbounds)
+		return err
 	})
 
 	if err != nil {
@@ -370,8 +509,7 @@ func (c *Config) DeleteSingboxInbound(tag string) error {
 	return c.RemoveInboundFromLists(tag)
 }
 
-func (c *Config) saveAndReload(rawConfig SingboxConfigRaw) error {
-	// Serialize with indentation
+func (c *Config) saveAndReload(rawConfig *SingboxConfig) error {
 	data, err := json.MarshalIndent(rawConfig, "", "  ")
 	if err != nil {
 		return err
