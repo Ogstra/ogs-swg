@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"reflect"
@@ -318,6 +319,117 @@ func (c *Config) GetSingboxInbounds() ([]map[string]interface{}, error) {
 	return result, nil
 }
 
+func decodeSingboxInboundMeta(rawInbound json.RawMessage) (SingboxInboundMeta, error) {
+	var inboundMeta struct {
+		InboundBase
+		ListenPort int `json:"listen_port,omitempty"`
+	}
+	if err := json.Unmarshal(rawInbound, &inboundMeta); err != nil {
+		return SingboxInboundMeta{}, err
+	}
+	return SingboxInboundMeta{
+		Tag:        strings.TrimSpace(inboundMeta.Tag),
+		Type:       strings.ToLower(strings.TrimSpace(inboundMeta.Type)),
+		ListenPort: inboundMeta.ListenPort,
+	}, nil
+}
+
+func (c *Config) getSingboxInboundMetasLocked() ([]SingboxInboundMeta, error) {
+	content, err := c.readSingboxConfigLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg SingboxConfig
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		return nil, err
+	}
+
+	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
+	if err != nil {
+		return nil, err
+	}
+	metas := make([]SingboxInboundMeta, 0, len(rawInbounds))
+	for _, rawInbound := range rawInbounds {
+		meta, err := decodeSingboxInboundMeta(rawInbound)
+		if err != nil {
+			return nil, err
+		}
+		metas = append(metas, meta)
+	}
+	return metas, nil
+}
+
+func (c *Config) GetSingboxInboundMetas() ([]SingboxInboundMeta, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.getSingboxInboundMetasLocked()
+}
+
+func (c *Config) GetSingboxInboundMeta(tag string) (*SingboxInboundMeta, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	needle := strings.TrimSpace(tag)
+	if needle == "" {
+		return nil, fmt.Errorf("inbound tag is required")
+	}
+
+	metas, err := c.getSingboxInboundMetasLocked()
+	if err != nil {
+		return nil, err
+	}
+	for i := range metas {
+		if metas[i].Tag == needle {
+			meta := metas[i]
+			return &meta, nil
+		}
+	}
+
+	return nil, fmt.Errorf("inbound with tag '%s' not found", needle)
+}
+
+func (c *Config) GetSingboxInboundByTag(tag string) (map[string]interface{}, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	needle := strings.TrimSpace(tag)
+	if needle == "" {
+		return nil, fmt.Errorf("inbound tag is required")
+	}
+
+	content, err := c.readSingboxConfigLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg SingboxConfig
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		return nil, err
+	}
+
+	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
+	if err != nil {
+		return nil, err
+	}
+	for _, rawInbound := range rawInbounds {
+		meta, err := decodeSingboxInboundMeta(rawInbound)
+		if err != nil {
+			return nil, err
+		}
+		if meta.Tag != needle {
+			continue
+		}
+		inboundMap := map[string]interface{}{}
+		if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+			return nil, err
+		}
+		return inboundMap, nil
+	}
+
+	return nil, fmt.Errorf("inbound with tag '%s' not found", needle)
+}
+
 type UserInboundInfo struct {
 	Tag           string `json:"tag"`
 	UUID          string `json:"uuid"`
@@ -365,7 +477,15 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 						flow = ""
 					}
 					vmessSecurity, _ := um["security"].(string)
-					vmessAlterID := extractVmessAlterID(um)
+					vmessAlterID := 0
+					if alterRaw, ok := um["alterId"]; ok {
+						vmessAlterID = parseAlterIDValue(alterRaw)
+					} else if alterRaw, ok := um["alter_id"]; ok {
+						vmessLegacyAlterIDWarnOnce.Do(func() {
+							log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
+						})
+						vmessAlterID = parseAlterIDValue(alterRaw)
+					}
 					result = append(result, UserInboundInfo{
 						Tag:           tag,
 						UUID:          uuid,
