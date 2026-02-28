@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 
@@ -63,6 +63,8 @@ export default function Dashboard() {
     const today = now.toISOString().split('T')[0]
     const [customStart, setCustomStart] = useState(today)
     const [customEnd, setCustomEnd] = useState(today)
+    const chartContainerRef = useRef<HTMLDivElement | null>(null)
+    const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
 
     const computeRangeSeconds = (range: string) => {
         const nowSec = Math.floor(Date.now() / 1000)
@@ -86,6 +88,20 @@ export default function Dashboard() {
         setPrefsLoaded(true)
     }, [])
 
+    useEffect(() => {
+        const el = chartContainerRef.current
+        if (!el || typeof ResizeObserver === 'undefined') return
+        const update = () => {
+            const nextWidth = Math.max(0, Math.floor(el.clientWidth))
+            const nextHeight = Math.max(300, Math.floor(el.clientHeight))
+            setChartSize({ width: nextWidth, height: nextHeight })
+        }
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [])
+
     const requestWindow = useMemo(() => {
         if (timeRange === 'custom') {
             const start = Math.floor(new Date(customStart).getTime() / 1000)
@@ -95,8 +111,6 @@ export default function Dashboard() {
         const range = computeRangeSeconds(timeRange)
         return { start: range.start, end: range.end, startText: String(range.start), endText: String(range.end), range: timeRange }
     }, [timeRange, customStart, customEnd])
-
-    const chartDomain: [number, number] = [requestWindow.start, requestWindow.end]
 
     const dashboardQuery = useQuery({
         queryKey: ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText],
@@ -109,6 +123,15 @@ export default function Dashboard() {
     const loading = dashboardQuery.isFetching
     const lastUpdated = dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt) : new Date()
     const chartData: UnifiedChartPoint[] = dashboardQuery.data?.chart_data || []
+    const chartDomain: [number, number] = useMemo(() => {
+        if (chartData.length > 1) {
+            const first = chartData[0]?.ts ?? requestWindow.start
+            const last = chartData[chartData.length - 1]?.ts ?? requestWindow.end
+            if (last > first) return [first, last]
+            return [first, first + 1]
+        }
+        return [requestWindow.start, requestWindow.end]
+    }, [chartData, requestWindow.start, requestWindow.end])
     const statsCards: Record<string, TrafficStats> = dashboardQuery.data?.stats_cards || {
         singbox: { uplink: 0, downlink: 0 },
         wireguard: { uplink: 0, downlink: 0 }
@@ -352,9 +375,14 @@ export default function Dashboard() {
                             </div>
                         }
                     >
-                        <div className="h-[300px] w-full mt-4">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                        <div ref={chartContainerRef} className="h-[300px] min-h-[300px] w-full min-w-0 mt-4">
+                            {chartSize.width > 0 && (
+                                <AreaChart
+                                    width={chartSize.width}
+                                    height={chartSize.height}
+                                    data={chartData}
+                                    margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+                                >
                                     <defs>
                                         <linearGradient id="colorUp" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -419,7 +447,7 @@ export default function Dashboard() {
                                         fill={chartMode === 'singbox' ? "url(#colorDown)" : "url(#colorUp)"}
                                     />
                                 </AreaChart>
-                            </ResponsiveContainer>
+                            )}
                         </div>
                     </Card>
                 </div>
