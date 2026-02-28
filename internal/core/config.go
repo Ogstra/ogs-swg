@@ -80,6 +80,55 @@ func inboundTypeFromMap(inbound map[string]interface{}) string {
 	return ""
 }
 
+var vmessLegacyAlterIDWarnOnce sync.Once
+
+func parseAlterIDValue(raw interface{}) int {
+	switch v := raw.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case string:
+		parsed, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func extractVmessAlterID(userMap map[string]interface{}) int {
+	if alterRaw, ok := userMap["alterId"]; ok {
+		return parseAlterIDValue(alterRaw)
+	}
+	if alterRaw, ok := userMap["alter_id"]; ok {
+		vmessLegacyAlterIDWarnOnce.Do(func() {
+			log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
+		})
+		return parseAlterIDValue(alterRaw)
+	}
+	return 0
+}
+
+func normalizeVmessUserMap(user map[string]interface{}) {
+	if user == nil {
+		return
+	}
+	if _, hasAlterID := user["alterId"]; hasAlterID {
+		delete(user, "alter_id")
+		return
+	}
+	if legacy, ok := user["alter_id"]; ok {
+		user["alterId"] = legacy
+		delete(user, "alter_id")
+		vmessLegacyAlterIDWarnOnce.Do(func() {
+			log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
+		})
+	}
+}
+
 func LoadConfig(path ...string) *Config {
 	cfg := &Config{}
 
@@ -161,21 +210,7 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 			uuid, _ := userMapData["uuid"].(string)
 			flow, _ := userMapData["flow"].(string)
 			vmessSecurity, _ := userMapData["security"].(string)
-			vmessAlterID := 0
-			if alterRaw, ok := userMapData["alter_id"]; ok {
-				switch v := alterRaw.(type) {
-				case float64:
-					vmessAlterID = int(v)
-				case int:
-					vmessAlterID = v
-				case int64:
-					vmessAlterID = int(v)
-				case string:
-					if parsed, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
-						vmessAlterID = parsed
-					}
-				}
-			}
+			vmessAlterID := extractVmessAlterID(userMapData)
 			if inbType == "trojan" {
 				uuid, _ = userMapData["password"].(string)
 				flow = ""
@@ -240,8 +275,12 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 		return fmt.Errorf("inbound tag is required")
 	}
 
-	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
-		inbounds := c.findManagedInbounds(cfgMap)
+	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inboundsResult, err := c.findManagedInbounds(cfg)
+		if err != nil {
+			return err
+		}
+		inbounds := inboundsResult.inbounds
 		if len(inbounds) == 0 {
 			return os.ErrInvalid
 		}
@@ -289,7 +328,7 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 		case "vmess":
 			user["uuid"] = uuid
 			if vmessAlterID != 0 {
-				user["alter_id"] = vmessAlterID
+				user["alterId"] = vmessAlterID
 			}
 		case "trojan":
 			user["password"] = uuid
@@ -299,14 +338,21 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 		users = append(users, user)
 		targetInbound["users"] = users
 
-		c.syncStatsUsers(cfgMap)
+		if err := inboundsResult.commit(cfg); err != nil {
+			return err
+		}
+		c.syncStatsUsers(cfg)
 		return nil
 	})
 }
 
 func (c *Config) RemoveUser(name string) error {
-	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
-		inbounds := c.findManagedInbounds(cfgMap)
+	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inboundsResult, err := c.findManagedInbounds(cfg)
+		if err != nil {
+			return err
+		}
+		inbounds := inboundsResult.inbounds
 		if len(inbounds) == 0 {
 			return os.ErrInvalid
 		}
@@ -323,15 +369,22 @@ func (c *Config) RemoveUser(name string) error {
 			}
 			inbound["users"] = newUsers
 		}
-		c.syncStatsUsers(cfgMap)
+		if err := inboundsResult.commit(cfg); err != nil {
+			return err
+		}
+		c.syncStatsUsers(cfg)
 		return nil
 	})
 }
 
 // RemoveUserFromInbound removes a user from a specific inbound only
 func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
-	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
-		inbounds := c.findManagedInbounds(cfgMap)
+	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inboundsResult, err := c.findManagedInbounds(cfg)
+		if err != nil {
+			return err
+		}
+		inbounds := inboundsResult.inbounds
 		if len(inbounds) == 0 {
 			return os.ErrInvalid
 		}
@@ -362,15 +415,22 @@ func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
 			return fmt.Errorf("user %s not found in inbound %s", name, inboundTag)
 		}
 
-		c.syncStatsUsers(cfgMap)
+		if err := inboundsResult.commit(cfg); err != nil {
+			return err
+		}
+		c.syncStatsUsers(cfg)
 		return nil
 	})
 }
 
 // UpdateUserInInbound updates uuid/flow for a user in a specific inbound.
 func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity string, vmessAlterID int) error {
-	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
-		inbounds := c.findManagedInbounds(cfgMap)
+	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inboundsResult, err := c.findManagedInbounds(cfg)
+		if err != nil {
+			return err
+		}
+		inbounds := inboundsResult.inbounds
 		if len(inbounds) == 0 {
 			return os.ErrInvalid
 		}
@@ -407,7 +467,8 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity
 							um["uuid"] = uuid
 							delete(um, "flow")
 							delete(um, "security")
-							um["alter_id"] = vmessAlterID
+							um["alterId"] = vmessAlterID
+							delete(um, "alter_id")
 						case "trojan":
 							um["password"] = uuid
 							delete(um, "flow")
@@ -423,14 +484,21 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity
 			return fmt.Errorf("user %s not found in inbound %s", name, inboundTag)
 		}
 
-		c.syncStatsUsers(cfgMap)
+		if err := inboundsResult.commit(cfg); err != nil {
+			return err
+		}
+		c.syncStatsUsers(cfg)
 		return nil
 	})
 }
 
 func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, vmessAlterID int) error {
-	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
-		inbounds := c.findManagedInbounds(cfgMap)
+	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inboundsResult, err := c.findManagedInbounds(cfg)
+		if err != nil {
+			return err
+		}
+		inbounds := inboundsResult.inbounds
 		if len(inbounds) == 0 {
 			return os.ErrInvalid
 		}
@@ -475,7 +543,8 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 							um["uuid"] = uuid
 							delete(um, "flow")
 							delete(um, "security")
-							um["alter_id"] = vmessAlterID
+							um["alterId"] = vmessAlterID
+							delete(um, "alter_id")
 						case "trojan":
 							um["password"] = uuid
 							delete(um, "flow")
@@ -490,6 +559,9 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 			return fmt.Errorf("user %s not found", name)
 		}
 
+		if err := inboundsResult.commit(cfg); err != nil {
+			return err
+		}
 		return nil
 	})
 }
@@ -503,8 +575,12 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 		return nil
 	}
 
-	return c.ModifySingboxConfig(func(cfgMap SingboxConfigRaw) error {
-		inbounds := c.findManagedInbounds(cfgMap)
+	return c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
+		inboundsResult, err := c.findManagedInbounds(cfg)
+		if err != nil {
+			return err
+		}
+		inbounds := inboundsResult.inbounds
 		if len(inbounds) == 0 {
 			return os.ErrInvalid
 		}
@@ -547,7 +623,8 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 							um["uuid"] = uuid
 							delete(um, "flow")
 							delete(um, "security")
-							um["alter_id"] = vmessAlterID
+							um["alterId"] = vmessAlterID
+							delete(um, "alter_id")
 						case "trojan":
 							um["password"] = uuid
 							delete(um, "flow")
@@ -562,15 +639,46 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 			return fmt.Errorf("user %s not found", originalName)
 		}
 
-		c.syncStatsUsers(cfgMap)
+		if err := inboundsResult.commit(cfg); err != nil {
+			return err
+		}
+		c.syncStatsUsers(cfg)
 		return nil
 	})
 }
 
-func (c *Config) findManagedInbounds(cfgMap map[string]interface{}) []map[string]interface{} {
-	inbounds, ok := cfgMap["inbounds"].([]interface{})
-	if !ok || len(inbounds) == 0 {
+type managedInbounds struct {
+	rawList  []json.RawMessage
+	indices  []int
+	inbounds []map[string]interface{}
+}
+
+func (m *managedInbounds) commit(cfg *SingboxConfig) error {
+	if m == nil {
 		return nil
+	}
+	for i, idx := range m.indices {
+		data, err := json.Marshal(m.inbounds[i])
+		if err != nil {
+			return err
+		}
+		m.rawList[idx] = data
+	}
+	encoded, err := encodeInboundRawList(m.rawList)
+	if err != nil {
+		return err
+	}
+	cfg.Inbounds = encoded
+	return nil
+}
+
+func (c *Config) findManagedInbounds(cfg *SingboxConfig) (*managedInbounds, error) {
+	rawList, err := decodeInboundRawList(cfg.Inbounds)
+	if err != nil {
+		return nil, err
+	}
+	if len(rawList) == 0 {
+		return &managedInbounds{rawList: rawList}, nil
 	}
 
 	managed := c.ManagedInbounds
@@ -581,22 +689,31 @@ func (c *Config) findManagedInbounds(cfgMap map[string]interface{}) []map[string
 		}
 	}
 
-	var result []map[string]interface{}
-	for _, inbound := range inbounds {
-		if inboundMap, ok := inbound.(map[string]interface{}); ok {
-			if !isUserInboundType(inboundTypeFromMap(inboundMap)) {
-				continue
-			}
-			if len(tagFilter) > 0 {
-				if tag, ok := inboundMap["tag"].(string); ok && tagFilter[tag] {
-					result = append(result, inboundMap)
-				}
-			} else {
-				result = append(result, inboundMap)
-			}
-		}
+	result := &managedInbounds{
+		rawList:  rawList,
+		indices:  make([]int, 0, len(rawList)),
+		inbounds: make([]map[string]interface{}, 0, len(rawList)),
 	}
-	return result
+	for i, rawInbound := range rawList {
+		inboundMap := map[string]interface{}{}
+		if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+			return nil, err
+		}
+		if !isUserInboundType(inboundTypeFromMap(inboundMap)) {
+			continue
+		}
+		if len(tagFilter) > 0 {
+			if tag, ok := inboundMap["tag"].(string); ok && tagFilter[tag] {
+				result.indices = append(result.indices, i)
+				result.inbounds = append(result.inbounds, inboundMap)
+			}
+			continue
+		}
+		result.indices = append(result.indices, i)
+		result.inbounds = append(result.inbounds, inboundMap)
+	}
+
+	return result, nil
 }
 
 func ensureUsers(inbound map[string]interface{}) []interface{} {
@@ -611,11 +728,12 @@ func sanitizeVmessUsers(users []interface{}) {
 	for _, u := range users {
 		if um, ok := u.(map[string]interface{}); ok {
 			delete(um, "security")
+			normalizeVmessUserMap(um)
 		}
 	}
 }
 
-func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
+func (c *Config) syncStatsUsers(cfg *SingboxConfig) {
 	names := []string{}
 	seen := make(map[string]bool)
 	tagFilter := make(map[string]bool)
@@ -624,21 +742,22 @@ func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
 			tagFilter[t] = true
 		}
 	}
-	if inbounds, ok := cfgMap["inbounds"].([]interface{}); ok {
-		for _, inb := range inbounds {
-			inbMap, ok := inb.(map[string]interface{})
-			if !ok {
+	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
+	if err == nil {
+		for _, rawInbound := range rawInbounds {
+			inboundMap := map[string]interface{}{}
+			if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
 				continue
 			}
-			if !isUserInboundType(inboundTypeFromMap(inbMap)) {
+			if !isUserInboundType(inboundTypeFromMap(inboundMap)) {
 				continue
 			}
 			if len(tagFilter) > 0 {
-				if tag, ok := inbMap["tag"].(string); ok && !tagFilter[tag] {
+				if tag, ok := inboundMap["tag"].(string); ok && !tagFilter[tag] {
 					continue
 				}
 			}
-			users := ensureUsers(inbMap)
+			users := ensureUsers(inboundMap)
 			for _, u := range users {
 				if um, ok := u.(map[string]interface{}); ok {
 					if name, ok := um["name"].(string); ok && name != "" && !seen[name] {
@@ -650,19 +769,17 @@ func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
 		}
 	}
 
-	exp, ok := cfgMap["experimental"].(map[string]interface{})
-	if !ok {
-		exp = map[string]interface{}{}
-		cfgMap["experimental"] = exp
+	if cfg.Experimental == nil {
+		cfg.Experimental = &Experimental{}
 	}
-	v2, ok := exp["v2ray_api"].(map[string]interface{})
-	if !ok {
-		v2 = map[string]interface{}{}
-		exp["v2ray_api"] = v2
+	if cfg.Experimental.V2RayAPI == nil {
+		cfg.Experimental.V2RayAPI = &V2RayAPI{}
 	}
+	v2 := cfg.Experimental.V2RayAPI
+
 	listenAddr := strings.TrimSpace(c.SingboxAPIAddr)
-	if v, ok := v2["listen"].(string); ok && strings.TrimSpace(v) != "" {
-		listenAddr = strings.TrimSpace(v)
+	if strings.TrimSpace(v2.Listen) != "" {
+		listenAddr = strings.TrimSpace(v2.Listen)
 	}
 	if c.ExecutionMode == "docker_local" && !dockerLocalHostNetworkEnabled() {
 		if host, port, err := net.SplitHostPort(listenAddr); err == nil && port != "" {
@@ -677,28 +794,20 @@ func (c *Config) syncStatsUsers(cfgMap map[string]interface{}) {
 	if listenAddr == "" {
 		listenAddr = c.SingboxAPIAddr
 	}
-	v2["listen"] = listenAddr
-	stats, ok := v2["stats"].(map[string]interface{})
-	if !ok {
-		stats = map[string]interface{}{}
-		v2["stats"] = stats
+	v2.Listen = listenAddr
+
+	if v2.Stats == nil {
+		v2.Stats = &V2RayStats{}
 	}
-	stats["enabled"] = true
+	stats := v2.Stats
+	stats.Enabled = true
 	if len(c.StatsInbounds) > 0 {
-		stats["inbounds"] = toInterfaceSlice(c.StatsInbounds)
+		stats.Inbounds = append([]string(nil), c.StatsInbounds...)
 	}
 	if len(c.StatsOutbounds) > 0 {
-		stats["outbounds"] = toInterfaceSlice(c.StatsOutbounds)
+		stats.Outbounds = append([]string(nil), c.StatsOutbounds...)
 	}
-	stats["users"] = toInterfaceSlice(names)
-}
-
-func toInterfaceSlice(list []string) []interface{} {
-	out := make([]interface{}, 0, len(list))
-	for _, v := range list {
-		out = append(out, v)
-	}
-	return out
+	stats.Users = names
 }
 
 func dockerLocalHostNetworkEnabled() bool {
