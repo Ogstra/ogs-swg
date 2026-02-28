@@ -311,7 +311,7 @@ export default function Settings() {
     ]
 
     return (
-        <div className="h-full min-h-0 flex flex-col gap-4 sm:gap-6">
+        <div className="h-full min-h-0 flex flex-col gap-0 sm:gap-6">
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">Settings</h1>
@@ -322,13 +322,27 @@ export default function Settings() {
                         variant="secondary"
                         isLoading={loading && !samplerRunning}
                         icon={<RefreshCw size={16} />}
+                        className="hidden sm:inline-flex"
                     >
                         Refresh
                     </Button>
                 </div>
             </div>
 
-            <Tabs tabs={tabs} className="flex-1 min-h-0" />
+            <Tabs
+                tabs={tabs}
+                className="flex-1 min-h-0"
+                headerRight={
+                    <button
+                        onClick={() => loadAll()}
+                        className="sm:hidden w-[38px] h-[38px] inline-flex items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 transition-colors"
+                        title="Refresh"
+                        aria-label="Refresh settings"
+                    >
+                        <RefreshCw size={16} className={loading && !samplerRunning ? 'animate-spin' : ''} />
+                    </button>
+                }
+            />
         </div>
     )
 }
@@ -428,7 +442,7 @@ function GeneralTab({
     canWriteConfig: boolean
 }) {
     return (
-        <div className="space-y-4 sm:space-y-6">
+        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Features & Configuration */}
             <Card
                 title="System Features"
@@ -641,15 +655,16 @@ function DatabaseTab({
     }, [])
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-stretch pb-4 sm:pb-0">
             <div ref={dbCardRef}>
                 <Card
                     title="Database & Retention"
                     className="h-full flex flex-col"
                     action={
                         <div className="flex gap-2">
-                            <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
-                                Save Changes
+                            <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} iconNoGap disabled={!canWriteSettings}>
+                                <span className="sm:hidden sr-only">Save Changes</span>
+                                <span className="hidden sm:inline">Save Changes</span>
                             </Button>
                             <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
                         </div>
@@ -724,17 +739,17 @@ function DatabaseTab({
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />
                             </div>
-                        </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-400">Active Threshold (Bytes)</label>
-                            <input
-                                type="number"
-                                min={0}
-                                value={features.active_threshold_bytes ?? 1024}
-                                onChange={e => setFeatures(prev => ({ ...prev, active_threshold_bytes: parseInt(e.target.value) }))}
-                                disabled={!canWriteSettings}
-                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
-                            />
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Active Threshold (Bytes)</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    value={features.active_threshold_bytes ?? 1024}
+                                    onChange={e => setFeatures(prev => ({ ...prev, active_threshold_bytes: parseInt(e.target.value) }))}
+                                    disabled={!canWriteSettings}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
                         </div>
                     </div>
 
@@ -749,6 +764,14 @@ function DatabaseTab({
                         </Button>
                         <div className="flex gap-2">
                             <Button
+                                onClick={handleTogglePause}
+                                disabled={!canWriteSettings}
+                                variant="secondary"
+                                className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
+                            >
+                                {features.sampler_paused ? 'Resume' : 'Pause'}
+                            </Button>
+                            <Button
                                 onClick={handleRunSampler}
                                 disabled={!canWriteSettings || samplerRunning}
                                 className="flex-1"
@@ -756,14 +779,6 @@ function DatabaseTab({
                                 variant="primary"
                             >
                                 Run Sampler
-                            </Button>
-                            <Button
-                                onClick={handleTogglePause}
-                                disabled={!canWriteSettings}
-                                variant="secondary"
-                                className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
-                            >
-                                {features.sampler_paused ? 'Resume' : 'Pause'}
                             </Button>
                         </div>
                     </div>
