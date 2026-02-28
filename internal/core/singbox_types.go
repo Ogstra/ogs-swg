@@ -92,7 +92,7 @@ type SingboxConfig struct {
 	NTP          json.RawMessage `json:"ntp,omitempty"`
 	Certificate  json.RawMessage `json:"certificate,omitempty"`
 	Endpoints    json.RawMessage `json:"endpoints,omitempty"`
-	Inbounds     json.RawMessage `json:"inbounds,omitempty"` // typed per-inbound in Phase 2
+	Inbounds     json.RawMessage `json:"inbounds,omitempty"`
 	Outbounds    json.RawMessage `json:"outbounds,omitempty"`
 	Route        json.RawMessage `json:"route,omitempty"`
 	Services     json.RawMessage `json:"services,omitempty"`
