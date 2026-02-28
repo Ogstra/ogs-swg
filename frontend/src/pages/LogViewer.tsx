@@ -4,7 +4,7 @@ import { Terminal, RefreshCw, Search } from 'lucide-react'
 
 export default function LogViewer() {
     const [lines, setLines] = useState<string[]>([])
-    const [loading, setLoading] = useState(true)
+    const [loading, setLoading] = useState(false)
     const [refreshInterval, setRefreshInterval] = useState<number>(5000)
     const [query, setQuery] = useState<string>('')
     const [searchQuery, setSearchQuery] = useState<string>('')
