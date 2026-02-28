@@ -311,7 +311,7 @@ export default function Settings() {
     ]
 
     return (
-        <div className="h-full min-h-0 flex flex-col gap-6">
+        <div className="h-full min-h-0 flex flex-col gap-4 sm:gap-6">
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">Settings</h1>
@@ -354,7 +354,7 @@ function DashboardTab({
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             <Card title="Dashboard Preferences">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-1">
@@ -428,7 +428,7 @@ function GeneralTab({
     canWriteConfig: boolean
 }) {
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             {/* Features & Configuration */}
             <Card
                 title="System Features"
@@ -438,7 +438,7 @@ function GeneralTab({
                     </Button>
                 }
             >
-                <div className="space-y-6">
+                <div className="space-y-4 sm:space-y-6">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
                             <input
@@ -528,7 +528,7 @@ function GeneralTab({
                         Service control is disabled (systemctl unavailable).
                     </div>
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                         {/* Singbox Control */}
                         <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_singbox ? 'opacity-50' : ''}`}>
                             <div className="flex items-center justify-between">
@@ -641,7 +641,7 @@ function DatabaseTab({
     }, [])
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-stretch">
             <div ref={dbCardRef}>
                 <Card
                     title="Database & Retention"

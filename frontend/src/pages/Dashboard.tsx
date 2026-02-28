@@ -141,7 +141,7 @@ export default function Dashboard() {
     const topConsumers = (topConsumersMap[chartMode] || []).slice(0, 20)
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             {/* Pending Changes Banner */}
             {singboxPendingChanges && (
                 <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-4 flex items-center justify-between">
@@ -164,11 +164,11 @@ export default function Dashboard() {
             )}
 
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-white hidden sm:block">Dashboard</h1>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
+                <div className="hidden sm:block">
+                    <h1 className="text-2xl font-bold text-white">Dashboard</h1>
                     <div className="flex items-center gap-2 mt-1">
-                        <span className="text-slate-500 text-xs hidden sm:inline">Updated {lastUpdated.toLocaleTimeString()}</span>
+                        <span className="text-slate-500 text-xs">Updated {lastUpdated.toLocaleTimeString()}</span>
                     </div>
                 </div>
                 <div className="w-full sm:w-auto flex items-center gap-3 flex-wrap justify-end">
@@ -218,7 +218,7 @@ export default function Dashboard() {
             </div>
 
             {/* Unified Service & Traffic Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 {/* sing-box Card */}
                 <Card className={`transition-all ${status.singbox === true ? 'bg-slate-900 border-slate-800' : status.singbox === false ? 'bg-red-900/10 border-red-900/20' : 'bg-slate-900 border-slate-800'}`}>
                     <div className="flex items-start justify-between mb-6">
@@ -329,7 +329,7 @@ export default function Dashboard() {
             </div>
 
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                 {/* Traffic Chart */}
                 <div className="lg:col-span-2">
                     <Card

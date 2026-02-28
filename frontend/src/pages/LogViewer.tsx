@@ -87,33 +87,68 @@ export default function LogViewer() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">sing-box Logs</h1>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="hidden sm:flex items-center gap-2 mt-1">
                         <span className={`text-xs px-2 py-0.5 rounded border ${logSource === 'journal' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
                             {logSource === 'journal' ? 'journalctl' : 'File'}
                         </span>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <button
-                        onClick={() => fetchLogs(true)}
-                        className="sm:hidden w-11 h-11 shrink-0 flex items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 text-xs border border-slate-700 transition-colors"
-                        title="Refresh Now"
-                    >
-                        <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                    </button>
-                    <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg">
-                    <button
-                        onClick={() => setViewMode('tail')}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'tail' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                        Live Tail
-                    </button>
-                    <button
-                        onClick={() => setViewMode('search')}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${viewMode === 'search' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
-                    >
-                        Search History
-                    </button>
+                <div className="flex items-center justify-end gap-2 w-full sm:w-auto flex-nowrap">
+                    {viewMode === 'tail' && (
+                        <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-2">
+                                <span className="hidden sm:inline text-slate-500 text-xs font-medium uppercase tracking-wider">Lines</span>
+                                <select
+                                    value={tailLimit}
+                                    onChange={e => setTailLimit(parseInt(e.target.value))}
+                                    className="select-field h-[38px] w-[68px] sm:min-w-[82px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    aria-label="Lines"
+                                >
+                                    <option value={50}>50</option>
+                                    <option value={100}>100</option>
+                                    <option value={200}>200</option>
+                                </select>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <span className="hidden sm:inline text-slate-500 text-xs font-medium uppercase tracking-wider">Poll</span>
+                                <select
+                                    value={refreshInterval}
+                                    onChange={e => setRefreshInterval(parseInt(e.target.value))}
+                                    className="select-field h-[38px] w-[68px] sm:min-w-[82px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    aria-label="Poll interval"
+                                >
+                                    <option value={2000}>2s</option>
+                                    <option value={5000}>5s</option>
+                                    <option value={10000}>10s</option>
+                                    <option value={30000}>30s</option>
+                                </select>
+                            </div>
+                        </div>
+                    )}
+                    <div className="flex items-center justify-end gap-2 shrink-0">
+                        <div className="flex bg-slate-900 border border-slate-800 p-1 rounded-lg h-[38px] shrink-0">
+                            <button
+                                onClick={() => setViewMode('tail')}
+                                className={`px-3 sm:px-4 h-full rounded-md text-sm font-medium transition-all ${viewMode === 'tail' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                            >
+                                <span className="sm:hidden">Live</span>
+                                <span className="hidden sm:inline">Live Tail</span>
+                            </button>
+                            <button
+                                onClick={() => setViewMode('search')}
+                                className={`px-3 sm:px-4 h-full rounded-md text-sm font-medium transition-all ${viewMode === 'search' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                            >
+                                <span className="sm:hidden">History</span>
+                                <span className="hidden sm:inline">Search History</span>
+                            </button>
+                        </div>
+                        <button
+                            onClick={() => fetchLogs(true)}
+                            className="w-[38px] h-[38px] shrink-0 flex items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 text-xs border border-slate-700 transition-colors"
+                            title="Refresh Now"
+                        >
+                            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+                        </button>
                     </div>
                 </div>
             </div>
@@ -133,46 +168,11 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="w-full flex items-center flex-nowrap gap-3  sm:border-slate-800 sm:pl-2">
-                            <div className="flex items-center gap-2">
-                                <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Lines</span>
-                                <select
-                                    value={tailLimit}
-                                    onChange={e => setTailLimit(parseInt(e.target.value))}
-                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
-                                >
-                                    <option value={50}>50</option>
-                                    <option value={100}>100</option>
-                                    <option value={200}>200</option>
-                                </select>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                                <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Poll</span>
-                                <select
-                                    value={refreshInterval}
-                                    onChange={e => setRefreshInterval(parseInt(e.target.value))}
-                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
-                                >
-                                    <option value={2000}>2s</option>
-                                    <option value={5000}>5s</option>
-                                    <option value={10000}>10s</option>
-                                    <option value={30000}>30s</option>
-                                </select>
-                            </div>
-
-                            <button
-                                onClick={() => fetchLogs(true)}
-                                className="hidden sm:flex w-9 h-9 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 text-xs border border-slate-700 transition-colors"
-                                title="Refresh Now"
-                            >
-                                <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
-                            </button>
-
+                        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
                             <button
                                 onClick={() => fetchLogs(true)}
                                 disabled={loading}
-                                className="ml-auto h-[34px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                className="ml-auto h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
                                 {loading ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
                                 Search
@@ -195,7 +195,7 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="w-full flex items-center gap-3 sm:border-slate-800 sm:pl-2">
+                        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
                             <div className="flex items-center gap-2">
                                 <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Limit</span>
                                 <select
@@ -215,7 +215,7 @@ export default function LogViewer() {
                             <button
                                 onClick={() => handleSearch()}
                                 disabled={searching}
-                                className="ml-auto h-[34px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                className="ml-auto h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
                                 {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
                                 {searching ? 'Searching...' : 'Search'}
