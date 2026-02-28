@@ -17,17 +17,17 @@ export default function LogViewer() {
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
 
-    const fetchLogs = (forceTail = false) => {
-        setLoading(true)
+    const fetchLogs = (forceTail = false, silent = false) => {
+        if (!silent) setLoading(true)
         api.getLogs({ user: query || undefined, limit: tailLimit }).then(data => {
             setLines(data.logs)
             if (forceTail) setViewMode('tail')
-            setLoading(false)
+            if (!silent) setLoading(false)
         }).catch(err => {
             console.error(err)
             setLines(['Error loading logs: ' + err.message])
             if (forceTail) setViewMode('tail')
-            setLoading(false)
+            if (!silent) setLoading(false)
         })
     }
 
@@ -41,9 +41,9 @@ export default function LogViewer() {
 
     useEffect(() => {
         if (viewMode !== 'tail') return
-        fetchLogs(true)
+        fetchLogs(true, true)
         const interval = setInterval(() => {
-            fetchLogs(true)
+            fetchLogs(true, true)
         }, refreshInterval)
         return () => clearInterval(interval)
     }, [refreshInterval, query, viewMode, tailLimit])
@@ -162,7 +162,10 @@ export default function LogViewer() {
                             <input
                                 type="text"
                                 value={query}
-                                onChange={e => setQuery(e.target.value)}
+                                onChange={e => {
+                                    setQuery(e.target.value)
+                                    setAutoScroll(false)
+                                }}
                                 placeholder="Filter live logs..."
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600"
                             />
