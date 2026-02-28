@@ -129,14 +129,16 @@ func normalizeAllowedIPs(raw string) ([]string, string, error) {
 			}
 		}
 
-		_, ipNet, err := net.ParseCIDR(p)
-		if err != nil || ipNet == nil {
+		ip, ipNet, err := net.ParseCIDR(p)
+		if err != nil || ipNet == nil || ip == nil {
 			return nil, "", fmt.Errorf("invalid CIDR: %s", p)
 		}
+		ones, _ := ipNet.Mask.Size()
+		normalized := fmt.Sprintf("%s/%d", ip.String(), ones)
 
-		out = append(out, ipNet.String())
+		out = append(out, normalized)
 		if primary == "" {
-			primary = ipNet.String()
+			primary = normalized
 		}
 	}
 
@@ -950,11 +952,18 @@ func peerClientAddress(peerAllowedIPs, serverIfaceAddr string) (string, error) {
 		}
 	}
 
-	firstServerAddr := strings.TrimSpace(strings.Split(serverIfaceAddr, ",")[0])
-	if firstServerAddr != "" {
-		if _, serverNet, err := net.ParseCIDR(firstServerAddr); err == nil {
-			ones, _ := serverNet.Mask.Size()
-			return fmt.Sprintf("%s/%d", peerIP.String(), ones), nil
+	for _, part := range strings.Split(serverIfaceAddr, ",") {
+		addr := strings.TrimSpace(part)
+		if addr == "" {
+			continue
+		}
+		if _, serverNet, err := net.ParseCIDR(addr); err == nil && serverNet != nil {
+			serverIsV4 := serverNet.IP.To4() != nil
+			peerIsV4 := peerIP.To4() != nil
+			if serverIsV4 == peerIsV4 {
+				ones, _ := serverNet.Mask.Size()
+				return fmt.Sprintf("%s/%d", peerIP.String(), ones), nil
+			}
 		}
 	}
 
