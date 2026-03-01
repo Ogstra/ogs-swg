@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -73,13 +74,14 @@ func NewStore(dbPath string) (*Store, error) {
 }
 
 type UserMetadata struct {
-	Email         string `json:"email"`
-	QuotaLimit    int64  `json:"quota_limit"`
-	QuotaPeriod   string `json:"quota_period"`
-	ResetDay      int    `json:"reset_day"`
-	Enabled       bool   `json:"enabled"`
-	VmessSecurity string `json:"vmess_security,omitempty"`
-	VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
+	Email         string   `json:"email"`
+	QuotaLimit    int64    `json:"quota_limit"`
+	QuotaPeriod   string   `json:"quota_period"`
+	ResetDay      int      `json:"reset_day"`
+	Enabled       bool     `json:"enabled"`
+	VmessSecurity string   `json:"vmess_security,omitempty"`
+	VmessAlterID  int      `json:"vmess_alter_id,omitempty"`
+	InboundTags   []string `json:"inbound_tags,omitempty"`
 }
 
 type InboundMeta struct {
@@ -209,6 +211,9 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add client_sni to existing inbound_meta tables that predate this column.
 	// Silently ignored if column already exists (fresh installs have it from CREATE TABLE above).
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN client_sni TEXT DEFAULT NULL;")
+	// Upgrade path: add inbound_tags to existing users tables that predate this column.
+	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
+	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';");
 	// Reset day is now fixed to 1 for all users.
 	s.db.Exec("UPDATE users SET reset_day = 1 WHERE COALESCE(reset_day, 1) != 1;")
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -857,7 +862,7 @@ func (s *Store) SaveUserMetadata(meta UserMetadata) error {
 	}
 	// Reset day is fixed to day 1 of each month.
 	resetDay := int64(1)
-	return s.Queries.UpsertUser(context.Background(), sqlcStore.UpsertUserParams{
+	if err := s.Queries.UpsertUser(context.Background(), sqlcStore.UpsertUserParams{
 		Email: meta.Email,
 		QuotaLimit: sql.NullInt64{
 			Int64: meta.QuotaLimit,
@@ -883,7 +888,21 @@ func (s *Store) SaveUserMetadata(meta UserMetadata) error {
 			Int64: int64(meta.VmessAlterID),
 			Valid: true,
 		},
-	})
+	}); err != nil {
+		return err
+	}
+
+	// Persist InboundTags as JSON in the inbound_tags column (not covered by sqlc-generated query).
+	tagsJSON := "[]"
+	if len(meta.InboundTags) > 0 {
+		b, err := json.Marshal(meta.InboundTags)
+		if err != nil {
+			return fmt.Errorf("failed to marshal inbound_tags: %w", err)
+		}
+		tagsJSON = string(b)
+	}
+	_, err := s.db.Exec("UPDATE users SET inbound_tags = ? WHERE email = ?", tagsJSON, meta.Email)
+	return err
 }
 
 func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
@@ -894,6 +913,20 @@ func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
 		}
 		return nil, err
 	}
+
+	// Read inbound_tags from the column not covered by sqlc-generated query.
+	var tagsJSON string
+	_ = s.db.QueryRow("SELECT COALESCE(inbound_tags, '') FROM users WHERE email = ?", email).Scan(&tagsJSON)
+	var inboundTags []string
+	if tagsJSON != "" && tagsJSON != "[]" {
+		if err := json.Unmarshal([]byte(tagsJSON), &inboundTags); err != nil {
+			inboundTags = []string{}
+		}
+	}
+	if inboundTags == nil {
+		inboundTags = []string{}
+	}
+
 	return &UserMetadata{
 		Email:         meta.Email,
 		QuotaLimit:    meta.QuotaLimit.Int64,
@@ -902,6 +935,7 @@ func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
 		Enabled:       meta.Enabled.Int64 != 0,
 		VmessSecurity: meta.VmessSecurity.String,
 		VmessAlterID:  int(meta.VmessAlterID.Int64),
+		InboundTags:   inboundTags,
 	}, nil
 }
 
@@ -914,8 +948,36 @@ func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Build a map of inbound_tags per email using a single raw query.
+	tagsMap := make(map[string][]string)
+	tagRows, err := s.db.Query("SELECT email, COALESCE(inbound_tags, '') FROM users")
+	if err == nil {
+		defer tagRows.Close()
+		for tagRows.Next() {
+			var email, tagsJSON string
+			if err := tagRows.Scan(&email, &tagsJSON); err != nil {
+				continue
+			}
+			var tags []string
+			if tagsJSON != "" && tagsJSON != "[]" {
+				if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+					tags = []string{}
+				}
+			}
+			if tags == nil {
+				tags = []string{}
+			}
+			tagsMap[email] = tags
+		}
+	}
+
 	var result []UserMetadata
 	for _, meta := range rows {
+		tags := tagsMap[meta.Email]
+		if tags == nil {
+			tags = []string{}
+		}
 		result = append(result, UserMetadata{
 			Email:         meta.Email,
 			QuotaLimit:    meta.QuotaLimit.Int64,
@@ -924,6 +986,7 @@ func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
 			Enabled:       meta.Enabled.Int64 != 0,
 			VmessSecurity: meta.VmessSecurity.String,
 			VmessAlterID:  int(meta.VmessAlterID.Int64),
+			InboundTags:   tags,
 		})
 	}
 	return result, nil
