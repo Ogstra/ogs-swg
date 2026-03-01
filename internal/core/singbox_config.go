@@ -366,11 +366,23 @@ func decodeSingboxInboundView(rawInbound json.RawMessage) (SingboxInboundView, e
 	}
 	meta := parseSingboxInboundMetaFromMap(inboundMap)
 
+	var tlsCfg *TLSConfig
+	rawKeys := map[string]json.RawMessage{}
+	if err := json.Unmarshal(rawInbound, &rawKeys); err == nil {
+		if tlsRaw, ok := rawKeys["tls"]; ok && len(tlsRaw) > 0 && string(tlsRaw) != "null" {
+			var t TLSConfig
+			if err := json.Unmarshal(tlsRaw, &t); err == nil {
+				tlsCfg = &t
+			}
+		}
+	}
+
 	return SingboxInboundView{
 		Tag:        meta.Tag,
 		Type:       meta.Type,
 		ListenPort: meta.ListenPort,
 		Users:      decodeSingboxInboundUserViews(inboundMap["users"]),
+		TLS:        tlsCfg,
 		Raw:        inboundMap,
 	}, nil
 }
