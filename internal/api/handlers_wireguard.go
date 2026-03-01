@@ -129,14 +129,16 @@ func normalizeAllowedIPs(raw string) ([]string, string, error) {
 			}
 		}
 
-		_, ipNet, err := net.ParseCIDR(p)
-		if err != nil || ipNet == nil {
+		ip, ipNet, err := net.ParseCIDR(p)
+		if err != nil || ipNet == nil || ip == nil {
 			return nil, "", fmt.Errorf("invalid CIDR: %s", p)
 		}
+		ones, _ := ipNet.Mask.Size()
+		normalized := fmt.Sprintf("%s/%d", ip.String(), ones)
 
-		out = append(out, ipNet.String())
+		out = append(out, normalized)
 		if primary == "" {
-			primary = ipNet.String()
+			primary = normalized
 		}
 	}
 
@@ -173,21 +175,25 @@ func addUsedIP(used map[string]bool, cidr string) {
 	if cidr == "" {
 		return
 	}
+	if ip, ok := extractHostIP(cidr); ok {
+		used[ip.String()] = true
+	}
+}
+
+func extractHostIP(cidr string) (net.IP, bool) {
 	cidr = strings.TrimSpace(cidr)
+	if cidr == "" {
+		return nil, false
+	}
 	host := cidr
 	if idx := strings.Index(host, "/"); idx != -1 {
 		host = strings.TrimSpace(host[:idx])
 	}
-	// Track the exact host IP to avoid assigning it.
-	if ip := net.ParseIP(host); ip != nil {
-		used[ip.String()] = true
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, false
 	}
-	// Also track the network address if a CIDR is provided.
-	if strings.Contains(cidr, "/") {
-		if _, netblock, err := net.ParseCIDR(cidr); err == nil && netblock != nil {
-			used[netblock.IP.String()] = true
-		}
-	}
+	return ip, true
 }
 
 func findAvailableIP(ipNet *net.IPNet, used map[string]bool) (string, error) {
@@ -304,7 +310,7 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if _, netblock, err := net.ParseCIDR(primaryIP); err == nil && netblock != nil && usedIPs[netblock.IP.String()] {
+		if ip, ok := extractHostIP(primaryIP); ok && usedIPs[ip.String()] {
 			http.Error(w, "IP already assigned to another peer", http.StatusBadRequest)
 			return
 		}
@@ -628,11 +634,8 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		if ip == "" {
 			return
 		}
-		if !strings.Contains(ip, "/") {
-			ip += "/32"
-		}
-		if _, netblock, err := net.ParseCIDR(ip); err == nil && netblock != nil {
-			usedIPs[netblock.IP.String()] = owner
+		if host, ok := extractHostIP(ip); ok {
+			usedIPs[host.String()] = owner
 		}
 	}
 
@@ -642,8 +645,8 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		addUsedIPStr(existing, p.PublicKey)
 	}
 
-	if _, netblock, err := net.ParseCIDR(primaryIP); err == nil && netblock != nil {
-		if owner, ok := usedIPs[netblock.IP.String()]; ok && owner != pubKey {
+	if host, ok := extractHostIP(primaryIP); ok {
+		if owner, found := usedIPs[host.String()]; found && owner != pubKey {
 			http.Error(w, "IP already assigned to another peer", http.StatusBadRequest)
 			return
 		}
@@ -949,11 +952,18 @@ func peerClientAddress(peerAllowedIPs, serverIfaceAddr string) (string, error) {
 		}
 	}
 
-	firstServerAddr := strings.TrimSpace(strings.Split(serverIfaceAddr, ",")[0])
-	if firstServerAddr != "" {
-		if _, serverNet, err := net.ParseCIDR(firstServerAddr); err == nil {
-			ones, _ := serverNet.Mask.Size()
-			return fmt.Sprintf("%s/%d", peerIP.String(), ones), nil
+	for _, part := range strings.Split(serverIfaceAddr, ",") {
+		addr := strings.TrimSpace(part)
+		if addr == "" {
+			continue
+		}
+		if _, serverNet, err := net.ParseCIDR(addr); err == nil && serverNet != nil {
+			serverIsV4 := serverNet.IP.To4() != nil
+			peerIsV4 := peerIP.To4() != nil
+			if serverIsV4 == peerIsV4 {
+				ones, _ := serverNet.Mask.Size()
+				return fmt.Sprintf("%s/%d", peerIP.String(), ones), nil
+			}
 		}
 	}
 

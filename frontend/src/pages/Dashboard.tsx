@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 
@@ -63,6 +63,8 @@ export default function Dashboard() {
     const today = now.toISOString().split('T')[0]
     const [customStart, setCustomStart] = useState(today)
     const [customEnd, setCustomEnd] = useState(today)
+    const chartContainerRef = useRef<HTMLDivElement | null>(null)
+    const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
 
     const computeRangeSeconds = (range: string) => {
         const nowSec = Math.floor(Date.now() / 1000)
@@ -86,6 +88,20 @@ export default function Dashboard() {
         setPrefsLoaded(true)
     }, [])
 
+    useEffect(() => {
+        const el = chartContainerRef.current
+        if (!el || typeof ResizeObserver === 'undefined') return
+        const update = () => {
+            const nextWidth = Math.max(0, Math.floor(el.clientWidth))
+            const nextHeight = Math.max(300, Math.floor(el.clientHeight))
+            setChartSize({ width: nextWidth, height: nextHeight })
+        }
+        update()
+        const ro = new ResizeObserver(update)
+        ro.observe(el)
+        return () => ro.disconnect()
+    }, [])
+
     const requestWindow = useMemo(() => {
         if (timeRange === 'custom') {
             const start = Math.floor(new Date(customStart).getTime() / 1000)
@@ -95,8 +111,6 @@ export default function Dashboard() {
         const range = computeRangeSeconds(timeRange)
         return { start: range.start, end: range.end, startText: String(range.start), endText: String(range.end), range: timeRange }
     }, [timeRange, customStart, customEnd])
-
-    const chartDomain: [number, number] = [requestWindow.start, requestWindow.end]
 
     const dashboardQuery = useQuery({
         queryKey: ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText],
@@ -109,6 +123,15 @@ export default function Dashboard() {
     const loading = dashboardQuery.isFetching
     const lastUpdated = dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt) : new Date()
     const chartData: UnifiedChartPoint[] = dashboardQuery.data?.chart_data || []
+    const chartDomain: [number, number] = useMemo(() => {
+        if (chartData.length > 1) {
+            const first = chartData[0]?.ts ?? requestWindow.start
+            const last = chartData[chartData.length - 1]?.ts ?? requestWindow.end
+            if (last > first) return [first, last]
+            return [first, first + 1]
+        }
+        return [requestWindow.start, requestWindow.end]
+    }, [chartData, requestWindow.start, requestWindow.end])
     const statsCards: Record<string, TrafficStats> = dashboardQuery.data?.stats_cards || {
         singbox: { uplink: 0, downlink: 0 },
         wireguard: { uplink: 0, downlink: 0 }
@@ -141,7 +164,7 @@ export default function Dashboard() {
     const topConsumers = (topConsumersMap[chartMode] || []).slice(0, 20)
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Pending Changes Banner */}
             {singboxPendingChanges && (
                 <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-4 flex items-center justify-between">
@@ -164,11 +187,11 @@ export default function Dashboard() {
             )}
 
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-white hidden sm:block">Dashboard</h1>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
+                <div className="hidden sm:block">
+                    <h1 className="text-2xl font-bold text-white">Dashboard</h1>
                     <div className="flex items-center gap-2 mt-1">
-                        <span className="text-slate-500 text-xs hidden sm:inline">Updated {lastUpdated.toLocaleTimeString()}</span>
+                        <span className="text-slate-500 text-xs">Updated {lastUpdated.toLocaleTimeString()}</span>
                     </div>
                 </div>
                 <div className="w-full sm:w-auto flex items-center gap-3 flex-wrap justify-end">
@@ -218,7 +241,7 @@ export default function Dashboard() {
             </div>
 
             {/* Unified Service & Traffic Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 {/* sing-box Card */}
                 <Card className={`transition-all ${status.singbox === true ? 'bg-slate-900 border-slate-800' : status.singbox === false ? 'bg-red-900/10 border-red-900/20' : 'bg-slate-900 border-slate-800'}`}>
                     <div className="flex items-start justify-between mb-6">
@@ -329,7 +352,7 @@ export default function Dashboard() {
             </div>
 
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
                 {/* Traffic Chart */}
                 <div className="lg:col-span-2">
                     <Card
@@ -352,9 +375,14 @@ export default function Dashboard() {
                             </div>
                         }
                     >
-                        <div className="h-[300px] w-full mt-4">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <AreaChart data={chartData} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+                        <div ref={chartContainerRef} className="h-[300px] min-h-[300px] w-full min-w-0 mt-4">
+                            {chartSize.width > 0 && (
+                                <AreaChart
+                                    width={chartSize.width}
+                                    height={chartSize.height}
+                                    data={chartData}
+                                    margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+                                >
                                     <defs>
                                         <linearGradient id="colorUp" x1="0" y1="0" x2="0" y2="1">
                                             <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
@@ -419,7 +447,7 @@ export default function Dashboard() {
                                         fill={chartMode === 'singbox' ? "url(#colorDown)" : "url(#colorUp)"}
                                     />
                                 </AreaChart>
-                            </ResponsiveContainer>
+                            )}
                         </div>
                     </Card>
                 </div>
@@ -462,9 +490,6 @@ export default function Dashboard() {
                                     </div>
                                     <div className="text-right">
                                         <div className="font-mono text-sm text-blue-400">{formatBytes(u.total)}</div>
-                                        <div className="text-[10px] text-slate-500">
-                                            {u.quota_limit ? `${((u.total / u.quota_limit) * 100).toFixed(1)}%` : '∞'}
-                                        </div>
                                     </div>
                                 </div>
                             ))
