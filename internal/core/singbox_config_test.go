@@ -283,3 +283,109 @@ func TestModifySingboxConfig_RejectsNonInboundChange(t *testing.T) {
 		t.Fatal("expected ModifySingboxConfig to return error when Log is mutated, got nil")
 	}
 }
+
+func TestTLSTyped_RealityDecoded(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "vless",
+            "tag": "test-vless",
+            "listen": "0.0.0.0",
+            "listen_port": 443,
+            "users": [],
+            "tls": {
+                "enabled": true,
+                "server_name": "example.com",
+                "reality": {
+                    "enabled": true,
+                    "handshake": {"server": "example.com", "server_port": 443},
+                    "private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+                    "public_key":  "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+                    "short_id": ["deadbeef", "cafebabe"]
+                }
+            }
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-vless")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.TLS == nil {
+		t.Fatal("TLS is nil; expected *TLSConfig")
+	}
+	if !view.TLS.Enabled {
+		t.Error("TLS.Enabled should be true")
+	}
+	if view.TLS.ServerName != "example.com" {
+		t.Errorf("TLS.ServerName = %q; want %q", view.TLS.ServerName, "example.com")
+	}
+	if view.TLS.Reality == nil {
+		t.Fatal("TLS.Reality is nil; expected *RealityConfig")
+	}
+	if view.TLS.Reality.Handshake.Server != "example.com" {
+		t.Errorf("Reality.Handshake.Server = %q; want %q", view.TLS.Reality.Handshake.Server, "example.com")
+	}
+	if len(view.TLS.Reality.ShortIDs) != 2 {
+		t.Errorf("Reality.ShortIDs len = %d; want 2", len(view.TLS.Reality.ShortIDs))
+	}
+	if view.TLS.Reality.ShortIDs[0] != "deadbeef" {
+		t.Errorf("Reality.ShortIDs[0] = %q; want %q", view.TLS.Reality.ShortIDs[0], "deadbeef")
+	}
+}
+
+func TestTLSTyped_StandardTLSDecoded(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "trojan",
+            "tag": "test-trojan",
+            "listen": "0.0.0.0",
+            "listen_port": 443,
+            "users": [],
+            "tls": {
+                "enabled": true,
+                "server_name": "my.domain.com",
+                "certificate_path": "/etc/ssl/cert.pem"
+            }
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-trojan")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.TLS == nil {
+		t.Fatal("TLS is nil; expected *TLSConfig")
+	}
+	if !view.TLS.Enabled {
+		t.Error("TLS.Enabled should be true")
+	}
+	if view.TLS.ServerName != "my.domain.com" {
+		t.Errorf("TLS.ServerName = %q; want %q", view.TLS.ServerName, "my.domain.com")
+	}
+	if view.TLS.CertificatePath != "/etc/ssl/cert.pem" {
+		t.Errorf("TLS.CertificatePath = %q; want %q", view.TLS.CertificatePath, "/etc/ssl/cert.pem")
+	}
+	if view.TLS.Reality != nil {
+		t.Error("TLS.Reality should be nil for standard TLS inbound")
+	}
+}
+
+func TestTLSTyped_AbsentTLSIsNil(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "vmess",
+            "tag": "test-vmess",
+            "listen": "0.0.0.0",
+            "listen_port": 10080,
+            "users": []
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-vmess")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.TLS != nil {
+		t.Errorf("TLS should be nil for inbound without tls block; got %+v", view.TLS)
+	}
+}
