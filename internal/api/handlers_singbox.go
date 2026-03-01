@@ -227,7 +227,6 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		return "", "", fmt.Errorf("Inbound listen_port missing")
 	}
 	port := strconv.Itoa(inboundView.ListenPort)
-	inbound := inboundView.Raw
 
 	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil && meta.ExternalPort > 0 {
 		port = strconv.Itoa(meta.ExternalPort)
@@ -240,7 +239,7 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 
 	switch inbType {
 	case "vless":
-		link, err := buildVlessLink(name, userInfo, inbound, host, port)
+		link, err := buildVlessLink(name, userInfo, inboundView, host, port)
 		return link, inbType, err
 	case "vmess":
 		userCopy := *userInfo
@@ -252,10 +251,10 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 				userCopy.VmessAlterID = meta.VmessAlterID
 			}
 		}
-		link, err := buildVmessLink(name, &userCopy, inbound, host, port)
+		link, err := buildVmessLink(name, &userCopy, inboundView, host, port)
 		return link, inbType, err
 	case "trojan":
-		link, err := buildTrojanLink(name, userInfo, inbound, host, port)
+		link, err := buildTrojanLink(name, userInfo, inboundView, host, port)
 		return link, inbType, err
 	default:
 		return "", "", fmt.Errorf("Inbound type is not supported")
@@ -360,24 +359,28 @@ type tlsInfo struct {
 	CertPath   string
 }
 
-func extractTLSInfo(inbound map[string]interface{}) tlsInfo {
-	tls, ok := inbound["tls"].(map[string]interface{})
-	if !ok || tls == nil {
+// extractTLSInfo returns TLS parameters from the typed SingboxInboundView.TLS field.
+// Falls back gracefully when TLS is nil (no tls block in inbound).
+func extractTLSInfo(view *core.SingboxInboundView) tlsInfo {
+	if view.TLS == nil {
 		return tlsInfo{}
 	}
-	enabled, _ := tls["enabled"].(bool)
-	serverName, _ := tls["server_name"].(string)
-	certPath, _ := tls["certificate_path"].(string)
-	return tlsInfo{Enabled: enabled, ServerName: serverName, CertPath: certPath}
+	return tlsInfo{
+		Enabled:    view.TLS.Enabled,
+		ServerName: view.TLS.ServerName,
+		CertPath:   view.TLS.CertificatePath,
+	}
 }
 
-func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
-	tlsMap, _ := inbound["tls"].(map[string]interface{})
-	reality, _ := tlsMap["reality"].(map[string]interface{})
+func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+	var reality *core.RealityConfig
+	if view.TLS != nil {
+		reality = view.TLS.Reality
+	}
 	if reality != nil {
-		pbk, _ := reality["public_key"].(string)
+		pbk := reality.PublicKey
 		if pbk == "" {
-			if priv, _ := reality["private_key"].(string); strings.TrimSpace(priv) != "" {
+			if priv := reality.PrivateKey; strings.TrimSpace(priv) != "" {
 				derived, err := deriveRealityPublicKey(priv)
 				if err != nil {
 					return "", fmt.Errorf("Reality private_key invalid: %w", err)
@@ -388,11 +391,10 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 		if pbk == "" {
 			return "", fmt.Errorf("Reality public_key missing")
 		}
-		handshake, _ := reality["handshake"].(map[string]interface{})
-		handshakeSNI, _ := handshake["server"].(string)
+		handshakeSNI := reality.Handshake.Server
 
 		// Prefer tls.server_name as client SNI; fall back to handshake.server
-		sni, _ := tlsMap["server_name"].(string)
+		sni := view.TLS.ServerName
 		if sni == "" {
 			sni = handshakeSNI
 		}
@@ -400,26 +402,15 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 			return "", fmt.Errorf("Reality handshake server missing")
 		}
 
-		var sid string
-		switch v := reality["short_id"].(type) {
-		case []interface{}:
-			if len(v) > 0 {
-				if s, ok := v[0].(string); ok {
-					sid = s
-				}
-			}
-		case []string:
-			if len(v) > 0 {
-				sid = v[0]
-			}
-		case string:
-			sid = v
+		sid := ""
+		if len(reality.ShortIDs) > 0 {
+			sid = reality.ShortIDs[0]
 		}
 		if sid == "" {
 			return "", fmt.Errorf("Reality short_id missing")
 		}
 
-		transport := extractTransportInfo(inbound)
+		transport := extractTransportInfo(view.Raw)
 		flowParam := ""
 		if userInfo.Flow != "" {
 			flowParam = "&flow=" + url.QueryEscape(userInfo.Flow)
@@ -447,8 +438,8 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 		return link, nil
 	}
 
-	transport := extractTransportInfo(inbound)
-	tls := extractTLSInfo(inbound)
+	transport := extractTransportInfo(view.Raw)
+	tls := extractTLSInfo(view)
 	params := url.Values{}
 	params.Set("encryption", "none")
 	if tls.Enabled {
@@ -489,12 +480,12 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, inbound map[str
 	return base, nil
 }
 
-func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
+func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User password missing for inbound")
 	}
-	transport := extractTransportInfo(inbound)
-	tls := extractTLSInfo(inbound)
+	transport := extractTransportInfo(view.Raw)
+	tls := extractTLSInfo(view)
 
 	params := url.Values{}
 	if tls.Enabled {
@@ -530,12 +521,12 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, inbound map[st
 	return base, nil
 }
 
-func buildVmessLink(name string, userInfo *core.UserInboundInfo, inbound map[string]interface{}, host, port string) (string, error) {
+func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User UUID missing for inbound")
 	}
-	transport := extractTransportInfo(inbound)
-	tls := extractTLSInfo(inbound)
+	transport := extractTransportInfo(view.Raw)
+	tls := extractTLSInfo(view)
 
 	alterID := userInfo.VmessAlterID
 	security := strings.TrimSpace(userInfo.VmessSecurity)
