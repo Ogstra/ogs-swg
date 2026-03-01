@@ -578,6 +578,12 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			inboundTags = user.InboundTags
 		}
 
+		// If the user is not active but has stored inbound tags in metadata, use them.
+		// This ensures disabled users display their real inbound_tags instead of nil/"all".
+		if !isActive && hasMeta && len(meta.InboundTags) > 0 {
+			inboundTags = meta.InboundTags
+		}
+
 		if hasMeta {
 			limit = meta.QuotaLimit
 			period = meta.QuotaPeriod
@@ -756,17 +762,26 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		originalName = req.Name
 	}
 
+	// Load existing metadata upfront — needed for both enable and disable paths.
+	existingMeta, _ := s.store.GetUserMetadata(originalName)
+
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	} else {
-		if meta, _ := s.store.GetUserMetadata(originalName); meta != nil {
-			enabled = meta.Enabled
+		if existingMeta != nil {
+			enabled = existingMeta.Enabled
 		}
 	}
 
 	if req.UUID == "" {
 		req.UUID = uuid.NewString()
+	}
+
+	// inboundTags tracks which inbound tags to persist in metadata.
+	var inboundTags []string
+	if existingMeta != nil {
+		inboundTags = existingMeta.InboundTags
 	}
 
 	if enabled {
@@ -776,14 +791,49 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Failed to rename user in config: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
-		} else if err := s.config.UpdateUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
-			// Fallback to AddUser if Update failed (e.g. user didn't exist in config)
-			if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
-				http.Error(w, "Failed to update user in config: "+err.Error(), http.StatusInternalServerError)
-				return
+		} else {
+			// Re-enable path: restore user in all previously known inbounds.
+			// Determine the list of inbounds to restore.
+			tagsToRestore := inboundTags
+			if len(tagsToRestore) == 0 && req.InboundTag != "" {
+				tagsToRestore = []string{req.InboundTag}
+			}
+
+			if len(tagsToRestore) > 0 {
+				for _, tag := range tagsToRestore {
+					// Try updating in-place first (user already present in inbound).
+					if err := s.config.UpdateUserInInbound(req.Name, req.UUID, req.Flow, tag, req.VmessSecurity, req.VmessAlterID); err != nil {
+						// User not in this inbound yet — add them.
+						if addErr := s.config.AddUser(req.Name, req.UUID, req.Flow, tag, req.VmessSecurity, req.VmessAlterID); addErr != nil {
+							// Ignore "already exists" — propagate other errors.
+							if !strings.Contains(addErr.Error(), "already exists") {
+								http.Error(w, "Failed to restore user in inbound "+tag+": "+addErr.Error(), http.StatusInternalServerError)
+								return
+							}
+						}
+					}
+				}
+			} else {
+				// No known inbounds: fall back to UpdateUser across all managed inbounds.
+				if err := s.config.UpdateUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
+					if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
+						http.Error(w, "Failed to update user in config: "+err.Error(), http.StatusInternalServerError)
+						return
+					}
+				}
 			}
 		}
 	} else {
+		// Disable path: capture current inbound tags before removing the user.
+		if currentInbounds, err := s.config.GetUserInbounds(originalName); err == nil && len(currentInbounds) > 0 {
+			tags := make([]string, len(currentInbounds))
+			for i, ib := range currentInbounds {
+				tags[i] = ib.Tag
+			}
+			inboundTags = tags
+		}
+		// If GetUserInbounds failed or returned empty, preserve existing inboundTags from metadata.
+
 		s.config.RemoveUser(originalName)
 		if originalName != req.Name {
 			s.config.RemoveUser(req.Name)
@@ -798,6 +848,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Enabled:       enabled,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
+		InboundTags:   inboundTags,
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
 		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
