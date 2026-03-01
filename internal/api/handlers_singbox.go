@@ -57,20 +57,27 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	inbounds, err := s.config.GetSingboxInbounds()
+	inboundViews, err := s.config.GetSingboxInboundViews()
 	if err != nil {
 		http.Error(w, "Failed to get inbounds: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	inbounds := make([]map[string]interface{}, 0, len(inboundViews))
+	for _, inboundView := range inboundViews {
+		inbounds = append(inbounds, inboundView.Raw)
+	}
 
 	if meta, err := s.store.GetAllInboundMeta(); err == nil {
-		for _, inbound := range inbounds {
-			tag, _ := inbound["tag"].(string)
+		for i := range inboundViews {
+			tag := inboundViews[i].Tag
 			if tag == "" {
 				continue
 			}
 			if entry, ok := meta[tag]; ok && entry.ExternalPort > 0 {
-				inbound["external_port"] = entry.ExternalPort
+				if inbounds[i] == nil {
+					inbounds[i] = map[string]interface{}{}
+				}
+				inbounds[i]["external_port"] = entry.ExternalPort
 			}
 		}
 	}
@@ -105,12 +112,12 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 
 	if len(inbounds) > 0 {
 		tagTypes := map[string]string{}
-		if allInboundMetas, err := s.config.GetSingboxInboundMetas(); err == nil {
-			for _, inboundMeta := range allInboundMetas {
-				if inboundMeta.Tag == "" {
+		if allInboundViews, err := s.config.GetSingboxInboundViews(); err == nil {
+			for _, inboundView := range allInboundViews {
+				if inboundView.Tag == "" {
 					continue
 				}
-				tagTypes[inboundMeta.Tag] = inboundMeta.Type
+				tagTypes[inboundView.Tag] = inboundView.Type
 			}
 		}
 		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
@@ -206,30 +213,21 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		return "", "", fmt.Errorf("User credential missing for inbound")
 	}
 
-	inboundMeta, err := s.config.GetSingboxInboundMeta(tag)
-	if err != nil {
-		return "", "", fmt.Errorf("Failed to get inbound metadata: %w", err)
-	}
-
-	inbound, err := s.config.GetSingboxInboundByTag(tag)
+	inboundView, err := s.config.GetSingboxInboundView(tag)
 	if err != nil {
 		return "", "", fmt.Errorf("Failed to get inbound config: %w", err)
 	}
 
-	inbType := inboundMeta.Type
+	inbType := inboundView.Type
 	if inbType == "" {
 		inbType = "vless"
 	}
 
-	port := ""
-	if inboundMeta.ListenPort > 0 {
-		port = strconv.Itoa(inboundMeta.ListenPort)
-	} else {
-		port, err = extractInboundPort(inbound)
-		if err != nil {
-			return "", "", err
-		}
+	if inboundView.ListenPort <= 0 {
+		return "", "", fmt.Errorf("Inbound listen_port missing")
 	}
+	port := strconv.Itoa(inboundView.ListenPort)
+	inbound := inboundView.Raw
 
 	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil && meta.ExternalPort > 0 {
 		port = strconv.Itoa(meta.ExternalPort)
@@ -320,22 +318,6 @@ func firstHeaderToken(value string) string {
 		return strings.TrimSpace(value)
 	}
 	return strings.TrimSpace(parts[0])
-}
-
-func extractInboundPort(inbound map[string]interface{}) (string, error) {
-	switch v := inbound["listen_port"].(type) {
-	case float64:
-		return fmt.Sprintf("%.0f", v), nil
-	case int:
-		return fmt.Sprintf("%d", v), nil
-	case int64:
-		return fmt.Sprintf("%d", v), nil
-	case string:
-		if strings.TrimSpace(v) != "" {
-			return v, nil
-		}
-	}
-	return "", fmt.Errorf("Inbound listen_port missing")
 }
 
 type transportInfo struct {

@@ -203,3 +203,21 @@ type SingboxInboundMeta struct {
 	Type       string `json:"type"`
 	ListenPort int    `json:"listen_port,omitempty"`
 }
+
+type SingboxInboundUserView struct {
+	Name     string `json:"name,omitempty"`
+	UUID     string `json:"uuid,omitempty"`
+	ID       string `json:"id,omitempty"`
+	Password string `json:"password,omitempty"`
+	Flow     string `json:"flow,omitempty"`
+	Security string `json:"security,omitempty"`
+	AlterID  int    `json:"alterId,omitempty"`
+}
+
+type SingboxInboundView struct {
+	Tag        string                   `json:"tag"`
+	Type       string                   `json:"type"`
+	ListenPort int                      `json:"listen_port,omitempty"`
+	Users      []SingboxInboundUserView `json:"users,omitempty"`
+	Raw        map[string]interface{}   `json:"-"`
+}

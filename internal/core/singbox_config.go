@@ -284,150 +284,183 @@ func (c *Config) modifySingboxConfig(modifier func(*SingboxConfig) error) error 
 	return nil
 }
 
-// GetSingboxInbounds returns the list of inbounds as map objects
+func decodeSingboxInboundMeta(rawInbound json.RawMessage) (SingboxInboundMeta, error) {
+	inboundMap := map[string]interface{}{}
+	if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+		return SingboxInboundMeta{}, err
+	}
+	return parseSingboxInboundMetaFromMap(inboundMap), nil
+}
+
+func parseSingboxInboundMetaFromMap(inboundMap map[string]interface{}) SingboxInboundMeta {
+	tag, _ := inboundMap["tag"].(string)
+	inboundType, _ := inboundMap["type"].(string)
+	return SingboxInboundMeta{
+		Tag:        strings.TrimSpace(tag),
+		Type:       strings.ToLower(strings.TrimSpace(inboundType)),
+		ListenPort: parseAlterIDValue(inboundMap["listen_port"]),
+	}
+}
+
+func decodeSingboxInboundUserViews(rawUsers interface{}) []SingboxInboundUserView {
+	userInterfaces, ok := rawUsers.([]interface{})
+	if !ok || len(userInterfaces) == 0 {
+		return nil
+	}
+
+	users := make([]SingboxInboundUserView, 0, len(userInterfaces))
+	for _, rawUser := range userInterfaces {
+		userMap, ok := rawUser.(map[string]interface{})
+		if !ok || len(userMap) == 0 {
+			continue
+		}
+
+		user := SingboxInboundUserView{}
+		user.Name, _ = userMap["name"].(string)
+		user.UUID, _ = userMap["uuid"].(string)
+		user.ID, _ = userMap["id"].(string)
+		user.Password, _ = userMap["password"].(string)
+		user.Flow, _ = userMap["flow"].(string)
+		user.Security, _ = userMap["security"].(string)
+		if alterRaw, ok := userMap["alterId"]; ok {
+			user.AlterID = parseAlterIDValue(alterRaw)
+		} else if alterRaw, ok := userMap["alter_id"]; ok {
+			vmessLegacyAlterIDWarnOnce.Do(func() {
+				log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
+			})
+			user.AlterID = parseAlterIDValue(alterRaw)
+		}
+
+		users = append(users, user)
+	}
+	return users
+}
+
+func decodeSingboxInboundView(rawInbound json.RawMessage) (SingboxInboundView, error) {
+	inboundMap := map[string]interface{}{}
+	if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
+		return SingboxInboundView{}, err
+	}
+	meta := parseSingboxInboundMetaFromMap(inboundMap)
+
+	return SingboxInboundView{
+		Tag:        meta.Tag,
+		Type:       meta.Type,
+		ListenPort: meta.ListenPort,
+		Users:      decodeSingboxInboundUserViews(inboundMap["users"]),
+		Raw:        inboundMap,
+	}, nil
+}
+
+func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
+	content, err := c.readSingboxConfigLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg SingboxConfig
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		return nil, err
+	}
+
+	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]SingboxInboundView, 0, len(rawInbounds))
+	for _, rawInbound := range rawInbounds {
+		view, err := decodeSingboxInboundView(rawInbound)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+func (c *Config) GetSingboxInboundViews() ([]SingboxInboundView, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.getSingboxInboundViewsLocked()
+}
+
+func (c *Config) GetSingboxInboundView(tag string) (*SingboxInboundView, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	needle := strings.TrimSpace(tag)
+	if needle == "" {
+		return nil, fmt.Errorf("inbound tag is required")
+	}
+
+	views, err := c.getSingboxInboundViewsLocked()
+	if err != nil {
+		return nil, err
+	}
+	for i := range views {
+		if views[i].Tag == needle {
+			view := views[i]
+			return &view, nil
+		}
+	}
+
+	return nil, fmt.Errorf("inbound with tag '%s' not found", needle)
+}
+
+// GetSingboxInbounds returns the list of inbounds as map objects.
 func (c *Config) GetSingboxInbounds() ([]map[string]interface{}, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	content, err := c.readSingboxConfigLocked()
+	views, err := c.getSingboxInboundViewsLocked()
 	if err != nil {
 		return nil, err
 	}
 
-	var cfg SingboxConfig
-	if err := json.Unmarshal(content, &cfg); err != nil {
-		return nil, err
+	result := make([]map[string]interface{}, 0, len(views))
+	for _, view := range views {
+		result = append(result, view.Raw)
 	}
-
-	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
-	if err != nil {
-		return nil, err
-	}
-	if len(rawInbounds) == 0 {
-		return []map[string]interface{}{}, nil
-	}
-
-	result := make([]map[string]interface{}, 0, len(rawInbounds))
-	for _, rawInbound := range rawInbounds {
-		inboundMap := map[string]interface{}{}
-		if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
-			return nil, err
-		}
-		result = append(result, inboundMap)
-	}
-
 	return result, nil
-}
-
-func decodeSingboxInboundMeta(rawInbound json.RawMessage) (SingboxInboundMeta, error) {
-	var inboundMeta struct {
-		InboundBase
-		ListenPort int `json:"listen_port,omitempty"`
-	}
-	if err := json.Unmarshal(rawInbound, &inboundMeta); err != nil {
-		return SingboxInboundMeta{}, err
-	}
-	return SingboxInboundMeta{
-		Tag:        strings.TrimSpace(inboundMeta.Tag),
-		Type:       strings.ToLower(strings.TrimSpace(inboundMeta.Type)),
-		ListenPort: inboundMeta.ListenPort,
-	}, nil
-}
-
-func (c *Config) getSingboxInboundMetasLocked() ([]SingboxInboundMeta, error) {
-	content, err := c.readSingboxConfigLocked()
-	if err != nil {
-		return nil, err
-	}
-
-	var cfg SingboxConfig
-	if err := json.Unmarshal(content, &cfg); err != nil {
-		return nil, err
-	}
-
-	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
-	if err != nil {
-		return nil, err
-	}
-	metas := make([]SingboxInboundMeta, 0, len(rawInbounds))
-	for _, rawInbound := range rawInbounds {
-		meta, err := decodeSingboxInboundMeta(rawInbound)
-		if err != nil {
-			return nil, err
-		}
-		metas = append(metas, meta)
-	}
-	return metas, nil
 }
 
 func (c *Config) GetSingboxInboundMetas() ([]SingboxInboundMeta, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.getSingboxInboundMetasLocked()
+
+	views, err := c.getSingboxInboundViewsLocked()
+	if err != nil {
+		return nil, err
+	}
+	metas := make([]SingboxInboundMeta, 0, len(views))
+	for _, view := range views {
+		metas = append(metas, SingboxInboundMeta{
+			Tag:        view.Tag,
+			Type:       view.Type,
+			ListenPort: view.ListenPort,
+		})
+	}
+	return metas, nil
 }
 
 func (c *Config) GetSingboxInboundMeta(tag string) (*SingboxInboundMeta, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	needle := strings.TrimSpace(tag)
-	if needle == "" {
-		return nil, fmt.Errorf("inbound tag is required")
-	}
-
-	metas, err := c.getSingboxInboundMetasLocked()
+	view, err := c.GetSingboxInboundView(tag)
 	if err != nil {
 		return nil, err
 	}
-	for i := range metas {
-		if metas[i].Tag == needle {
-			meta := metas[i]
-			return &meta, nil
-		}
-	}
-
-	return nil, fmt.Errorf("inbound with tag '%s' not found", needle)
+	return &SingboxInboundMeta{
+		Tag:        view.Tag,
+		Type:       view.Type,
+		ListenPort: view.ListenPort,
+	}, nil
 }
 
 func (c *Config) GetSingboxInboundByTag(tag string) (map[string]interface{}, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	needle := strings.TrimSpace(tag)
-	if needle == "" {
-		return nil, fmt.Errorf("inbound tag is required")
-	}
-
-	content, err := c.readSingboxConfigLocked()
+	view, err := c.GetSingboxInboundView(tag)
 	if err != nil {
 		return nil, err
 	}
-
-	var cfg SingboxConfig
-	if err := json.Unmarshal(content, &cfg); err != nil {
-		return nil, err
-	}
-
-	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
-	if err != nil {
-		return nil, err
-	}
-	for _, rawInbound := range rawInbounds {
-		meta, err := decodeSingboxInboundMeta(rawInbound)
-		if err != nil {
-			return nil, err
-		}
-		if meta.Tag != needle {
-			continue
-		}
-		inboundMap := map[string]interface{}{}
-		if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
-			return nil, err
-		}
-		return inboundMap, nil
-	}
-
-	return nil, fmt.Errorf("inbound with tag '%s' not found", needle)
+	return view.Raw, nil
 }
 
 type UserInboundInfo struct {
@@ -440,61 +473,42 @@ type UserInboundInfo struct {
 
 // GetUserInbounds returns inbound tags with per-inbound flow/uuid for a user.
 func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
-	inbounds, err := c.GetSingboxInbounds()
+	inbounds, err := c.GetSingboxInboundViews()
 	if err != nil {
 		return nil, err
 	}
 
 	result := []UserInboundInfo{}
 	for _, inbound := range inbounds {
-		tag, _ := inbound["tag"].(string)
-		if tag == "" {
+		if inbound.Tag == "" {
 			continue
 		}
-		inbType := ""
-		if t, ok := inbound["type"].(string); ok {
-			inbType = strings.ToLower(strings.TrimSpace(t))
-		}
-		users, ok := inbound["users"].([]interface{})
-		if !ok || len(users) == 0 {
+		if len(inbound.Users) == 0 {
 			continue
 		}
-		for _, u := range users {
-			if um, ok := u.(map[string]interface{}); ok {
-				if um["name"] == name {
-					uuid, _ := um["uuid"].(string)
-					flow, _ := um["flow"].(string)
-					if inbType == "trojan" {
-						uuid, _ = um["password"].(string)
-						flow = ""
-					}
-					if inbType == "vmess" {
-						if uuid == "" {
-							if id, ok := um["id"].(string); ok {
-								uuid = id
-							}
-						}
-						flow = ""
-					}
-					vmessSecurity, _ := um["security"].(string)
-					vmessAlterID := 0
-					if alterRaw, ok := um["alterId"]; ok {
-						vmessAlterID = parseAlterIDValue(alterRaw)
-					} else if alterRaw, ok := um["alter_id"]; ok {
-						vmessLegacyAlterIDWarnOnce.Do(func() {
-							log.Printf("singbox vmess legacy key detected: normalizing alter_id to alterId")
-						})
-						vmessAlterID = parseAlterIDValue(alterRaw)
-					}
-					result = append(result, UserInboundInfo{
-						Tag:           tag,
-						UUID:          uuid,
-						Flow:          flow,
-						VmessSecurity: vmessSecurity,
-						VmessAlterID:  vmessAlterID,
-					})
-				}
+		for _, user := range inbound.Users {
+			if user.Name != name {
+				continue
 			}
+			uuid := user.UUID
+			flow := user.Flow
+			switch inbound.Type {
+			case "trojan":
+				uuid = user.Password
+				flow = ""
+			case "vmess":
+				if uuid == "" {
+					uuid = user.ID
+				}
+				flow = ""
+			}
+			result = append(result, UserInboundInfo{
+				Tag:           inbound.Tag,
+				UUID:          uuid,
+				Flow:          flow,
+				VmessSecurity: user.Security,
+				VmessAlterID:  user.AlterID,
+			})
 		}
 	}
 	return result, nil
