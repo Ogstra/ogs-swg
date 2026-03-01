@@ -102,6 +102,29 @@ func jsonSemanticallyEqual(left, right []byte) bool {
 	return reflect.DeepEqual(leftAny, rightAny)
 }
 
+// mergeInboundWithOriginal overlays the typed fields from typedBytes onto the
+// original raw JSON object, preserving any unknown fields present in original
+// that are not modeled by the typed struct (e.g. "x-meta").
+func mergeInboundWithOriginal(original, typedBytes json.RawMessage) (json.RawMessage, error) {
+	origMap := map[string]json.RawMessage{}
+	if err := json.Unmarshal(original, &origMap); err != nil {
+		return typedBytes, nil // fall back to typed-only output
+	}
+	typedMap := map[string]json.RawMessage{}
+	if err := json.Unmarshal(typedBytes, &typedMap); err != nil {
+		return typedBytes, nil
+	}
+	// Overwrite original keys with typed values; unknown original keys are kept.
+	for k, v := range typedMap {
+		origMap[k] = v
+	}
+	merged, err := json.Marshal(origMap)
+	if err != nil {
+		return typedBytes, nil
+	}
+	return merged, nil
+}
+
 func parseRawObject(data json.RawMessage) (map[string]json.RawMessage, error) {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 || string(trimmed) == "null" {

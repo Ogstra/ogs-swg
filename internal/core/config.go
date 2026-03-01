@@ -620,9 +620,10 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 }
 
 type managedInbounds struct {
-	rawList  []json.RawMessage
-	indices  []int
-	inbounds []ManagedInbound
+	rawList   []json.RawMessage
+	indices   []int
+	inbounds  []ManagedInbound
+	originals []json.RawMessage // original raw bytes for each managed inbound (parallel to indices/inbounds)
 }
 
 func (m *managedInbounds) commit(cfg *SingboxConfig) error {
@@ -633,6 +634,14 @@ func (m *managedInbounds) commit(cfg *SingboxConfig) error {
 		data, err := json.Marshal(m.inbounds[i])
 		if err != nil {
 			return err
+		}
+		// Merge typed output back onto the original raw object so that unknown
+		// fields (e.g. "x-meta") that the typed struct does not model are preserved.
+		if i < len(m.originals) && len(m.originals[i]) > 0 {
+			merged, mergeErr := mergeInboundWithOriginal(m.originals[i], data)
+			if mergeErr == nil {
+				data = merged
+			}
 		}
 		m.rawList[idx] = data
 	}
@@ -691,9 +700,10 @@ func (c *Config) findManagedInbounds(cfg *SingboxConfig) (*managedInbounds, erro
 	}
 
 	result := &managedInbounds{
-		rawList:  rawList,
-		indices:  make([]int, 0, len(rawList)),
-		inbounds: make([]ManagedInbound, 0, len(rawList)),
+		rawList:   rawList,
+		indices:   make([]int, 0, len(rawList)),
+		inbounds:  make([]ManagedInbound, 0, len(rawList)),
+		originals: make([]json.RawMessage, 0, len(rawList)),
 	}
 	for i, rawInbound := range rawList {
 		var base InboundBase
@@ -713,6 +723,7 @@ func (c *Config) findManagedInbounds(cfg *SingboxConfig) (*managedInbounds, erro
 		}
 		result.indices = append(result.indices, i)
 		result.inbounds = append(result.inbounds, inbound)
+		result.originals = append(result.originals, append(json.RawMessage(nil), rawInbound...))
 	}
 
 	return result, nil
