@@ -68,6 +68,52 @@ type TrojanInbound struct {
 	Transport json.RawMessage `json:"transport,omitempty"`
 }
 
+type RealityHandshake struct {
+	Server     string `json:"server,omitempty"`
+	ServerPort int    `json:"server_port,omitempty"`
+}
+
+type RealityConfig struct {
+	Enabled    bool             `json:"enabled,omitempty"`
+	Handshake  RealityHandshake `json:"handshake,omitempty"`
+	PrivateKey string           `json:"private_key,omitempty"`
+	PublicKey  string           `json:"public_key,omitempty"`
+	ShortIDs   []string         `json:"short_id,omitempty"`
+}
+
+func (r *RealityConfig) UnmarshalJSON(data []byte) error {
+	type alias RealityConfig
+	var tmp struct {
+		alias
+		RawShortID json.RawMessage `json:"short_id,omitempty"`
+	}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	*r = RealityConfig(tmp.alias)
+	if len(tmp.RawShortID) == 0 || string(tmp.RawShortID) == "null" {
+		return nil
+	}
+	var arr []string
+	if err := json.Unmarshal(tmp.RawShortID, &arr); err == nil {
+		r.ShortIDs = arr
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(tmp.RawShortID, &s); err == nil {
+		r.ShortIDs = []string{s}
+		return nil
+	}
+	return nil
+}
+
+type TLSConfig struct {
+	Enabled         bool           `json:"enabled,omitempty"`
+	ServerName      string         `json:"server_name,omitempty"`
+	CertificatePath string         `json:"certificate_path,omitempty"`
+	Reality         *RealityConfig `json:"reality,omitempty"`
+}
+
 type ManagedInbound interface {
 	Base() InboundBase
 	UserNames() []string
@@ -219,5 +265,6 @@ type SingboxInboundView struct {
 	Type       string                   `json:"type"`
 	ListenPort int                      `json:"listen_port,omitempty"`
 	Users      []SingboxInboundUserView `json:"users,omitempty"`
+	TLS        *TLSConfig               `json:"-"`
 	Raw        map[string]interface{}   `json:"-"`
 }
