@@ -135,7 +135,7 @@ export function RawEditorPanel({
                         className="w-full h-9 bg-slate-950 border border-slate-700 rounded-lg pl-3 pr-20 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
                         ref={searchInputRef}
                     />
-                    <div className="absolute right-1 top-1/2 -translate-y-1/2 flex gap-0.5">
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-0.5">
                         <button
                             onClick={() => performFind('prev')}
                             className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white flex items-center justify-center leading-none"
@@ -162,13 +162,14 @@ export function RawEditorPanel({
                 <button
                     onClick={onSave}
                     disabled={!canWrite || !hasChanges || saving}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg shadow-lg font-medium text-sm transition-all ${!canWrite || !hasChanges || saving
+                    className={`flex items-center justify-center gap-2 w-9 h-9 p-0 sm:w-auto sm:h-auto sm:px-4 sm:py-2 rounded-lg shadow-lg font-medium text-sm transition-all ${!canWrite || !hasChanges || saving
                         ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20'
                         }`}
                 >
                     <Save size={16} />
-                    {saving ? 'Saving...' : saveLabel}
+                    <span className="sm:hidden sr-only">{saving ? 'Saving...' : saveLabel}</span>
+                    <span className="hidden sm:inline">{saving ? 'Saving...' : saveLabel}</span>
                 </button>
             </div>
 

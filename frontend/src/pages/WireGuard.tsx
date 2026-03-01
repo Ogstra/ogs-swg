@@ -316,9 +316,9 @@ export default function WireGuard() {
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">WireGuard</h1>
                 </div>

@@ -6,6 +6,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
     size?: 'sm' | 'md' | 'lg' | 'icon'
     isLoading?: boolean
     icon?: React.ReactNode
+    iconNoGap?: boolean
 }
 
 export function Button({
@@ -15,6 +16,7 @@ export function Button({
     size = 'md',
     isLoading = false,
     icon,
+    iconNoGap = false,
     disabled,
     ...props
 }: ButtonProps) {
@@ -44,8 +46,8 @@ export function Button({
             disabled={disabled || isLoading}
             {...props}
         >
-            {isLoading && <RotateCw className={`${children ? 'mr-2' : ''} h-4 w-4 animate-spin`} />}
-            {!isLoading && icon && <span className={`${children ? 'mr-2' : ''}`}>{icon}</span>}
+            {isLoading && <RotateCw className={`${children && !iconNoGap ? 'mr-2' : ''} h-4 w-4 animate-spin`} />}
+            {!isLoading && icon && <span className={`${children && !iconNoGap ? 'mr-2' : ''}`}>{icon}</span>}
             {children}
         </button>
     )

@@ -621,7 +621,7 @@ export default function UserManagement() {
 
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Pending Changes Banner */}
             {singboxPendingChanges && (
                 <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-4 flex items-center justify-between">
@@ -644,7 +644,7 @@ export default function UserManagement() {
                 </div>
             )}
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">User Management</h1>
                 </div>
@@ -1265,7 +1265,7 @@ export default function UserManagement() {
                 }
             >
                 <div className="space-y-4 modal-form-uniform">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Inbound (Required)</label>
                             <select
@@ -1291,7 +1291,7 @@ export default function UserManagement() {
                             </select>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Prefix</label>
                             <input
@@ -1313,8 +1313,8 @@ export default function UserManagement() {
                             />
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <div className="sm:col-span-1">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                        <div className="col-span-1 sm:col-span-1">
                             <label className="block text-sm font-medium text-slate-400 mb-1">Count</label>
                             <input
                                 type="number"
@@ -1324,7 +1324,7 @@ export default function UserManagement() {
                                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                             />
                         </div>
-                        <div className="sm:col-span-1">
+                        <div className="col-span-1 sm:col-span-1">
                             <label className="block text-sm font-medium text-slate-400 mb-1">Start Index</label>
                             <input
                                 type="number"
@@ -1335,7 +1335,7 @@ export default function UserManagement() {
                                 disabled={bulkConfig.mode !== 'sequential'}
                             />
                         </div>
-                        <div className="sm:col-span-2">
+                        <div className="col-span-2 sm:col-span-2">
                             <label className="block text-sm font-medium text-slate-400 mb-1">Pattern</label>
                             <select
                                 value={bulkConfig.mode}
@@ -1347,7 +1347,7 @@ export default function UserManagement() {
                             </select>
                         </div>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Quota (GB)</label>
                             <input
