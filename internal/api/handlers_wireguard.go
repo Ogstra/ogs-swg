@@ -56,31 +56,25 @@ func (s *Server) wireGuardConfigDir() string {
 	return filepath.Dir(basePath)
 }
 
-func (s *Server) scopedWireGuardServerForRequest(r *http.Request) (*Server, string, error) {
+func (s *Server) scopedWireGuardInterfaceForRequest(r *http.Request) (string, error) {
 	iface := strings.TrimSpace(r.PathValue("iface"))
 	if !wireGuardInterfaceParamPattern.MatchString(iface) {
-		return nil, "", fmt.Errorf("invalid wireguard interface name")
+		return "", fmt.Errorf("invalid wireguard interface name")
 	}
 
-	path, err := s.wireGuardConfigPathForIface(iface)
-	if err != nil {
-		return nil, "", fmt.Errorf("invalid wireguard interface name")
+	if _, err := s.wireGuardConfigPathForIface(iface); err != nil {
+		return "", fmt.Errorf("invalid wireguard interface name")
 	}
-
-	cfgCopy := *s.config
-	cfgCopy.WireGuardConfigPath = path
-	scoped := *s
-	scoped.config = &cfgCopy
-	return &scoped, iface, nil
+	return iface, nil
 }
 
 func (s *Server) runScopedWireGuardHandler(w http.ResponseWriter, r *http.Request, h func(*Server, http.ResponseWriter, *http.Request)) {
-	scoped, _, err := s.scopedWireGuardServerForRequest(r)
+	iface, err := s.scopedWireGuardInterfaceForRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	h(scoped, w, r)
+	h(s, w, r.WithContext(withWireGuardInterfaceContext(r.Context(), iface)))
 }
 
 func (s *Server) handleListWireGuardInterfaces(w http.ResponseWriter, r *http.Request) {
@@ -831,10 +825,16 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	cfgPath, err := s.wireGuardConfigPathForContext(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	redact := shouldRedactWireGuardReadOnly(r)
 
 	if s.executor != nil {
-		content, err := s.executor.ReadConfig(r.Context(), s.config.WireGuardConfigPath)
+		content, err := s.executor.ReadConfig(r.Context(), cfgPath)
 		if err != nil {
 			if isNotFoundErr(err) {
 				w.Header().Set("Content-Type", "text/plain")
@@ -855,7 +855,7 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 	}
 
 	// Fallback/Legacy logic if executor is somehow nil (impossible with new init)
-	content, err := os.ReadFile(s.config.WireGuardConfigPath)
+	content, err := os.ReadFile(cfgPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			w.Header().Set("Content-Type", "text/plain")
@@ -878,6 +878,12 @@ func (s *Server) handleUpdateWireGuardConfig(w http.ResponseWriter, r *http.Requ
 	if !s.requireWireGuard(w) {
 		return
 	}
+	cfgPath, err := s.wireGuardConfigPathForContext(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	content, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read body: "+err.Error(), http.StatusBadRequest)
@@ -885,12 +891,12 @@ func (s *Server) handleUpdateWireGuardConfig(w http.ResponseWriter, r *http.Requ
 	}
 
 	if s.executor != nil {
-		if err := s.executor.WriteConfig(r.Context(), s.config.WireGuardConfigPath, content, 0644); err != nil {
+		if err := s.executor.WriteConfig(r.Context(), cfgPath, content, 0644); err != nil {
 			http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	} else {
-		if err := os.WriteFile(s.config.WireGuardConfigPath, content, 0644); err != nil {
+		if err := os.WriteFile(cfgPath, content, 0644); err != nil {
 			http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -951,7 +957,7 @@ func (s *Server) handleUpdateWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	iface := defaultWireGuardInterfaceName(s.config.WireGuardConfigPath)
+	iface := s.wireGuardInterfaceForContext(r.Context())
 	if !s.syncWireGuardConfigForIface(r.Context(), iface, beforeIface, wgConfig.Interface, wgConfig) {
 		s.markWireGuardPending()
 	}

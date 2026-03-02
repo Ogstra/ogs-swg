@@ -112,7 +112,11 @@ func (s *Server) runWireGuardSample() {
 }
 
 func (s *Server) syncWireGuardConfig(wgConfig *core.WireGuardConfig) bool {
-	iface := defaultWireGuardInterfaceName(s.config.WireGuardConfigPath)
+	path := s.config.WireGuardConfigPath
+	if wgConfig != nil && strings.TrimSpace(wgConfig.Path) != "" {
+		path = wgConfig.Path
+	}
+	iface := defaultWireGuardInterfaceName(path)
 	after := core.WireGuardInterface{}
 	if wgConfig != nil {
 		after = wgConfig.Interface
