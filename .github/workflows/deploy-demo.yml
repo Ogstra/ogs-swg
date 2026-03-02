@@ -114,7 +114,6 @@ jobs:
             docker pull "$IMAGE"
             docker tag "$IMAGE" ogs-swg:demo
 
-            export COMPOSE_IGNORE_ORPHANS=1
             docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --no-build --remove-orphans
 
             docker image prune -f >/dev/null 2>&1 || true
