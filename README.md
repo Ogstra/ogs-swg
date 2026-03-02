@@ -2,7 +2,13 @@
 
 Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
-![Dashboard Screenshot](https://github.com/user-attachments/assets/db59dedb-9f6e-4a70-8421-756fb7156a12)
+<img width="3024" height="1714" alt="image" src="https://github.com/user-attachments/assets/9fca6d02-1f95-406b-a59e-0127b2c693ae" />
+
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://swg-demo.ogstra.com/)
+
+## Live Demo
+
+A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstra.com/)** — no login required.
 
 ## Tech Stack
 *   **Runtime**: Go 1.24
@@ -15,19 +21,20 @@ Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** bui
 
 ## Features
 
-| Protocol | Security | Transport |
-|----------|----------|-----------|
-| VLESS    | Reality / None | TCP |
-| VMess    | TLS / None | TCP · WebSocket |
-| Trojan   | TLS | TCP |
-| WireGuard | WireGuard | UDP |
+|           | Reality | TLS | None | TCP | WebSocket | HTTP | gRPC | HTTP Upgrade | UDP |
+|-----------|:-------:|:---:|:----:|:---:|:---------:|:----:|:----:|:------------:|:---:|
+| VLESS     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| VMess     | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Trojan    | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| WireGuard | — | — | — | — | — | — | — | — | ✓ |
 
-*   **User Management**: create, modify, and delete users with multi-inbound support.
-*   **Traffic Monitoring**: real-time stats for Sing-box users and WireGuard peers.
-*   **Service Control**: restart/stop services and reload configs from the UI.
-*   **Logs**: view and filter system logs (Sing-box/Systemd).
-*   **Sysctl Management**: view and edit allowed kernel parameters via whitelist.
-*   **Raw Configuration**: direct editing of underlying JSON configurations (Experimental).
+*   **User Management**: create, edit, and delete Sing-box users per inbound; supports multiple inbound assignments, traffic limits, and expiry dates.
+*   **Traffic Monitoring**: per-user download/upload stats for Sing-box inbounds; per-peer rx/tx stats across all WireGuard interfaces.
+*   **WireGuard Interfaces**: create, configure, enable/disable, and delete WireGuard interfaces; raw `.conf` editing per interface.
+*   **Service Control**: restart/stop Sing-box and WireGuard services and reload configurations without leaving the UI.
+*   **Logs**: tail and filter Sing-box access logs and systemd journal entries in real time.
+*   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.
+*   **Raw Configuration**: full JSON editor for the Sing-box config file (Experimental).
 
 ## Execution Modes
 
