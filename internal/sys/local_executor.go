@@ -6,8 +6,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -25,25 +27,89 @@ var AllowedSysctlKeys = map[string]bool{
 	"net.ipv6.conf.all.accept_redirects": true,
 }
 
-type LocalExecutor struct{}
+type LocalExecutor struct {
+	wireGuardTestMode  bool
+	wireGuardConfigDir string
+	wireGuardMu        sync.RWMutex
+	wireGuardEnabled   map[string]bool
+}
 
-func NewLocalExecutor() *LocalExecutor {
-	return &LocalExecutor{}
+type LocalExecutorOption func(*LocalExecutor)
+
+func WithWireGuardTestMode(enabled bool) LocalExecutorOption {
+	return func(e *LocalExecutor) {
+		e.wireGuardTestMode = enabled
+	}
+}
+
+func WithWireGuardConfigDir(dir string) LocalExecutorOption {
+	return func(e *LocalExecutor) {
+		trimmed := strings.TrimSpace(dir)
+		if trimmed != "" {
+			e.wireGuardConfigDir = filepath.Clean(trimmed)
+		}
+	}
+}
+
+func NewLocalExecutor(opts ...LocalExecutorOption) *LocalExecutor {
+	executor := &LocalExecutor{
+		wireGuardConfigDir: "/etc/wireguard",
+		wireGuardEnabled:   make(map[string]bool),
+	}
+	for _, opt := range opts {
+		opt(executor)
+	}
+	return executor
+}
+
+func (e *LocalExecutor) isWireGuardTestMode() bool {
+	return e.wireGuardTestMode
 }
 
 func (e *LocalExecutor) RestartService(ctx context.Context, name string) error {
+	if e.wireGuardTestMode && isWireGuardServiceName(name) {
+		return nil
+	}
 	return dbusServiceAction(ctx, "restart", name)
 }
 
 func (e *LocalExecutor) StartService(ctx context.Context, name string) error {
+	if e.wireGuardTestMode && isWireGuardServiceName(name) {
+		configured, err := e.listConfiguredInterfacesFromDisk()
+		if err != nil {
+			return err
+		}
+		for _, iface := range configured {
+			e.setInterfaceEnabled(iface, true)
+		}
+		return nil
+	}
 	return dbusServiceAction(ctx, "start", name)
 }
 
 func (e *LocalExecutor) StopService(ctx context.Context, name string) error {
+	if e.wireGuardTestMode && isWireGuardServiceName(name) {
+		e.wireGuardMu.Lock()
+		for iface := range e.wireGuardEnabled {
+			e.wireGuardEnabled[iface] = false
+		}
+		e.wireGuardMu.Unlock()
+		return nil
+	}
 	return dbusServiceAction(ctx, "stop", name)
 }
 
 func (e *LocalExecutor) IsServiceActive(ctx context.Context, name string) (bool, error) {
+	if e.wireGuardTestMode {
+		if strings.HasPrefix(name, "wg-quick@") {
+			iface := strings.TrimPrefix(name, "wg-quick@")
+			return e.isInterfaceEnabled(iface), nil
+		}
+		if isWireGuardServiceName(name) {
+			return len(e.activeTestInterfaces()) > 0, nil
+		}
+	}
+
 	conn, err := dbus.NewSystemConnectionContext(ctx)
 	if err != nil {
 		return false, fmt.Errorf("D-Bus connect: %v", err)
@@ -60,6 +126,9 @@ func (e *LocalExecutor) IsServiceActive(ctx context.Context, name string) (bool,
 }
 
 func (e *LocalExecutor) WriteConfig(_ context.Context, path string, content []byte, fileMode os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	tmpPath := path + ".tmp"
 	if err := os.WriteFile(tmpPath, content, fileMode); err != nil {
 		return err
@@ -113,6 +182,9 @@ func (e *LocalExecutor) Dial(ctx context.Context, network, addr string) (net.Con
 
 func (e *LocalExecutor) GetWireGuardStats(_ context.Context) (map[string]core.PeerStats, error) {
 	stats := make(map[string]core.PeerStats)
+	if e.wireGuardTestMode {
+		return stats, nil
+	}
 
 	c, err := wgctrl.New()
 	if err != nil {
@@ -150,10 +222,17 @@ func (e *LocalExecutor) GetWireGuardStats(_ context.Context) (map[string]core.Pe
 }
 
 func (e *LocalExecutor) RestartWireGuard(ctx context.Context, interfaceName string) error {
+	if e.wireGuardTestMode {
+		e.setInterfaceEnabled(interfaceName, true)
+		return nil
+	}
 	return dbusServiceAction(ctx, "restart", resolveUnitName("wireguard", interfaceName))
 }
 
 func (e *LocalExecutor) ListWireGuardInterfaces(ctx context.Context) ([]string, error) {
+	if e.wireGuardTestMode {
+		return e.activeTestInterfaces(), nil
+	}
 	out, err := exec.CommandContext(ctx, "wg", "show", "interfaces").CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("wg show interfaces failed: %v, output: %s", err, string(out))
@@ -162,15 +241,83 @@ func (e *LocalExecutor) ListWireGuardInterfaces(ctx context.Context) ([]string, 
 }
 
 func (e *LocalExecutor) EnableWireGuardInterface(ctx context.Context, interfaceName string) error {
+	if e.wireGuardTestMode {
+		e.setInterfaceEnabled(interfaceName, true)
+		return nil
+	}
 	return dbusServiceAction(ctx, "start", resolveUnitName("wireguard", interfaceName))
 }
 
 func (e *LocalExecutor) DisableWireGuardInterface(ctx context.Context, interfaceName string) error {
+	if e.wireGuardTestMode {
+		e.setInterfaceEnabled(interfaceName, false)
+		return nil
+	}
 	return dbusServiceAction(ctx, "stop", resolveUnitName("wireguard", interfaceName))
 }
 
 func (e *LocalExecutor) Close() error {
 	return nil
+}
+
+func (e *LocalExecutor) setInterfaceEnabled(interfaceName string, enabled bool) {
+	iface := normalizeWireGuardInterfaceName(interfaceName)
+	e.wireGuardMu.Lock()
+	e.wireGuardEnabled[iface] = enabled
+	e.wireGuardMu.Unlock()
+}
+
+func (e *LocalExecutor) isInterfaceEnabled(interfaceName string) bool {
+	iface := normalizeWireGuardInterfaceName(interfaceName)
+	e.wireGuardMu.RLock()
+	defer e.wireGuardMu.RUnlock()
+	return e.wireGuardEnabled[iface]
+}
+
+func (e *LocalExecutor) activeTestInterfaces() []string {
+	configured, err := e.listConfiguredInterfacesFromDisk()
+	if err != nil {
+		return []string{}
+	}
+	e.wireGuardMu.RLock()
+	defer e.wireGuardMu.RUnlock()
+	active := make([]string, 0, len(configured))
+	for _, iface := range configured {
+		if e.wireGuardEnabled[iface] {
+			active = append(active, iface)
+		}
+	}
+	sort.Strings(active)
+	return active
+}
+
+func (e *LocalExecutor) listConfiguredInterfacesFromDisk() ([]string, error) {
+	entries, err := os.ReadDir(e.wireGuardConfigDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("read wireguard config dir: %w", err)
+	}
+
+	names := make([]string, 0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".conf") {
+			continue
+		}
+		names = append(names, normalizeWireGuardInterfaceName(name))
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func isWireGuardServiceName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	return trimmed == "wireguard" || strings.HasPrefix(trimmed, "wg-quick@")
 }
 
 // --- Helpers ---

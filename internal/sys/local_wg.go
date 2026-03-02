@@ -8,6 +8,10 @@ import (
 )
 
 func (e *LocalExecutor) SyncWireGuard(ctx context.Context, interfaceName string, configContent []byte) error {
+	if e.isWireGuardTestMode() {
+		return nil
+	}
+
 	tmpFile, err := os.CreateTemp("", "wg-sync-*.conf")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %v", err)

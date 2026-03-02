@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { api } from '../services/api'
-import { useAuth } from '../context/AuthContext'
-import { RawEditorPanel } from '../components/raw/RawEditorPanel'
+import { api } from '../../services/api'
+import { useAuth } from '../../context/AuthContext'
+import { RawEditorPanel } from '../../components/raw/RawEditorPanel'
 
 type TabId = 'raw-singbox' | 'raw-wireguard'
 
@@ -19,6 +19,15 @@ export default function RawConfig() {
     const [wireguardConfig, setWireguardConfig] = useState('')
     const [originalSingboxConfig, setOriginalSingboxConfig] = useState('')
     const [originalWireguardConfig, setOriginalWireguardConfig] = useState('')
+    const [wireguardInterfaces, setWireguardInterfaces] = useState<string[]>([])
+    const [activeWireguardInterface, setActiveWireguardInterface] = useState('')
+
+    const resolveActiveWireguardInterface = (available: string[], preferred: string) => {
+        if (preferred && available.includes(preferred)) {
+            return preferred
+        }
+        return available[0] || ''
+    }
 
     const normalizeJson = (value: string) => {
         try {
@@ -50,9 +59,14 @@ export default function RawConfig() {
                 setSingboxConfig(normalized)
                 setOriginalSingboxConfig(normalized)
             } else if (canReadWireguard) {
-                const content = await api.getWireGuardConfig()
-                setWireguardConfig(content)
-                setOriginalWireguardConfig(content)
+                if (!activeWireguardInterface) {
+                    setWireguardConfig('')
+                    setOriginalWireguardConfig('')
+                } else {
+                    const content = await api.getWireGuardConfigForInterface(activeWireguardInterface)
+                    setWireguardConfig(content)
+                    setOriginalWireguardConfig(content)
+                }
             }
             await loadBackupMeta()
         } catch (err) {
@@ -78,14 +92,26 @@ export default function RawConfig() {
 
             if (canReadWireguard) {
                 try {
-                    const wgRaw = await api.getWireGuardConfig()
-                    setWireguardConfig(wgRaw)
-                    setOriginalWireguardConfig(wgRaw)
+                    const ifaces = await api.getWireGuardInterfaces()
+                    const normalizedIfaces = Array.isArray(ifaces) ? ifaces : []
+                    setWireguardInterfaces(normalizedIfaces)
+                    const selectedIface = resolveActiveWireguardInterface(normalizedIfaces, activeWireguardInterface)
+                    setActiveWireguardInterface(selectedIface)
+                    if (selectedIface) {
+                        const wgRaw = await api.getWireGuardConfigForInterface(selectedIface)
+                        setWireguardConfig(wgRaw)
+                        setOriginalWireguardConfig(wgRaw)
+                    } else {
+                        setWireguardConfig('')
+                        setOriginalWireguardConfig('')
+                    }
                 } catch (err) {
                     console.error('Failed to load WireGuard config', err)
                     // Keep previous WG state on errors.
                 }
             } else {
+                setWireguardInterfaces([])
+                setActiveWireguardInterface('')
                 setWireguardConfig('')
                 setOriginalWireguardConfig('')
             }
@@ -108,6 +134,18 @@ export default function RawConfig() {
         }
     }, [canReadWireguard, activeTab])
 
+    useEffect(() => {
+        if (activeTab !== 'raw-wireguard' || !canReadWireguard) {
+            return
+        }
+        if (!activeWireguardInterface) {
+            setWireguardConfig('')
+            setOriginalWireguardConfig('')
+            return
+        }
+        void loadCurrentConfig()
+    }, [activeTab, canReadWireguard, activeWireguardInterface])
+
     const handleSave = async () => {
         setSaving(true)
         try {
@@ -116,7 +154,11 @@ export default function RawConfig() {
                 await api.updateSingboxConfig(singboxConfig)
                 setOriginalSingboxConfig(singboxConfig)
             } else if (canReadWireguard) {
-                await api.updateWireGuardConfig(wireguardConfig)
+                if (!activeWireguardInterface) {
+                    alert('Select a WireGuard interface first')
+                    return
+                }
+                await api.updateWireGuardConfigForInterface(activeWireguardInterface, wireguardConfig)
                 setOriginalWireguardConfig(wireguardConfig)
             }
             alert('Configuration saved successfully')
@@ -165,6 +207,7 @@ export default function RawConfig() {
     const currentOriginal = activeTab === 'raw-singbox' ? originalSingboxConfig : originalWireguardConfig
     const currentLastBackup = activeTab === 'raw-singbox' ? lastBackup.singbox : lastBackup.wireguard
     const canWriteCurrent = activeTab === 'raw-singbox' ? canWriteConfig : canWriteWireguard
+    const mobileTabWidthClass = canReadWireguard ? 'w-1/2 sm:w-auto' : 'w-full sm:w-auto'
 
     if (!canReadConfig) {
         return (
@@ -186,16 +229,16 @@ export default function RawConfig() {
                 <div className="flex border-b border-slate-800 bg-slate-950/50">
                     <button
                         onClick={() => setActiveTab('raw-singbox')}
-                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'raw-singbox' ? 'border-blue-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                        className={`${mobileTabWidthClass} px-6 py-3 text-center sm:text-left text-sm font-medium transition-colors border-b-2 ${activeTab === 'raw-singbox' ? 'border-blue-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
                     >
-                        sing-box (config.json)
+                        sing-box
                     </button>
                     {canReadWireguard && (
                         <button
                             onClick={() => setActiveTab('raw-wireguard')}
-                            className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 ${activeTab === 'raw-wireguard' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                            className={`${mobileTabWidthClass} px-6 py-3 text-center sm:text-left text-sm font-medium transition-colors border-b-2 ${activeTab === 'raw-wireguard' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
                         >
-                            WireGuard (wg0.conf)
+                            WireGuard
                         </button>
                     )}
                 </div>
@@ -216,6 +259,46 @@ export default function RawConfig() {
                         language={activeTab === 'raw-singbox' ? 'json' : 'ini'}
                         textareaId={activeTab === 'raw-singbox' ? 'raw-editor-singbox' : 'raw-editor-wireguard'}
                         saveLabel="Save Changes"
+                        bottomBarExtraDesktop={activeTab === 'raw-wireguard' && canReadWireguard ? (
+                            <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                                    Interface
+                                </span>
+                                <select
+                                    value={activeWireguardInterface}
+                                    onChange={e => setActiveWireguardInterface(e.target.value)}
+                                    className="select-field h-[38px] min-w-[120px] max-w-[180px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors font-mono"
+                                >
+                                    {wireguardInterfaces.length === 0 ? (
+                                        <option value="">No interfaces</option>
+                                    ) : (
+                                        wireguardInterfaces.map(iface => (
+                                            <option key={iface} value={iface}>
+                                                {iface}
+                                            </option>
+                                        ))
+                                    )}
+                                </select>
+                            </div>
+                        ) : undefined}
+                        bottomBarExtraMobile={activeTab === 'raw-wireguard' && canReadWireguard ? (
+                            <select
+                                value={activeWireguardInterface}
+                                onChange={e => setActiveWireguardInterface(e.target.value)}
+                                className="select-field w-full h-[38px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors font-mono"
+                                aria-label="WireGuard interface"
+                            >
+                                {wireguardInterfaces.length === 0 ? (
+                                    <option value="">No interfaces</option>
+                                ) : (
+                                    wireguardInterfaces.map(iface => (
+                                        <option key={iface} value={iface}>
+                                            {iface}
+                                        </option>
+                                    ))
+                                )}
+                            </select>
+                        ) : undefined}
                     />
                 </div>
             </div>

@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { api, type PanelUserInfo, type CreatePanelUserRequest } from '../services/api';
-import { useToast } from '../context/ToastContext';
-import { useAuth, type PanelUserPermissions } from '../context/AuthContext';
+import { api, type PanelUserInfo, type CreatePanelUserRequest } from '../../../services/api';
+import { useToast } from '../../../context/ToastContext';
+import { useAuth, type PanelUserPermissions } from '../../../context/AuthContext';
 import { Plus, Trash2, RefreshCw, Edit } from 'lucide-react';
-import { ActionIconButton } from '../components/ui/ActionIconButton';
-import { Modal } from '../components/ui/Modal';
-import { Button } from '../components/ui/Button';
+import { ActionIconButton } from '../../../components/ui/ActionIconButton';
+import { Modal } from '../../../components/ui/Modal';
+import { Button } from '../../../components/ui/Button';
 
 const PERMISSION_GROUPS: {
     id: string

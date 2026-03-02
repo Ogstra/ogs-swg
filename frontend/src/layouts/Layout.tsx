@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { useLocation, Link, Outlet, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../services/api';
 import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson } from 'lucide-react';
 
 export const Layout: React.FC = () => {
@@ -10,6 +12,17 @@ export const Layout: React.FC = () => {
     const { logout, permissions } = useAuth();
 
     const isActive = (path: string) => location.pathname === path;
+    const wireGuardQueryIface = new URLSearchParams(location.search).get('iface') || '';
+    const wireGuardActive = location.pathname === '/wireguard';
+
+    const interfacesQuery = useQuery({
+        queryKey: ['layout-wireguard-interfaces'],
+        queryFn: () => api.getWireGuardInterfaces(),
+        enabled: !!permissions?.can_read_wireguard,
+        refetchInterval: 30_000,
+        placeholderData: previousData => previousData,
+    });
+    const wireGuardInterfaces = Array.isArray(interfacesQuery.data) ? (interfacesQuery.data as string[]) : [];
 
     const allNavItems = [
         { path: '/', label: 'Dashboard', icon: LayoutDashboard, permission: null },
@@ -55,22 +68,51 @@ export const Layout: React.FC = () => {
                 </div>
 
                 <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
-                    {navItems.map(item => (
-                        <Link
-                            key={item.path}
-                            to={item.path}
-                            onClick={() => setSidebarOpen(false)}
-                            className={`
-                                w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors
-                                ${isActive(item.path)
-                                    ? 'bg-slate-800 text-white'
-                                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}
-                            `}
-                        >
-                            <item.icon size={18} className={isActive(item.path) ? 'text-blue-500' : 'text-slate-400'} />
-                            {item.label}
-                        </Link>
-                    ))}
+                    {navItems.map(item => {
+                        const itemActive = isActive(item.path);
+                        const isWireGuardItem = item.path === '/wireguard';
+
+                        return (
+                            <div key={item.path} className="space-y-1">
+                                <Link
+                                    to={item.path}
+                                    onClick={() => setSidebarOpen(false)}
+                                    className={`
+                                        w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors
+                                        ${itemActive
+                                            ? 'bg-slate-800 text-white'
+                                            : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}
+                                    `}
+                                >
+                                    <item.icon size={18} className={itemActive ? 'text-blue-500' : 'text-slate-400'} />
+                                    {item.label}
+                                </Link>
+
+                                {isWireGuardItem && wireGuardInterfaces.length > 0 && (
+                                    <div className="ml-6 space-y-0.5">
+                                        {wireGuardInterfaces.map(iface => {
+                                            const ifaceActive = wireGuardActive && wireGuardQueryIface === iface;
+                                            return (
+                                                <Link
+                                                    key={iface}
+                                                    to={`/wireguard?iface=${encodeURIComponent(iface)}`}
+                                                    onClick={() => setSidebarOpen(false)}
+                                                    className={`
+                                                        w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors
+                                                        ${ifaceActive
+                                                            ? 'bg-slate-800/60 text-white'
+                                                            : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/40'}
+                                                    `}
+                                                >
+                                                    <span className="font-mono">{iface}</span>
+                                                </Link>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </nav>
                 <div className="pb-2 pr-2 text-right text-[10px] text-slate-500">
                     {commitLabel}

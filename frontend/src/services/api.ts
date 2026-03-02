@@ -382,6 +382,21 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update interface');
     },
+    getWireGuardConfigForInterface: async (iface: string): Promise<string> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config`, {
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to fetch WireGuard raw config');
+        return res.text();
+    },
+    updateWireGuardConfigForInterface: async (iface: string, config: string): Promise<void> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config`, {
+            method: 'PUT',
+            headers: buildHeaders('text/plain'),
+            body: config
+        });
+        await handleResponse(res, 'Failed to update WireGuard raw config');
+    },
     updateWireGuardPeer: async (publicKey: string, config: any): Promise<void> => {
         const res = await fetch(`/api/wireguard/peer?public_key=${encodeURIComponent(publicKey)}`, {
             method: 'PUT',
@@ -469,6 +484,10 @@ export const api = {
     disableWireGuardInterface: async (iface: string): Promise<void> => {
         const res = await fetch(`${wireGuardInterfaceBase(iface)}/disable`, { method: 'POST', headers: buildHeaders() });
         await handleResponse(res, 'Failed to disable WireGuard interface');
+    },
+    deleteWireGuardInterface: async (iface: string): Promise<void> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}`, { method: 'DELETE', headers: buildHeaders() });
+        await handleResponse(res, 'Failed to delete WireGuard interface');
     },
 
     // Service Control

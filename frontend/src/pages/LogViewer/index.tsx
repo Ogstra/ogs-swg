@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { api } from '../services/api'
+import { api } from '../../services/api'
 import { Terminal, RefreshCw, Search } from 'lucide-react'
 
 export default function LogViewer() {
@@ -94,14 +94,24 @@ export default function LogViewer() {
                     </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 w-full sm:w-auto flex-nowrap">
-                    {viewMode === 'tail' && (
+                    {viewMode === 'tail' ? (
                         <div className="flex items-center gap-2 shrink-0">
                             <div className="flex items-center gap-2">
                                 <span className="hidden sm:inline text-slate-500 text-xs font-medium uppercase tracking-wider">Lines</span>
                                 <select
                                     value={tailLimit}
                                     onChange={e => setTailLimit(parseInt(e.target.value))}
-                                    className="select-field h-[38px] w-[68px] sm:min-w-[82px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field h-[38px] w-[100px] sm:hidden bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    aria-label="Lines"
+                                >
+                                    <option value={50}>50 lines</option>
+                                    <option value={100}>100 lines</option>
+                                    <option value={200}>200 lines</option>
+                                </select>
+                                <select
+                                    value={tailLimit}
+                                    onChange={e => setTailLimit(parseInt(e.target.value))}
+                                    className="select-field hidden sm:block h-[38px] w-[65px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                     aria-label="Lines"
                                 >
                                     <option value={50}>50</option>
@@ -114,7 +124,18 @@ export default function LogViewer() {
                                 <select
                                     value={refreshInterval}
                                     onChange={e => setRefreshInterval(parseInt(e.target.value))}
-                                    className="select-field h-[38px] w-[68px] sm:min-w-[82px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    className="select-field h-[38px] w-[100px] sm:hidden bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                    aria-label="Poll interval"
+                                >
+                                    <option value={2000}>2s poll</option>
+                                    <option value={5000}>5s poll</option>
+                                    <option value={10000}>10s poll</option>
+                                    <option value={30000}>30s poll</option>
+                                </select>
+                                <select
+                                    value={refreshInterval}
+                                    onChange={e => setRefreshInterval(parseInt(e.target.value))}
+                                    className="select-field hidden sm:block h-[38px] w-[65px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                     aria-label="Poll interval"
                                 >
                                     <option value={2000}>2s</option>
@@ -123,6 +144,32 @@ export default function LogViewer() {
                                     <option value={30000}>30s</option>
                                 </select>
                             </div>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-2 shrink-0">
+                            <span className="hidden sm:inline text-slate-500 text-xs font-medium uppercase tracking-wider">Limit</span>
+                            <select
+                                value={searchLimit}
+                                onChange={e => setSearchLimit(parseInt(e.target.value))}
+                                className="select-field h-[38px] w-[100px] sm:hidden bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                aria-label="Search limit"
+                            >
+                                <option value={100}>100 limit</option>
+                                <option value={500}>500 limit</option>
+                                <option value={1000}>1kb limit</option>
+                                <option value={5000}>5kb limit</option>
+                            </select>
+                            <select
+                                value={searchLimit}
+                                onChange={e => setSearchLimit(parseInt(e.target.value))}
+                                className="select-field hidden sm:block h-[38px] w-[65px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
+                                aria-label="Search limit"
+                            >
+                                <option value={100}>100</option>
+                                <option value={500}>500</option>
+                                <option value={1000}>1kb</option>
+                                <option value={5000}>5kb</option>
+                            </select>
                         </div>
                     )}
                     <div className="flex items-center justify-end gap-2 shrink-0">
@@ -154,10 +201,10 @@ export default function LogViewer() {
             </div>
 
             {/* Controls */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap gap-4 items-center shadow-sm">
+            <div className={`bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-4 items-center shadow-sm ${viewMode === 'tail' ? 'flex-wrap' : 'flex-nowrap'}`}>
                 {viewMode === 'tail' ? (
                     <>
-                        <div className="flex-1 min-w-[200px] relative">
+                        <div className="flex-1 min-w-0 relative">
                             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                             <input
                                 type="text"
@@ -171,11 +218,11 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
+                        <div className="flex items-center gap-3 shrink-0">
                             <button
                                 onClick={() => fetchLogs(true)}
                                 disabled={loading}
-                                className="ml-auto h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                className="h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
                                 {loading ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
                                 Search
@@ -198,32 +245,15 @@ export default function LogViewer() {
                             />
                         </div>
 
-                        <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap">
-                            <div className="flex items-center gap-2">
-                                <span className="text-slate-500 text-xs font-medium uppercase tracking-wider">Limit</span>
-                                <select
-                                    value={searchLimit}
-                                    onChange={e => {
-                                        setSearchLimit(parseInt(e.target.value))
-                                    }}
-                                    className="select-field bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-300 outline-none focus:border-blue-500"
-                                >
-                                    <option value={100}>100</option>
-                                    <option value={500}>500</option>
-                                    <option value={1000}>1kb</option>
-                                    <option value={5000}>5kb</option>
-                                </select>
-                            </div>
-
+                        <div className="flex items-center gap-3 shrink-0">
                             <button
                                 onClick={() => handleSearch()}
                                 disabled={searching}
-                                className="ml-auto h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                className="h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
                                 {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
                                 {searching ? 'Searching...' : 'Search'}
                             </button>
-
                         </div>
                     </>
                 )}

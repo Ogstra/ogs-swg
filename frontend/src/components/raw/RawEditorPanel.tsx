@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { type ReactNode, useMemo, useRef, useState } from 'react'
 import { RefreshCw, Save } from 'lucide-react'
 import Editor from 'react-simple-code-editor'
 import Prism from 'prismjs'
@@ -23,6 +23,8 @@ interface RawEditorPanelProps {
     language?: RawLanguage
     textareaId?: string
     saveLabel?: string
+    bottomBarExtraDesktop?: ReactNode
+    bottomBarExtraMobile?: ReactNode
 }
 
 export function RawEditorPanel({
@@ -40,6 +42,8 @@ export function RawEditorPanel({
     language = 'json',
     textareaId = 'raw-editor',
     saveLabel = 'Save Changes',
+    bottomBarExtraDesktop,
+    bottomBarExtraMobile,
 }: RawEditorPanelProps) {
     const [searchTerm, setSearchTerm] = useState('')
     const [searchCursor, setSearchCursor] = useState(0)
@@ -171,10 +175,13 @@ export function RawEditorPanel({
                     <span className="sm:hidden sr-only">{saving ? 'Saving...' : saveLabel}</span>
                     <span className="hidden sm:inline">{saving ? 'Saving...' : saveLabel}</span>
                 </button>
+                <div className="hidden sm:block ml-auto text-xs text-slate-500 font-mono">
+                    {lastBackupText ? `Last Backup: ${lastBackupText}` : 'No backups yet'}
+                </div>
             </div>
 
             <div className="flex items-center justify-between p-3 border-b border-slate-800 bg-slate-900">
-                <div className="grid grid-cols-3 sm:flex items-center gap-2 w-full sm:w-auto">
+                <div className={`grid ${bottomBarExtraMobile ? 'grid-cols-4' : 'grid-cols-3'} sm:flex items-center gap-2 w-full sm:w-auto`}>
                     <button
                         onClick={() => setShowDiff(d => !d)}
                         className="w-full sm:w-auto px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium whitespace-nowrap"
@@ -206,10 +213,13 @@ export function RawEditorPanel({
                     >
                         Restore
                     </button>
+                    {bottomBarExtraMobile && (
+                        <div className="sm:hidden w-full">
+                            {bottomBarExtraMobile}
+                        </div>
+                    )}
                 </div>
-                <div className="hidden sm:block text-xs text-slate-500 font-mono">
-                    {lastBackupText ? `Last Backup: ${lastBackupText}` : 'No backups yet'}
-                </div>
+                <div className="hidden sm:flex items-center gap-3">{bottomBarExtraDesktop}</div>
             </div>
 
             {showDiff && (
