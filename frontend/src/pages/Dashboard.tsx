@@ -136,6 +136,11 @@ export default function Dashboard() {
         singbox: { uplink: 0, downlink: 0 },
         wireguard: { uplink: 0, downlink: 0 }
     }
+    const wireguardByInterface: Record<string, TrafficStats> = dashboardQuery.data?.wireguard_interfaces || {}
+    const wireguardInterfaceRows = useMemo(
+        () => Object.entries(wireguardByInterface).sort(([a], [b]) => a.localeCompare(b)),
+        [wireguardByInterface]
+    )
     const topConsumersMap: Record<string, Consumer[]> = dashboardQuery.data?.top_consumers || {
         singbox: [],
         wireguard: []
@@ -331,6 +336,21 @@ export default function Dashboard() {
                         </div>
                     </div>
 
+                    {wireguardInterfaceRows.length > 0 && (
+                        <div className="mb-6 border border-slate-800/50 rounded-lg bg-slate-950/40 p-3 space-y-2">
+                            <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Per Interface (range)</p>
+                            {wireguardInterfaceRows.map(([iface, st]) => (
+                                <div key={iface} className="flex items-center justify-between text-xs">
+                                    <span className="font-mono text-slate-200">{iface}</span>
+                                    <div className="flex items-center gap-3 font-mono">
+                                        <span className="text-blue-400">RX {formatBytes(st.downlink)}</span>
+                                        <span className="text-emerald-400">TX {formatBytes(st.uplink)}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
                     <div className="border-t border-slate-800 pt-4">
                         <div className="flex items-center justify-between mb-3">
                             <p className="text-sm font-semibold text-slate-300">Active Peers</p>
@@ -486,6 +506,9 @@ export default function Dashboard() {
                                         <div>
                                             <div className="font-medium text-slate-200 text-sm">{u.name}</div>
                                             <div className="text-[10px] text-slate-500 uppercase">{u.flow || 'Default'}</div>
+                                            {chartMode === 'wireguard' && u.interface_name && (
+                                                <div className="text-[10px] text-slate-400">Interface: {u.interface_name}</div>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="text-right">

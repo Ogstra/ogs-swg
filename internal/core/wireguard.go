@@ -285,6 +285,7 @@ func (c *WireGuardConfig) RemovePeer(publicKey string) error {
 
 type PeerStats struct {
 	PublicKey       string `json:"public_key"`
+	InterfaceName   string `json:"interface_name,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	LatestHandshake int64  `json:"latest_handshake"`
 	TransferRx      int64  `json:"transfer_rx"`
@@ -318,6 +319,7 @@ func GetWireGuardStats() (map[string]PeerStats, error) {
 			}
 			stats[peer.PublicKey.String()] = PeerStats{
 				PublicKey:       peer.PublicKey.String(),
+				InterfaceName:   dev.Name,
 				Endpoint:        endpoint,
 				LatestHandshake: handshake,
 				TransferRx:      peer.ReceiveBytes,
