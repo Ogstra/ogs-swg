@@ -9,6 +9,8 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
+type wireGuardInterfaceContextKey struct{}
+
 func isNotFoundErr(err error) bool {
 	if err == nil {
 		return false
@@ -20,8 +22,47 @@ func isNotFoundErr(err error) bool {
 	return strings.Contains(msg, "not exist") || strings.Contains(msg, "no such file")
 }
 
+func withWireGuardInterfaceContext(ctx context.Context, iface string) context.Context {
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, wireGuardInterfaceContextKey{}, iface)
+}
+
+func wireGuardInterfaceFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	iface, _ := ctx.Value(wireGuardInterfaceContextKey{}).(string)
+	return strings.TrimSpace(iface)
+}
+
+func (s *Server) wireGuardConfigPathForContext(ctx context.Context) (string, error) {
+	if iface := wireGuardInterfaceFromContext(ctx); iface != "" {
+		return s.wireGuardConfigPathForIface(iface)
+	}
+
+	path := strings.TrimSpace(s.config.WireGuardConfigPath)
+	if path == "" {
+		path = "/etc/wireguard/wg0.conf"
+	}
+	return path, nil
+}
+
+func (s *Server) wireGuardInterfaceForContext(ctx context.Context) string {
+	if iface := wireGuardInterfaceFromContext(ctx); iface != "" {
+		return iface
+	}
+	return defaultWireGuardInterfaceName(s.config.WireGuardConfigPath)
+}
+
 func (s *Server) loadWireGuardConfig(ctx context.Context) (*core.WireGuardConfig, error) {
-	return s.loadWireGuardConfigAtPath(ctx, s.config.WireGuardConfigPath)
+	path, err := s.wireGuardConfigPathForContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.loadWireGuardConfigAtPath(ctx, path)
 }
 
 func (s *Server) loadWireGuardConfigForIface(ctx context.Context, iface string) (*core.WireGuardConfig, error) {
@@ -70,7 +111,11 @@ func (s *Server) loadWireGuardConfigAtPath(ctx context.Context, path string) (*c
 }
 
 func (s *Server) saveWireGuardConfig(ctx context.Context, cfg *core.WireGuardConfig) error {
-	return s.saveWireGuardConfigAtPath(ctx, s.config.WireGuardConfigPath, cfg)
+	path, err := s.wireGuardConfigPathForContext(ctx)
+	if err != nil {
+		return err
+	}
+	return s.saveWireGuardConfigAtPath(ctx, path, cfg)
 }
 
 func (s *Server) saveWireGuardConfigForIface(ctx context.Context, cfg *core.WireGuardConfig, iface string) error {
