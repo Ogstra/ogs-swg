@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api } from '../services/api'
+import { api, type CreateWireGuardInterfaceResponse } from '../services/api'
 import { Plus, Trash2, Settings, Edit, ArrowUp, ArrowDown, Shield, ArrowUpDown, QrCode, RotateCcw } from 'lucide-react'
 import QRCode from 'react-qr-code'
 import { useToast } from '../context/ToastContext'
@@ -66,6 +66,7 @@ export default function WireGuard() {
     const canWriteConfig = !!permissions?.can_write_config
     const [showPeerModal, setShowPeerModal] = useState(false)
     const [showInterfaceModal, setShowInterfaceModal] = useState(false)
+    const [showCreateInterfaceModal, setShowCreateInterfaceModal] = useState(false)
 
     // Edit/Create State
     const [editingPeer, setEditingPeer] = useState<WireGuardPeer | null>(null)
@@ -88,18 +89,53 @@ export default function WireGuard() {
     const [copiedConfig, setCopiedConfig] = useState(false)
     const [confirmDeletePeer, setConfirmDeletePeer] = useState<WireGuardPeer | null>(null)
     const [lastDeletedPeer, setLastDeletedPeer] = useState<WireGuardPeer | null>(null)
+    const [activeInterface, setActiveInterface] = useState('')
+    const [interfaceEnabled, setInterfaceEnabled] = useState<Record<string, boolean>>({})
+    const [newInterfaceName, setNewInterfaceName] = useState('')
+    const [newInterfaceSubnet, setNewInterfaceSubnet] = useState('')
+    const [newInterfaceListenPort, setNewInterfaceListenPort] = useState('51820')
+    const [creatingInterface, setCreatingInterface] = useState(false)
+
+    const interfacesQuery = useQuery({
+        queryKey: ['wireguard-interfaces'],
+        queryFn: () => api.getWireGuardInterfaces(),
+        refetchInterval: 5000,
+        placeholderData: previousData => previousData,
+    })
+    const interfaces = Array.isArray(interfacesQuery.data) ? (interfacesQuery.data as string[]) : []
+
+    useEffect(() => {
+        if (interfaces.length === 0) {
+            setActiveInterface('')
+            return
+        }
+        if (!activeInterface || !interfaces.includes(activeInterface)) {
+            setActiveInterface(interfaces[0])
+        }
+        setInterfaceEnabled(prev => {
+            const next = { ...prev }
+            for (const name of interfaces) {
+                if (next[name] === undefined) {
+                    next[name] = true
+                }
+            }
+            return next
+        })
+    }, [interfaces, activeInterface])
 
     const peersQuery = useQuery({
-        queryKey: ['wireguard-peers'],
-        queryFn: () => api.getWireGuardPeers(),
+        queryKey: ['wireguard-peers', activeInterface],
+        queryFn: () => api.getWireGuardPeersForInterface(activeInterface),
+        enabled: !!activeInterface,
         refetchInterval: 5000,
         placeholderData: previousData => previousData,
     })
     const peers = Array.isArray(peersQuery.data) ? (peersQuery.data as WireGuardPeer[]) : []
 
     const interfaceQuery = useQuery({
-        queryKey: ['wireguard-interface'],
-        queryFn: () => api.getWireGuardInterface(),
+        queryKey: ['wireguard-interface', activeInterface],
+        queryFn: () => api.getWireGuardInterfaceForInterface(activeInterface),
+        enabled: !!activeInterface,
         refetchInterval: 5000,
         placeholderData: previousData => previousData,
     })
@@ -118,6 +154,7 @@ export default function WireGuard() {
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['wireguard-peers'] }),
             queryClient.invalidateQueries({ queryKey: ['wireguard-interface'] }),
+            queryClient.invalidateQueries({ queryKey: ['wireguard-interfaces'] }),
             queryClient.invalidateQueries({ queryKey: ['system-status-wireguard'] }),
         ])
     }
@@ -130,7 +167,11 @@ export default function WireGuard() {
         setConfigPrivateKey(peer.private_key || '')
         setCopiedConfig(false)
         setConfigModalPeer(peer)
-        api.getWireGuardPeerConfig(peer.public_key)
+        if (!activeInterface) {
+            setConfigLoading(false)
+            return
+        }
+        api.getWireGuardPeerConfigForInterface(activeInterface, peer.public_key)
             .then(res => {
                 setConfigText(res.config)
                 const expires = new Date(Date.now() + 60 * 60 * 1000)
@@ -155,8 +196,12 @@ export default function WireGuard() {
             alert('Alias is required')
             return
         }
+        if (!activeInterface) {
+            toastError('No WireGuard interface selected')
+            return
+        }
         try {
-            const peer = await api.createWireGuardPeer({ alias: newName, ip: newIp, endpoint: newEndpoint })
+            const peer = await api.createWireGuardPeerForInterface(activeInterface, { alias: newName, ip: newIp, endpoint: newEndpoint })
             setNewName('')
             setNewIp('')
             setNewEndpoint('')
@@ -175,9 +220,13 @@ export default function WireGuard() {
             return
         }
         if (!editingPeer) return
+        if (!activeInterface) {
+            toastError('No WireGuard interface selected')
+            return
+        }
         try {
             const { persistent_keepalive, private_key, ...rest } = editingPeer as any
-            await api.updateWireGuardPeer(editingPeer.public_key, rest)
+            await api.updateWireGuardPeerForInterface(activeInterface, editingPeer.public_key, rest)
             setEditingPeer(null)
             setShowPeerModal(false)
             await refreshData()
@@ -198,10 +247,14 @@ export default function WireGuard() {
             return
         }
         if (!confirmDeletePeer) return
+        if (!activeInterface) {
+            toastError('No WireGuard interface selected')
+            return
+        }
         const target = confirmDeletePeer
         setConfirmDeletePeer(null)
         try {
-            await api.deleteWireGuardPeer(target.public_key)
+            await api.deleteWireGuardPeerForInterface(activeInterface, target.public_key)
             setLastDeletedPeer(target)
             success('Peer deleted')
             await refreshData()
@@ -216,8 +269,12 @@ export default function WireGuard() {
             return
         }
         if (!lastDeletedPeer) return
+        if (!activeInterface) {
+            toastError('No WireGuard interface selected')
+            return
+        }
         try {
-            await api.restoreWireGuardPeer({
+            await api.restoreWireGuardPeerForInterface(activeInterface, {
                 public_key: lastDeletedPeer.public_key,
                 allowed_ips: lastDeletedPeer.allowed_ips,
                 endpoint: lastDeletedPeer.endpoint,
@@ -238,12 +295,64 @@ export default function WireGuard() {
             return
         }
         if (!editInterface) return
+        if (!activeInterface) {
+            toastError('No WireGuard interface selected')
+            return
+        }
         try {
-            await api.updateWireGuardInterface(editInterface)
+            await api.updateWireGuardInterfaceForInterface(activeInterface, editInterface)
             setShowInterfaceModal(false)
             await refreshData()
         } catch (err) {
             toastError('Failed to update interface: ' + err)
+        }
+    }
+
+    const resetCreateInterfaceForm = () => {
+        setNewInterfaceName('')
+        setNewInterfaceSubnet('')
+        setNewInterfaceListenPort('51820')
+    }
+
+    const handleCreateInterface = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+
+        const name = newInterfaceName.trim()
+        const subnet = newInterfaceSubnet.trim()
+        const listenPort = Number.parseInt(newInterfaceListenPort, 10)
+        if (!name) {
+            toastError('Interface name is required')
+            return
+        }
+        if (!subnet) {
+            toastError('Subnet is required')
+            return
+        }
+        if (!Number.isFinite(listenPort) || listenPort < 1 || listenPort > 65535) {
+            toastError('Listen port must be between 1 and 65535')
+            return
+        }
+
+        setCreatingInterface(true)
+        try {
+            const created: CreateWireGuardInterfaceResponse = await api.createWireGuardInterface({
+                name,
+                subnet,
+                listen_port: listenPort,
+            })
+            setShowCreateInterfaceModal(false)
+            resetCreateInterfaceForm()
+            setInterfaceEnabled(prev => ({ ...prev, [created.name]: true }))
+            setActiveInterface(created.name)
+            await refreshData()
+            success(`Interface ${created.name} created`)
+        } catch (err) {
+            toastError('Failed to create interface: ' + err)
+        } finally {
+            setCreatingInterface(false)
         }
     }
 
@@ -302,6 +411,44 @@ export default function WireGuard() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
+    const activeInterfaceEnabled = activeInterface ? interfaceEnabled[activeInterface] !== false : false
+
+    const handleEnableActiveInterface = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+        if (!activeInterface) {
+            toastError('No WireGuard interface selected')
+            return
+        }
+        try {
+            await api.enableWireGuardInterface(activeInterface)
+            setInterfaceEnabled(prev => ({ ...prev, [activeInterface]: true }))
+            await refreshData()
+        } catch (err) {
+            toastError('Failed to enable interface: ' + err)
+        }
+    }
+
+    const handleDisableActiveInterface = async () => {
+        if (!canWriteWireguard) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+        if (!activeInterface) {
+            toastError('No WireGuard interface selected')
+            return
+        }
+        try {
+            await api.disableWireGuardInterface(activeInterface)
+            setInterfaceEnabled(prev => ({ ...prev, [activeInterface]: false }))
+            await refreshData()
+        } catch (err) {
+            toastError('Failed to disable interface: ' + err)
+        }
+    }
+
     const handleRestartWireGuard = async () => {
         if (!canWriteConfig) {
             toastError('No write permission for service control')
@@ -338,10 +485,22 @@ export default function WireGuard() {
                     <button
                         onClick={() => {
                             if (!canWriteWireguard) return
+                            resetCreateInterfaceForm()
+                            setShowCreateInterfaceModal(true)
+                        }}
+                        disabled={!canWriteWireguard}
+                        className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors font-medium text-sm shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <Plus size={16} />
+                        New Interface
+                    </button>
+                    <button
+                        onClick={() => {
+                            if (!canWriteWireguard) return
                             setEditInterface(interfaceConfig ?? { address: '', private_key: '', listen_port: 51820, post_up: '', post_down: '', mtu: 1420, dns: '' })
                             setShowInterfaceModal(true)
                         }}
-                        disabled={!canWriteWireguard}
+                        disabled={!canWriteWireguard || !activeInterface}
                         className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors font-medium text-sm border border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Settings size={16} />
@@ -356,12 +515,56 @@ export default function WireGuard() {
                             setNewEndpoint('')
                             setShowPeerModal(true)
                         }}
-                        disabled={!canWriteWireguard}
+                        disabled={!canWriteWireguard || !activeInterface}
                         className="w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors font-medium text-sm shadow-lg shadow-blue-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         <Plus size={16} />
                         Add Peer
                     </button>
+                    <button
+                        onClick={activeInterfaceEnabled ? handleDisableActiveInterface : handleEnableActiveInterface}
+                        disabled={!canWriteWireguard || !activeInterface}
+                        className={`w-full md:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-lg transition-colors font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed ${activeInterfaceEnabled ? 'bg-rose-600 hover:bg-rose-500 text-white' : 'bg-emerald-600 hover:bg-emerald-500 text-white'}`}
+                    >
+                        {activeInterfaceEnabled ? 'Disable Interface' : 'Enable Interface'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+                <div className="flex flex-wrap gap-2">
+                    {interfaces.map(iface => {
+                        const isActive = iface === activeInterface
+                        const isEnabled = interfaceEnabled[iface] !== false
+                        return (
+                            <button
+                                key={iface}
+                                onClick={() => setActiveInterface(iface)}
+                                className={`px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${isActive ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-950 text-slate-300 border-slate-700 hover:bg-slate-800'}`}
+                            >
+                                {iface}
+                                <span className={`ml-2 text-[11px] ${isEnabled ? 'text-emerald-300' : 'text-rose-300'}`}>
+                                    {isEnabled ? 'enabled' : 'disabled'}
+                                </span>
+                            </button>
+                        )
+                    })}
+                    {interfaces.length === 0 && (
+                        <div className="flex flex-wrap items-center gap-3 text-sm text-slate-400">
+                            <span>No WireGuard interfaces discovered.</span>
+                            <button
+                                onClick={() => {
+                                    if (!canWriteWireguard) return
+                                    resetCreateInterfaceForm()
+                                    setShowCreateInterfaceModal(true)
+                                }}
+                                disabled={!canWriteWireguard}
+                                className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-700 bg-slate-950 text-slate-200 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Create Interface
+                            </button>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -618,6 +821,69 @@ export default function WireGuard() {
                     )}
                 </div>
             </div>
+
+            {showCreateInterfaceModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-md p-6 shadow-xl">
+                        <h2 className="text-xl font-bold text-white mb-4">Create WireGuard Interface</h2>
+                        <div className="space-y-4 modal-form-uniform">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Interface Name</label>
+                                <input
+                                    type="text"
+                                    value={newInterfaceName}
+                                    onChange={e => setNewInterfaceName(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-sm"
+                                    placeholder="wg1"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Subnet (CIDR)</label>
+                                <input
+                                    type="text"
+                                    value={newInterfaceSubnet}
+                                    onChange={e => setNewInterfaceSubnet(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-sm"
+                                    placeholder="10.30.0.0/24"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Listen Port</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={65535}
+                                    value={newInterfaceListenPort}
+                                    onChange={e => setNewInterfaceListenPort(e.target.value)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-white outline-none focus:ring-2 focus:ring-emerald-500 font-mono text-sm"
+                                    placeholder="51820"
+                                />
+                            </div>
+                            <p className="text-xs text-slate-500">
+                                The keypair is generated server-side. No private key is sent from the browser.
+                            </p>
+                            <div className="flex justify-end gap-3 mt-6">
+                                <button
+                                    onClick={() => {
+                                        if (creatingInterface) return
+                                        setShowCreateInterfaceModal(false)
+                                    }}
+                                    className="px-4 py-2 text-slate-400 hover:text-white"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleCreateInterface}
+                                    disabled={!canWriteWireguard || creatingInterface}
+                                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {creatingInterface ? 'Creating...' : 'Create Interface'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Peer Modal (Create/Edit) */}
             {showPeerModal && (
