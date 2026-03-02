@@ -99,6 +99,14 @@ export interface CreateWireGuardInterfaceRequest {
     listen_port: number;
 }
 
+export interface WireGuardInterfaceSummary {
+    name: string;
+    address: string;
+    listen_port: number;
+    peer_count: number;
+    is_up: boolean;
+}
+
 export interface CreateWireGuardInterfaceResponse {
     name: string;
     subnet: string;
@@ -283,6 +291,11 @@ export const api = {
             body: JSON.stringify(payload),
         });
         await handleResponse(res, 'Failed to create WireGuard interface');
+        return res.json();
+    },
+    getWireGuardInterfacesStatus: async (): Promise<WireGuardInterfaceSummary[]> => {
+        const res = await fetch('/api/wireguard/interfaces/status', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard interface status');
         return res.json();
     },
     getWireGuardPeers: async (): Promise<any[]> => {
