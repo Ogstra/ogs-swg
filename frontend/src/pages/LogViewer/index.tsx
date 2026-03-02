@@ -16,6 +16,7 @@ export default function LogViewer() {
     const [searching, setSearching] = useState(false)
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
+    const demoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
 
     const fetchLogs = (forceTail = false, silent = false) => {
         if (!silent) setLoading(true)
@@ -34,10 +35,14 @@ export default function LogViewer() {
     useEffect(() => {
         api.getFeatures().then(f => {
             if (f.log_source === 'journal' || f.log_source === 'file') {
-                setLogSource(f.log_source)
+                if (demoMode && f.log_source === 'file') {
+                    setLogSource('journal')
+                } else {
+                    setLogSource(f.log_source)
+                }
             }
         }).catch(err => console.error('Failed to load features', err))
-    }, [])
+    }, [demoMode])
 
     useEffect(() => {
         if (viewMode !== 'tail') return

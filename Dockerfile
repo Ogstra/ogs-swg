@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y \
     tzdata \
     iproute2 \
     curl \
+    sqlite3 \
     systemd \
     && rm -rf /var/lib/apt/lists/*
 

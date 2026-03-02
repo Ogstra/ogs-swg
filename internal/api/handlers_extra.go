@@ -322,8 +322,8 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		} else {
 			stats, err = core.GetWireGuardStats()
 		}
+		threshold := time.Now().Add(-3 * time.Minute).Unix()
 		if err == nil {
-			threshold := time.Now().Add(-3 * time.Minute).Unix()
 			for _, peer := range stats {
 				if peer.LatestHandshake >= threshold {
 					activeUsersWG++
@@ -335,6 +335,19 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if s.config.DemoMode {
+			demoList := s.demoActiveWireGuardPeers(threshold, pubToDisplay, time.Now())
+			if len(demoList) > 0 {
+				activeWGList = demoList
+				activeUsersWG = len(demoList)
+			}
+		}
+	}
+
+	if s.config.DemoMode {
+		// Demo mode intentionally shows both services as running for UX demos.
+		singboxStatus = true
+		wireguardStatus = true
 	}
 
 	status := map[string]interface{}{

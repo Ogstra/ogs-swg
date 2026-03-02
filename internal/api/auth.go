@@ -28,6 +28,11 @@ func getPasetoKey(secret string) []byte {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if s.config.DisablePasswordLogin {
+		http.Error(w, "Password login is disabled", http.StatusForbidden)
+		return
+	}
+
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -193,24 +198,10 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		authHeader := r.Header.Get("Authorization")
+		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
 		if authHeader == "" {
-			// Fallback to API key.
-			if s.config.APIKey != "" && r.Header.Get("X-API-Key") == s.config.APIKey {
-				allPerms := &core.PanelUserPermissions{
-					CanReadUsers:       true,
-					CanWriteUsers:      true,
-					CanReadWireguard:   true,
-					CanWriteWireguard:  true,
-					CanReadConfig:      true,
-					CanWriteConfig:     true,
-					CanReadSettings:    true,
-					CanWriteSettings:   true,
-					CanReadPanelUsers:  true,
-					CanWritePanelUsers: true,
-					CanReadLogs:        true,
-				}
-				ctx := context.WithValue(r.Context(), permissionsContextKey, allPerms)
+			if apiKeyPerms, ok := s.permissionsFromAPIKey(r); ok {
+				ctx := context.WithValue(r.Context(), permissionsContextKey, apiKeyPerms)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -220,6 +211,11 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 
 		parts := strings.Split(authHeader, " ")
 		if len(parts) != 2 || parts[0] != "Bearer" {
+			if apiKeyPerms, ok := s.permissionsFromAPIKey(r); ok {
+				ctx := context.WithValue(r.Context(), permissionsContextKey, apiKeyPerms)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
 			return
 		}
@@ -230,11 +226,21 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		v2 := paseto.NewV2()
 
 		if err := v2.Decrypt(tokenString, getPasetoKey(s.config.JWTSecret), &jsonToken, nil); err != nil {
+			if apiKeyPerms, ok := s.permissionsFromAPIKey(r); ok {
+				ctx := context.WithValue(r.Context(), permissionsContextKey, apiKeyPerms)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			http.Error(w, "Invalid token", http.StatusUnauthorized)
 			return
 		}
 
 		if time.Now().After(jsonToken.Expiration) {
+			if apiKeyPerms, ok := s.permissionsFromAPIKey(r); ok {
+				ctx := context.WithValue(r.Context(), permissionsContextKey, apiKeyPerms)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
 			http.Error(w, "Token expired", http.StatusUnauthorized)
 			return
 		}
@@ -251,4 +257,26 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, permissionsContextKey, &perms)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) permissionsFromAPIKey(r *http.Request) (*core.PanelUserPermissions, bool) {
+	if s.config.APIKey == "" || r.Header.Get("X-API-Key") != s.config.APIKey {
+		return nil, false
+	}
+
+	perms := &core.PanelUserPermissions{
+		CanReadUsers:       true,
+		CanWriteUsers:      !s.config.APIKeyReadOnly,
+		CanReadWireguard:   true,
+		CanWriteWireguard:  !s.config.APIKeyReadOnly,
+		CanReadConfig:      true,
+		CanWriteConfig:     !s.config.APIKeyReadOnly,
+		CanReadSettings:    true,
+		CanWriteSettings:   !s.config.APIKeyReadOnly,
+		CanReadPanelUsers:  !s.config.APIKeyReadOnly,
+		CanWritePanelUsers: !s.config.APIKeyReadOnly,
+		CanReadLogs:        true,
+	}
+	perms.Normalize()
+	return perms, true
 }

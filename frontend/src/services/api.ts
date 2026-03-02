@@ -120,7 +120,15 @@ const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
     if (contentType) headers['Content-Type'] = contentType;
     const token = localStorage.getItem('token');
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const apiKey = localStorage.getItem('api_key');
+    const demoMode = localStorage.getItem('demo_mode') === '1';
+    if (demoMode && apiKey) {
+        headers['X-API-Key'] = apiKey;
+    } else if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    } else if (apiKey) {
+        headers['X-API-Key'] = apiKey;
+    }
     return headers;
 };
 

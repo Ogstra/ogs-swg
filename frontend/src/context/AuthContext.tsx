@@ -25,6 +25,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const PERMISSIONS_KEY = 'permissions';
+const API_KEY_KEY = 'api_key';
 
 const normalizePermissions = (raw: any): PanelUserPermissions => ({
     can_read_users: !!raw?.can_read_users,
@@ -42,6 +43,7 @@ const normalizePermissions = (raw: any): PanelUserPermissions => ({
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+    const [apiKey, setApiKey] = useState<string | null>(localStorage.getItem(API_KEY_KEY));
     const [permissions, setPermissions] = useState<PanelUserPermissions | null>(() => {
         const raw = localStorage.getItem(PERMISSIONS_KEY);
         if (raw) {
@@ -49,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         return null;
     });
-    const isAuthenticated = !!token;
+    const isAuthenticated = !!token || !!apiKey;
 
     useEffect(() => {
         if (token) {
@@ -58,6 +60,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             localStorage.removeItem('token');
         }
     }, [token]);
+
+    useEffect(() => {
+        if (apiKey) {
+            localStorage.setItem(API_KEY_KEY, apiKey);
+        } else {
+            localStorage.removeItem(API_KEY_KEY);
+        }
+    }, [apiKey]);
 
     useEffect(() => {
         if (permissions) {
@@ -89,14 +99,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const data = await res.json();
+        setApiKey(null);
         setToken(data.token);
         setPermissions(data.permissions ? normalizePermissions(data.permissions) : null);
     };
 
     const logout = () => {
         setToken(null);
+        setApiKey(null);
         setPermissions(null);
         localStorage.removeItem('token');
+        localStorage.removeItem(API_KEY_KEY);
         localStorage.removeItem(PERMISSIONS_KEY);
     };
 
