@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ type Config struct {
 	DatabasePath          string   `json:"database_path" env:"OGS_DB_PATH" env-default:"data/stats.db"`
 	ListenAddr            string   `json:"listen_addr" env:"OGS_LISTEN_ADDR" env-default:":8080"`
 	WireGuardConfigPath   string   `json:"wireguard_config_path" env:"OGS_WIREGUARD_CONFIG_PATH" env-default:"/etc/wireguard/wg0.conf"`
+	WireGuardConfigDir    string   `json:"wireguard_config_dir" env:"OGS_WIREGUARD_CONFIG_DIR"`
 	EnableWireGuard       bool     `json:"enable_wireguard" env:"OGS_ENABLE_WIREGUARD" env-default:"true"`
 	EnableSingbox         bool     `json:"enable_singbox" env:"OGS_ENABLE_SINGBOX" env-default:"true"`
 	UseStatsSampler       bool     `json:"use_stats_sampler" env:"OGS_USE_STATS_SAMPLER" env-default:"true"`
@@ -147,6 +149,15 @@ func LoadConfig(path ...string) *Config {
 			cfg.JWTSecret = fmt.Sprintf("auto-generated-%d", os.Getpid())
 		}
 	}
+
+	derivePath := strings.TrimSpace(cfg.WireGuardConfigPath)
+	if derivePath == "" {
+		derivePath = "/etc/wireguard/wg0.conf"
+	}
+	if strings.TrimSpace(cfg.WireGuardConfigDir) == "" {
+		cfg.WireGuardConfigDir = filepath.Dir(derivePath)
+	}
+	cfg.WireGuardConfigDir = filepath.Clean(cfg.WireGuardConfigDir)
 
 	return cfg
 }
