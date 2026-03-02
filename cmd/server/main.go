@@ -18,6 +18,7 @@ func main() {
 	singboxConfigPath := flag.String("singbox-config", "", "Override sing-box config path (optional)")
 	logPath := flag.String("log", "", "Path to access.log")
 	dbPath := flag.String("db", "", "Path to stats.db")
+	wgTestMode := flag.Bool("wg-test-mode", false, "Enable simulated WireGuard mode (no wg/systemd dependency)")
 	flag.Parse()
 
 	cfg := core.LoadConfig(*configPath)
@@ -30,6 +31,10 @@ func main() {
 	if *dbPath != "" {
 		cfg.DatabasePath = *dbPath
 	}
+	if *wgTestMode {
+		cfg.WireGuardTestMode = true
+	}
+	cfg.ApplyWireGuardTestModeDefaults()
 
 	log.Printf("Starting OGS XWG...")
 	log.Printf(
@@ -54,8 +59,15 @@ func main() {
 			log.Printf("Initializing Docker Local Executor (host D-Bus mode)")
 			executor = sys.NewDockerLocalExecutor(cfg)
 		} else {
-			log.Printf("Initializing Local Executor")
-			executor = sys.NewLocalExecutor()
+			if cfg.WireGuardTestMode {
+				log.Printf("Initializing Local Executor (WireGuard test mode enabled, dir=%s)", cfg.WireGuardConfigDir)
+			} else {
+				log.Printf("Initializing Local Executor")
+			}
+			executor = sys.NewLocalExecutor(
+				sys.WithWireGuardConfigDir(cfg.WireGuardConfigDir),
+				sys.WithWireGuardTestMode(cfg.WireGuardTestMode),
+			)
 		}
 
 		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)

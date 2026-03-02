@@ -450,3 +450,85 @@ func TestWireGuardMultiInterface_EnableDisable(t *testing.T) {
 		t.Fatalf("invalid iface status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
+
+func TestWireGuardMultiInterface_DeleteInterface_Success(t *testing.T) {
+	tmp := t.TempDir()
+	wg0 := filepath.Join(tmp, "wg0.conf")
+	wg1 := filepath.Join(tmp, "wg1.conf")
+	if err := os.WriteFile(wg0, []byte("[Interface]\nAddress = 10.0.0.1/24\nListenPort = 51820\n"), 0644); err != nil {
+		t.Fatalf("write wg0: %v", err)
+	}
+	if err := os.WriteFile(wg1, []byte("[Interface]\nAddress = 10.1.0.1/24\nListenPort = 51821\n"), 0644); err != nil {
+		t.Fatalf("write wg1: %v", err)
+	}
+
+	stub := newMultiIfaceExecutorStub()
+	cfg := &core.Config{
+		EnableWireGuard:     true,
+		WireGuardConfigPath: wg0,
+		WireGuardConfigDir:  tmp,
+	}
+	srv := NewServer(nil, cfg, stub)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wireguard/interfaces/wg1", nil)
+	req.SetPathValue("iface", "wg1")
+	rec := httptest.NewRecorder()
+	srv.handleDeleteWireGuardInterface(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if stub.disableCalls != 1 || stub.lastDisableIface != "wg1" {
+		t.Fatalf("disable calls=%d iface=%q", stub.disableCalls, stub.lastDisableIface)
+	}
+	if _, err := os.Stat(wg1); !os.IsNotExist(err) {
+		t.Fatalf("wg1 should be removed, err=%v", err)
+	}
+}
+
+func TestWireGuardMultiInterface_DeleteInterface_RejectsInvalidIface(t *testing.T) {
+	tmp := t.TempDir()
+	wg0 := filepath.Join(tmp, "wg0.conf")
+	if err := os.WriteFile(wg0, []byte("[Interface]\nAddress = 10.0.0.1/24\nListenPort = 51820\n"), 0644); err != nil {
+		t.Fatalf("write wg0: %v", err)
+	}
+
+	stub := newMultiIfaceExecutorStub()
+	cfg := &core.Config{
+		EnableWireGuard:     true,
+		WireGuardConfigPath: wg0,
+		WireGuardConfigDir:  tmp,
+	}
+	srv := NewServer(nil, cfg, stub)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wireguard/interfaces/bad$name", nil)
+	req.SetPathValue("iface", "bad$name")
+	rec := httptest.NewRecorder()
+	srv.handleDeleteWireGuardInterface(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid iface status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestWireGuardMultiInterface_DeleteInterface_MissingInterface(t *testing.T) {
+	tmp := t.TempDir()
+	wg0 := filepath.Join(tmp, "wg0.conf")
+	if err := os.WriteFile(wg0, []byte("[Interface]\nAddress = 10.0.0.1/24\nListenPort = 51820\n"), 0644); err != nil {
+		t.Fatalf("write wg0: %v", err)
+	}
+
+	stub := newMultiIfaceExecutorStub()
+	cfg := &core.Config{
+		EnableWireGuard:     true,
+		WireGuardConfigPath: wg0,
+		WireGuardConfigDir:  tmp,
+	}
+	srv := NewServer(nil, cfg, stub)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/wireguard/interfaces/wg99", nil)
+	req.SetPathValue("iface", "wg99")
+	rec := httptest.NewRecorder()
+	srv.handleDeleteWireGuardInterface(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("missing iface status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}

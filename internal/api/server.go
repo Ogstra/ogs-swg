@@ -246,6 +246,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/traffic/series", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTrafficSeriesForInterface)))
 	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/enable", s.secure(s.requirePerm(canWriteWG, s.handleEnableWireGuardInterface)))
 	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/disable", s.secure(s.requirePerm(canWriteWG, s.handleDisableWireGuardInterface)))
+	protected.HandleFunc("DELETE /api/wireguard/interfaces/{iface}", s.secure(s.requirePerm(canWriteWG, s.handleDeleteWireGuardInterface)))
 
 	// Config / Sing-box / service control
 	protected.HandleFunc("GET /api/config", s.secure(s.requirePerm(canReadConfig, s.handleGetConfig)))
@@ -330,6 +331,7 @@ func (s *Server) Stop() {
 }
 
 func StartServer(cfg *core.Config) *Server {
+	cfg.ApplyWireGuardTestModeDefaults()
 	cfg.LogSource = detectLogSource(cfg)
 
 	store, err := core.NewStore(cfg.DatabasePath)
@@ -346,8 +348,19 @@ func StartServer(cfg *core.Config) *Server {
 		log.Printf("Initializing Docker Local Executor (host D-Bus mode)")
 		executor = sys.NewDockerLocalExecutor(cfg)
 	} else {
-		log.Printf("Initializing Local Executor")
-		executor = sys.NewLocalExecutor()
+		localOpts := []sys.LocalExecutorOption{
+			sys.WithWireGuardConfigDir(cfg.WireGuardConfigDir),
+			sys.WithWireGuardTestMode(cfg.WireGuardTestMode),
+		}
+		if cfg.WireGuardTestMode {
+			if err := os.MkdirAll(cfg.WireGuardConfigDir, 0755); err != nil {
+				panic("StartServer: failed to create WireGuard test dir: " + err.Error())
+			}
+			log.Printf("Initializing Local Executor (WireGuard test mode enabled, dir=%s)", cfg.WireGuardConfigDir)
+		} else {
+			log.Printf("Initializing Local Executor")
+		}
+		executor = sys.NewLocalExecutor(localOpts...)
 	}
 
 	// 2a. Set executor on config so it can read remote files if needed

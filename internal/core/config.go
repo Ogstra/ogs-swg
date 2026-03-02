@@ -48,6 +48,9 @@ type Config struct {
 	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host).
 	ExecutionMode string `json:"execution_mode" env:"OGS_EXECUTION_MODE"`
 
+	// WireGuard test mode: when true, WireGuard service/wg calls are simulated so UI flows can be tested without wg/systemd installed.
+	WireGuardTestMode bool `json:"wireguard_test_mode" env:"OGS_WIREGUARD_TEST_MODE" env-default:"false"`
+
 	// Sysctl Whitelist (Optional override)
 	SysctlWhitelist []string `json:"sysctl_whitelist" env:"OGS_SYSCTL_WHITELIST"`
 

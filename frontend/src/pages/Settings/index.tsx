@@ -1,18 +1,28 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { api, FeatureFlags } from '../services/api'
-import type { WireGuardInterfaceSummary } from '../services/api'
-import { Save, RefreshCw, UserCog, Shield } from 'lucide-react'
-import { useToast } from '../context/ToastContext'
-import { Card } from '../components/ui/Card'
-import { Button } from '../components/ui/Button'
-import { Badge } from '../components/ui/Badge'
-import { useAuth } from '../context/AuthContext'
-import SingboxConfigEditor from '../components/SingboxConfigEditor'
-import { Tabs } from '../components/ui/Tabs'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, FeatureFlags } from '../../services/api'
+import type { WireGuardInterfaceSummary } from '../../services/api'
+import { Save, RefreshCw, UserCog, Shield, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
+import { useToast } from '../../context/ToastContext'
+import { Card } from '../../components/ui/Card'
+import { Button } from '../../components/ui/Button'
+import { Badge } from '../../components/ui/Badge'
+import { Modal } from '../../components/ui/Modal'
+import { ConfirmModal } from '../../components/ui/ConfirmModal'
+import { useAuth } from '../../context/AuthContext'
+import SingboxConfigEditor from '../../components/SingboxConfigEditor'
+import { Tabs } from '../../components/ui/Tabs'
 import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
-import PanelUsers from './PanelUsers'
+import PanelUsers from './components/PanelUsers'
+import { WireGuardRawConfigModal } from './components/WireGuardRawConfigModal'
+import {
+    WG_INTERFACE_DEFAULTS,
+    normalizeWireGuardInterfaceCreateInput,
+    normalizeWireGuardInterfaceEditInput,
+    validateWireGuardInterfaceCreate,
+    validateWireGuardInterfaceEdit,
+} from '../../utils/wireguardForms'
 
 type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
 type DbInfo = { rows: number; sizeMB: number }
@@ -273,6 +283,11 @@ export default function Settings() {
         },
         { id: 'singbox', label: <span className="flex items-center gap-2"><Server size={16} /> Sing-box</span>, content: <SingboxConfigEditor /> },
         {
+            id: 'wireguard-interfaces',
+            label: <span className="flex items-center gap-2"><Shield size={16} /> WireGuard</span>,
+            content: <WireGuardInterfacesTab />,
+        },
+        {
             id: 'dashboard',
             label: <span className="flex items-center gap-2"><SettingsIcon size={16} /> Dashboard</span>,
             content: (
@@ -282,11 +297,6 @@ export default function Settings() {
                     success={success}
                 />
             )
-        },
-        {
-            id: 'wireguard-interfaces',
-            label: <span className="flex items-center gap-2"><Shield size={16} /> WireGuard Interfaces</span>,
-            content: <WireGuardInterfacesTab />,
         },
         {
             id: 'database',
@@ -618,55 +628,455 @@ function GeneralTab({
 }
 
 function WireGuardInterfacesTab() {
+    const queryClient = useQueryClient()
+    const { success, error: toastError } = useToast()
+    const { permissions } = useAuth()
+    const canWriteWG = !!permissions?.can_write_wireguard
+
     const interfacesQuery = useQuery({
         queryKey: ['settings-wg-interfaces-status'],
         queryFn: () => api.getWireGuardInterfacesStatus(),
         placeholderData: (previousData: WireGuardInterfaceSummary[] | undefined) => previousData,
         refetchInterval: 30_000,
     })
-
     const interfaces = interfacesQuery.data ?? []
+    const [createOpen, setCreateOpen] = useState(false)
+    const [editOpen, setEditOpen] = useState(false)
+    const [editTarget, setEditTarget] = useState<string | null>(null)
+    const [deleteTarget, setDeleteTarget] = useState<WireGuardInterfaceSummary | null>(null)
+    const [rawConfigTarget, setRawConfigTarget] = useState<string | null>(null)
+    const [rawConfigOpen, setRawConfigOpen] = useState(false)
+    const [busyKey, setBusyKey] = useState<string | null>(null)
+
+    const [createName, setCreateName] = useState('')
+    const [createSubnet, setCreateSubnet] = useState('')
+    const [createListenPort, setCreateListenPort] = useState(String(WG_INTERFACE_DEFAULTS.listenPort))
+    const [createErrors, setCreateErrors] = useState<Record<string, string>>({})
+
+    const [editAddress, setEditAddress] = useState('')
+    const [editBindAddress, setEditBindAddress] = useState('')
+    const [editListenPort, setEditListenPort] = useState(String(WG_INTERFACE_DEFAULTS.listenPort))
+    const [editPostUp, setEditPostUp] = useState('')
+    const [editPostDown, setEditPostDown] = useState('')
+    const [editMTU, setEditMTU] = useState('')
+    const [editDNS, setEditDNS] = useState('')
+    const [editErrors, setEditErrors] = useState<Record<string, string>>({})
+
+    const refreshInterfaces = async () => {
+        await queryClient.invalidateQueries({ queryKey: ['settings-wg-interfaces-status'] })
+    }
+
+    const resetCreateForm = () => {
+        setCreateName('')
+        setCreateSubnet('')
+        setCreateListenPort(String(WG_INTERFACE_DEFAULTS.listenPort))
+        setCreateErrors({})
+    }
+
+    const closeCreateModal = () => {
+        if (busyKey === 'create') return
+        setCreateOpen(false)
+        resetCreateForm()
+    }
+
+    const closeEditModal = () => {
+        if (busyKey === 'edit') return
+        setEditOpen(false)
+        setEditTarget(null)
+        setEditErrors({})
+    }
+
+    const handleCreateInterface = async () => {
+        if (!canWriteWG) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+        const createInput = {
+            name: createName,
+            subnet: createSubnet,
+            listenPort: createListenPort,
+        }
+        const errors = validateWireGuardInterfaceCreate(createInput)
+        setCreateErrors(errors)
+        if (Object.keys(errors).length > 0) return
+
+        const normalized = normalizeWireGuardInterfaceCreateInput(createInput)
+        const payload = {
+            name: normalized.name,
+            subnet: normalized.subnet,
+            listen_port: normalized.listenPort,
+        }
+        setBusyKey('create')
+        try {
+            await api.createWireGuardInterface(payload)
+            success(`Interface ${payload.name} created`)
+            setCreateOpen(false)
+            resetCreateForm()
+            await refreshInterfaces()
+        } catch (err) {
+            toastError('Failed to create interface: ' + err)
+        } finally {
+            setBusyKey(null)
+        }
+    }
+
+    const handleOpenEdit = async (iface: WireGuardInterfaceSummary) => {
+        if (!canWriteWG) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+        const key = `load-edit:${iface.name}`
+        setBusyKey(key)
+        setEditErrors({})
+        try {
+            const cfg = await api.getWireGuardInterfaceForInterface(iface.name)
+            setEditTarget(iface.name)
+            setEditAddress(String(cfg?.address || ''))
+            setEditBindAddress(String(cfg?.bind_address || ''))
+            setEditListenPort(String(cfg?.listen_port ?? WG_INTERFACE_DEFAULTS.listenPort))
+            setEditPostUp(String(cfg?.post_up || ''))
+            setEditPostDown(String(cfg?.post_down || ''))
+            setEditMTU(cfg?.mtu === undefined || cfg?.mtu === null ? String(WG_INTERFACE_DEFAULTS.mtu) : String(cfg.mtu))
+            setEditDNS(String(cfg?.dns ?? WG_INTERFACE_DEFAULTS.dns))
+            setEditOpen(true)
+        } catch (err) {
+            toastError('Failed to load interface config: ' + err)
+        } finally {
+            setBusyKey(null)
+        }
+    }
+
+    const handleSaveEdit = async () => {
+        if (!canWriteWG) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+        if (!editTarget) return
+        const editInput = {
+            address: editAddress,
+            listenPort: editListenPort,
+            mtu: editMTU,
+        }
+        const errors = validateWireGuardInterfaceEdit(editInput)
+        setEditErrors(errors)
+        if (Object.keys(errors).length > 0) return
+
+        const normalized = normalizeWireGuardInterfaceEditInput(editInput)
+        const payload = {
+            address: normalized.address,
+            bind_address: editBindAddress.trim(),
+            listen_port: normalized.listenPort,
+            post_up: editPostUp.trim(),
+            post_down: editPostDown.trim(),
+            mtu: normalized.mtu,
+            dns: editDNS.trim(),
+        }
+
+        setBusyKey('edit')
+        try {
+            await api.updateWireGuardInterfaceForInterface(editTarget, payload)
+            success(`Interface ${editTarget} updated`)
+            closeEditModal()
+            await refreshInterfaces()
+        } catch (err) {
+            toastError('Failed to update interface: ' + err)
+        } finally {
+            setBusyKey(null)
+        }
+    }
+
+    const handleToggleInterface = async (iface: WireGuardInterfaceSummary) => {
+        if (!canWriteWG) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+        const key = `toggle:${iface.name}`
+        setBusyKey(key)
+        try {
+            if (iface.is_up) {
+                await api.disableWireGuardInterface(iface.name)
+                success(`Interface ${iface.name} disabled`)
+            } else {
+                await api.enableWireGuardInterface(iface.name)
+                success(`Interface ${iface.name} enabled`)
+            }
+            await refreshInterfaces()
+        } catch (err) {
+            toastError(`Failed to ${iface.is_up ? 'disable' : 'enable'} interface: ` + err)
+        } finally {
+            setBusyKey(null)
+        }
+    }
+
+    const handleConfirmDelete = async () => {
+        if (!canWriteWG) {
+            toastError('No write permission for WireGuard')
+            return
+        }
+        if (!deleteTarget) return
+        const target = deleteTarget
+        setBusyKey(`delete:${target.name}`)
+        try {
+            await api.deleteWireGuardInterface(target.name)
+            success(`Interface ${target.name} deleted`)
+            setDeleteTarget(null)
+            await refreshInterfaces()
+        } catch (err) {
+            toastError('Failed to delete interface: ' + err)
+        } finally {
+            setBusyKey(null)
+        }
+    }
 
     return (
-        <div className="space-y-4 sm:space-y-6">
-            <Card
-                title="WireGuard Interfaces"
-                action={
-                    <Button
-                        onClick={() => interfacesQuery.refetch()}
-                        variant="icon"
-                        size="icon"
-                        icon={<RefreshCw size={16} className={interfacesQuery.isFetching ? 'animate-spin' : ''} />}
-                    />
-                }
-            >
-                {interfacesQuery.isLoading ? (
-                    <p className="text-slate-400 text-sm">Loading interfaces...</p>
-                ) : interfaces.length === 0 ? (
-                    <p className="text-slate-500 text-sm italic">No WireGuard interfaces configured.</p>
-                ) : (
-                    <div className="divide-y divide-slate-800">
-                        {interfaces.map(iface => (
-                            <div key={iface.name} className="py-3 flex items-center justify-between gap-4">
-                                <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-mono font-semibold text-white text-sm">{iface.name}</span>
-                                        <Badge variant={iface.is_up ? 'success' : 'neutral'}>
-                                            <div className={`w-1.5 h-1.5 rounded-full ${iface.is_up ? 'bg-emerald-500' : 'bg-slate-500'}`} />
-                                            {iface.is_up ? 'Up' : 'Down'}
-                                        </Badge>
+        <div className="space-y-6">
+            <div className="flex justify-between items-center">
+                <h3 className="text-lg font-semibold text-white">WireGuard Interfaces</h3>
+                <Button
+                    onClick={() => setCreateOpen(true)}
+                    size="sm"
+                    icon={<Plus size={16} />}
+                    disabled={!canWriteWG}
+                    title={canWriteWG ? 'Create interface' : 'No write permission'}
+                >
+                    Add Interface
+                </Button>
+            </div>
+
+            {interfacesQuery.isLoading ? (
+                <div className="text-slate-400 text-sm animate-pulse">Loading interfaces...</div>
+            ) : interfaces.length === 0 ? (
+                <div className="p-8 border border-dashed border-slate-800 rounded-xl text-center text-slate-500">
+                    No WireGuard interfaces configured. Click "Add Interface" to create one.
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {interfaces.map(iface => (
+                        <div
+                            key={iface.name}
+                            className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-4 group shadow-sm hover:border-slate-700 hover:shadow-md transition-all"
+                        >
+                            <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <Badge variant={iface.is_up ? 'success' : 'neutral'}>
+                                        <div className={`w-1.5 h-1.5 rounded-full ${iface.is_up ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                                        {iface.is_up ? 'Up' : 'Down'}
+                                    </Badge>
+                                    <div className="flex gap-1.5">
+                                        <button
+                                            onClick={() => handleOpenEdit(iface)}
+                                            disabled={!canWriteWG || busyKey === `load-edit:${iface.name}`}
+                                            title={canWriteWG ? 'Edit interface config' : 'No write permission'}
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <Edit size={15} strokeWidth={1.6} />
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setRawConfigTarget(iface.name)
+                                                setRawConfigOpen(true)
+                                            }}
+                                            disabled={!canWriteWG}
+                                            title={canWriteWG ? 'Edit raw config' : 'No write permission'}
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <FileJson size={15} strokeWidth={1.6} />
+                                        </button>
+                                        <button
+                                            onClick={() => handleToggleInterface(iface)}
+                                            disabled={!canWriteWG || busyKey === `toggle:${iface.name}`}
+                                            title={canWriteWG ? (iface.is_up ? 'Disable interface' : 'Enable interface') : 'No write permission'}
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <Power size={15} strokeWidth={1.6} />
+                                        </button>
+                                        <button
+                                            onClick={() => setDeleteTarget(iface)}
+                                            disabled={!canWriteWG || busyKey === `delete:${iface.name}`}
+                                            title={canWriteWG ? 'Delete interface' : 'No write permission'}
+                                            className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            <Trash2 size={15} strokeWidth={1.6} />
+                                        </button>
                                     </div>
-                                    <div className="text-xs text-slate-400 mt-1 flex gap-4">
-                                        {iface.address && <span>Address: <span className="font-mono text-slate-300">{iface.address}</span></span>}
-                                        {iface.listen_port > 0 && <span>Port: <span className="font-mono text-slate-300">{iface.listen_port}</span></span>}
-                                        <span>Peers: <span className="font-mono text-slate-300">{iface.peer_count}</span></span>
+                                </div>
+                                <div>
+                                    <div className="text-white font-semibold font-mono truncate" title={iface.name}>
+                                        {iface.name}
+                                    </div>
+                                    <div className="text-slate-500 text-xs mt-1 font-mono">
+                                        {iface.address || '—'}{iface.listen_port > 0 ? ` · :${iface.listen_port}` : ''}
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                            <div className="pt-3 border-t border-slate-800/50 flex gap-4 text-xs text-slate-400 items-center">
+                                <span>{iface.peer_count} peer{iface.peer_count !== 1 ? 's' : ''}</span>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            <Modal
+                isOpen={createOpen}
+                onClose={closeCreateModal}
+                title="Create WireGuard Interface"
+                footer={
+                    <>
+                        <Button variant="ghost" onClick={closeCreateModal} disabled={busyKey === 'create'}>Cancel</Button>
+                        <Button variant="primary" onClick={handleCreateInterface} isLoading={busyKey === 'create'} disabled={!canWriteWG}>
+                            Create Interface
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4 modal-form-uniform">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Name</label>
+                        <input
+                            type="text"
+                            value={createName}
+                            onChange={(e) => setCreateName(e.target.value)}
+                            placeholder="wg1"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                        {createErrors.name && <p className="text-xs text-amber-400 mt-1">{createErrors.name}</p>}
                     </div>
-                )}
-            </Card>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Subnet (CIDR)</label>
+                        <input
+                            type="text"
+                            value={createSubnet}
+                            onChange={(e) => setCreateSubnet(e.target.value)}
+                            placeholder="10.20.0.0/24"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                        {createErrors.subnet && <p className="text-xs text-amber-400 mt-1">{createErrors.subnet}</p>}
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Listen Port</label>
+                        <input
+                            type="number"
+                            min={1}
+                            max={65535}
+                            value={createListenPort}
+                            onChange={(e) => setCreateListenPort(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                        {createErrors.listen_port && <p className="text-xs text-amber-400 mt-1">{createErrors.listen_port}</p>}
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                isOpen={editOpen}
+                onClose={closeEditModal}
+                title={editTarget ? `Edit ${editTarget}` : 'Edit Interface'}
+                footer={
+                    <>
+                        <Button variant="ghost" onClick={closeEditModal} disabled={busyKey === 'edit'}>Cancel</Button>
+                        <Button variant="primary" onClick={handleSaveEdit} isLoading={busyKey === 'edit'} disabled={!canWriteWG || !editTarget}>
+                            Save Changes
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4 modal-form-uniform">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Address</label>
+                        <input
+                            type="text"
+                            value={editAddress}
+                            onChange={(e) => setEditAddress(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                        {editErrors.address && <p className="text-xs text-amber-400 mt-1">{editErrors.address}</p>}
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Bind Address</label>
+                        <input
+                            type="text"
+                            value={editBindAddress}
+                            onChange={(e) => setEditBindAddress(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Listen Port</label>
+                            <input
+                                type="number"
+                                min={1}
+                                max={65535}
+                                value={editListenPort}
+                                onChange={(e) => setEditListenPort(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                            />
+                            {editErrors.listen_port && <p className="text-xs text-amber-400 mt-1">{editErrors.listen_port}</p>}
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">MTU</label>
+                            <input
+                                type="number"
+                                min={0}
+                                value={editMTU}
+                                onChange={(e) => setEditMTU(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                            />
+                            {editErrors.mtu && <p className="text-xs text-amber-400 mt-1">{editErrors.mtu}</p>}
+                        </div>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">DNS</label>
+                        <input
+                            type="text"
+                            value={editDNS}
+                            onChange={(e) => setEditDNS(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Post Up</label>
+                        <input
+                            type="text"
+                            value={editPostUp}
+                            onChange={(e) => setEditPostUp(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Post Down</label>
+                        <input
+                            type="text"
+                            value={editPostDown}
+                            onChange={(e) => setEditPostDown(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors font-mono text-sm"
+                        />
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmModal
+                isOpen={!!deleteTarget}
+                onClose={() => setDeleteTarget(null)}
+                onConfirm={handleConfirmDelete}
+                title="Delete interface?"
+                message={deleteTarget ? `This will permanently delete ${deleteTarget.name}.` : 'This action cannot be undone.'}
+                confirmLabel="Delete"
+                confirmTone="danger"
+                isLoading={!!deleteTarget && busyKey === `delete:${deleteTarget.name}`}
+            />
+
+            <WireGuardRawConfigModal
+                isOpen={rawConfigOpen}
+                iface={rawConfigTarget}
+                canWriteWG={canWriteWG}
+                onClose={() => {
+                    setRawConfigOpen(false)
+                    setRawConfigTarget(null)
+                }}
+                onSaved={refreshInterfaces}
+            />
         </div>
     )
 }

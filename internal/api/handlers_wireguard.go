@@ -365,6 +365,74 @@ func (s *Server) handleDisableWireGuardInterface(w http.ResponseWriter, r *http.
 	w.WriteHeader(http.StatusOK)
 }
 
+func shouldIgnoreWireGuardDisableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	ignoreTokens := []string{
+		"not loaded",
+		"not found",
+		"not active",
+		"inactive",
+		"already stopped",
+		"unit could not be found",
+	}
+	for _, token := range ignoreTokens {
+		if strings.Contains(msg, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) handleDeleteWireGuardInterface(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	if s.executor == nil {
+		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	iface := strings.TrimSpace(r.PathValue("iface"))
+	if !wireGuardInterfaceParamPattern.MatchString(iface) {
+		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		return
+	}
+
+	path, err := s.wireGuardConfigPathForIface(iface)
+	if err != nil {
+		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "wireguard interface not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "failed to inspect interface config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.executor.DisableWireGuardInterface(r.Context(), iface); err != nil && !shouldIgnoreWireGuardDisableError(err) {
+		http.Error(w, "Failed to disable interface: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			http.Error(w, "wireguard interface not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to delete interface config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	s.clearWireGuardPending()
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWireGuard(w) {
 		return
