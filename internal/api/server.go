@@ -231,6 +231,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/wireguard/traffic/series", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTrafficSeries)))
 	protected.HandleFunc("GET /api/wireguard/interfaces", s.secure(s.requirePerm(canReadWG, s.handleListWireGuardInterfaces)))
 	protected.HandleFunc("POST /api/wireguard/interfaces", s.secure(s.requirePerm(canWriteWG, s.handleCreateWireGuardInterface)))
+	protected.HandleFunc("GET /api/wireguard/interfaces/status", s.secure(s.requirePerm(canReadWG, s.handleListWireGuardInterfacesStatus)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardPeersForInterface)))
 	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canWriteWG, s.handleCreateWireGuardPeerForInterface)))
 	protected.HandleFunc("DELETE /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canWriteWG, s.handleDeleteWireGuardPeerForInterface)))

@@ -99,6 +99,58 @@ func (s *Server) handleListWireGuardInterfaces(w http.ResponseWriter, r *http.Re
 	json.NewEncoder(w).Encode(ifaces)
 }
 
+// WireGuardInterfaceSummary holds the operational summary of a single WireGuard interface.
+type WireGuardInterfaceSummary struct {
+	Name       string `json:"name"`
+	Address    string `json:"address"`
+	ListenPort int    `json:"listen_port"`
+	PeerCount  int    `json:"peer_count"`
+	IsUp       bool   `json:"is_up"`
+}
+
+func (s *Server) handleListWireGuardInterfacesStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+
+	dir := s.wireGuardConfigDir()
+	var registry core.WireGuardRegistry
+	configured, err := registry.DiscoverInterfaces(dir)
+	if err != nil {
+		http.Error(w, "Failed to discover interfaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	sort.Strings(configured)
+
+	// Determine which interfaces are currently UP at the kernel level.
+	activeSet := make(map[string]bool)
+	if s.executor != nil {
+		if active, err := s.executor.ListWireGuardInterfaces(r.Context()); err == nil {
+			for _, name := range active {
+				activeSet[name] = true
+			}
+		}
+		// If ListWireGuardInterfaces errors, we degrade gracefully: all show as down.
+	}
+
+	result := make([]WireGuardInterfaceSummary, 0, len(configured))
+	for _, name := range configured {
+		summary := WireGuardInterfaceSummary{
+			Name: name,
+			IsUp: activeSet[name],
+		}
+		if cfg, err := registry.LoadInterface(dir, name); err == nil {
+			summary.Address = cfg.Interface.Address
+			summary.ListenPort = cfg.Interface.ListenPort
+			summary.PeerCount = len(cfg.Peers)
+		}
+		result = append(result, summary)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
 func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWireGuard(w) {
 		return
