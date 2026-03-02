@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -113,8 +112,44 @@ func (s *Server) runWireGuardSample() {
 }
 
 func (s *Server) syncWireGuardConfig(wgConfig *core.WireGuardConfig) bool {
+	iface := defaultWireGuardInterfaceName(s.config.WireGuardConfigPath)
+	after := core.WireGuardInterface{}
+	if wgConfig != nil {
+		after = wgConfig.Interface
+	}
+	return s.syncWireGuardConfigForIface(context.Background(), iface, after, after, wgConfig)
+}
+
+func (s *Server) syncWireGuardConfigForIface(
+	ctx context.Context,
+	iface string,
+	before core.WireGuardInterface,
+	after core.WireGuardInterface,
+	wgConfig *core.WireGuardConfig,
+) bool {
 	if !s.config.EnableWireGuard {
 		return false
+	}
+	if s.executor == nil {
+		return false
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	iface = strings.TrimSpace(iface)
+	if iface == "" {
+		iface = "wg0"
+	}
+
+	if interfaceChanged(before, after) {
+		restartCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := s.executor.RestartWireGuard(restartCtx, iface); err != nil {
+			log.Printf("wireguard restart failed: %v", err)
+			return false
+		}
+		s.clearWireGuardPending()
+		return true
 	}
 
 	syncPath, cleanup, err := s.writeSyncConf(wgConfig)
@@ -130,21 +165,22 @@ func (s *Server) syncWireGuardConfig(wgConfig *core.WireGuardConfig) bool {
 		return false
 	}
 
-	iface := strings.TrimSuffix(filepath.Base(s.config.WireGuardConfigPath), filepath.Ext(s.config.WireGuardConfigPath))
-	if iface == "" {
-		iface = "wg0"
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	syncCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if err := s.executor.SyncWireGuard(ctx, iface, syncContent); err != nil {
+	if err := s.executor.SyncWireGuard(syncCtx, iface, syncContent); err != nil {
 		log.Printf("wg syncconf failed: %v", err)
 		return false
 	}
 
 	s.clearWireGuardPending()
 	return true
+}
+
+func interfaceChanged(before, after core.WireGuardInterface) bool {
+	return strings.TrimSpace(before.PrivateKey) != strings.TrimSpace(after.PrivateKey) ||
+		before.ListenPort != after.ListenPort ||
+		strings.TrimSpace(before.Address) != strings.TrimSpace(after.Address)
 }
 
 func (s *Server) writeSyncConf(wgConfig *core.WireGuardConfig) (string, func(), error) {

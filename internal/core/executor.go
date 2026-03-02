@@ -36,6 +36,14 @@ type SystemExecutor interface {
 
 	// SyncWireGuard applies the WireGuard configuration to the interface.
 	SyncWireGuard(ctx context.Context, interfaceName string, configContent []byte) error
+	// RestartWireGuard restarts the target WireGuard interface service.
+	RestartWireGuard(ctx context.Context, interfaceName string) error
+	// ListWireGuardInterfaces returns currently available WireGuard interface names.
+	ListWireGuardInterfaces(ctx context.Context) ([]string, error)
+	// EnableWireGuardInterface brings the target interface up.
+	EnableWireGuardInterface(ctx context.Context, interfaceName string) error
+	// DisableWireGuardInterface brings the target interface down.
+	DisableWireGuardInterface(ctx context.Context, interfaceName string) error
 
 	// ValidateSingboxConfig validates the sing-box configuration content.
 	ValidateSingboxConfig(ctx context.Context, content []byte) error

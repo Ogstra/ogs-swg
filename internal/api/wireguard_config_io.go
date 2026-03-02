@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -20,7 +21,18 @@ func isNotFoundErr(err error) bool {
 }
 
 func (s *Server) loadWireGuardConfig(ctx context.Context) (*core.WireGuardConfig, error) {
-	path := s.config.WireGuardConfigPath
+	return s.loadWireGuardConfigAtPath(ctx, s.config.WireGuardConfigPath)
+}
+
+func (s *Server) loadWireGuardConfigForIface(ctx context.Context, iface string) (*core.WireGuardConfig, error) {
+	path, err := s.wireGuardConfigPathForIface(iface)
+	if err != nil {
+		return nil, err
+	}
+	return s.loadWireGuardConfigAtPath(ctx, path)
+}
+
+func (s *Server) loadWireGuardConfigAtPath(ctx context.Context, path string) (*core.WireGuardConfig, error) {
 	if s.executor == nil {
 		return core.LoadWireGuardConfig(path)
 	}
@@ -58,6 +70,18 @@ func (s *Server) loadWireGuardConfig(ctx context.Context) (*core.WireGuardConfig
 }
 
 func (s *Server) saveWireGuardConfig(ctx context.Context, cfg *core.WireGuardConfig) error {
+	return s.saveWireGuardConfigAtPath(ctx, s.config.WireGuardConfigPath, cfg)
+}
+
+func (s *Server) saveWireGuardConfigForIface(ctx context.Context, cfg *core.WireGuardConfig, iface string) error {
+	path, err := s.wireGuardConfigPathForIface(iface)
+	if err != nil {
+		return err
+	}
+	return s.saveWireGuardConfigAtPath(ctx, path, cfg)
+}
+
+func (s *Server) saveWireGuardConfigAtPath(ctx context.Context, path string, cfg *core.WireGuardConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -68,9 +92,9 @@ func (s *Server) saveWireGuardConfig(ctx context.Context, cfg *core.WireGuardCon
 	}
 
 	if s.executor != nil {
-		return s.executor.WriteConfig(ctx, s.config.WireGuardConfigPath, content, 0644)
+		return s.executor.WriteConfig(ctx, path, content, 0644)
 	}
-	return os.WriteFile(s.config.WireGuardConfigPath, content, 0644)
+	return os.WriteFile(path, content, 0644)
 }
 
 func serializeWireGuardConfig(cfg *core.WireGuardConfig) ([]byte, error) {
@@ -110,4 +134,31 @@ func mutateWireGuardConfig(cfg *core.WireGuardConfig, mutate func(*core.WireGuar
 	}()
 
 	return mutate(cfg)
+}
+
+func (s *Server) wireGuardConfigPathForIface(iface string) (string, error) {
+	name := strings.TrimSpace(iface)
+	if name == "" {
+		name = defaultWireGuardInterfaceName(s.config.WireGuardConfigPath)
+	}
+
+	dir := strings.TrimSpace(s.config.WireGuardConfigDir)
+	if dir == "" {
+		basePath := strings.TrimSpace(s.config.WireGuardConfigPath)
+		if basePath == "" {
+			basePath = "/etc/wireguard/wg0.conf"
+		}
+		dir = filepath.Dir(basePath)
+	}
+
+	var registry core.WireGuardRegistry
+	return registry.InterfacePath(dir, name)
+}
+
+func defaultWireGuardInterfaceName(configPath string) string {
+	iface := strings.TrimSpace(strings.TrimSuffix(filepath.Base(configPath), filepath.Ext(configPath)))
+	if iface == "" {
+		return "wg0"
+	}
+	return iface
 }

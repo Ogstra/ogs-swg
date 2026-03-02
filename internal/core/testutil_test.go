@@ -30,14 +30,14 @@ func (s *stubExecutor) WriteConfig(_ context.Context, _ string, content []byte, 
 }
 
 func (s *stubExecutor) ValidateSingboxConfig(_ context.Context, _ []byte) error { return nil }
-func (s *stubExecutor) RestartService(_ context.Context, _ string) error         { return nil }
-func (s *stubExecutor) StartService(_ context.Context, _ string) error           { return nil }
-func (s *stubExecutor) StopService(_ context.Context, _ string) error            { return nil }
+func (s *stubExecutor) RestartService(_ context.Context, _ string) error        { return nil }
+func (s *stubExecutor) StartService(_ context.Context, _ string) error          { return nil }
+func (s *stubExecutor) StopService(_ context.Context, _ string) error           { return nil }
 func (s *stubExecutor) IsServiceActive(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }
-func (s *stubExecutor) ApplySysctl(_ context.Context, _, _ string) error        { return nil }
-func (s *stubExecutor) GetSysctl(_ context.Context, _ string) (string, error)   { return "", nil }
+func (s *stubExecutor) ApplySysctl(_ context.Context, _, _ string) error      { return nil }
+func (s *stubExecutor) GetSysctl(_ context.Context, _ string) (string, error) { return "", nil }
 func (s *stubExecutor) ReadJournal(_ context.Context, _ string, _ int) ([]string, error) {
 	return nil, nil
 }
@@ -45,11 +45,19 @@ func (s *stubExecutor) SearchJournal(_ context.Context, _, _ string, _ int) ([]s
 	return nil, nil
 }
 func (s *stubExecutor) SyncWireGuard(_ context.Context, _ string, _ []byte) error { return nil }
+func (s *stubExecutor) RestartWireGuard(_ context.Context, _ string) error        { return nil }
+func (s *stubExecutor) ListWireGuardInterfaces(_ context.Context) ([]string, error) {
+	return nil, nil
+}
+func (s *stubExecutor) EnableWireGuardInterface(_ context.Context, _ string) error { return nil }
+func (s *stubExecutor) DisableWireGuardInterface(_ context.Context, _ string) error {
+	return nil
+}
 func (s *stubExecutor) GetWireGuardStats(_ context.Context) (map[string]PeerStats, error) {
 	return nil, nil
 }
-func (s *stubExecutor) CheckConnectivity(_ context.Context) error              { return nil }
-func (s *stubExecutor) Close() error                                           { return nil }
+func (s *stubExecutor) CheckConnectivity(_ context.Context) error             { return nil }
+func (s *stubExecutor) Close() error                                          { return nil }
 func (s *stubExecutor) Dial(_ context.Context, _, _ string) (net.Conn, error) { return nil, nil }
 
 // newTestConfig creates a *Config wired to an in-memory stubExecutor.

@@ -22,6 +22,7 @@ func parseWGDumpStats(output []byte) map[string]core.PeerStats {
 		if len(pubKey) < 40 {
 			continue
 		}
+		iface := parts[0]
 		endpoint := parts[3]
 		if endpoint == "(none)" {
 			endpoint = ""
@@ -31,6 +32,7 @@ func parseWGDumpStats(output []byte) map[string]core.PeerStats {
 		transferTx, _ := strconv.ParseInt(parts[7], 10, 64)
 		stats[pubKey] = core.PeerStats{
 			PublicKey:       pubKey,
+			InterfaceName:   iface,
 			Endpoint:        endpoint,
 			LatestHandshake: latestHandshake,
 			TransferRx:      transferRx,
@@ -44,17 +46,26 @@ func parseWGTextStats(output []byte) map[string]core.PeerStats {
 	stats := make(map[string]core.PeerStats)
 	lines := strings.Split(string(output), "\n")
 	var currentPeer string
+	var currentInterface string
 
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
+		if strings.HasPrefix(line, "interface: ") {
+			currentInterface = strings.TrimSpace(strings.TrimPrefix(line, "interface: "))
+			currentPeer = ""
+			continue
+		}
 		if strings.HasPrefix(line, "peer: ") {
 			currentPeer = strings.TrimSpace(strings.TrimPrefix(line, "peer: "))
 			if currentPeer != "" {
 				if _, ok := stats[currentPeer]; !ok {
-					stats[currentPeer] = core.PeerStats{PublicKey: currentPeer}
+					stats[currentPeer] = core.PeerStats{
+						PublicKey:     currentPeer,
+						InterfaceName: currentInterface,
+					}
 				}
 			}
 			continue

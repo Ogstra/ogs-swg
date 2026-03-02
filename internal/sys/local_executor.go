@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -135,6 +137,7 @@ func (e *LocalExecutor) GetWireGuardStats(_ context.Context) (map[string]core.Pe
 			}
 			stats[peer.PublicKey.String()] = core.PeerStats{
 				PublicKey:       peer.PublicKey.String(),
+				InterfaceName:   dev.Name,
 				Endpoint:        endpoint,
 				LatestHandshake: handshake,
 				TransferRx:      peer.ReceiveBytes,
@@ -144,6 +147,26 @@ func (e *LocalExecutor) GetWireGuardStats(_ context.Context) (map[string]core.Pe
 	}
 
 	return stats, nil
+}
+
+func (e *LocalExecutor) RestartWireGuard(ctx context.Context, interfaceName string) error {
+	return dbusServiceAction(ctx, "restart", resolveUnitName("wireguard", interfaceName))
+}
+
+func (e *LocalExecutor) ListWireGuardInterfaces(ctx context.Context) ([]string, error) {
+	out, err := exec.CommandContext(ctx, "wg", "show", "interfaces").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("wg show interfaces failed: %v, output: %s", err, string(out))
+	}
+	return parseWireGuardInterfaces(out), nil
+}
+
+func (e *LocalExecutor) EnableWireGuardInterface(ctx context.Context, interfaceName string) error {
+	return dbusServiceAction(ctx, "start", resolveUnitName("wireguard", interfaceName))
+}
+
+func (e *LocalExecutor) DisableWireGuardInterface(ctx context.Context, interfaceName string) error {
+	return dbusServiceAction(ctx, "stop", resolveUnitName("wireguard", interfaceName))
 }
 
 func (e *LocalExecutor) Close() error {
@@ -189,9 +212,30 @@ func dbusServiceAction(ctx context.Context, action, service string) error {
 	return nil
 }
 
-func resolveUnitName(service string) string {
+func resolveUnitName(service string, interfaceName ...string) string {
 	if service == "wireguard" {
-		return "wg-quick@wg0"
+		iface := "wg0"
+		if len(interfaceName) > 0 {
+			iface = normalizeWireGuardInterfaceName(interfaceName[0])
+		}
+		return fmt.Sprintf("wg-quick@%s", iface)
 	}
 	return service
+}
+
+func normalizeWireGuardInterfaceName(interfaceName string) string {
+	iface := strings.TrimSpace(strings.TrimSuffix(interfaceName, ".conf"))
+	if iface == "" {
+		return "wg0"
+	}
+	return iface
+}
+
+func parseWireGuardInterfaces(out []byte) []string {
+	names := strings.Fields(strings.TrimSpace(string(out)))
+	if len(names) == 0 {
+		return []string{}
+	}
+	sort.Strings(names)
+	return names
 }

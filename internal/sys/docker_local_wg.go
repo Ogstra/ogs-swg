@@ -2,6 +2,7 @@ package sys
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"time"
@@ -10,22 +11,24 @@ import (
 )
 
 // SyncWireGuard assumes config content has already been persisted by the caller.
-// In docker_local mode we reload wg-quick for the target interface through host
-// systemd (via the host D-Bus bind mount).
+// In docker_local mode peer-only updates are applied through wg syncconf on the host.
 func (e *DockerLocalExecutor) SyncWireGuard(ctx context.Context, interfaceName string, configContent []byte) error {
-	_ = configContent
-
-	iface := strings.TrimSpace(strings.TrimSuffix(interfaceName, ".conf"))
-	if iface == "" {
-		iface = "wg0"
+	if len(configContent) == 0 {
+		return fmt.Errorf("wireguard syncconf content is empty")
 	}
-	unit := fmt.Sprintf("wg-quick@%s", iface)
+	iface := normalizeWireGuardInterfaceName(interfaceName)
+	encoded := base64.StdEncoding.EncodeToString(configContent)
+	script := fmt.Sprintf(
+		"set -eu; umask 077; tmp=$(mktemp /tmp/wg-sync-XXXXXX.conf); trap 'rm -f \"$tmp\"' EXIT; printf '%%s' '%s' | base64 -d > \"$tmp\"; wg syncconf %s \"$tmp\"",
+		encoded,
+		iface,
+	)
 
 	restartCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	output, err := runViaSystemdRun(restartCtx, "systemctl", "--system", "restart", "--no-block", unit)
+	output, err := runViaSystemdRun(restartCtx, "/bin/sh", "-lc", script)
 	if err != nil {
-		return fmt.Errorf("host systemctl restart %s failed: %v, output: %s", unit, err, string(output))
+		return fmt.Errorf("host wg syncconf %s failed: %v, output: %s", iface, err, string(output))
 	}
 	return nil
 }

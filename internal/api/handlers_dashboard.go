@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -15,6 +17,7 @@ import (
 type DashboardData struct {
 	Status                map[string]interface{}  `json:"status"`
 	StatsCards            map[string]TrafficStats `json:"stats_cards"`
+	WireGuardInterfaces   map[string]TrafficStats `json:"wireguard_interfaces,omitempty"`
 	ChartData             []UnifiedChartPoint     `json:"chart_data"`
 	TopConsumers          map[string][]Consumer   `json:"top_consumers"`
 	SingboxPendingChanges bool                    `json:"singbox_pending_changes"`
@@ -38,8 +41,73 @@ type Consumer struct {
 	Name       string `json:"name"`
 	Total      int64  `json:"total"`
 	Flow       string `json:"flow"`
+	Interface  string `json:"interface_name,omitempty"`
 	QuotaLimit int64  `json:"quota_limit"` // 0 if none
 	Key        string `json:"key"`         // For linking/identification
+}
+
+func wireGuardFlowLabel(interfaceName string) string {
+	iface := strings.TrimSpace(interfaceName)
+	if iface == "" {
+		return "WireGuard"
+	}
+	return fmt.Sprintf("WireGuard:%s", iface)
+}
+
+func sumCoreTrafficMap(stats map[int64]core.TrafficStats) TrafficStats {
+	var out TrafficStats
+	for _, st := range stats {
+		out.Uplink += st.Uplink
+		out.Downlink += st.Downlink
+	}
+	return out
+}
+
+func (s *Server) discoverWireGuardPeersByInterface(ctx context.Context) (map[string][]string, map[string]string, map[string]string) {
+	byInterface := make(map[string][]string)
+	aliasByKey := make(map[string]string)
+	interfaceByKey := make(map[string]string)
+	seenGlobal := make(map[string]struct{})
+
+	var registry core.WireGuardRegistry
+	ifaces, err := registry.DiscoverInterfaces(s.wireGuardConfigDir())
+	if err != nil || len(ifaces) == 0 {
+		ifaces = []string{defaultWireGuardInterfaceName(s.config.WireGuardConfigPath)}
+	}
+	sort.Strings(ifaces)
+
+	for _, iface := range ifaces {
+		cfg, err := s.loadWireGuardConfigForIface(ctx, iface)
+		if err != nil || cfg == nil {
+			continue
+		}
+
+		seenIface := make(map[string]struct{})
+		for _, p := range cfg.Peers {
+			key := strings.TrimSpace(p.PublicKey)
+			if key == "" {
+				continue
+			}
+			if _, ok := seenIface[key]; !ok {
+				byInterface[iface] = append(byInterface[iface], key)
+				seenIface[key] = struct{}{}
+			}
+			if _, ok := seenGlobal[key]; !ok {
+				interfaceByKey[key] = iface
+				seenGlobal[key] = struct{}{}
+			}
+
+			alias := strings.TrimSpace(p.Alias)
+			if alias == "" {
+				alias = strings.TrimSpace(p.Email)
+			}
+			if alias != "" {
+				aliasByKey[key] = alias
+			}
+		}
+	}
+
+	return byInterface, aliasByKey, interfaceByKey
 }
 
 func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) {
@@ -125,13 +193,23 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	// 2. Fetch WireGuard peers for range calculations
 	var wgPeerKeys []string
 	wgAliases := make(map[string]string)
+	wgInterfaceByKey := make(map[string]string)
+	wgKeysByInterface := make(map[string][]string)
 	if s.config.EnableWireGuard {
-		wgCfg, _ := s.loadWireGuardConfig(r.Context())
-		if wgCfg != nil {
-			wgPeerKeys = make([]string, 0, len(wgCfg.Peers))
-			for _, p := range wgCfg.Peers {
-				wgPeerKeys = append(wgPeerKeys, p.PublicKey)
-				wgAliases[p.PublicKey] = p.Alias
+		wgKeysByInterface, wgAliases, wgInterfaceByKey = s.discoverWireGuardPeersByInterface(r.Context())
+		seen := make(map[string]struct{})
+		ifaces := make([]string, 0, len(wgKeysByInterface))
+		for iface := range wgKeysByInterface {
+			ifaces = append(ifaces, iface)
+		}
+		sort.Strings(ifaces)
+		for _, iface := range ifaces {
+			for _, key := range wgKeysByInterface[iface] {
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				wgPeerKeys = append(wgPeerKeys, key)
 			}
 		}
 	}
@@ -156,6 +234,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	// 4. Fetch buckets
 	sbBuckets := make(map[int64]TrafficStats)
 	wgBuckets := make(map[int64]TrafficStats)
+	wgInterfaceStats := make(map[string]TrafficStats)
 
 	if s.config.EnableSingbox {
 		if buckets, err := s.store.GetSBTrafficBuckets(start, end, interval); err == nil {
@@ -171,6 +250,22 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 			for ts, stats := range buckets {
 				wgBuckets[ts] = TrafficStats{Uplink: stats.Uplink, Downlink: stats.Downlink}
 			}
+		}
+		ifaces := make([]string, 0, len(wgKeysByInterface))
+		for iface := range wgKeysByInterface {
+			ifaces = append(ifaces, iface)
+		}
+		sort.Strings(ifaces)
+		for _, iface := range ifaces {
+			keys := wgKeysByInterface[iface]
+			if len(keys) == 0 {
+				continue
+			}
+			buckets, err := s.store.GetWGTrafficBuckets(keys, start, end, interval)
+			if err != nil {
+				continue
+			}
+			wgInterfaceStats[iface] = sumCoreTrafficMap(buckets)
 		}
 	}
 
@@ -223,11 +318,13 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 				if name == "" && len(t.Key) >= 8 {
 					name = t.Key[0:8]
 				}
+				iface := wgInterfaceByKey[t.Key]
 				topWG = append(topWG, Consumer{
 					Name:       name,
 					Key:        t.Key,
 					Total:      t.Total,
-					Flow:       "WireGuard",
+					Flow:       wireGuardFlowLabel(iface),
+					Interface:  iface,
 					QuotaLimit: 0,
 				})
 			}
@@ -300,7 +397,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 			"singbox":   {Uplink: totalSBUplink, Downlink: totalSBDownlink},
 			"wireguard": {Uplink: totalWGTx, Downlink: totalWGRx},
 		},
-		ChartData: chartData,
+		WireGuardInterfaces: wgInterfaceStats,
+		ChartData:           chartData,
 		TopConsumers: map[string][]Consumer{
 			"wireguard": topWG,
 			"singbox":   topSB,

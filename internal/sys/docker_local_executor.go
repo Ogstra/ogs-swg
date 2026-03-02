@@ -84,6 +84,31 @@ func (e *DockerLocalExecutor) IsServiceActive(ctx context.Context, name string) 
 	return true, nil
 }
 
+func (e *DockerLocalExecutor) RestartWireGuard(ctx context.Context, interfaceName string) error {
+	return e.runSystemctl(ctx, "restart", "wireguard", interfaceName)
+}
+
+func (e *DockerLocalExecutor) ListWireGuardInterfaces(ctx context.Context) ([]string, error) {
+	out, err := runViaSystemdRun(
+		ctx,
+		"/bin/sh",
+		"-lc",
+		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin; wg show interfaces",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("host wg show interfaces failed: %v, output: %s", err, string(out))
+	}
+	return parseWireGuardInterfaces(out), nil
+}
+
+func (e *DockerLocalExecutor) EnableWireGuardInterface(ctx context.Context, interfaceName string) error {
+	return e.runSystemctl(ctx, "start", "wireguard", interfaceName)
+}
+
+func (e *DockerLocalExecutor) DisableWireGuardInterface(ctx context.Context, interfaceName string) error {
+	return e.runSystemctl(ctx, "stop", "wireguard", interfaceName)
+}
+
 // Sysctl: execute on host via systemd-run so /proc/sys is host-scoped.
 
 func (e *DockerLocalExecutor) ApplySysctl(ctx context.Context, key, value string) error {
@@ -176,8 +201,8 @@ func (e *DockerLocalExecutor) Close() error {
 
 // helpers
 
-func (e *DockerLocalExecutor) runSystemctl(ctx context.Context, action, name string) error {
-	unit := resolveUnitName(name)
+func (e *DockerLocalExecutor) runSystemctl(ctx context.Context, action, name string, interfaceName ...string) error {
+	unit := resolveUnitName(name, interfaceName...)
 	args := []string{"--system", action}
 	switch action {
 	case "restart", "start", "stop":
