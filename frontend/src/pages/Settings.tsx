@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api, FeatureFlags } from '../services/api'
-import { Save, RefreshCw, UserCog } from 'lucide-react'
+import type { WireGuardInterfaceSummary } from '../services/api'
+import { Save, RefreshCw, UserCog, Shield } from 'lucide-react'
 import { useToast } from '../context/ToastContext'
 import { Card } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -281,6 +282,11 @@ export default function Settings() {
                     success={success}
                 />
             )
+        },
+        {
+            id: 'wireguard-interfaces',
+            label: <span className="flex items-center gap-2"><Shield size={16} /> WireGuard Interfaces</span>,
+            content: <WireGuardInterfacesTab />,
         },
         {
             id: 'database',
@@ -604,6 +610,60 @@ function GeneralTab({
                                 </Button>
                             </div>
                         </div>
+                    </div>
+                )}
+            </Card>
+        </div>
+    )
+}
+
+function WireGuardInterfacesTab() {
+    const interfacesQuery = useQuery({
+        queryKey: ['settings-wg-interfaces-status'],
+        queryFn: () => api.getWireGuardInterfacesStatus(),
+        placeholderData: (previousData: WireGuardInterfaceSummary[] | undefined) => previousData,
+        refetchInterval: 30_000,
+    })
+
+    const interfaces = interfacesQuery.data ?? []
+
+    return (
+        <div className="space-y-4 sm:space-y-6">
+            <Card
+                title="WireGuard Interfaces"
+                action={
+                    <Button
+                        onClick={() => interfacesQuery.refetch()}
+                        variant="icon"
+                        size="icon"
+                        icon={<RefreshCw size={16} className={interfacesQuery.isFetching ? 'animate-spin' : ''} />}
+                    />
+                }
+            >
+                {interfacesQuery.isLoading ? (
+                    <p className="text-slate-400 text-sm">Loading interfaces...</p>
+                ) : interfaces.length === 0 ? (
+                    <p className="text-slate-500 text-sm italic">No WireGuard interfaces configured.</p>
+                ) : (
+                    <div className="divide-y divide-slate-800">
+                        {interfaces.map(iface => (
+                            <div key={iface.name} className="py-3 flex items-center justify-between gap-4">
+                                <div className="min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-mono font-semibold text-white text-sm">{iface.name}</span>
+                                        <Badge variant={iface.is_up ? 'success' : 'neutral'}>
+                                            <div className={`w-1.5 h-1.5 rounded-full ${iface.is_up ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                                            {iface.is_up ? 'Up' : 'Down'}
+                                        </Badge>
+                                    </div>
+                                    <div className="text-xs text-slate-400 mt-1 flex gap-4">
+                                        {iface.address && <span>Address: <span className="font-mono text-slate-300">{iface.address}</span></span>}
+                                        {iface.listen_port > 0 && <span>Port: <span className="font-mono text-slate-300">{iface.listen_port}</span></span>}
+                                        <span>Peers: <span className="font-mono text-slate-300">{iface.peer_count}</span></span>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 )}
             </Card>
