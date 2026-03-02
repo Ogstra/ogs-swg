@@ -8,6 +8,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +24,299 @@ type PeerWithStats struct {
 	core.WireGuardPeer
 	Stats       core.PeerStats `json:"stats"`
 	QRAvailable bool           `json:"qr_available"`
+}
+
+type CreateWireGuardInterfaceRequest struct {
+	Name       string `json:"name" validate:"required"`
+	Subnet     string `json:"subnet" validate:"required"`
+	ListenPort int    `json:"listen_port" validate:"required"`
+	PrivateKey string `json:"private_key,omitempty"`
+}
+
+type CreateWireGuardInterfaceResponse struct {
+	Name       string `json:"name"`
+	Subnet     string `json:"subnet"`
+	Address    string `json:"address"`
+	ListenPort int    `json:"listen_port"`
+	PublicKey  string `json:"public_key"`
+	Path       string `json:"path"`
+}
+
+var wireGuardInterfaceParamPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,15}$`)
+
+func (s *Server) wireGuardConfigDir() string {
+	if dir := strings.TrimSpace(s.config.WireGuardConfigDir); dir != "" {
+		return filepath.Clean(dir)
+	}
+
+	basePath := strings.TrimSpace(s.config.WireGuardConfigPath)
+	if basePath == "" {
+		basePath = "/etc/wireguard/wg0.conf"
+	}
+	return filepath.Dir(basePath)
+}
+
+func (s *Server) scopedWireGuardServerForRequest(r *http.Request) (*Server, string, error) {
+	iface := strings.TrimSpace(r.PathValue("iface"))
+	if !wireGuardInterfaceParamPattern.MatchString(iface) {
+		return nil, "", fmt.Errorf("invalid wireguard interface name")
+	}
+
+	path, err := s.wireGuardConfigPathForIface(iface)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid wireguard interface name")
+	}
+
+	cfgCopy := *s.config
+	cfgCopy.WireGuardConfigPath = path
+	scoped := *s
+	scoped.config = &cfgCopy
+	return &scoped, iface, nil
+}
+
+func (s *Server) runScopedWireGuardHandler(w http.ResponseWriter, r *http.Request, h func(*Server, http.ResponseWriter, *http.Request)) {
+	scoped, _, err := s.scopedWireGuardServerForRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h(scoped, w, r)
+}
+
+func (s *Server) handleListWireGuardInterfaces(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+
+	var registry core.WireGuardRegistry
+	ifaces, err := registry.DiscoverInterfaces(s.wireGuardConfigDir())
+	if err != nil {
+		http.Error(w, "Failed to discover interfaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Keep output deterministic even if discovery source changes in the future.
+	sort.Strings(ifaces)
+	if ifaces == nil {
+		ifaces = []string{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ifaces)
+}
+
+func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	if s.executor == nil {
+		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	var req CreateWireGuardInterfaceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.validate.Struct(req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.PrivateKey) != "" {
+		http.Error(w, "private_key is managed server-side", http.StatusBadRequest)
+		return
+	}
+
+	iface := strings.TrimSpace(req.Name)
+	if !wireGuardInterfaceParamPattern.MatchString(iface) {
+		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		return
+	}
+	if req.ListenPort < 1 || req.ListenPort > 65535 {
+		http.Error(w, "listen_port must be between 1 and 65535", http.StatusBadRequest)
+		return
+	}
+
+	subnetCIDR, subnetNet, err := normalizeWireGuardSubnet(req.Subnet)
+	if err != nil {
+		http.Error(w, "invalid subnet: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	address, err := firstInterfaceAddressFromSubnet(subnetNet)
+	if err != nil {
+		http.Error(w, "invalid subnet: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	dir := s.wireGuardConfigDir()
+	var registry core.WireGuardRegistry
+	existingIfaces, err := registry.DiscoverInterfaces(dir)
+	if err != nil {
+		http.Error(w, "Failed to discover interfaces: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for _, existing := range existingIfaces {
+		if existing == iface {
+			http.Error(w, "wireguard interface already exists", http.StatusConflict)
+			return
+		}
+		existingCfg, err := registry.LoadInterface(dir, existing)
+		if err != nil {
+			continue
+		}
+		existingNet, err := firstInterfaceCIDR(existingCfg)
+		if err != nil {
+			continue
+		}
+		if cidrOverlaps(existingNet, subnetNet) {
+			http.Error(w, "subnet overlaps with existing interface "+existing, http.StatusBadRequest)
+			return
+		}
+	}
+
+	path, err := s.wireGuardConfigPathForIface(iface)
+	if err != nil {
+		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		http.Error(w, "wireguard interface already exists", http.StatusConflict)
+		return
+	} else if err != nil && !os.IsNotExist(err) {
+		http.Error(w, "Failed to check interface path: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	privateKey, publicKey, err := core.GenerateWireGuardKeys()
+	if err != nil {
+		http.Error(w, "Failed to generate keys: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	cfg := &core.WireGuardConfig{
+		Path: path,
+		Interface: core.WireGuardInterface{
+			Address:    address,
+			PrivateKey: privateKey,
+			ListenPort: req.ListenPort,
+		},
+		Peers: []core.WireGuardPeer{},
+	}
+	if err := s.saveWireGuardConfigAtPath(r.Context(), path, cfg); err != nil {
+		http.Error(w, "Failed to persist interface config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := s.executor.EnableWireGuardInterface(r.Context(), iface); err != nil {
+		http.Error(w, "Failed to enable interface: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.clearWireGuardPending()
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(CreateWireGuardInterfaceResponse{
+		Name:       iface,
+		Subnet:     subnetCIDR,
+		Address:    address,
+		ListenPort: req.ListenPort,
+		PublicKey:  publicKey,
+		Path:       path,
+	})
+}
+
+func (s *Server) handleGetWireGuardPeersForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleGetWireGuardPeers)
+}
+
+func (s *Server) handleCreateWireGuardPeerForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleCreateWireGuardPeer)
+}
+
+func (s *Server) handleDeleteWireGuardPeerForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleDeleteWireGuardPeer)
+}
+
+func (s *Server) handleRestoreWireGuardPeerForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleRestoreWireGuardPeer)
+}
+
+func (s *Server) handleGetWireGuardInterfaceForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleGetWireGuardInterface)
+}
+
+func (s *Server) handleUpdateWireGuardInterfaceForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleUpdateWireGuardInterface)
+}
+
+func (s *Server) handleUpdateWireGuardPeerForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleUpdateWireGuardPeer)
+}
+
+func (s *Server) handleGetWireGuardPeerConfigForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleGetWireGuardPeerConfig)
+}
+
+func (s *Server) handleGetWireGuardConfigForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleGetWireGuardConfig)
+}
+
+func (s *Server) handleUpdateWireGuardConfigForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleUpdateWireGuardConfig)
+}
+
+func (s *Server) handleGetWireGuardTrafficForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleGetWireGuardTraffic)
+}
+
+func (s *Server) handleGetWireGuardTrafficSeriesForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleGetWireGuardTrafficSeries)
+}
+
+func (s *Server) handleEnableWireGuardInterface(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	if s.executor == nil {
+		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	iface := strings.TrimSpace(r.PathValue("iface"))
+	if !wireGuardInterfaceParamPattern.MatchString(iface) {
+		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.executor.EnableWireGuardInterface(r.Context(), iface); err != nil {
+		http.Error(w, "Failed to enable interface: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.clearWireGuardPending()
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleDisableWireGuardInterface(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	if s.executor == nil {
+		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	iface := strings.TrimSpace(r.PathValue("iface"))
+	if !wireGuardInterfaceParamPattern.MatchString(iface) {
+		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.executor.DisableWireGuardInterface(r.Context(), iface); err != nil {
+		http.Error(w, "Failed to disable interface: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.clearWireGuardPending()
+	w.WriteHeader(http.StatusOK)
 }
 
 func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +465,65 @@ func firstInterfaceCIDR(cfg *core.WireGuardConfig) (*net.IPNet, error) {
 		return nil, err
 	}
 	return ipNet, nil
+}
+
+func normalizeWireGuardSubnet(raw string) (string, *net.IPNet, error) {
+	subnet := strings.TrimSpace(raw)
+	if subnet == "" {
+		return "", nil, fmt.Errorf("subnet is required")
+	}
+
+	ip, ipNet, err := net.ParseCIDR(subnet)
+	if err != nil || ipNet == nil || ip == nil {
+		return "", nil, fmt.Errorf("expected CIDR notation like 10.20.0.0/24")
+	}
+	if ip.To4() == nil {
+		return "", nil, fmt.Errorf("only IPv4 subnets are supported")
+	}
+
+	network := ip.Mask(ipNet.Mask)
+	ones, bits := ipNet.Mask.Size()
+	if bits != 32 || ones < 0 || ones > 32 {
+		return "", nil, fmt.Errorf("invalid subnet mask")
+	}
+
+	normalized := &net.IPNet{IP: network, Mask: ipNet.Mask}
+	return normalized.String(), normalized, nil
+}
+
+func firstInterfaceAddressFromSubnet(ipNet *net.IPNet) (string, error) {
+	if ipNet == nil {
+		return "", fmt.Errorf("subnet is required")
+	}
+	ones, bits := ipNet.Mask.Size()
+	if bits != 32 {
+		return "", fmt.Errorf("only IPv4 subnets are supported")
+	}
+	if ones >= 31 {
+		return "", fmt.Errorf("subnet must provide at least one usable host address")
+	}
+
+	base := ipNet.IP.To4()
+	if base == nil {
+		return "", fmt.Errorf("only IPv4 subnets are supported")
+	}
+	host := make(net.IP, len(base))
+	copy(host, base)
+	host[3]++
+	if !ipNet.Contains(host) {
+		return "", fmt.Errorf("subnet has no usable host address")
+	}
+	return fmt.Sprintf("%s/%d", host.String(), ones), nil
+}
+
+func cidrOverlaps(a, b *net.IPNet) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if (a.IP.To4() == nil) != (b.IP.To4() == nil) {
+		return false
+	}
+	return a.Contains(b.IP) || b.Contains(a.IP)
 }
 
 func addUsedIP(used map[string]bool, cidr string) {
@@ -585,6 +940,7 @@ func (s *Server) handleUpdateWireGuardInterface(w http.ResponseWriter, r *http.R
 		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	beforeIface := wgConfig.Interface
 
 	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.UpdateInterface(req) }); err != nil {
 		http.Error(w, "Failed to update interface: "+err.Error(), http.StatusInternalServerError)
@@ -595,7 +951,8 @@ func (s *Server) handleUpdateWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if !s.syncWireGuardConfig(wgConfig) {
+	iface := defaultWireGuardInterfaceName(s.config.WireGuardConfigPath)
+	if !s.syncWireGuardConfigForIface(r.Context(), iface, beforeIface, wgConfig.Interface, wgConfig) {
 		s.markWireGuardPending()
 	}
 	w.WriteHeader(http.StatusOK)
