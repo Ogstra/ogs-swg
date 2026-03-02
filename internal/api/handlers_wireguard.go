@@ -137,7 +137,7 @@ func (s *Server) handleListWireGuardInterfacesStatus(w http.ResponseWriter, r *h
 	for _, name := range configured {
 		summary := WireGuardInterfaceSummary{
 			Name: name,
-			IsUp: activeSet[name],
+			IsUp: s.config.DemoMode || activeSet[name],
 		}
 		if cfg, err := registry.LoadInterface(dir, name); err == nil {
 			summary.Address = cfg.Interface.Address
@@ -450,6 +450,8 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 		stats, _ = core.GetWireGuardStats()
 	}
 	storedPeers, _ := s.store.GetWGPeerMeta()
+	now := time.Now()
+	ifaceName := s.wireGuardInterfaceForContext(r.Context())
 
 	response := make([]PeerWithStats, 0)
 	redactWG := shouldRedactWireGuardReadOnly(r)
@@ -480,9 +482,6 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 		}
 		if s, ok := stats[p.PublicKey]; ok {
 			ps.Stats = s
-			if redactWG && strings.TrimSpace(ps.Stats.PublicKey) != "" {
-				ps.Stats.PublicKey = maskedValue
-			}
 			if ps.Stats.LatestHandshake <= 0 {
 				if meta, ok := storedPeers[p.PublicKey]; ok {
 					ps.Stats.LatestHandshake = meta.LastHandshake
@@ -497,7 +496,34 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 				ps.Stats.PublicKey = maskedValue
 			}
 		}
+		if s.config.DemoMode {
+			if strings.TrimSpace(ps.Stats.PublicKey) == "" {
+				ps.Stats.PublicKey = p.PublicKey
+			}
+			if strings.TrimSpace(ps.Stats.InterfaceName) == "" {
+				ps.Stats.InterfaceName = ifaceName
+			}
+			ps.Stats.LatestHandshake = demoModeLastSeen("wireguard-peer", p.PublicKey, now)
+		}
+		if redactWG && strings.TrimSpace(ps.Stats.PublicKey) != "" {
+			ps.Stats.PublicKey = maskedValue
+		}
 		response = append(response, ps)
+	}
+	if s.config.DemoMode && len(response) > 0 {
+		threshold := now.Add(-3 * time.Minute).Unix()
+		hasActive := false
+		for _, peer := range response {
+			if peer.Stats.LatestHandshake >= threshold {
+				hasActive = true
+				break
+			}
+		}
+		if !hasActive {
+			bucket := now.Unix() / 90
+			idx := int(stableHash64("wireguard-peer-list-fallback|"+ifaceName+"|"+strconv.FormatInt(bucket, 10)) % uint64(len(response)))
+			response[idx].Stats.LatestHandshake = now.Unix() - 45
+		}
 	}
 
 	log.Printf("DEBUG: GetWireGuardPeers called. Response size: %d", len(response))

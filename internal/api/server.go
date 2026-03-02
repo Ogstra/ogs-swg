@@ -581,6 +581,21 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	for name := range metaMap {
 		uniqueNames[name] = true
 	}
+	demoActiveUsers := make(map[string]bool)
+	if s.config.DemoMode && s.store != nil {
+		if users, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
+			for _, user := range users {
+				demoActiveUsers[user] = true
+			}
+		}
+		if len(demoActiveUsers) == 0 {
+			if users, err := s.store.GetActiveUsers(5 * time.Minute); err == nil {
+				for _, user := range users {
+					demoActiveUsers[user] = true
+				}
+			}
+		}
+	}
 
 	result := []UserStatus{}
 	for name := range uniqueNames {
@@ -669,6 +684,13 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		if lastSeen == 0 {
 			if ts, err := s.store.GetLastSeenWithThreshold(name, s.config.ActiveThresholdBytes); err == nil && ts > 0 {
 				lastSeen = ts
+			}
+		}
+		if s.config.DemoMode {
+			if demoActiveUsers[name] {
+				lastSeen = demoModeLastSeenInRange("singbox-user-active", name, now, 5, 240)
+			} else {
+				lastSeen = demoModeLastSeenInRange("singbox-user-idle", name, now, 6*60, 9*60*60)
 			}
 		}
 

@@ -1,0 +1,20 @@
+services:
+  ogs-swg-demo:
+    build: .
+    image: ogs-swg:demo
+    container_name: ogs-swg-demo
+    restart: unless-stopped
+    ports:
+      - "${OGS_DEMO_PORT:-8119}:8080"
+    environment:
+      - TZ=${TZ:-America/Argentina/Buenos_Aires}
+      - OGS_API_KEY=${OGS_API_KEY:-demo-readonly-key}
+      - OGS_API_KEY_READ_ONLY=true
+      - OGS_DEMO_MODE=true
+      - OGS_DISABLE_PASSWORD_LOGIN=true
+      - OGS_PUBLIC_IP=203.0.113.10
+    tmpfs:
+      - /demo-runtime:rw,size=256m
+    volumes:
+      - ./docker/demo:/demo:ro
+    command: ["/bin/bash", "/demo/start-demo.sh"]

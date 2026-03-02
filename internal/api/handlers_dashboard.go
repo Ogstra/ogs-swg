@@ -446,6 +446,7 @@ func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{}
 
 	if s.config.EnableWireGuard {
 		wireguardStatus = s.checkService(ctx, "wireguard")
+		storedPeers, _ := s.store.GetWGPeerMeta()
 		var (
 			stats map[string]core.PeerStats
 			err   error
@@ -455,9 +456,8 @@ func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{}
 		} else {
 			stats, err = core.GetWireGuardStats()
 		}
+		threshold := time.Now().Add(-3 * time.Minute).Unix()
 		if err == nil {
-			threshold := time.Now().Add(-3 * time.Minute).Unix()
-			storedPeers, _ := s.store.GetWGPeerMeta()
 			for _, peer := range stats {
 				if peer.LatestHandshake >= threshold {
 					activeUsersWG++
@@ -476,6 +476,25 @@ func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{}
 				}
 			}
 		}
+		if s.config.DemoMode {
+			preferred := make(map[string]string, len(storedPeers))
+			for publicKey, meta := range storedPeers {
+				if strings.TrimSpace(meta.Alias) != "" {
+					preferred[publicKey] = meta.Alias
+				}
+			}
+			demoList := s.demoActiveWireGuardPeers(threshold, preferred, time.Now())
+			if len(demoList) > 0 {
+				activeUsersWGList = demoList
+				activeUsersWG = len(demoList)
+			}
+		}
+	}
+
+	if s.config.DemoMode {
+		// Demo mode intentionally shows both services as running for UX demos.
+		singboxStatus = true
+		wireguardStatus = true
 	}
 
 	return map[string]interface{}{

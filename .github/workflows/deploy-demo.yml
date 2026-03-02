@@ -1,0 +1,133 @@
+name: Deploy Demo (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      demo_port:
+        description: "Puerto HTTP público para la demo"
+        required: false
+        default: "18080"
+        type: string
+      deploy_path:
+        description: "Ruta remota de deploy (override opcional)"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: deploy-demo-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push-demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push demo image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/ogs-swg:demo-latest
+            ${{ secrets.DOCKER_USERNAME }}/ogs-swg:demo-${{ github.sha }}
+          build-args: |
+            APP_COMMIT_SHA=${{ github.sha }}
+          platforms: ${{ secrets.DEPLOY_ARCH || 'linux/amd64,linux/arm64' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-demo:
+    runs-on: ubuntu-latest
+    needs: build-and-push-demo
+    timeout-minutes: 30
+    environment: demo
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup SSH
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.DEMO_VPS_HOST || secrets.VPS_HOST }}"
+          PORT="${{ secrets.DEMO_VPS_PORT || secrets.VPS_PORT || 22 }}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keygen -R "$HOST" >/dev/null 2>&1 || true
+          ssh-keygen -R "[$HOST]:$PORT" >/dev/null 2>&1 || true
+          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Copy demo compose and assets
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
+        with:
+          host: ${{ secrets.DEMO_VPS_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.DEMO_VPS_USER || secrets.VPS_USER }}
+          key: ${{ secrets.DEMO_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.DEMO_VPS_PORT || secrets.VPS_PORT || 22 }}
+          source: "docker-compose.demo.yml,docker/demo/**"
+          target: "${{ github.event.inputs.deploy_path || secrets.DEMO_DEPLOY_PATH || secrets.DEPLOY_PATH }}"
+
+      - name: Deploy demo on VPS
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        with:
+          host: ${{ secrets.DEMO_VPS_HOST || secrets.VPS_HOST }}
+          username: ${{ secrets.DEMO_VPS_USER || secrets.VPS_USER }}
+          key: ${{ secrets.DEMO_VPS_SSH_KEY || secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.DEMO_VPS_PORT || secrets.VPS_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            umask 077
+
+            DEPLOY_PATH='${{ github.event.inputs.deploy_path || secrets.DEMO_DEPLOY_PATH || secrets.DEPLOY_PATH }}'
+            IMAGE='${{ secrets.DOCKER_USERNAME }}/ogs-swg:demo-${{ github.sha }}'
+            DEMO_PORT='${{ github.event.inputs.demo_port || secrets.OGS_DEMO_PORT || '18080' }}'
+            DEMO_API_KEY='${{ secrets.OGS_DEMO_API_KEY || secrets.OGS_API_KEY }}'
+            TZ_VAL='${{ secrets.DEMO_TZ || 'America/Argentina/Buenos_Aires' }}'
+
+            if [ -z "$DEMO_API_KEY" ]; then
+              echo "Missing OGS_DEMO_API_KEY (or fallback OGS_API_KEY) secret."
+              exit 1
+            fi
+
+            mkdir -p "$DEPLOY_PATH/docker/demo"
+            cd "$DEPLOY_PATH"
+
+            cat > .env.demo <<EOF_ENV
+            OGS_DEMO_PORT=${DEMO_PORT}
+            OGS_API_KEY=${DEMO_API_KEY}
+            TZ=${TZ_VAL}
+            EOF_ENV
+            chmod 600 .env.demo
+
+            docker login -u '${{ secrets.DOCKER_USERNAME }}' -p '${{ secrets.DOCKER_PASSWORD }}'
+            docker pull "$IMAGE"
+            docker tag "$IMAGE" ogs-swg:demo
+
+            export COMPOSE_IGNORE_ORPHANS=1
+            docker compose --env-file .env.demo -f docker-compose.demo.yml up -d --no-build --remove-orphans
+
+            docker image prune -f >/dev/null 2>&1 || true
+            echo "Demo deployed at port ${DEMO_PORT}"
