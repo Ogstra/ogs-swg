@@ -123,7 +123,10 @@ seed_reference_rows() {
   local sql="BEGIN;"
   local user
   for user in "${VLESS_USERS[@]}"; do
-    sql+="INSERT INTO users(email, quota_limit, quota_period, reset_day, enabled) VALUES('${user}', 21474836480, 'monthly', 1, 1) ON CONFLICT(email) DO UPDATE SET enabled=1;"
+    local quota_gb quota_bytes
+    quota_gb=$(rand_between 100 200)
+    quota_bytes=$((quota_gb * 1024 * 1024 * 1024))
+    sql+="INSERT INTO users(email, quota_limit, quota_period, reset_day, enabled) VALUES('${user}', ${quota_bytes}, 'monthly', 1, 1) ON CONFLICT(email) DO UPDATE SET quota_limit=excluded.quota_limit, quota_period=excluded.quota_period, reset_day=excluded.reset_day, enabled=1;"
   done
   local i
   for i in "${!WG_KEYS[@]}"; do
