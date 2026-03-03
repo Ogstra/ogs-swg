@@ -451,6 +451,8 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 	}
 	storedPeers, _ := s.store.GetWGPeerMeta()
 	now := time.Now()
+	demoMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Unix()
+	demoNow := now.Unix()
 	ifaceName := s.wireGuardInterfaceForContext(r.Context())
 
 	response := make([]PeerWithStats, 0)
@@ -497,6 +499,14 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		if s.config.DemoMode {
+			// In demo mode stats are usually seeded in DB (wg_samples) instead of kernel.
+			// Fill transfer counters from current-month DB delta when live counters are absent.
+			if s.store != nil && (ps.Stats.TransferRx <= 0 && ps.Stats.TransferTx <= 0) {
+				if rx, tx, err := s.store.GetWGTrafficDelta(p.PublicKey, demoMonthStart, demoNow); err == nil {
+					ps.Stats.TransferRx = rx
+					ps.Stats.TransferTx = tx
+				}
+			}
 			if strings.TrimSpace(ps.Stats.PublicKey) == "" {
 				ps.Stats.PublicKey = p.PublicKey
 			}
