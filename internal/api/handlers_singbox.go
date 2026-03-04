@@ -356,7 +356,28 @@ func extractTransportInfo(inbound map[string]interface{}) transportInfo {
 type tlsInfo struct {
 	Enabled    bool
 	ServerName string
+	ALPN       []string
 	CertPath   string
+}
+
+func normalizedALPN(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	return strings.Join(out, ",")
 }
 
 // extractTLSInfo returns TLS parameters from the typed SingboxInboundView.TLS field.
@@ -368,11 +389,14 @@ func extractTLSInfo(view *core.SingboxInboundView) tlsInfo {
 	return tlsInfo{
 		Enabled:    view.TLS.Enabled,
 		ServerName: view.TLS.ServerName,
+		ALPN:       append([]string(nil), view.TLS.ALPN...),
 		CertPath:   view.TLS.CertificatePath,
 	}
 }
 
 func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+	tls := extractTLSInfo(view)
+	alpn := normalizedALPN(tls.ALPN)
 	var reality *core.RealityConfig
 	if view.TLS != nil {
 		reality = view.TLS.Reality
@@ -421,7 +445,11 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
 			udpParam = "&udp=0"
 		}
-		link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s#%s",
+		alpnParam := ""
+		if alpn != "" {
+			alpnParam = "&alpn=" + url.QueryEscape(alpn)
+		}
+		link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s%s#%s",
 			url.QueryEscape(userInfo.UUID),
 			host,
 			port,
@@ -430,6 +458,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 			flowParam,
 			url.QueryEscape(sni),
 			url.QueryEscape(sid),
+			alpnParam,
 			nameTag,
 		)
 		if udpParam != "" {
@@ -439,7 +468,6 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	}
 
 	transport := extractTransportInfo(view.Raw)
-	tls := extractTLSInfo(view)
 	params := url.Values{}
 	params.Set("encryption", "none")
 	if tls.Enabled {
@@ -449,6 +477,9 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	}
 	if tls.ServerName != "" {
 		params.Set("sni", tls.ServerName)
+	}
+	if alpn != "" {
+		params.Set("alpn", alpn)
 	}
 	if shouldAllowInsecure(tls) {
 		params.Set("allowInsecure", "1")
@@ -486,6 +517,7 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 	}
 	transport := extractTransportInfo(view.Raw)
 	tls := extractTLSInfo(view)
+	alpn := normalizedALPN(tls.ALPN)
 
 	params := url.Values{}
 	if tls.Enabled {
@@ -493,6 +525,9 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 	}
 	if tls.ServerName != "" {
 		params.Set("sni", tls.ServerName)
+	}
+	if alpn != "" {
+		params.Set("alpn", alpn)
 	}
 	if shouldAllowInsecure(tls) {
 		params.Set("allowInsecure", "1")
@@ -527,11 +562,17 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	}
 	transport := extractTransportInfo(view.Raw)
 	tls := extractTLSInfo(view)
+	alpn := normalizedALPN(tls.ALPN)
 
 	alterID := userInfo.VmessAlterID
 	security := strings.TrimSpace(userInfo.VmessSecurity)
 	if security == "" {
 		security = "auto"
+	}
+	net := transport.Type
+	// VMess share links expect "h2" to represent HTTP/2 transport.
+	if strings.EqualFold(net, "http") {
+		net = "h2"
 	}
 
 	payload := map[string]string{
@@ -541,7 +582,7 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		"port": port,
 		"id":   userInfo.UUID,
 		"aid":  strconv.Itoa(alterID),
-		"net":  transport.Type,
+		"net":  net,
 		"type": "none",
 	}
 	if security != "" {
@@ -562,6 +603,9 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		payload["tls"] = "tls"
 		if tls.ServerName != "" {
 			payload["sni"] = tls.ServerName
+		}
+		if alpn != "" {
+			payload["alpn"] = alpn
 		}
 		if shouldAllowInsecure(tls) {
 			payload["allowInsecure"] = "1"
@@ -595,6 +639,10 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 	var newInbound map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&newInbound); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := normalizeInboundMultiplex(newInbound); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -670,6 +718,10 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 	var updatedInbound map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updatedInbound); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := normalizeInboundMultiplex(updatedInbound); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -757,6 +809,125 @@ func popExternalPort(inbound map[string]interface{}) (int, bool, error) {
 	default:
 		return 0, true, fmt.Errorf("external_port must be a number")
 	}
+}
+
+func parseBooleanField(value interface{}, fieldName string) (bool, error) {
+	switch v := value.(type) {
+	case nil:
+		return false, nil
+	case bool:
+		return v, nil
+	case string:
+		trimmed := strings.ToLower(strings.TrimSpace(v))
+		if trimmed == "" {
+			return false, nil
+		}
+		if trimmed == "true" {
+			return true, nil
+		}
+		if trimmed == "false" {
+			return false, nil
+		}
+		return false, fmt.Errorf("%s must be a boolean", fieldName)
+	default:
+		return false, fmt.Errorf("%s must be a boolean", fieldName)
+	}
+}
+
+func parsePositiveIntField(value interface{}, fieldName string) (int, error) {
+	switch v := value.(type) {
+	case float64:
+		if v <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer", fieldName)
+		}
+		return int(v), nil
+	case int:
+		if v <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer", fieldName)
+		}
+		return v, nil
+	case int64:
+		if v <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer", fieldName)
+		}
+		return int(v), nil
+	case string:
+		trimmed := strings.TrimSpace(v)
+		if trimmed == "" {
+			return 0, fmt.Errorf("%s is required", fieldName)
+		}
+		parsed, err := strconv.Atoi(trimmed)
+		if err != nil || parsed <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer", fieldName)
+		}
+		return parsed, nil
+	default:
+		return 0, fmt.Errorf("%s must be a positive integer", fieldName)
+	}
+}
+
+func normalizeInboundMultiplex(inbound map[string]interface{}) error {
+	if inbound == nil {
+		return nil
+	}
+	rawMultiplex, hasMultiplex := inbound["multiplex"]
+	if !hasMultiplex || rawMultiplex == nil {
+		delete(inbound, "multiplex")
+		return nil
+	}
+
+	multiplexMap, ok := rawMultiplex.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("multiplex must be an object")
+	}
+
+	enabled, err := parseBooleanField(multiplexMap["enabled"], "multiplex.enabled")
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		delete(inbound, "multiplex")
+		return nil
+	}
+
+	normalized := map[string]interface{}{"enabled": true}
+	if rawPadding, ok := multiplexMap["padding"]; ok {
+		padding, err := parseBooleanField(rawPadding, "multiplex.padding")
+		if err != nil {
+			return err
+		}
+		normalized["padding"] = padding
+	}
+
+	rawBrutal, hasBrutal := multiplexMap["brutal"]
+	if hasBrutal && rawBrutal != nil {
+		brutalMap, ok := rawBrutal.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("multiplex.brutal must be an object")
+		}
+		brutalEnabled, err := parseBooleanField(brutalMap["enabled"], "multiplex.brutal.enabled")
+		if err != nil {
+			return err
+		}
+		if brutalEnabled {
+			upMbps, err := parsePositiveIntField(brutalMap["up_mbps"], "multiplex.brutal.up_mbps")
+			if err != nil {
+				return err
+			}
+			downMbps, err := parsePositiveIntField(brutalMap["down_mbps"], "multiplex.brutal.down_mbps")
+			if err != nil {
+				return err
+			}
+			normalized["brutal"] = map[string]interface{}{
+				"enabled":   true,
+				"up_mbps":   upMbps,
+				"down_mbps": downMbps,
+			}
+		}
+	}
+
+	inbound["multiplex"] = normalized
+	return nil
 }
 
 // handleApplySingboxChanges applies pending Sing-box configuration changes

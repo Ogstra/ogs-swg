@@ -39,6 +39,15 @@ const DEFAULT_VLESS = {
         type: 'http',
         path: '/',
         service_name: 'grpc-service'
+    },
+    multiplex: {
+        enabled: false,
+        padding: false,
+        brutal: {
+            enabled: false,
+            up_mbps: 100,
+            down_mbps: 100
+        }
     }
 }
 
@@ -60,6 +69,15 @@ const DEFAULT_VMESS = {
         type: 'ws',
         path: '/',
         service_name: 'grpc-service'
+    },
+    multiplex: {
+        enabled: false,
+        padding: false,
+        brutal: {
+            enabled: false,
+            up_mbps: 100,
+            down_mbps: 100
+        }
     }
 }
 
@@ -81,6 +99,15 @@ const DEFAULT_TROJAN = {
         type: 'ws',
         path: '/',
         service_name: 'grpc-service'
+    },
+    multiplex: {
+        enabled: false,
+        padding: false,
+        brutal: {
+            enabled: false,
+            up_mbps: 100,
+            down_mbps: 100
+        }
     }
 }
 
@@ -103,6 +130,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
             // Ensure nested objects exist
             const fallback = DEFAULT_BY_TYPE[data.type] || DEFAULT_VLESS
             if (!data.transport) data.transport = { ...fallback.transport }
+            if (!data.multiplex) data.multiplex = { ...fallback.multiplex }
+            if (!data.multiplex.brutal) data.multiplex.brutal = { ...fallback.multiplex.brutal }
             if (!data.tls) data.tls = { ...fallback.tls }
             if (!data.tls.reality && data.type === 'vless') data.tls.reality = { ...DEFAULT_VLESS.tls.reality }
             if (!data.tls.alpn) data.tls.alpn = [...fallback.tls.alpn]
@@ -210,6 +239,29 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
         } else {
             // Remove transport field entirely if disabled
             delete submission.transport
+        }
+
+        if (formData.multiplex?.enabled) {
+            const cleanedMultiplex: any = { enabled: true }
+            cleanedMultiplex.padding = !!formData.multiplex?.padding
+
+            if (formData.multiplex?.brutal?.enabled) {
+                const upMbps = parseInt(String(formData.multiplex?.brutal?.up_mbps ?? ''), 10)
+                const downMbps = parseInt(String(formData.multiplex?.brutal?.down_mbps ?? ''), 10)
+                if (Number.isNaN(upMbps) || upMbps <= 0 || Number.isNaN(downMbps) || downMbps <= 0) {
+                    alert('Multiplex brutal up/down Mbps must be positive numbers')
+                    return
+                }
+                cleanedMultiplex.brutal = {
+                    enabled: true,
+                    up_mbps: upMbps,
+                    down_mbps: downMbps
+                }
+            }
+
+            submission.multiplex = cleanedMultiplex
+        } else {
+            delete submission.multiplex
         }
 
         // Ensure Reality is only present for VLESS
@@ -569,6 +621,118 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                     />
                                 </div>
                             )}
+                        </div>
+                    )}
+                </div>
+
+                <div className="w-full h-px bg-slate-800/50" />
+
+                {/* Multiplex Settings */}
+                <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium text-slate-400 uppercase tracking-wider">Multiplex</h3>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={!!formData.multiplex?.enabled}
+                                onChange={e => setFormData({
+                                    ...formData,
+                                    multiplex: {
+                                        ...(formData.multiplex || {}),
+                                        enabled: e.target.checked,
+                                        brutal: {
+                                            ...(formData.multiplex?.brutal || {}),
+                                            enabled: e.target.checked ? !!formData.multiplex?.brutal?.enabled : false
+                                        }
+                                    }
+                                })}
+                                className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                            />
+                            <span className="text-xs font-medium text-white">Enable Multiplex</span>
+                        </label>
+                    </div>
+
+                    {formData.multiplex?.enabled && (
+                        <div className="grid grid-cols-1 gap-4 p-4 bg-slate-950/50 rounded-lg border border-slate-800/50">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={!!formData.multiplex?.padding}
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        multiplex: {
+                                            ...(formData.multiplex || {}),
+                                            padding: e.target.checked
+                                        }
+                                    })}
+                                    className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                />
+                                <span className="text-xs font-medium text-white">Enable Padding</span>
+                            </label>
+
+                            <div className="space-y-3 p-3 bg-slate-900/50 rounded border border-slate-700">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!formData.multiplex?.brutal?.enabled}
+                                        onChange={e => setFormData({
+                                            ...formData,
+                                            multiplex: {
+                                                ...(formData.multiplex || {}),
+                                                brutal: {
+                                                    ...(formData.multiplex?.brutal || {}),
+                                                    enabled: e.target.checked
+                                                }
+                                            }
+                                        })}
+                                        className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                    />
+                                    <span className="text-xs font-medium text-white">Enable TCP Brutal</span>
+                                </label>
+
+                                {formData.multiplex?.brutal?.enabled && (
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">Upload (Mbps)</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                value={formData.multiplex?.brutal?.up_mbps ?? 100}
+                                                onChange={e => setFormData({
+                                                    ...formData,
+                                                    multiplex: {
+                                                        ...(formData.multiplex || {}),
+                                                        brutal: {
+                                                            ...(formData.multiplex?.brutal || {}),
+                                                            up_mbps: e.target.value
+                                                        }
+                                                    }
+                                                })}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">Download (Mbps)</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                value={formData.multiplex?.brutal?.down_mbps ?? 100}
+                                                onChange={e => setFormData({
+                                                    ...formData,
+                                                    multiplex: {
+                                                        ...(formData.multiplex || {}),
+                                                        brutal: {
+                                                            ...(formData.multiplex?.brutal || {}),
+                                                            down_mbps: e.target.value
+                                                        }
+                                                    }
+                                                })}
+                                                className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
