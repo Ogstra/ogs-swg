@@ -344,6 +344,7 @@ func TestTLSTyped_StandardTLSDecoded(t *testing.T) {
             "tls": {
                 "enabled": true,
                 "server_name": "my.domain.com",
+                "alpn": ["h2", "http/1.1"],
                 "certificate_path": "/etc/ssl/cert.pem"
             }
         }]
@@ -361,6 +362,9 @@ func TestTLSTyped_StandardTLSDecoded(t *testing.T) {
 	}
 	if view.TLS.ServerName != "my.domain.com" {
 		t.Errorf("TLS.ServerName = %q; want %q", view.TLS.ServerName, "my.domain.com")
+	}
+	if len(view.TLS.ALPN) != 2 || view.TLS.ALPN[0] != "h2" || view.TLS.ALPN[1] != "http/1.1" {
+		t.Errorf("TLS.ALPN = %#v; want [\"h2\", \"http/1.1\"]", view.TLS.ALPN)
 	}
 	if view.TLS.CertificatePath != "/etc/ssl/cert.pem" {
 		t.Errorf("TLS.CertificatePath = %q; want %q", view.TLS.CertificatePath, "/etc/ssl/cert.pem")

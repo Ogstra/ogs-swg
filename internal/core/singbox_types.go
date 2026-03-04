@@ -110,6 +110,7 @@ func (r *RealityConfig) UnmarshalJSON(data []byte) error {
 type TLSConfig struct {
 	Enabled         bool           `json:"enabled,omitempty"`
 	ServerName      string         `json:"server_name,omitempty"`
+	ALPN            []string       `json:"alpn,omitempty"`
 	CertificatePath string         `json:"certificate_path,omitempty"`
 	Reality         *RealityConfig `json:"reality,omitempty"`
 }
