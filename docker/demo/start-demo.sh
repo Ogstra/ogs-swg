@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUNTIME_ROOT="/demo-runtime"
-DATA_DIR="$RUNTIME_ROOT/data"
+RUNTIME_ROOT="/app/data"
+DATA_DIR="$RUNTIME_ROOT"
 WG_DIR="$DATA_DIR/wireguard"
-SINGBOX_DIR="$RUNTIME_ROOT/singbox"
-CONFIG_PATH="$RUNTIME_ROOT/config.json"
+SINGBOX_DIR="$DATA_DIR/singbox"
+CONFIG_PATH="$DATA_DIR/config.json"
 ACCESS_LOG="$DATA_DIR/access.log"
 DB_PATH="$DATA_DIR/stats.db"
 FRONTEND_INDEX="/app/frontend/index.html"
 
-mkdir -p "$WG_DIR" "$SINGBOX_DIR"
-find "$RUNTIME_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+# Keep demo storage volatile while using the same /app/data path style as prod:
+# wipe data directory on every container start.
+mkdir -p "$DATA_DIR"
+find "$DATA_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 mkdir -p "$WG_DIR" "$SINGBOX_DIR"
 
 cp /demo/config.demo.json "$CONFIG_PATH"

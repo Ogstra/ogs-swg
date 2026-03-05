@@ -1,5 +1,5 @@
 {
-  "singbox_config_path": "/demo-runtime/singbox/config.json",
+  "singbox_config_path": "/app/data/singbox/config.json",
   "singbox_api_addr": "127.0.0.1:8080",
   "managed_inbounds": [
     "demo-vless-443",
@@ -12,12 +12,12 @@
   "stats_outbounds": [
     "direct"
   ],
-  "access_log_path": "/demo-runtime/data/access.log",
+  "access_log_path": "/app/data/access.log",
   "log_source": "file",
-  "database_path": "/demo-runtime/data/stats.db",
+  "database_path": "/app/data/stats.db",
   "listen_addr": ":8080",
-  "wireguard_config_path": "/demo-runtime/data/wireguard/wg0.conf",
-  "wireguard_config_dir": "/demo-runtime/data/wireguard",
+  "wireguard_config_path": "/app/data/wireguard/wg0.conf",
+  "wireguard_config_dir": "/app/data/wireguard",
   "wireguard_test_mode": true,
   "enable_wireguard": true,
   "enable_singbox": true,

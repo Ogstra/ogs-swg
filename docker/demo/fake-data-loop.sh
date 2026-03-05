@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DB_PATH="${DEMO_DB_PATH:-/demo-runtime/data/stats.db}"
-LOG_PATH="${DEMO_LOG_PATH:-/demo-runtime/data/access.log}"
+DB_PATH="${DEMO_DB_PATH:-/app/data/stats.db}"
+LOG_PATH="${DEMO_LOG_PATH:-/app/data/access.log}"
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "[demo-seeder] sqlite3 is required in runtime image" >&2
@@ -24,10 +24,17 @@ WG_KEYS=(
 )
 WG_ALIASES=(peer-01 peer-02 peer-03 peer-04 peer-05 peer-06 peer-07 peer-08 peer-09)
 
-MIN_TOTAL_BYTES=$((40 * 1024 * 1024 * 1024))
-MAX_TOTAL_BYTES=$((100 * 1024 * 1024 * 1024))
-SEED_INTERVAL_SEC=300   # 5 min
-LIVE_INTERVAL_SEC=60    # 1 min
+DEMO_MIN_TOTAL_GB="${DEMO_MIN_TOTAL_GB:-40}"
+DEMO_MAX_TOTAL_GB="${DEMO_MAX_TOTAL_GB:-100}"
+if (( DEMO_MIN_TOTAL_GB > DEMO_MAX_TOTAL_GB )); then
+  DEMO_MAX_TOTAL_GB="$DEMO_MIN_TOTAL_GB"
+fi
+MIN_TOTAL_BYTES=$((DEMO_MIN_TOTAL_GB * 1024 * 1024 * 1024))
+MAX_TOTAL_BYTES=$((DEMO_MAX_TOTAL_GB * 1024 * 1024 * 1024))
+SEED_INTERVAL_SEC="${DEMO_SEED_INTERVAL_SEC:-300}" # 5 min
+LIVE_INTERVAL_SEC="${DEMO_LIVE_INTERVAL_SEC:-60}"  # 1 min
+LOG_INTERVAL_SEC="${DEMO_LOG_INTERVAL_SEC:-3}"     # 3 sec
+RETENTION_SECONDS="${DEMO_RETENTION_SECONDS:-172800}"
 SEED_POINTS=$((24 * 3600 / SEED_INTERVAL_SEC))
 
 WG_RX=()
@@ -44,6 +51,64 @@ done
 for _ in "${WG_KEYS[@]}"; do
   WG_PEER_BIAS_BPS+=("$((200 + RANDOM % (3400 - 200 + 1)))")
 done
+
+build_active_set() {
+  local total="$1"
+  local target="$2"
+  local step="$3"
+  local start
+  local k
+  local idx
+  local set=","
+
+  if (( total <= 0 )); then
+    echo ","
+    return
+  fi
+  if (( target < 1 )); then
+    target=1
+  fi
+  if (( target > total )); then
+    target="$total"
+  fi
+  if (( step < 1 )); then
+    step=1
+  fi
+
+  start=$((RANDOM % total))
+  for ((k = 0; k < target; k++)); do
+    idx=$(((start + k * step) % total))
+    if [[ "$set" != *",$idx,"* ]]; then
+      set+="$idx,"
+      continue
+    fi
+    # Fallback when step/total are not coprime and we collide.
+    local probe
+    for ((probe = 0; probe < total; probe++)); do
+      idx=$(((idx + 1) % total))
+      if [[ "$set" != *",$idx,"* ]]; then
+        set+="$idx,"
+        break
+      fi
+    done
+  done
+
+  echo "$set"
+}
+
+is_set_member() {
+  local set="$1"
+  local idx="$2"
+  [[ "$set" == *",$idx,"* ]]
+}
+
+SB_ACTIVE_TARGET="${DEMO_SB_ACTIVE_TARGET:-$((4 + RANDOM % 2))}"
+WG_ACTIVE_TARGET="${DEMO_WG_ACTIVE_TARGET:-$((4 + RANDOM % 2))}"
+
+# Keep active subsets stable for the full process lifetime so "last 5 min"
+# never drifts above the configured cap.
+SB_ACTIVE_SET="$(build_active_set "${#VLESS_USERS[@]}" "$SB_ACTIVE_TARGET" 3)"
+WG_ACTIVE_SET="$(build_active_set "${#WG_KEYS[@]}" "$WG_ACTIVE_TARGET" 2)"
 
 rand_between() {
   local min="$1"
@@ -77,32 +142,13 @@ clamp() {
 }
 
 is_live_user_active() {
-  local ts="$1"
-  local idx="$2"
-  local total="$3"
+  local idx="$1"
+  is_set_member "$SB_ACTIVE_SET" "$idx"
+}
 
-  if (( total <= 0 )); then
-    return 1
-  fi
-
-  # Keep the active subset stable per 5-minute window so "active in last 5m"
-  # naturally lands around 3-5 users.
-  local window=$((ts / 300))
-  local active_target=$((3 + (window % 3))) # 3..5
-  if (( active_target > total )); then
-    active_target="$total"
-  fi
-
-  local start=$(((window * 5 + 1) % total))
-  local step=3
-  local k pos
-  for ((k = 0; k < active_target; k++)); do
-    pos=$(((start + k * step) % total))
-    if (( pos == idx )); then
-      return 0
-    fi
-  done
-  return 1
+is_live_wg_peer_active() {
+  local idx="$1"
+  is_set_member "$WG_ACTIVE_SET" "$idx"
 }
 
 wait_for_db() {
@@ -183,7 +229,7 @@ append_bucket() {
   local i
   for i in "${!VLESS_USERS[@]}"; do
     local w
-    if [[ "$source" == "demo-live" ]] && ! is_live_user_active "$ts" "$i" "${#VLESS_USERS[@]}"; then
+    if [[ "$source" == "demo-live" ]] && ! is_live_user_active "$i"; then
       w=0
     else
       w=$(rand_between 20 2600)
@@ -234,18 +280,22 @@ append_bucket() {
 
   for i in "${!WG_KEYS[@]}"; do
     local w
-    w=$(rand_between 15 2500)
-    w=$((w * WG_PEER_BIAS_BPS[i] / 1000))
-    if (( i == wg_hot )); then
-      w=$((w * $(rand_between 230 760) / 100))
+    if [[ "$source" == "demo-live" ]] && ! is_live_wg_peer_active "$i"; then
+      w=0
+    else
+      w=$(rand_between 15 2500)
+      w=$((w * WG_PEER_BIAS_BPS[i] / 1000))
+      if (( i == wg_hot )); then
+        w=$((w * $(rand_between 230 760) / 100))
+      fi
+      if (( RANDOM % 100 < 24 )); then
+        w=$((w * $(rand_between 6 40) / 100))
+      fi
+      if (( RANDOM % 100 < 16 )); then
+        w=$((w * $(rand_between 180 520) / 100))
+      fi
+      w=$(clamp "$w" 1 250000)
     fi
-    if (( RANDOM % 100 < 24 )); then
-      w=$((w * $(rand_between 6 40) / 100))
-    fi
-    if (( RANDOM % 100 < 16 )); then
-      w=$((w * $(rand_between 180 520) / 100))
-    fi
-    w=$(clamp "$w" 1 250000)
     wg_weights+=("$w")
     wg_sum=$((wg_sum + w))
   done
@@ -378,7 +428,7 @@ emit_log_line() {
 log_loop() {
   while true; do
     emit_log_line
-    sleep 3
+    sleep "$LOG_INTERVAL_SEC"
   done
 }
 
@@ -428,7 +478,7 @@ sample_loop() {
 
     loops=$((loops + 1))
     if (( loops % 30 == 0 )); then
-      apply_sql "BEGIN;DELETE FROM samples WHERE ts < strftime('%s','now') - 172800;DELETE FROM wg_samples WHERE ts < strftime('%s','now') - 172800;DELETE FROM sampler_runs WHERE ts < strftime('%s','now') - 172800;COMMIT;"
+      apply_sql "BEGIN;DELETE FROM samples WHERE ts < strftime('%s','now') - ${RETENTION_SECONDS};DELETE FROM wg_samples WHERE ts < strftime('%s','now') - ${RETENTION_SECONDS};DELETE FROM sampler_runs WHERE ts < strftime('%s','now') - ${RETENTION_SECONDS};COMMIT;"
     fi
 
     sleep "$LIVE_INTERVAL_SEC"
