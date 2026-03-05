@@ -58,6 +58,15 @@ export function WireGuardRawConfigModal({
             toastError('No write permission for WireGuard')
             return
         }
+        const hasInterfaceSection = configText
+            .split('\n')
+            .map(line => line.trim())
+            .some(line => line.toLowerCase() === '[interface]')
+
+        if (!hasInterfaceSection) {
+            toastError('Config must contain a [Interface] section')
+            return
+        }
 
         setSavingConfig(true)
         try {
