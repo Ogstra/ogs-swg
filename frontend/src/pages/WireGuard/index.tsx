@@ -9,7 +9,7 @@ import { useAuth } from '../../context/AuthContext'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { formatBytes, formatTimeAgo } from '../../utils/traffic'
-import { WG_INTERFACE_DEFAULTS, validateWireGuardInterfaceEdit } from '../../utils/wireguardForms'
+import { WG_INTERFACE_DEFAULTS, normalizeWireGuardInterfaceEditInput, validateWireGuardInterfaceEdit } from '../../utils/wireguardForms'
 
 interface WireGuardPeer {
     public_key: string
@@ -297,9 +297,16 @@ export default function WireGuard() {
             return
         }
         try {
+            const normalized = normalizeWireGuardInterfaceEditInput({
+                address: editInterface.address,
+                listenPort: String(editInterface.listen_port),
+                mtu: editInterface.mtu === undefined || editInterface.mtu === null ? '' : String(editInterface.mtu),
+            })
             await api.updateWireGuardInterfaceForInterface(activeInterface, {
                 ...editInterface,
-                address: editInterface.address.trim(),
+                address: normalized.address,
+                listen_port: normalized.listenPort,
+                mtu: normalized.mtu,
                 bind_address: (editInterface.bind_address || '').trim(),
                 post_up: (editInterface.post_up || '').trim(),
                 post_down: (editInterface.post_down || '').trim(),
