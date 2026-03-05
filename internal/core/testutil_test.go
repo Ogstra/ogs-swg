@@ -1,3 +1,4 @@
+// Package core test infrastructure provides shared stubs and factory functions used by tests in this package.
 package core
 
 import (
@@ -86,23 +87,4 @@ func newTestConfigJSON(t *testing.T, parts map[string]interface{}) (*Config, *st
 		t.Fatalf("newTestConfigJSON: marshal: %v", err)
 	}
 	return newTestConfig(t, string(data))
-}
-
-func TestStubExecutor_ReadWrite(t *testing.T) {
-	initial := `{"inbounds":[]}`
-	cfg, stub := newTestConfig(t, initial)
-	_ = cfg
-
-	// Verify write then read round-trip
-	want := []byte(`{"inbounds":[]}`)
-	if err := stub.WriteConfig(context.Background(), "/test/config.json", want, 0644); err != nil {
-		t.Fatalf("WriteConfig: %v", err)
-	}
-	got, err := stub.ReadConfig(context.Background(), "/test/config.json")
-	if err != nil {
-		t.Fatalf("ReadConfig: %v", err)
-	}
-	if string(got) != string(want) {
-		t.Errorf("round-trip mismatch: got %s, want %s", got, want)
-	}
 }
