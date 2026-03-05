@@ -454,6 +454,14 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 	demoMonthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Unix()
 	demoNow := now.Unix()
 	ifaceName := s.wireGuardInterfaceForContext(r.Context())
+	demoActiveWGSet := make(map[string]struct{})
+	if s.config.DemoMode {
+		keys := make([]string, 0, len(wgConfig.Peers))
+		for _, p := range wgConfig.Peers {
+			keys = append(keys, p.PublicKey)
+		}
+		demoActiveWGSet = demoSelectActiveKeys("wireguard-peer", keys, now, 4, 5)
+	}
 
 	response := make([]PeerWithStats, 0)
 	redactWG := shouldRedactWireGuardReadOnly(r)
@@ -513,7 +521,11 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 			if strings.TrimSpace(ps.Stats.InterfaceName) == "" {
 				ps.Stats.InterfaceName = ifaceName
 			}
-			ps.Stats.LatestHandshake = demoModeLastSeen("wireguard-peer", p.PublicKey, now)
+			if _, ok := demoActiveWGSet[p.PublicKey]; ok {
+				ps.Stats.LatestHandshake = demoModeLastSeenInRange("wireguard-peer-active", p.PublicKey, now, 5, 120)
+			} else {
+				ps.Stats.LatestHandshake = demoModeLastSeenInRange("wireguard-peer-idle", p.PublicKey, now, 6*60, 9*60*60)
+			}
 		}
 		if redactWG && strings.TrimSpace(ps.Stats.PublicKey) != "" {
 			ps.Stats.PublicKey = maskedValue

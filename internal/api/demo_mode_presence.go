@@ -69,6 +69,50 @@ func wireGuardPeerDisplayName(publicKey string, meta core.WGPeerMeta, preferred 
 	return publicKey
 }
 
+func demoSelectActiveKeys(scope string, keys []string, now time.Time, minCount, maxCount int) map[string]struct{} {
+	active := make(map[string]struct{})
+	if len(keys) == 0 {
+		return active
+	}
+
+	sort.Strings(keys)
+	if minCount < 1 {
+		minCount = 1
+	}
+	if maxCount < minCount {
+		maxCount = minCount
+	}
+	if minCount > len(keys) {
+		minCount = len(keys)
+	}
+	if maxCount > len(keys) {
+		maxCount = len(keys)
+	}
+
+	bucket := now.Unix() / 300 // 5-minute windows
+	target := minCount
+	span := maxCount - minCount + 1
+	if span > 1 {
+		target += int(stableHash64("count|"+scope+"|"+strconv.FormatInt(bucket, 10)) % uint64(span))
+	}
+
+	start := int(stableHash64("start|"+scope+"|"+strconv.FormatInt(bucket, 10)) % uint64(len(keys)))
+	step := 1
+	if len(keys) > 1 {
+		step += int(stableHash64("step|"+scope+"|"+strconv.FormatInt(bucket, 10)) % uint64(len(keys)-1))
+	}
+
+	for k := 0; len(active) < target && k < len(keys)*2; k++ {
+		idx := (start + k*step) % len(keys)
+		active[keys[idx]] = struct{}{}
+	}
+	for len(active) < target {
+		idx := len(active) % len(keys)
+		active[keys[idx]] = struct{}{}
+	}
+	return active
+}
+
 func (s *Server) demoActiveWireGuardPeers(threshold int64, preferred map[string]string, now time.Time) []string {
 	if !s.config.DemoMode || s.store == nil {
 		return nil
@@ -78,11 +122,17 @@ func (s *Server) demoActiveWireGuardPeers(threshold int64, preferred map[string]
 		return nil
 	}
 
-	out := make([]string, 0, len(peers))
 	peerKeys := make([]string, 0, len(peers))
-	for publicKey, meta := range peers {
+	for publicKey := range peers {
 		peerKeys = append(peerKeys, publicKey)
-		lastSeen := demoModeLastSeen("wireguard-peer", publicKey, now)
+	}
+	activeSet := demoSelectActiveKeys("wireguard-peer", peerKeys, now, 4, 5)
+	out := make([]string, 0, len(activeSet))
+	for publicKey, meta := range peers {
+		if _, ok := activeSet[publicKey]; !ok {
+			continue
+		}
+		lastSeen := now.Unix() - 30
 		if lastSeen < threshold {
 			continue
 		}
