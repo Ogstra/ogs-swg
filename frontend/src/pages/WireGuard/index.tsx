@@ -287,21 +287,18 @@ export default function WireGuard() {
             toastError('No WireGuard interface selected')
             return
         }
-        const errors = validateWireGuardInterfaceEdit({
+        const editInput = {
             address: editInterface.address,
             listenPort: String(editInterface.listen_port),
-            mtu: editInterface.mtu === undefined || editInterface.mtu === null ? '' : String(editInterface.mtu),
-        })
+            mtu: String(editInterface.mtu ?? ''),
+        }
+        const errors = validateWireGuardInterfaceEdit(editInput)
         setInterfaceErrors(errors)
         if (Object.keys(errors).length > 0) {
             return
         }
         try {
-            const normalized = normalizeWireGuardInterfaceEditInput({
-                address: editInterface.address,
-                listenPort: String(editInterface.listen_port),
-                mtu: editInterface.mtu === undefined || editInterface.mtu === null ? '' : String(editInterface.mtu),
-            })
+            const normalized = normalizeWireGuardInterfaceEditInput(editInput)
             await api.updateWireGuardInterfaceForInterface(activeInterface, {
                 ...editInterface,
                 address: normalized.address,

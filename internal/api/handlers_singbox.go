@@ -397,6 +397,7 @@ func extractTLSInfo(view *core.SingboxInboundView) tlsInfo {
 func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
 	tls := extractTLSInfo(view)
 	alpn := normalizedALPN(tls.ALPN)
+	transport := extractTransportInfo(view.Raw)
 	var reality *core.RealityConfig
 	if view.TLS != nil {
 		reality = view.TLS.Reality
@@ -434,7 +435,6 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 			return "", fmt.Errorf("Reality short_id missing")
 		}
 
-		transport := extractTransportInfo(view.Raw)
 		flowParam := ""
 		if userInfo.Flow != "" {
 			flowParam = "&flow=" + url.QueryEscape(userInfo.Flow)
@@ -467,7 +467,6 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		return link, nil
 	}
 
-	transport := extractTransportInfo(view.Raw)
 	params := url.Values{}
 	params.Set("encryption", "none")
 	if tls.Enabled {
@@ -835,22 +834,14 @@ func parseBooleanField(value interface{}, fieldName string) (bool, error) {
 }
 
 func parsePositiveIntField(value interface{}, fieldName string) (int, error) {
+	var n int64
 	switch v := value.(type) {
 	case float64:
-		if v <= 0 {
-			return 0, fmt.Errorf("%s must be a positive integer", fieldName)
-		}
-		return int(v), nil
+		n = int64(v)
 	case int:
-		if v <= 0 {
-			return 0, fmt.Errorf("%s must be a positive integer", fieldName)
-		}
-		return v, nil
+		n = int64(v)
 	case int64:
-		if v <= 0 {
-			return 0, fmt.Errorf("%s must be a positive integer", fieldName)
-		}
-		return int(v), nil
+		n = v
 	case string:
 		trimmed := strings.TrimSpace(v)
 		if trimmed == "" {
@@ -864,6 +855,10 @@ func parsePositiveIntField(value interface{}, fieldName string) (int, error) {
 	default:
 		return 0, fmt.Errorf("%s must be a positive integer", fieldName)
 	}
+	if n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", fieldName)
+	}
+	return int(n), nil
 }
 
 func normalizeInboundMultiplex(inbound map[string]interface{}) error {
@@ -899,8 +894,8 @@ func normalizeInboundMultiplex(inbound map[string]interface{}) error {
 		normalized["padding"] = padding
 	}
 
-	rawBrutal, hasBrutal := multiplexMap["brutal"]
-	if hasBrutal && rawBrutal != nil {
+	rawBrutal := multiplexMap["brutal"]
+	if rawBrutal != nil {
 		brutalMap, ok := rawBrutal.(map[string]interface{})
 		if !ok {
 			return fmt.Errorf("multiplex.brutal must be an object")

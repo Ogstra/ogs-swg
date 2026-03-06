@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUNTIME_ROOT="/app/data"
-DATA_DIR="$RUNTIME_ROOT"
+DATA_DIR="/app/data"
 WG_DIR="$DATA_DIR/wireguard"
 SINGBOX_DIR="$DATA_DIR/singbox"
 CONFIG_PATH="$DATA_DIR/config.json"
