@@ -136,6 +136,38 @@ func TestDashboard_TopConsumersIncludeInterfaceLabel(t *testing.T) {
 	}
 }
 
+func TestDashboard_TopConsumersIncludeSingboxInboundTags(t *testing.T) {
+	server, _, _ := newDashboardTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard?start=100&end=200", nil)
+	rec := httptest.NewRecorder()
+	server.handleGetDashboardData(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var payload DashboardData
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	topSB := payload.TopConsumers["singbox"]
+	if len(topSB) == 0 {
+		t.Fatalf("expected at least 1 singbox consumer")
+	}
+
+	got := topSB[0]
+	if got.Name != "carol@example.com" {
+		t.Fatalf("unexpected singbox consumer name=%q", got.Name)
+	}
+	if got.Flow != "demo-vless-443" {
+		t.Fatalf("unexpected singbox flow label=%q", got.Flow)
+	}
+	if len(got.InboundTags) != 1 || got.InboundTags[0] != "demo-vless-443" {
+		t.Fatalf("unexpected inbound tags=%v", got.InboundTags)
+	}
+}
+
 func newDashboardTestServer(t *testing.T) (*Server, string, string) {
 	t.Helper()
 
@@ -172,6 +204,20 @@ func newDashboardTestServer(t *testing.T) (*Server, string, string) {
 	if err := store.InsertWGSamples(samples); err != nil {
 		t.Fatalf("InsertWGSamples: %v", err)
 	}
+	if err := store.SaveUserMetadata(core.UserMetadata{
+		Email:       "carol@example.com",
+		QuotaPeriod: "monthly",
+		Enabled:     true,
+		InboundTags: []string{"demo-vless-443"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+	if err := store.BulkInsert([]core.Sample{
+		{User: "carol@example.com", Timestamp: 100, Uplink: 300, Downlink: 200},
+		{User: "carol@example.com", Timestamp: 200, Uplink: 700, Downlink: 500},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
 
 	now := time.Now().Unix()
 	exec := &dashboardExecutorStub{
@@ -182,7 +228,7 @@ func newDashboardTestServer(t *testing.T) (*Server, string, string) {
 	}
 	cfg := &core.Config{
 		EnableWireGuard:     true,
-		EnableSingbox:       false,
+		EnableSingbox:       true,
 		WireGuardConfigPath: wg0Path,
 		WireGuardConfigDir:  tmp,
 	}

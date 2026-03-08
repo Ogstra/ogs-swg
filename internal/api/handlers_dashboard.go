@@ -38,12 +38,13 @@ type UnifiedChartPoint struct {
 }
 
 type Consumer struct {
-	Name       string `json:"name"`
-	Total      int64  `json:"total"`
-	Flow       string `json:"flow"`
-	Interface  string `json:"interface_name,omitempty"`
-	QuotaLimit int64  `json:"quota_limit"` // 0 if none
-	Key        string `json:"key"`         // For linking/identification
+	Name        string   `json:"name"`
+	Total       int64    `json:"total"`
+	Flow        string   `json:"flow"`
+	Interface   string   `json:"interface_name,omitempty"`
+	InboundTags []string `json:"inbound_tags,omitempty"`
+	QuotaLimit  int64    `json:"quota_limit"` // 0 if none
+	Key         string   `json:"key"`         // For linking/identification
 }
 
 func wireGuardFlowLabel(interfaceName string) string {
@@ -52,6 +53,21 @@ func wireGuardFlowLabel(interfaceName string) string {
 		return "WireGuard"
 	}
 	return fmt.Sprintf("WireGuard:%s", iface)
+}
+
+func singboxFlowLabel(inboundTags []string) string {
+	trimmed := make([]string, 0, len(inboundTags))
+	for _, tag := range inboundTags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		trimmed = append(trimmed, tag)
+	}
+	if len(trimmed) == 0 {
+		return "Proxy"
+	}
+	return strings.Join(trimmed, ", ")
 }
 
 func sumCoreTrafficMap(stats map[int64]core.TrafficStats) TrafficStats {
@@ -357,11 +373,12 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 					name = t.Key
 				}
 				topSB = append(topSB, Consumer{
-					Name:       name,
-					Total:      t.Total,
-					Flow:       "Proxy",
-					QuotaLimit: meta.QuotaLimit,
-					Key:        t.Key,
+					Name:        name,
+					Total:       t.Total,
+					Flow:        singboxFlowLabel(meta.InboundTags),
+					InboundTags: meta.InboundTags,
+					QuotaLimit:  meta.QuotaLimit,
+					Key:         t.Key,
 				})
 			}
 		}
