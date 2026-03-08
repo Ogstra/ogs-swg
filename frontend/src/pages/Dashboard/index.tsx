@@ -477,9 +477,11 @@ export default function Dashboard() {
                                         </div>
                                         <div>
                                             <div className="font-medium text-slate-200 text-sm">{u.name}</div>
-                                            <div className={`text-[10px] text-slate-500 ${/^wireguard:/i.test(u.flow || '') ? '' : 'uppercase'}`}>
-                                                {(u.flow || 'Default').replace(/^wireguard:/i, '')}
-                                            </div>
+                                            {chartMode === 'wireguard' && (
+                                                <div className="text-[10px] text-slate-500">
+                                                    {u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="text-right">
