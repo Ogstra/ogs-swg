@@ -74,7 +74,6 @@ export interface Consumer {
     total: number;
     flow: string;
     interface_name?: string;
-    inbound_tags?: string[];
     quota_limit: number;
     key: string;
 }
