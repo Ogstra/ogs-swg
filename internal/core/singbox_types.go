@@ -269,3 +269,17 @@ type SingboxInboundView struct {
 	TLS        *TLSConfig               `json:"-"`
 	Raw        map[string]interface{}   `json:"-"`
 }
+
+type SingboxOutboundView struct {
+	Tag            string `json:"tag"`
+	Type           string `json:"type"`
+	Server         string `json:"server,omitempty"`
+	ServerPort     int    `json:"server_port,omitempty"`
+	DomainStrategy string `json:"domain_strategy,omitempty"`
+	DomainResolver string `json:"domain_resolver,omitempty"`
+}
+
+type SingboxOutboundDomainStrategyUpdate struct {
+	Tag            string `json:"tag"`
+	DomainStrategy string `json:"domain_strategy,omitempty"`
+}

@@ -284,6 +284,89 @@ func TestModifySingboxConfig_RejectsNonInboundChange(t *testing.T) {
 	}
 }
 
+func TestUpdateSingboxDNS_ReplacesSectionAndPreservesOthers(t *testing.T) {
+	fixtureJSON := `{
+		"dns": {"servers": [{"tag": "old", "address": "8.8.8.8"}]},
+		"outbounds": [{"type": "direct", "tag": "direct"}],
+		"inbounds": [{"type": "vless", "tag": "test-vless", "listen_port": 1080, "users": []}]
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+
+	nextDNS := map[string]interface{}{
+		"servers": []interface{}{
+			map[string]interface{}{"tag": "dns-google-v6", "address": "2001:4860:4860::8888", "strategy": "prefer_ipv6"},
+			map[string]interface{}{"tag": "dns-g", "server": "8.8.8.8", "type": "udp"},
+		},
+		"strategy":          "prefer_ipv6",
+		"independent_cache": true,
+	}
+
+	if err := cfg.UpdateSingboxDNS(nextDNS); err != nil {
+		t.Fatalf("UpdateSingboxDNS: %v", err)
+	}
+
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(stub.data, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	gotDNS := result["dns"]
+	wantDNS, err := json.Marshal(nextDNS)
+	if err != nil {
+		t.Fatalf("marshal want dns: %v", err)
+	}
+	if !jsonSemanticallyEqual(gotDNS, wantDNS) {
+		t.Fatalf("dns section mismatch:\n got: %s\nwant: %s", gotDNS, wantDNS)
+	}
+
+	var original map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(fixtureJSON), &original); err != nil {
+		t.Fatalf("unmarshal original: %v", err)
+	}
+	if !jsonSemanticallyEqual(result["outbounds"], original["outbounds"]) {
+		t.Fatalf("outbounds changed unexpectedly:\n got: %s\nwant: %s", result["outbounds"], original["outbounds"])
+	}
+}
+
+func TestUpdateSingboxOutboundDomainStrategies_UpdatesMatchingTagsOnly(t *testing.T) {
+	fixtureJSON := `{
+		"dns": {"servers": [{"tag": "google", "address": "8.8.8.8"}]},
+		"outbounds": [
+			{"type": "direct", "tag": "direct"},
+			{"type": "socks", "tag": "proxy", "server": "1.2.3.4", "server_port": 1080}
+		],
+		"inbounds": [{"type": "vless", "tag": "test-vless", "listen_port": 1080, "users": []}]
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+
+	err := cfg.UpdateSingboxOutboundDomainStrategies([]SingboxOutboundDomainStrategyUpdate{
+		{Tag: "direct", DomainStrategy: "prefer_ipv6"},
+		{Tag: "proxy", DomainStrategy: ""},
+	})
+	if err != nil {
+		t.Fatalf("UpdateSingboxOutboundDomainStrategies: %v", err)
+	}
+
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(stub.data, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	var outbounds []map[string]interface{}
+	if err := json.Unmarshal(result["outbounds"], &outbounds); err != nil {
+		t.Fatalf("unmarshal outbounds: %v", err)
+	}
+
+	if got, _ := outbounds[0]["domain_strategy"].(string); got != "prefer_ipv6" {
+		t.Fatalf("direct.domain_strategy = %q; want %q", got, "prefer_ipv6")
+	}
+	if _, ok := outbounds[1]["domain_strategy"]; ok {
+		t.Fatalf("proxy.domain_strategy should be removed when empty")
+	}
+}
+
 func TestTLSTyped_RealityDecoded(t *testing.T) {
 	fixtureJSON := `{
         "inbounds": [{

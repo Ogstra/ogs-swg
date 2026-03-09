@@ -253,6 +253,10 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/config", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateConfig)))
 	protected.HandleFunc("GET /api/singbox/config", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxConfig)))
 	protected.HandleFunc("PUT /api/singbox/config", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxConfig)))
+	protected.HandleFunc("GET /api/singbox/dns", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxDNS)))
+	protected.HandleFunc("PUT /api/singbox/dns", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxDNS)))
+	protected.HandleFunc("GET /api/singbox/outbounds", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxOutbounds)))
+	protected.HandleFunc("PUT /api/singbox/outbounds/domain-strategy", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxOutboundDomainStrategies)))
 	protected.HandleFunc("GET /api/singbox/inbounds", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxInbounds)))
 	protected.HandleFunc("POST /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.handleAddSingboxInbound)))
 	protected.HandleFunc("PUT /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxInbound)))
@@ -374,7 +378,7 @@ func StartServer(cfg *core.Config) *Server {
 
 	server := NewServer(store, cfg, executor)
 
-	if cfg.EnableSingbox {
+	if cfg.EnableSingbox && !cfg.DemoMode {
 		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
 		if cfg.UseStatsSampler {
 			sampler := core.NewStatsSampler(sbClient, store, cfg)
@@ -390,83 +394,91 @@ func StartServer(cfg *core.Config) *Server {
 			calc := core.NewCalculator(watcher, sbClient, store, inboundTags)
 			calc.Start()
 		}
+	} else if cfg.EnableSingbox && cfg.DemoMode {
+		log.Printf("Demo mode: skipping sing-box watcher/sampler; seeded demo data is authoritative")
 	} else {
 		log.Printf("sing-box disabled via config; skipping watcher/sampler")
 	}
 
-	if cfg.EnableWireGuard {
+	if cfg.EnableWireGuard && !cfg.DemoMode {
 		server.startWireGuardSampler()
+	} else if cfg.EnableWireGuard && cfg.DemoMode {
+		log.Printf("Demo mode: skipping WireGuard sampler; seeded demo data is authoritative")
 	}
 
 	// Start background maintenance (Retention & Vacuum)
-	go func() {
-		// Run initial check after 1 minute, then daily
-		time.Sleep(1 * time.Minute)
-		maintenance := func() {
-			vacuumNeeded := false
+	if !cfg.DemoMode {
+		go func() {
+			// Run initial check after 1 minute, then daily
+			time.Sleep(1 * time.Minute)
+			maintenance := func() {
+				vacuumNeeded := false
 
-			// Main Stats Retention
-			if cfg.RetentionEnabled && cfg.RetentionDays > 0 {
-				cutoff := time.Now().Add(-time.Duration(cfg.RetentionDays) * 24 * time.Hour).Unix()
-				err := store.PruneOlderThan(cutoff)
-				if err != nil {
-					log.Printf("Retention prune error: %v", err)
-				} else {
-					log.Printf("Retention prune: removed samples older than %d", cutoff)
-					vacuumNeeded = true
+				// Main Stats Retention
+				if cfg.RetentionEnabled && cfg.RetentionDays > 0 {
+					cutoff := time.Now().Add(-time.Duration(cfg.RetentionDays) * 24 * time.Hour).Unix()
+					err := store.PruneOlderThan(cutoff)
+					if err != nil {
+						log.Printf("Retention prune error: %v", err)
+					} else {
+						log.Printf("Retention prune: removed samples older than %d", cutoff)
+						vacuumNeeded = true
+					}
+				}
+
+				// WireGuard Stats Retention
+				if cfg.WGRetentionDays > 0 {
+					cutoff := time.Now().Add(-time.Duration(cfg.WGRetentionDays) * 24 * time.Hour).Unix()
+					err := store.PruneWGSamplesOlderThan(cutoff)
+					if err != nil {
+						log.Printf("WG retention prune error: %v", err)
+					} else {
+						log.Printf("WG retention prune: removed samples older than %d", cutoff)
+						vacuumNeeded = true
+					}
+				}
+
+				// Aggregation / Rollup
+				if cfg.AggregationEnabled && cfg.AggregationDays > 0 {
+					aggCutoff := time.Now().Add(-time.Duration(cfg.AggregationDays) * 24 * time.Hour).Unix()
+					err := store.CompressOldSamples(aggCutoff)
+					if err != nil {
+						log.Printf("Aggregation compression error: %v", err)
+					} else {
+						log.Printf("Aggregation: compressed samples older than %d", aggCutoff)
+						vacuumNeeded = true
+					}
+
+					err = store.CompressOldWGSamples(aggCutoff)
+					if err != nil {
+						log.Printf("WG Aggregation compression error: %v", err)
+					} else {
+						log.Printf("WG Aggregation: compressed samples older than %d", aggCutoff)
+						vacuumNeeded = true
+					}
+				}
+
+				if vacuumNeeded {
+					if err := store.Vacuum(); err != nil {
+						log.Printf("DB Maintenance: Vacuum failed: %v", err)
+					} else {
+						log.Printf("DB Maintenance: Vacuum completed")
+					}
 				}
 			}
 
-			// WireGuard Stats Retention
-			if cfg.WGRetentionDays > 0 {
-				cutoff := time.Now().Add(-time.Duration(cfg.WGRetentionDays) * 24 * time.Hour).Unix()
-				err := store.PruneWGSamplesOlderThan(cutoff)
-				if err != nil {
-					log.Printf("WG retention prune error: %v", err)
-				} else {
-					log.Printf("WG retention prune: removed samples older than %d", cutoff)
-					vacuumNeeded = true
-				}
-			}
-
-			// Aggregation / Rollup
-			if cfg.AggregationEnabled && cfg.AggregationDays > 0 {
-				aggCutoff := time.Now().Add(-time.Duration(cfg.AggregationDays) * 24 * time.Hour).Unix()
-				err := store.CompressOldSamples(aggCutoff)
-				if err != nil {
-					log.Printf("Aggregation compression error: %v", err)
-				} else {
-					log.Printf("Aggregation: compressed samples older than %d", aggCutoff)
-					vacuumNeeded = true
-				}
-
-				err = store.CompressOldWGSamples(aggCutoff)
-				if err != nil {
-					log.Printf("WG Aggregation compression error: %v", err)
-				} else {
-					log.Printf("WG Aggregation: compressed samples older than %d", aggCutoff)
-					vacuumNeeded = true
-				}
-			}
-
-			if vacuumNeeded {
-				if err := store.Vacuum(); err != nil {
-					log.Printf("DB Maintenance: Vacuum failed: %v", err)
-				} else {
-					log.Printf("DB Maintenance: Vacuum completed")
-				}
-			}
-		}
-
-		// Run once on startup (after delay)
-		maintenance()
-
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
+			// Run once on startup (after delay)
 			maintenance()
-		}
-	}()
+
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				maintenance()
+			}
+		}()
+	} else {
+		log.Printf("Demo mode: skipping DB maintenance; demo seeder manages retention")
+	}
 
 	router := server.Routes()
 

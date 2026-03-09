@@ -33,6 +33,21 @@ func (s *Server) handleGetSingboxConfig(w http.ResponseWriter, r *http.Request) 
 	w.Write([]byte(content))
 }
 
+func (s *Server) handleGetSingboxDNS(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	dns, err := s.config.GetSingboxDNS()
+	if err != nil {
+		http.Error(w, "Failed to get dns config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(dns)
+}
+
 func (s *Server) handleUpdateSingboxConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -46,6 +61,59 @@ func (s *Server) handleUpdateSingboxConfig(w http.ResponseWriter, r *http.Reques
 
 	if err := s.config.UpdateSingboxConfig(string(body)); err != nil {
 		http.Error(w, "Failed to update config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleUpdateSingboxDNS(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	var dns map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&dns); err != nil {
+		http.Error(w, "Failed to decode dns config: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.config.UpdateSingboxDNS(dns); err != nil {
+		http.Error(w, "Failed to update dns config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleGetSingboxOutbounds(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	outbounds, err := s.config.GetSingboxOutboundViews()
+	if err != nil {
+		http.Error(w, "Failed to get outbounds: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(outbounds)
+}
+
+func (s *Server) handleUpdateSingboxOutboundDomainStrategies(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	var updates []core.SingboxOutboundDomainStrategyUpdate
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		http.Error(w, "Failed to decode outbound updates: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.config.UpdateSingboxOutboundDomainStrategies(updates); err != nil {
+		http.Error(w, "Failed to update outbound domain_strategy: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

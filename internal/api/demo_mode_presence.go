@@ -148,3 +148,41 @@ func (s *Server) demoActiveWireGuardPeers(threshold int64, preferred map[string]
 	sort.Strings(out)
 	return out
 }
+
+func (s *Server) demoActiveSingboxUsers(now time.Time) []string {
+	if !s.config.DemoMode || s.config == nil {
+		return nil
+	}
+
+	activeUsers, err := s.config.GetActiveUsers()
+	if err != nil || len(activeUsers) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(activeUsers))
+	names := make([]string, 0, len(activeUsers))
+	for _, user := range activeUsers {
+		name := strings.TrimSpace(user.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	activeSet := demoSelectActiveKeys("singbox-user", names, now, 4, 5)
+	out := make([]string, 0, len(activeSet))
+	for _, name := range names {
+		if _, ok := activeSet[name]; ok {
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
