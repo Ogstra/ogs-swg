@@ -259,7 +259,11 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	samplerPaused := false
 
 	if s.config.EnableSingbox {
-		singboxStatus = s.checkService(r.Context(), "sing-box")
+		if s.config.DemoMode {
+			singboxStatus = true
+		} else {
+			singboxStatus = s.checkService(r.Context(), "sing-box")
+		}
 		activeUsersSB, _ = s.store.GetActiveUserCountWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes)
 		if lst, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
 			activeUsersList = lst
@@ -269,6 +273,12 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 			if lst, err := s.store.GetActiveUsers(5 * time.Minute); err == nil {
 				activeUsersList = lst
 				activeUsersSB = int64(len(lst))
+			}
+		}
+		if s.config.DemoMode && activeUsersSB == 0 {
+			if users := s.demoActiveSingboxUsers(time.Now()); len(users) > 0 {
+				activeUsersList = users
+				activeUsersSB = int64(len(users))
 			}
 		}
 		if xc := core.NewSingboxClient(s.config.SingboxAPIAddr, s.executor); xc != nil {
@@ -294,7 +304,11 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		// If we are in container, we can't easily check wg-quick@wg0 unless via SSH.
 		// If local and containerized without systemd, this fails.
 		// But s.checkService now uses s.executor.IsServiceActive.
-		wireguardStatus = s.checkService(r.Context(), "wireguard")
+		if s.config.DemoMode {
+			wireguardStatus = true
+		} else {
+			wireguardStatus = s.checkService(r.Context(), "wireguard")
+		}
 		wgCfg, _ := s.loadWireGuardConfig(r.Context())
 		pubToDisplay := make(map[string]string)
 		if wgCfg != nil {

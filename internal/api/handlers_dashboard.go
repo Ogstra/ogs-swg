@@ -428,7 +428,11 @@ func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{}
 	var activeUsersWGList []string
 
 	if s.config.EnableSingbox {
-		singboxStatus = s.checkService(ctx, "sing-box")
+		if s.config.DemoMode {
+			singboxStatus = true
+		} else {
+			singboxStatus = s.checkService(ctx, "sing-box")
+		}
 		// Fetch active users list (previously we only fetched count)
 		// We use the same threshold mechanism
 		if users, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
@@ -442,10 +446,20 @@ func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{}
 				activeUsersSB = int64(len(users))
 			}
 		}
+		if s.config.DemoMode && activeUsersSB == 0 {
+			if users := s.demoActiveSingboxUsers(time.Now()); len(users) > 0 {
+				activeUsersSBList = users
+				activeUsersSB = int64(len(users))
+			}
+		}
 	}
 
 	if s.config.EnableWireGuard {
-		wireguardStatus = s.checkService(ctx, "wireguard")
+		if s.config.DemoMode {
+			wireguardStatus = true
+		} else {
+			wireguardStatus = s.checkService(ctx, "wireguard")
+		}
 		storedPeers, _ := s.store.GetWGPeerMeta()
 		var (
 			stats map[string]core.PeerStats

@@ -116,6 +116,27 @@ export interface CreateWireGuardInterfaceResponse {
     path: string;
 }
 
+export interface SingboxDNSConfig {
+    servers?: Array<Record<string, any>>;
+    strategy?: string;
+    independent_cache?: boolean;
+    [key: string]: any;
+}
+
+export interface SingboxOutboundView {
+    tag: string;
+    type: string;
+    server?: string;
+    server_port?: number;
+    domain_strategy?: string;
+    domain_resolver?: string;
+}
+
+export interface SingboxOutboundDomainStrategyUpdate {
+    tag: string;
+    domain_strategy?: string;
+}
+
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
     if (contentType) headers['Content-Type'] = contentType;
@@ -262,6 +283,32 @@ export const api = {
         const res = await fetch('/api/config', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch config');
         return res.json();
+    },
+    getSingboxDNS: async (): Promise<SingboxDNSConfig> => {
+        const res = await fetch('/api/singbox/dns', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch sing-box DNS config');
+        return res.json();
+    },
+    updateSingboxDNS: async (dns: SingboxDNSConfig): Promise<void> => {
+        const res = await fetch('/api/singbox/dns', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(dns),
+        });
+        await handleResponse(res, 'Failed to update sing-box DNS config');
+    },
+    getSingboxOutbounds: async (): Promise<SingboxOutboundView[]> => {
+        const res = await fetch('/api/singbox/outbounds', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch sing-box outbounds');
+        return res.json();
+    },
+    updateSingboxOutboundDomainStrategies: async (updates: SingboxOutboundDomainStrategyUpdate[]): Promise<void> => {
+        const res = await fetch('/api/singbox/outbounds/domain-strategy', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(updates),
+        });
+        await handleResponse(res, 'Failed to update sing-box outbound domain_strategy values');
     },
     getLogs: async (params?: { user?: string; limit?: number }): Promise<{ logs: string[] }> => {
         const query = new URLSearchParams();

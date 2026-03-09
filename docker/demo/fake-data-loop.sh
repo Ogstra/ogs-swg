@@ -3,8 +3,9 @@ set -euo pipefail
 
 DB_PATH="${DEMO_DB_PATH:-/app/data/stats.db}"
 LOG_PATH="${DEMO_LOG_PATH:-/app/data/access.log}"
+MODE="${1:-live}"
 
-if ! command -v sqlite3 >/dev/null 2>&1; then
+if [[ "$MODE" != "logs" ]] && ! command -v sqlite3 >/dev/null 2>&1; then
   echo "[demo-seeder] sqlite3 is required in runtime image" >&2
   exit 1
 fi
@@ -489,9 +490,18 @@ sample_loop() {
   done
 }
 
+if [[ "$MODE" == "logs" ]]; then
+  log_loop
+  exit 0
+fi
+
 wait_for_db
 seed_reference_rows
 seed_bootstrap_history
+
+if [[ "$MODE" == "bootstrap" ]]; then
+  exit 0
+fi
 
 log_loop &
 LOG_PID=$!

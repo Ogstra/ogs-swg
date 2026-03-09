@@ -94,12 +94,22 @@ echo "[demo] autologin api key configured for read-only panel"
 
 inject_demo_frontend_autologin
 
-/bin/bash /demo/fake-data-loop.sh &
-SEED_PID=$!
+# Bootstrap DB schema and seed data before the final server process opens SQLite.
+/app/ogs-swg -config "$CONFIG_PATH" --wg-test-mode &
+BOOTSTRAP_PID=$!
 
-cleanup() {
-  kill "$SEED_PID" >/dev/null 2>&1 || true
+cleanup_bootstrap() {
+  kill "$BOOTSTRAP_PID" >/dev/null 2>&1 || true
 }
-trap cleanup EXIT INT TERM
+trap cleanup_bootstrap EXIT INT TERM
+
+/bin/bash /demo/fake-data-loop.sh bootstrap
+
+kill "$BOOTSTRAP_PID" >/dev/null 2>&1 || true
+wait "$BOOTSTRAP_PID" >/dev/null 2>&1 || true
+trap - EXIT INT TERM
+
+# Keep access.log live for Log Viewer without touching demo SQLite at runtime.
+/bin/bash /demo/fake-data-loop.sh logs &
 
 exec /app/ogs-swg -config "$CONFIG_PATH" --wg-test-mode

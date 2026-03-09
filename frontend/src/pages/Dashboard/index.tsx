@@ -470,21 +470,25 @@ export default function Dashboard() {
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
                         ) : (
                             topConsumers.map((u, i) => (
-                                <div key={u.key || u.name} className="flex-wrap flex items-center justify-between p-3 bg-slate-950/50 rounded-lg border border-slate-800/50 hover:border-slate-800 transition-colors">
-                                    <div className="flex items-center gap-3">
+                                <div key={u.key || u.name} className="flex h-[62px] items-center justify-between gap-3 overflow-hidden rounded-lg border border-slate-800/50 bg-slate-950/50 p-3 transition-colors hover:border-slate-800">
+                                    <div className="flex min-w-0 items-center gap-3">
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
                                             {i + 1}
                                         </div>
-                                        <div>
-                                            <div className="font-medium text-slate-200 text-sm">{u.name}</div>
-                                            {chartMode === 'wireguard' && (
-                                                <div className="text-[10px] text-slate-500">
+                                        <div className="min-w-0">
+                                            <div className="truncate font-medium text-sm text-slate-200">{u.name}</div>
+                                            {chartMode === 'wireguard' ? (
+                                                <div className="truncate text-[10px] text-slate-500">
                                                     {u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}
+                                                </div>
+                                            ) : (
+                                                <div className={`truncate text-[10px] text-slate-500 ${/^wireguard:/i.test(u.flow || '') ? '' : 'uppercase'}`}>
+                                                    {(u.flow || 'Default').replace(/^wireguard:/i, '')}
                                                 </div>
                                             )}
                                         </div>
                                     </div>
-                                    <div className="text-right">
+                                    <div className="shrink-0 text-right">
                                         <div className="font-mono text-sm text-blue-400">{formatBytes(u.total)}</div>
                                     </div>
                                 </div>
