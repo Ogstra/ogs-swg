@@ -52,6 +52,40 @@ func (s *Server) handleUpdateSingboxConfig(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleGetSingboxOutbounds(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	outbounds, err := s.config.GetSingboxOutboundViews()
+	if err != nil {
+		http.Error(w, "Failed to get outbounds: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(outbounds)
+}
+
+func (s *Server) handleUpdateSingboxOutboundDomainStrategies(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	var updates []core.SingboxOutboundDomainStrategyUpdate
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		http.Error(w, "Failed to decode outbound updates: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.config.UpdateSingboxOutboundDomainStrategies(updates); err != nil {
+		http.Error(w, "Failed to update outbound domain_strategy: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return

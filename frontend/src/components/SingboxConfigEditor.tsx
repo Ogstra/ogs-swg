@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { FileJson, List, GitBranch } from 'lucide-react'
+import { FileJson, List, GitBranch, Waypoints } from 'lucide-react'
 import { api } from '../services/api'
+import type { SingboxOutboundDomainStrategyUpdate, SingboxOutboundView } from '../services/api'
 import InboundList from './singbox/InboundList'
 import { Card } from './ui/Card'
 import { RawEditorPanel } from './raw/RawEditorPanel'
 import { useAuth } from '../context/AuthContext'
 
-type TabId = 'inbounds' | 'rules' | 'raw'
+type TabId = 'inbounds' | 'rules' | 'outbounds' | 'raw'
 
 export default function SingboxConfigEditor() {
     const { permissions } = useAuth()
@@ -23,6 +24,9 @@ export default function SingboxConfigEditor() {
     const [availableInbounds, setAvailableInbounds] = useState<string[]>([])
     const [availableOutbounds, setAvailableOutbounds] = useState<string[]>([])
     const [preservedRulesCount, setPreservedRulesCount] = useState(0)
+    const [outbounds, setOutbounds] = useState<SingboxOutboundView[]>([])
+    const [outboundsLoading, setOutboundsLoading] = useState(false)
+    const [outboundsSaving, setOutboundsSaving] = useState(false)
 
     // Load Config
     useEffect(() => {
@@ -32,6 +36,9 @@ export default function SingboxConfigEditor() {
         }
         if (activeTab === 'rules') {
             loadRules()
+        }
+        if (activeTab === 'outbounds') {
+            loadOutbounds()
         }
     }, [activeTab])
 
@@ -114,6 +121,37 @@ export default function SingboxConfigEditor() {
             alert(`Failed to save: ${err.message || err}`)
         } finally {
             setSaving(false)
+        }
+    }
+
+    const loadOutbounds = async () => {
+        setOutboundsLoading(true)
+        try {
+            const nextOutbounds = await api.getSingboxOutbounds()
+            setOutbounds(Array.isArray(nextOutbounds) ? nextOutbounds : [])
+        } catch (err: any) {
+            console.error('Failed to load outbounds', err)
+            alert('Failed to load outbounds')
+        } finally {
+            setOutboundsLoading(false)
+        }
+    }
+
+    const saveOutbounds = async () => {
+        setOutboundsSaving(true)
+        try {
+            const updates: SingboxOutboundDomainStrategyUpdate[] = outbounds.map(outbound => ({
+                tag: outbound.tag,
+                domain_strategy: (outbound.domain_strategy || '').trim(),
+            }))
+            await api.updateSingboxOutboundDomainStrategies(updates)
+            alert('Outbound domain_strategy values saved')
+            await loadOutbounds()
+        } catch (err: any) {
+            console.error('Failed to save outbounds', err)
+            alert('Failed to save outbounds')
+        } finally {
+            setOutboundsSaving(false)
         }
     }
 
@@ -224,6 +262,13 @@ export default function SingboxConfigEditor() {
                         Inbounds
                     </button>
                     <button
+                        onClick={() => setActiveTab('outbounds')}
+                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'outbounds' ? 'border-fuchsia-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                    >
+                        <Waypoints size={16} />
+                        Outbounds
+                    </button>
+                    <button
                         onClick={() => setActiveTab('rules')}
                         className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'rules' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
                     >
@@ -274,9 +319,168 @@ export default function SingboxConfigEditor() {
                                     save={saveRules}
                                 />
                             )}
+                            {activeTab === 'outbounds' && (
+                                <OutboundsTab
+                                    outbounds={outbounds}
+                                    setOutbounds={setOutbounds}
+                                    loading={outboundsLoading}
+                                    saving={outboundsSaving}
+                                    canWrite={canWriteConfig}
+                                    reload={loadOutbounds}
+                                    save={saveOutbounds}
+                                />
+                            )}
                         </div>
                     )}
                 </div>
+            </div>
+        </div>
+    )
+}
+
+function OutboundsTab({
+    outbounds,
+    setOutbounds,
+    loading,
+    saving,
+    canWrite,
+    reload,
+    save,
+}: {
+    outbounds: SingboxOutboundView[]
+    setOutbounds: React.Dispatch<React.SetStateAction<SingboxOutboundView[]>>
+    loading: boolean
+    saving: boolean
+    canWrite: boolean
+    reload: () => void
+    save: () => void
+}) {
+    const outboundTypeOptions = [
+        'direct',
+        'block',
+        'http',
+        'socks',
+        'shadowsocks',
+        'vmess',
+        'vless',
+        'trojan',
+        'wireguard',
+        'hysteria',
+        'hysteria2',
+        'tuic',
+        'tor',
+        'ssh',
+        'shadowtls',
+        'anytls',
+        'selector',
+        'urltest',
+    ]
+    const domainStrategyOptions = ['prefer_ipv4', 'prefer_ipv6', 'ipv4_only', 'ipv6_only']
+    const outboundTagOptions = Array.from(new Set(outbounds.map(o => (o.tag || '').trim()).filter(Boolean))).sort()
+
+    const updateOutbound = (idx: number, domainStrategy: string) => {
+        if (!canWrite) return
+        setOutbounds(prev => prev.map((outbound, i) => (i === idx ? { ...outbound, domain_strategy: domainStrategy } : outbound)))
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h3 className="text-lg font-semibold text-white">Outbounds Domain Strategy</h3>
+                </div>
+                <div className="flex gap-2 w-full sm:w-auto">
+                    <button
+                        onClick={reload}
+                        className="flex-1 sm:flex-none px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
+                        disabled={loading}
+                    >
+                        {loading ? 'Refreshing...' : 'Refresh'}
+                    </button>
+                    <button
+                        onClick={save}
+                        disabled={!canWrite || saving}
+                        className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!canWrite || saving
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-blue-600 hover:bg-blue-500 text-white'
+                            }`}
+                    >
+                        {saving ? 'Saving...' : 'Save Outbounds'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="space-y-3">
+                {outbounds.length === 0 && (
+                    <div className="text-sm text-slate-400">No outbounds found.</div>
+                )}
+                {outbounds.map((outbound, idx) => (
+                    <Card key={outbound.tag || `${outbound.type}-${idx}`} title={outbound.tag || `Outbound ${idx + 1}`} className="space-y-3">
+                        <div className="grid grid-cols-1 md:grid-cols-[2fr_2fr_3fr] gap-3">
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Type</label>
+                                <select
+                                    value={outbound.type || ''}
+                                    disabled
+                                    className="select-field w-full h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 text-slate-300 outline-none disabled:opacity-80"
+                                >
+                                    <option value="">unknown</option>
+                                    {outboundTypeOptions.map(option => (
+                                        <option key={option} value={option}>
+                                            {option}
+                                        </option>
+                                    ))}
+                                    {outbound.type && !outboundTypeOptions.includes(outbound.type) && (
+                                        <option value={outbound.type}>
+                                            {outbound.type}
+                                        </option>
+                                    )}
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Tag</label>
+                                <select
+                                    value={outbound.tag || ''}
+                                    disabled
+                                    className="select-field w-full h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 text-slate-300 outline-none disabled:opacity-80"
+                                >
+                                    <option value="">{outbound.tag ? outbound.tag : 'no-tag'}</option>
+                                    {outboundTagOptions.map(tag => (
+                                        <option key={tag} value={tag}>
+                                            {tag}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">domain_strategy</label>
+                                <select
+                                    value={outbound.domain_strategy || ''}
+                                    disabled={!canWrite}
+                                    onChange={(e) => updateOutbound(idx, e.target.value)}
+                                    className="select-field w-full h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 text-white outline-none focus:border-blue-500/50 transition-colors disabled:opacity-60"
+                                >
+                                    <option value="">empty (remove field)</option>
+                                    {domainStrategyOptions.map(option => (
+                                        <option key={option} value={option}>
+                                            {option}
+                                        </option>
+                                    ))}
+                                    {outbound.domain_strategy && !domainStrategyOptions.includes(outbound.domain_strategy) && (
+                                        <option value={outbound.domain_strategy}>
+                                            {outbound.domain_strategy}
+                                        </option>
+                                    )}
+                                </select>
+                            </div>
+                        </div>
+                        {outbound.domain_resolver && (
+                            <p className="text-xs text-amber-400">
+                                `domain_resolver` present: {outbound.domain_resolver}. Prefer this over `domain_strategy` in newer Sing-box configs.
+                            </p>
+                        )}
+                    </Card>
+                ))}
             </div>
         </div>
     )
