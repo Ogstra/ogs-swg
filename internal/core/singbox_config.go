@@ -59,7 +59,23 @@ func decodeInboundRawList(raw json.RawMessage) ([]json.RawMessage, error) {
 	return list, nil
 }
 
+func decodeRawList(raw json.RawMessage) ([]json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return []json.RawMessage{}, nil
+	}
+	var list []json.RawMessage
+	if err := json.Unmarshal(trimmed, &list); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 func encodeInboundRawList(list []json.RawMessage) (json.RawMessage, error) {
+	return encodeRawList(list)
+}
+
+func encodeRawList(list []json.RawMessage) (json.RawMessage, error) {
 	if list == nil {
 		list = []json.RawMessage{}
 	}
@@ -387,6 +403,28 @@ func decodeSingboxInboundView(rawInbound json.RawMessage) (SingboxInboundView, e
 	}, nil
 }
 
+func decodeSingboxOutboundView(rawOutbound json.RawMessage) (SingboxOutboundView, error) {
+	outboundMap := map[string]interface{}{}
+	if err := json.Unmarshal(rawOutbound, &outboundMap); err != nil {
+		return SingboxOutboundView{}, err
+	}
+
+	tag, _ := outboundMap["tag"].(string)
+	outboundType, _ := outboundMap["type"].(string)
+	server, _ := outboundMap["server"].(string)
+	domainStrategy, _ := outboundMap["domain_strategy"].(string)
+	domainResolver, _ := outboundMap["domain_resolver"].(string)
+
+	return SingboxOutboundView{
+		Tag:            strings.TrimSpace(tag),
+		Type:           strings.ToLower(strings.TrimSpace(outboundType)),
+		Server:         strings.TrimSpace(server),
+		ServerPort:     parseAlterIDValue(outboundMap["server_port"]),
+		DomainStrategy: strings.TrimSpace(domainStrategy),
+		DomainResolver: strings.TrimSpace(domainResolver),
+	}, nil
+}
+
 func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 	content, err := c.readSingboxConfigLocked()
 	if err != nil {
@@ -496,6 +534,118 @@ func (c *Config) GetSingboxInboundByTag(tag string) (map[string]interface{}, err
 		return nil, err
 	}
 	return view.Raw, nil
+}
+
+func (c *Config) GetSingboxOutboundViews() ([]SingboxOutboundView, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	content, err := c.readSingboxConfigLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg SingboxConfig
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		return nil, err
+	}
+
+	rawOutbounds, err := decodeRawList(cfg.Outbounds)
+	if err != nil {
+		return nil, err
+	}
+
+	views := make([]SingboxOutboundView, 0, len(rawOutbounds))
+	for _, rawOutbound := range rawOutbounds {
+		view, err := decodeSingboxOutboundView(rawOutbound)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+func (c *Config) UpdateSingboxOutboundDomainStrategies(updates []SingboxOutboundDomainStrategyUpdate) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	content, err := c.readSingboxConfigLocked()
+	if err != nil {
+		return err
+	}
+
+	var cfg SingboxConfig
+	if err := json.Unmarshal(content, &cfg); err != nil {
+		return err
+	}
+
+	rawOutbounds, err := decodeRawList(cfg.Outbounds)
+	if err != nil {
+		return err
+	}
+
+	updatesByTag := make(map[string]string, len(updates))
+	for _, update := range updates {
+		tag := strings.TrimSpace(update.Tag)
+		if tag == "" {
+			return fmt.Errorf("outbound tag is required")
+		}
+		updatesByTag[tag] = strings.TrimSpace(update.DomainStrategy)
+	}
+
+	foundTags := make(map[string]bool, len(updatesByTag))
+	for i, rawOutbound := range rawOutbounds {
+		outboundMap := map[string]interface{}{}
+		if err := json.Unmarshal(rawOutbound, &outboundMap); err != nil {
+			return err
+		}
+
+		tag, _ := outboundMap["tag"].(string)
+		tag = strings.TrimSpace(tag)
+		nextStrategy, ok := updatesByTag[tag]
+		if !ok {
+			continue
+		}
+		foundTags[tag] = true
+
+		if nextStrategy == "" {
+			delete(outboundMap, "domain_strategy")
+		} else {
+			outboundMap["domain_strategy"] = nextStrategy
+		}
+
+		updatedRaw, err := json.Marshal(outboundMap)
+		if err != nil {
+			return err
+		}
+		rawOutbounds[i] = updatedRaw
+	}
+
+	for tag := range updatesByTag {
+		if !foundTags[tag] {
+			return fmt.Errorf("outbound with tag '%s' not found", tag)
+		}
+	}
+
+	cfg.Outbounds, err = encodeRawList(rawOutbounds)
+	if err != nil {
+		return err
+	}
+
+	data, err := json.MarshalIndent(&cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := c.ValidateConfig(data); err != nil {
+		return fmt.Errorf("sing-box validation failed: %v", err)
+	}
+	if err := c.writeSingboxConfigLocked(data); err != nil {
+		return err
+	}
+
+	c.SingboxPendingChanges = true
+	return nil
 }
 
 type UserInboundInfo struct {

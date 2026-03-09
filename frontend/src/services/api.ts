@@ -116,6 +116,20 @@ export interface CreateWireGuardInterfaceResponse {
     path: string;
 }
 
+export interface SingboxOutboundView {
+    tag: string;
+    type: string;
+    server?: string;
+    server_port?: number;
+    domain_strategy?: string;
+    domain_resolver?: string;
+}
+
+export interface SingboxOutboundDomainStrategyUpdate {
+    tag: string;
+    domain_strategy?: string;
+}
+
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
     if (contentType) headers['Content-Type'] = contentType;
@@ -262,6 +276,19 @@ export const api = {
         const res = await fetch('/api/config', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch config');
         return res.json();
+    },
+    getSingboxOutbounds: async (): Promise<SingboxOutboundView[]> => {
+        const res = await fetch('/api/singbox/outbounds', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch sing-box outbounds');
+        return res.json();
+    },
+    updateSingboxOutboundDomainStrategies: async (updates: SingboxOutboundDomainStrategyUpdate[]): Promise<void> => {
+        const res = await fetch('/api/singbox/outbounds/domain-strategy', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(updates),
+        });
+        await handleResponse(res, 'Failed to update sing-box outbound domain_strategy values');
     },
     getLogs: async (params?: { user?: string; limit?: number }): Promise<{ logs: string[] }> => {
         const query = new URLSearchParams();
