@@ -495,6 +495,12 @@ if [[ "$MODE" == "logs" ]]; then
   exit 0
 fi
 
+if [[ "$MODE" == "sample" ]]; then
+  wait_for_db
+  sample_loop
+  exit 0
+fi
+
 wait_for_db
 seed_reference_rows
 seed_bootstrap_history
