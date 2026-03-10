@@ -112,4 +112,7 @@ trap - EXIT INT TERM
 # Keep access.log live for Log Viewer without touching demo SQLite at runtime.
 /bin/bash /demo/fake-data-loop.sh logs &
 
+# Keep dashboard data live by inserting samples every DEMO_LIVE_INTERVAL_SEC.
+/bin/bash /demo/fake-data-loop.sh sample &
+
 exec /app/ogs-swg -config "$CONFIG_PATH" --wg-test-mode
