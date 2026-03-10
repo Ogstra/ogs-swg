@@ -122,7 +122,6 @@ export interface SingboxDNSConfig {
     independent_cache?: boolean;
     [key: string]: any;
 }
-
 export interface SingboxOutboundView {
     tag: string;
     type: string;

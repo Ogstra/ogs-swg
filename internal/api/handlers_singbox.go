@@ -85,7 +85,6 @@ func (s *Server) handleUpdateSingboxDNS(w http.ResponseWriter, r *http.Request) 
 
 	w.WriteHeader(http.StatusOK)
 }
-
 func (s *Server) handleGetSingboxOutbounds(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
