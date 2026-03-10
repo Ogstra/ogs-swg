@@ -9,18 +9,18 @@ ACCESS_LOG="$DATA_DIR/access.log"
 DB_PATH="$DATA_DIR/stats.db"
 FRONTEND_INDEX="/app/frontend/index.html"
 
-# Keep demo storage volatile while using the same /app/data path style as prod:
-# wipe data directory on every container start.
+# ── Data directory: wipe on every start (demo is stateless) ──────────────────
 mkdir -p "$DATA_DIR"
 find "$DATA_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 mkdir -p "$WG_DIR" "$SINGBOX_DIR"
 
+# ── Copy demo configs ─────────────────────────────────────────────────────────
 cp /demo/config.demo.json "$CONFIG_PATH"
 cp /demo/singbox.demo.json "$SINGBOX_DIR/config.json"
 cp /demo/wireguard/*.conf "$WG_DIR/"
-
 touch "$ACCESS_LOG"
 
+# ── Environment ───────────────────────────────────────────────────────────────
 export DEMO_DB_PATH="$DB_PATH"
 export DEMO_LOG_PATH="$ACCESS_LOG"
 export DEMO_API_KEY="${OGS_API_KEY:-demo-readonly-key}"
@@ -36,32 +36,25 @@ export OGS_WIREGUARD_TEST_MODE="true"
 export OGS_DEMO_MODE="true"
 export OGS_DISABLE_PASSWORD_LOGIN="true"
 
+# ── Frontend: inject auto-login script before </head> ─────────────────────────
 inject_demo_frontend_autologin() {
-  if [[ ! -f "$FRONTEND_INDEX" ]]; then
-    return
-  fi
+  [[ -f "$FRONTEND_INDEX" ]] || return 0
 
-  local escaped_api_key
-  escaped_api_key="${DEMO_API_KEY//\\/\\\\}"
+  local escaped_api_key="${DEMO_API_KEY//\\/\\\\}"
   escaped_api_key="${escaped_api_key//\"/\\\"}"
 
-  local snippet_file
-  snippet_file="$(mktemp)"
-  cat >"$snippet_file" <<SNIPPET
+  local snippet tmp_index
+  snippet="$(mktemp)"
+  cat > "$snippet" <<SNIPPET
 <!-- DEMO_AUTOLOGIN_START -->
 <script>
 (() => {
   const readonlyPerms = {
-    can_read_users: true,
-    can_write_users: false,
-    can_read_wireguard: true,
-    can_write_wireguard: false,
-    can_read_config: true,
-    can_write_config: false,
-    can_read_settings: true,
-    can_write_settings: false,
-    can_read_panel_users: false,
-    can_write_panel_users: false,
+    can_read_users: true,    can_write_users: false,
+    can_read_wireguard: true, can_write_wireguard: false,
+    can_read_config: true,   can_write_config: false,
+    can_read_settings: true, can_write_settings: false,
+    can_read_panel_users: false, can_write_panel_users: false,
     can_read_logs: true
   };
   localStorage.setItem('api_key', "${escaped_api_key}");
@@ -73,35 +66,29 @@ inject_demo_frontend_autologin() {
 <!-- DEMO_AUTOLOGIN_END -->
 SNIPPET
 
+  # Remove any previous injection then re-inject before </head>.
   sed -i '/<!-- DEMO_AUTOLOGIN_START -->/,/<!-- DEMO_AUTOLOGIN_END -->/d' "$FRONTEND_INDEX"
-
-  local tmp_index
   tmp_index="$(mktemp)"
   while IFS= read -r line; do
     if [[ "$line" == *"</head>"* ]]; then
-      cat "$snippet_file" >>"$tmp_index"
+      cat "$snippet" >> "$tmp_index"
     fi
-    printf '%s\n' "$line" >>"$tmp_index"
-  done <"$FRONTEND_INDEX"
+    printf '%s\n' "$line" >> "$tmp_index"
+  done < "$FRONTEND_INDEX"
   mv "$tmp_index" "$FRONTEND_INDEX"
-  rm -f "$snippet_file"
+  rm -f "$snippet"
 }
 
-echo "[demo] runtime config: $CONFIG_PATH"
-echo "[demo] runtime db: $DB_PATH"
-echo "[demo] runtime wireguard dir: $WG_DIR"
-echo "[demo] autologin api key configured for read-only panel"
-
+echo "[demo] config:     $CONFIG_PATH"
+echo "[demo] database:   $DB_PATH"
+echo "[demo] wireguard:  $WG_DIR"
 inject_demo_frontend_autologin
+echo "[demo] autologin injected (read-only key)"
 
-# Bootstrap DB schema and seed data before the final server process opens SQLite.
+# ── Bootstrap: start server briefly so it initialises the DB schema ───────────
 /app/ogs-swg -config "$CONFIG_PATH" --wg-test-mode &
 BOOTSTRAP_PID=$!
-
-cleanup_bootstrap() {
-  kill "$BOOTSTRAP_PID" >/dev/null 2>&1 || true
-}
-trap cleanup_bootstrap EXIT INT TERM
+trap 'kill "$BOOTSTRAP_PID" >/dev/null 2>&1 || true' EXIT INT TERM
 
 /bin/bash /demo/fake-data-loop.sh bootstrap
 
@@ -109,10 +96,12 @@ kill "$BOOTSTRAP_PID" >/dev/null 2>&1 || true
 wait "$BOOTSTRAP_PID" >/dev/null 2>&1 || true
 trap - EXIT INT TERM
 
-# Keep access.log live for Log Viewer without touching demo SQLite at runtime.
+# ── Runtime loops ─────────────────────────────────────────────────────────────
+# Log viewer: emit fake sing-box log lines to access.log.
 /bin/bash /demo/fake-data-loop.sh logs &
 
-# Keep dashboard data live by inserting samples every DEMO_LIVE_INTERVAL_SEC.
+# Dashboard: insert live traffic samples every DEMO_LIVE_INTERVAL_SEC.
 /bin/bash /demo/fake-data-loop.sh sample &
 
+# ── Main server ───────────────────────────────────────────────────────────────
 exec /app/ogs-swg -config "$CONFIG_PATH" --wg-test-mode
