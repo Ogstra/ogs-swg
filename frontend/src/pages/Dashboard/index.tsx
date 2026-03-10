@@ -9,11 +9,17 @@ import { formatBytes } from '../../utils/traffic'
 
 const DASHBOARD_PREF_KEY = 'dashboard_prefs'
 
+type DashboardRange = '30m' | '1h' | '6h' | '24h' | '1w' | '1m' | 'custom'
+
 type DashboardPrefs = {
     defaultService?: 'singbox' | 'wireguard'
     refreshMs?: number
-    defaultRange?: string
+    defaultRange?: DashboardRange
 }
+
+type DashboardRequestWindow =
+    | { range: 'custom'; start: number; end: number; startText: string; endText: string }
+    | { range: Exclude<DashboardRange, 'custom'> }
 
 const loadDashboardPrefs = (): DashboardPrefs => {
     try {
@@ -46,7 +52,7 @@ const WireGuardIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
 )
 
 export default function Dashboard() {
-    const [timeRange, setTimeRange] = useState('24h')
+    const [timeRange, setTimeRange] = useState<DashboardRange>('24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [refreshInterval, setRefreshInterval] = useState<number>(10000)
     const [prefsLoaded, setPrefsLoaded] = useState(false)
@@ -94,19 +100,22 @@ export default function Dashboard() {
         return () => ro.disconnect()
     }, [])
 
-    const requestWindow = useMemo(() => {
+    const requestWindow = useMemo<DashboardRequestWindow>(() => {
         if (timeRange === 'custom') {
             const start = Math.floor(new Date(customStart).getTime() / 1000)
             const end = Math.floor(new Date(customEnd).getTime() / 1000) + 24 * 60 * 60
-            return { start, end, startText: String(start), endText: String(end), range: 'custom' as const }
+            return { range: 'custom' as const, start, end, startText: String(start), endText: String(end) }
         }
-        const range = computeRangeSeconds(timeRange)
-        return { start: range.start, end: range.end, startText: String(range.start), endText: String(range.end), range: timeRange }
+        return { range: timeRange }
     }, [timeRange, customStart, customEnd])
 
     const dashboardQuery = useQuery({
-        queryKey: ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText],
-        queryFn: () => api.getDashboardData(requestWindow.range, requestWindow.startText, requestWindow.endText),
+        queryKey: requestWindow.range === 'custom'
+            ? ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText]
+            : ['dashboard-data', requestWindow.range],
+        queryFn: () => requestWindow.range === 'custom'
+            ? api.getDashboardData(requestWindow.range, requestWindow.startText, requestWindow.endText)
+            : api.getDashboardData(requestWindow.range),
         enabled: prefsLoaded,
         refetchInterval: refreshInterval,
         placeholderData: previousData => previousData,
@@ -117,13 +126,20 @@ export default function Dashboard() {
     const chartData: UnifiedChartPoint[] = dashboardQuery.data?.chart_data || []
     const chartDomain: [number, number] = useMemo(() => {
         if (chartData.length > 1) {
-            const first = chartData[0]?.ts ?? requestWindow.start
-            const last = chartData[chartData.length - 1]?.ts ?? requestWindow.end
+            const fallbackRange = requestWindow.range === 'custom'
+                ? { start: requestWindow.start, end: requestWindow.end }
+                : computeRangeSeconds(timeRange)
+            const first = chartData[0]?.ts ?? fallbackRange.start
+            const last = chartData[chartData.length - 1]?.ts ?? fallbackRange.end
             if (last > first) return [first, last]
             return [first, first + 1]
         }
-        return [requestWindow.start, requestWindow.end]
-    }, [chartData, requestWindow.start, requestWindow.end])
+        if (requestWindow.range === 'custom') {
+            return [requestWindow.start, requestWindow.end]
+        }
+        const fallbackRange = computeRangeSeconds(timeRange)
+        return [fallbackRange.start, fallbackRange.end]
+    }, [chartData, requestWindow, timeRange])
     const statsCards: Record<string, TrafficStats> = dashboardQuery.data?.stats_cards || {
         singbox: { uplink: 0, downlink: 0 },
         wireguard: { uplink: 0, downlink: 0 }
@@ -191,7 +207,7 @@ export default function Dashboard() {
                         <Clock size={14} className="text-slate-500" />
                         <select
                             value={timeRange}
-                            onChange={(e) => setTimeRange(e.target.value)}
+                            onChange={(e) => setTimeRange(e.target.value as DashboardRange)}
                             className="select-field bg-transparent text-xs text-slate-300 border-none focus:ring-0 p-1 outline-none w-28 font-medium cursor-pointer"
                         >
                             <option value="30m">Last 30 Minutes</option>
