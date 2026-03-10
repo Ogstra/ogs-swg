@@ -493,13 +493,9 @@ export default function Dashboard() {
                                         </div>
                                         <div className="min-w-0">
                                             <div className="truncate font-medium text-sm text-slate-200">{u.name}</div>
-                                            {chartMode === 'wireguard' ? (
+                                            {chartMode === 'wireguard' && (
                                                 <div className="truncate text-[10px] text-slate-500">
                                                     {u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}
-                                                </div>
-                                            ) : (
-                                                <div className={`truncate text-[10px] text-slate-500 ${/^wireguard:/i.test(u.flow || '') ? '' : 'uppercase'}`}>
-                                                    {(u.flow || 'Default').replace(/^wireguard:/i, '')}
                                                 </div>
                                             )}
                                         </div>
