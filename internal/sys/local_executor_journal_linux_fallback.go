@@ -20,15 +20,18 @@ func journalRead(unit string, limit int, filter string) ([]string, error) {
 		unitFull += ".service"
 	}
 
-	fetchLimit := limit
+	var cmd *exec.Cmd
 	if filter != "" {
-		fetchLimit = limit * 5
-		if fetchLimit > 5000 {
-			fetchLimit = 5000
-		}
+		// NOTE for search: --merge includes all rotated journal segments (system@*.journal).
+		// Without it, journalctl may only scan the active journal file, missing older entries.
+		// We omit -n here to let Go-level filtering collect up to limit matches across
+		// the full history.
+		cmd = exec.Command("journalctl", "-u", unitFull, "--no-pager", "--merge", "-o", "cat")
+	} else {
+		// Tail: only need recent lines, -n is safe and efficient here.
+		cmd = exec.Command("journalctl", "-u", unitFull, "-n", strconv.Itoa(limit), "--no-pager", "-o", "cat")
 	}
 
-	cmd := exec.Command("journalctl", "-u", unitFull, "-n", strconv.Itoa(fetchLimit), "--no-pager", "-o", "cat")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
@@ -50,9 +53,12 @@ func journalRead(unit string, limit int, filter string) ([]string, error) {
 			continue
 		}
 		lines = append(lines, line)
+		if filter != "" && len(lines) >= limit {
+			break
+		}
 	}
 
-	if len(lines) > limit {
+	if filter == "" && len(lines) > limit {
 		lines = lines[len(lines)-limit:]
 	}
 	return lines, nil
