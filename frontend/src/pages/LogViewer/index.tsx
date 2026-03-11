@@ -12,7 +12,7 @@ export default function LogViewer() {
     const bottomRef = useRef<HTMLDivElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const [autoScroll, setAutoScroll] = useState(true)
-    const [searchLimit, setSearchLimit] = useState(200)
+    const [searchLimit, setSearchLimit] = useState(500)
     const [searching, setSearching] = useState(false)
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
