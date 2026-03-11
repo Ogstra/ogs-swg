@@ -1298,12 +1298,12 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	pageSize := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 2000 {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 5000 {
 			pageSize = v
 		}
 	}
 	if ps := r.URL.Query().Get("page_size"); ps != "" {
-		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 2000 {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 5000 {
 			pageSize = v
 		}
 	}
