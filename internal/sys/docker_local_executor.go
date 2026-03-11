@@ -144,11 +144,10 @@ func (e *DockerLocalExecutor) ReadJournal(ctx context.Context, unit string, limi
 }
 
 func (e *DockerLocalExecutor) SearchJournal(ctx context.Context, unit, query string, limit int) ([]string, error) {
-	fetchLimit := limit * 5
-	if fetchLimit > 5000 {
-		fetchLimit = 5000
-	}
-	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(fetchLimit), "--no-pager")
+	// NOTE: --merge includes all rotated journal segments (system@*.journal).
+	// Without it, journalctl only scans the active file, missing older entries.
+	// We omit -n to let Go-level filtering collect up to limit matches across full history.
+	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "--no-pager", "--merge")
 	if err != nil {
 		return nil, analyzeJournalError(out, err)
 	}
