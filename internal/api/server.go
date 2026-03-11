@@ -1435,8 +1435,10 @@ func searchJournalLines(unit, query string, maxLines int) ([]string, error) {
 		log.Printf("journalctl not found: %v", err)
 		return []string{"(journalctl not available on this system)"}, nil
 	}
-	// journalctl --grep does not match timestamps; fetch full log and filter newest first until limit.
-	cmd := exec.Command("journalctl", "-u", unit, "--no-pager")
+	// NOTE for search: --merge includes all rotated journal segments (system@*.journal).
+	// Without it, journalctl may only scan the active journal file, missing older entries.
+	// -o cat strips the syslog timestamp prefix so filters match message content only.
+	cmd := exec.Command("journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
