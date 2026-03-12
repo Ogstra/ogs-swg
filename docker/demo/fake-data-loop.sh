@@ -152,6 +152,8 @@ do_sample_loop() {
       apply_sql "DELETE FROM samples WHERE ts < strftime('%s','now') - ${RETENTION};
                  DELETE FROM wg_samples WHERE ts < strftime('%s','now') - ${RETENTION};
                  DELETE FROM sampler_runs WHERE ts < strftime('%s','now') - ${RETENTION};"
+      # Checkpoint the WAL so reads don't scan a bloated WAL file.
+      sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
     fi
 
     sleep "$LIVE_INTERVAL"
@@ -163,7 +165,13 @@ do_log_loop() {
   local -a TARGETS=(cdn-edge.demo.invalid:443 api-gw.demo.invalid:443 media.demo.invalid:443 updates.demo.invalid:443 198.51.100.44:443)
 
   while true; do
-    local sys_ts panel_ts tz inbound user conn latency port client target
+    local sys_ts panel_ts tz inbound user conn latency port client target fsize
+    # Rotate if > 1 MB so Log Viewer reads stay cheap.
+    fsize=$(stat -c%s "$LOG_PATH" 2>/dev/null || echo 0)
+    if (( fsize > 1048576 )); then
+      : > "$LOG_PATH"
+    fi
+
     sys_ts=$(date +"%b %d %H:%M:%S")
     panel_ts=$(date +"%Y-%m-%d %H:%M:%S")
     tz=$(date +"%z")
