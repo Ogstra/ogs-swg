@@ -18,6 +18,7 @@ const DEFAULT_VLESS = {
     listen: '0.0.0.0',
     listen_port: 443,
     external_port: '',
+    override_address: '',
     tls: {
         enabled: false,
         server_name: '',
@@ -57,6 +58,7 @@ const DEFAULT_VMESS = {
     listen: '0.0.0.0',
     listen_port: 443,
     external_port: '',
+    override_address: '',
     tls: {
         enabled: false,
         server_name: '',
@@ -87,6 +89,7 @@ const DEFAULT_TROJAN = {
     listen: '0.0.0.0',
     listen_port: 443,
     external_port: '',
+    override_address: '',
     tls: {
         enabled: false,
         server_name: '',
@@ -136,6 +139,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
             if (!data.tls.reality && data.type === 'vless') data.tls.reality = { ...DEFAULT_VLESS.tls.reality }
             if (!data.tls.alpn) data.tls.alpn = [...fallback.tls.alpn]
             data.external_port = data.external_port ? String(data.external_port) : ''
+            data.override_address = data.override_address ? String(data.override_address) : ''
             setFormData(data)
         } else {
             setFormData(JSON.parse(JSON.stringify(DEFAULT_VLESS)))
@@ -216,6 +220,12 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
             submission.external_port = externalPort
         } else {
             delete submission.external_port
+        }
+        const overrideAddressRaw = String(formData.override_address ?? '').trim()
+        if (overrideAddressRaw) {
+            submission.override_address = overrideAddressRaw
+        } else {
+            delete submission.override_address
         }
 
         // Only include transport if enabled
@@ -320,7 +330,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                         tag: prev.tag || nextDefaults.tag,
                                         listen: prev.listen || nextDefaults.listen,
                                         listen_port: prev.listen_port || nextDefaults.listen_port,
-                                        external_port: prev.external_port || ''
+                                        external_port: prev.external_port || '',
+                                        override_address: prev.override_address || ''
                                     }))
                                 }}
                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
@@ -357,6 +368,16 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 onChange={e => setFormData({ ...formData, external_port: e.target.value })}
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
                                 placeholder="e.g. 443"
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-300">Override Address (optional)</label>
+                            <input
+                                type="text"
+                                value={formData.override_address ?? ''}
+                                onChange={e => setFormData({ ...formData, override_address: e.target.value })}
+                                className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                                placeholder="e.g. 1.2.3.4 or other.domain.com"
                             />
                         </div>
                     </div>

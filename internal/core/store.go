@@ -85,8 +85,9 @@ type UserMetadata struct {
 }
 
 type InboundMeta struct {
-	Tag          string `json:"tag"`
-	ExternalPort int    `json:"external_port"`
+	Tag             string `json:"tag"`
+	ExternalPort    int    `json:"external_port"`
+	OverrideAddress string `json:"override_address,omitempty"`
 }
 
 // DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
@@ -211,6 +212,7 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add client_sni to existing inbound_meta tables that predate this column.
 	// Silently ignored if column already exists (fresh installs have it from CREATE TABLE above).
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN client_sni TEXT DEFAULT NULL;")
+	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN override_address TEXT DEFAULT NULL;")
 	// Upgrade path: add inbound_tags to existing users tables that predate this column.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';");
@@ -661,18 +663,23 @@ func (s *Store) UpdateAdminUsername(oldUsername, newUsername string) error {
 	})
 }
 
-func (s *Store) SaveInboundMeta(tag string, externalPort int) error {
+func (s *Store) SaveInboundMeta(tag string, externalPort int, overrideAddress string) error {
 	if tag == "" {
 		return fmt.Errorf("inbound tag required")
 	}
-	if externalPort <= 0 {
+	overrideAddress = strings.TrimSpace(overrideAddress)
+	if externalPort <= 0 && overrideAddress == "" {
 		return s.DeleteInboundMeta(tag)
 	}
 	return s.Queries.UpsertInboundMeta(context.Background(), sqlcStore.UpsertInboundMetaParams{
 		Tag: tag,
 		ExternalPort: sql.NullInt64{
 			Int64: int64(externalPort),
-			Valid: true,
+			Valid: externalPort > 0,
+		},
+		OverrideAddress: sql.NullString{
+			String: overrideAddress,
+			Valid:  overrideAddress != "",
 		},
 	})
 }
@@ -689,8 +696,9 @@ func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
 		return nil, err
 	}
 	return &InboundMeta{
-		Tag:          meta.Tag,
-		ExternalPort: int(meta.ExternalPort.Int64),
+		Tag:             meta.Tag,
+		ExternalPort:    int(meta.ExternalPort.Int64),
+		OverrideAddress: meta.OverrideAddress.String,
 	}, nil
 }
 
@@ -703,8 +711,9 @@ func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
 	meta := make(map[string]InboundMeta)
 	for _, entry := range rows {
 		meta[entry.Tag] = InboundMeta{
-			Tag:          entry.Tag,
-			ExternalPort: int(entry.ExternalPort.Int64),
+			Tag:             entry.Tag,
+			ExternalPort:    int(entry.ExternalPort.Int64),
+			OverrideAddress: entry.OverrideAddress.String,
 		}
 	}
 	return meta, nil
