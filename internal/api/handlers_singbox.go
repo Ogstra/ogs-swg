@@ -295,11 +295,16 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 	}
 	port := strconv.Itoa(inboundView.ListenPort)
 
-	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil && meta.ExternalPort > 0 {
-		port = strconv.Itoa(meta.ExternalPort)
+	host := s.resolvePublicHost(r)
+	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil {
+		if meta.ExternalPort > 0 {
+			port = strconv.Itoa(meta.ExternalPort)
+		}
+		if meta.OverrideAddress != "" {
+			host = meta.OverrideAddress
+		}
 	}
 
-	host := s.resolvePublicHost(r)
 	if host == "" {
 		return "", "", fmt.Errorf("Public IP not configured")
 	}
@@ -553,10 +558,12 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
 		params.Set("udp", "0")
 	}
-	if transport.Type != "" && transport.Type != "tcp" {
-		params.Set("type", transport.Type)
+	typeVal := transport.Type
+	if typeVal == "" {
+		typeVal = "tcp"
 	}
-	if transport.Type == "ws" || transport.Type == "http" || transport.Type == "httpupgrade" {
+	params.Set("type", typeVal)
+	if typeVal == "ws" || typeVal == "http" || typeVal == "httpupgrade" {
 		if transport.Path != "" {
 			params.Set("path", transport.Path)
 		}
@@ -564,7 +571,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 			params.Set("host", transport.Host)
 		}
 	}
-	if transport.Type == "grpc" && transport.ServiceName != "" {
+	if typeVal == "grpc" && transport.ServiceName != "" {
 		params.Set("serviceName", transport.ServiceName)
 	}
 
@@ -598,19 +605,21 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 	if shouldAllowInsecure(tls) {
 		params.Set("allowInsecure", "1")
 	}
-	if transport.Type != "" && transport.Type != "tcp" {
-		params.Set("type", transport.Type)
-		if transport.Type == "ws" || transport.Type == "http" || transport.Type == "httpupgrade" {
-			if transport.Path != "" {
-				params.Set("path", transport.Path)
-			}
-			if transport.Host != "" {
-				params.Set("host", transport.Host)
-			}
+	trojanType := transport.Type
+	if trojanType == "" {
+		trojanType = "tcp"
+	}
+	params.Set("type", trojanType)
+	if trojanType == "ws" || trojanType == "http" || trojanType == "httpupgrade" {
+		if transport.Path != "" {
+			params.Set("path", transport.Path)
 		}
-		if transport.Type == "grpc" && transport.ServiceName != "" {
-			params.Set("serviceName", transport.ServiceName)
+		if transport.Host != "" {
+			params.Set("host", transport.Host)
 		}
+	}
+	if trojanType == "grpc" && transport.ServiceName != "" {
+		params.Set("serviceName", transport.ServiceName)
 	}
 
 	nameTag := url.QueryEscape("TROJAN-" + name)
@@ -690,9 +699,6 @@ func shouldAllowInsecure(tls tlsInfo) bool {
 	if !tls.Enabled {
 		return false
 	}
-	if strings.TrimSpace(tls.ServerName) == "" {
-		return true
-	}
 	cert := strings.ToLower(tls.CertPath)
 	return strings.Contains(cert, "selfsigned") || strings.Contains(cert, "self-signed")
 }
@@ -717,15 +723,16 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	overrideAddress, overrideAddressSet := popOverrideAddress(newInbound)
 
 	if err := s.config.AddSingboxInbound(newInbound); err != nil {
 		http.Error(w, "Failed to add inbound: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if externalPortSet {
+	if externalPortSet || overrideAddressSet {
 		tag, _ := newInbound["tag"].(string)
-		if err := s.store.SaveInboundMeta(tag, externalPort); err != nil {
+		if err := s.store.SaveInboundMeta(tag, externalPort, overrideAddress); err != nil {
 			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -796,6 +803,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	overrideAddress, overrideAddressSet := popOverrideAddress(updatedInbound)
 
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
@@ -812,8 +820,8 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		}
 		tag = newTag
 	}
-	if externalPortSet {
-		if err := s.store.SaveInboundMeta(tag, externalPort); err != nil {
+	if externalPortSet || overrideAddressSet {
+		if err := s.store.SaveInboundMeta(tag, externalPort, overrideAddress); err != nil {
 			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -875,6 +883,19 @@ func popExternalPort(inbound map[string]interface{}) (int, bool, error) {
 	default:
 		return 0, true, fmt.Errorf("external_port must be a number")
 	}
+}
+
+func popOverrideAddress(inbound map[string]interface{}) (string, bool) {
+	if inbound == nil {
+		return "", false
+	}
+	raw, ok := inbound["override_address"]
+	if !ok {
+		return "", false
+	}
+	delete(inbound, "override_address")
+	addr, _ := raw.(string)
+	return strings.TrimSpace(addr), true
 }
 
 func parseBooleanField(value interface{}, fieldName string) (bool, error) {
