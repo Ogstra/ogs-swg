@@ -140,11 +140,16 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 			if tag == "" {
 				continue
 			}
-			if entry, ok := meta[tag]; ok && entry.ExternalPort > 0 {
+			if entry, ok := meta[tag]; ok {
 				if inbounds[i] == nil {
 					inbounds[i] = map[string]interface{}{}
 				}
-				inbounds[i]["external_port"] = entry.ExternalPort
+				if entry.ExternalPort > 0 {
+					inbounds[i]["external_port"] = entry.ExternalPort
+				}
+				if entry.OverrideAddress != "" {
+					inbounds[i]["override_address"] = entry.OverrideAddress
+				}
 			}
 		}
 	}
