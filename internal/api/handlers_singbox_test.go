@@ -24,7 +24,7 @@ func TestBuildVlessLink_IncludesALPN(t *testing.T) {
 	}
 	user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
 
-	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", "")
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -50,7 +50,7 @@ func TestBuildTrojanLink_IncludesALPN(t *testing.T) {
 	}
 	user := &core.UserInboundInfo{UUID: "secret-password"}
 
-	link, err := buildTrojanLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildTrojanLink("alice", user, view, "1.2.3.4", "443", "")
 	if err != nil {
 		t.Fatalf("buildTrojanLink() error = %v", err)
 	}
@@ -81,7 +81,7 @@ func TestBuildVmessLink_IncludesALPN(t *testing.T) {
 		VmessSecurity: "auto",
 	}
 
-	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", "")
 	if err != nil {
 		t.Fatalf("buildVmessLink() error = %v", err)
 	}
@@ -116,7 +116,7 @@ func TestBuildVmessLink_HTTPTransportMapsToH2(t *testing.T) {
 		VmessSecurity: "auto",
 	}
 
-	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", "")
 	if err != nil {
 		t.Fatalf("buildVmessLink() error = %v", err)
 	}
