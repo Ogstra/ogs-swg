@@ -133,6 +133,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
             // Ensure nested objects exist
             const fallback = DEFAULT_BY_TYPE[data.type] || DEFAULT_VLESS
             if (!data.transport) data.transport = { ...fallback.transport }
+            else if (data.transport.type) data.transport.enabled = true
             if (!data.multiplex) data.multiplex = { ...fallback.multiplex }
             if (!data.multiplex.brutal) data.multiplex.brutal = { ...fallback.multiplex.brutal }
             if (!data.tls) data.tls = { ...fallback.tls }
@@ -274,8 +275,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
             delete submission.multiplex
         }
 
-        // Ensure Reality is only present for VLESS
-        if (submission.type !== 'vless' && submission.tls && submission.tls.reality) {
+        // Strip reality block unless it's VLESS with reality explicitly enabled
+        if (submission.tls?.reality && (submission.type !== 'vless' || !submission.tls.reality.enabled)) {
             delete submission.tls.reality
         }
 
