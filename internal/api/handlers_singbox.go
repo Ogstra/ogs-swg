@@ -474,7 +474,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	if view.TLS != nil {
 		reality = view.TLS.Reality
 	}
-	if reality != nil {
+	if reality != nil && reality.Enabled {
 		pbk := reality.PublicKey
 		if pbk == "" {
 			if priv := reality.PrivateKey; strings.TrimSpace(priv) != "" {
