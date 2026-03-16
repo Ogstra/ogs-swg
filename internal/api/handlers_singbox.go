@@ -295,7 +295,8 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 	}
 	port := strconv.Itoa(inboundView.ListenPort)
 
-	host := s.resolvePublicHost(r)
+	originalHost := s.resolvePublicHost(r)
+	host := originalHost
 	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil {
 		if meta.ExternalPort > 0 {
 			port = strconv.Itoa(meta.ExternalPort)
@@ -309,9 +310,16 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		return "", "", fmt.Errorf("Public IP not configured")
 	}
 
+	// When override_address replaces the host with an IP, pass the original
+	// domain as SNI fallback so clients can complete the TLS handshake.
+	sniFallback := ""
+	if host != originalHost {
+		sniFallback = originalHost
+	}
+
 	switch inbType {
 	case "vless":
-		link, err := buildVlessLink(name, userInfo, inboundView, host, port)
+		link, err := buildVlessLink(name, userInfo, inboundView, host, port, sniFallback)
 		return link, inbType, err
 	case "vmess":
 		userCopy := *userInfo
@@ -323,10 +331,10 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 				userCopy.VmessAlterID = meta.VmessAlterID
 			}
 		}
-		link, err := buildVmessLink(name, &userCopy, inboundView, host, port)
+		link, err := buildVmessLink(name, &userCopy, inboundView, host, port, sniFallback)
 		return link, inbType, err
 	case "trojan":
-		link, err := buildTrojanLink(name, userInfo, inboundView, host, port)
+		link, err := buildTrojanLink(name, userInfo, inboundView, host, port, sniFallback)
 		return link, inbType, err
 	default:
 		return "", "", fmt.Errorf("Inbound type is not supported")
@@ -466,7 +474,7 @@ func extractTLSInfo(view *core.SingboxInboundView) tlsInfo {
 	}
 }
 
-func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port, sniFallback string) (string, error) {
 	tls := extractTLSInfo(view)
 	alpn := normalizedALPN(tls.ALPN)
 	transport := extractTransportInfo(view.Raw)
@@ -546,8 +554,10 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	} else {
 		params.Set("security", "none")
 	}
-	if tls.ServerName != "" {
-		params.Set("sni", tls.ServerName)
+	if sni := tls.ServerName; sni != "" {
+		params.Set("sni", sni)
+	} else if sniFallback != "" {
+		params.Set("sni", sniFallback)
 	}
 	if alpn != "" {
 		params.Set("alpn", alpn)
@@ -584,7 +594,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	return base, nil
 }
 
-func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port, sniFallback string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User password missing for inbound")
 	}
@@ -596,8 +606,10 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 	if tls.Enabled {
 		params.Set("security", "tls")
 	}
-	if tls.ServerName != "" {
-		params.Set("sni", tls.ServerName)
+	if sni := tls.ServerName; sni != "" {
+		params.Set("sni", sni)
+	} else if sniFallback != "" {
+		params.Set("sni", sniFallback)
 	}
 	if alpn != "" {
 		params.Set("alpn", alpn)
@@ -631,7 +643,7 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 	return base, nil
 }
 
-func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port, sniFallback string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User UUID missing for inbound")
 	}
@@ -676,8 +688,10 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	}
 	if tls.Enabled {
 		payload["tls"] = "tls"
-		if tls.ServerName != "" {
-			payload["sni"] = tls.ServerName
+		if sni := tls.ServerName; sni != "" {
+			payload["sni"] = sni
+		} else if sniFallback != "" {
+			payload["sni"] = sniFallback
 		}
 		if alpn != "" {
 			payload["alpn"] = alpn
