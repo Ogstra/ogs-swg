@@ -727,6 +727,83 @@ func (s *Store) RenameInboundMeta(oldTag, newTag string) error {
 	})
 }
 
+func renameInboundTagReferences(tags []string, oldTag, newTag string) ([]string, bool) {
+	if oldTag == "" || newTag == "" || oldTag == newTag {
+		return tags, false
+	}
+	changed := false
+	out := make([]string, len(tags))
+	copy(out, tags)
+	for i, tag := range out {
+		if tag == oldTag {
+			out[i] = newTag
+			changed = true
+		}
+	}
+	return out, changed
+}
+
+func (s *Store) RenameInboundReferences(oldTag, newTag string) error {
+	if oldTag == "" || newTag == "" || oldTag == newTag {
+		return nil
+	}
+
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := s.Queries.WithTx(tx)
+	if err := qtx.RenameInboundMeta(ctx, sqlcStore.RenameInboundMetaParams{
+		Tag:   newTag,
+		Tag_2: oldTag,
+	}); err != nil {
+		return err
+	}
+
+	rows, err := tx.QueryContext(ctx, "SELECT email, COALESCE(inbound_tags, '') FROM users")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var email, tagsJSON string
+		if err := rows.Scan(&email, &tagsJSON); err != nil {
+			return err
+		}
+
+		if tagsJSON == "" || tagsJSON == "[]" {
+			continue
+		}
+
+		var tags []string
+		if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+			return fmt.Errorf("decode inbound_tags for %s: %w", email, err)
+		}
+
+		renamedTags, changed := renameInboundTagReferences(tags, oldTag, newTag)
+		if !changed {
+			continue
+		}
+
+		payload, err := json.Marshal(renamedTags)
+		if err != nil {
+			return fmt.Errorf("encode inbound_tags for %s: %w", email, err)
+		}
+		if _, err := tx.ExecContext(ctx, "UPDATE users SET inbound_tags = ? WHERE email = ?", string(payload), email); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) EnsureDefaultAdmin() error {
 	var count int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM admins").Scan(&count); err != nil {

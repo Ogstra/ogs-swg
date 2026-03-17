@@ -791,7 +791,17 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
+	originalInbound, err := s.getSingboxInboundRaw(tag)
+	if err != nil {
+		http.Error(w, "Failed to load inbound before update: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	warnings := buildInboundUpdateWarnings(originalInbound, updatedInbound)
 	sanitiseInboundFields(updatedInbound)
+	if warnings == nil {
+		warnings = []string{}
+	}
 
 	externalPort, externalPortSet, err := popExternalPort(updatedInbound)
 	if err != nil {
@@ -801,6 +811,10 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
+	if s.store == nil && (tagChanged || externalPortSet) {
+		http.Error(w, "Inbound metadata store unavailable", http.StatusInternalServerError)
+		return
+	}
 
 	if err := s.config.UpdateSingboxInbound(tag, updatedInbound); err != nil {
 		http.Error(w, "Failed to update inbound: "+err.Error(), http.StatusInternalServerError)
@@ -808,7 +822,11 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 	}
 
 	if tagChanged {
-		if err := s.store.RenameInboundMeta(tag, newTag); err != nil {
+		if err := s.store.RenameInboundReferences(tag, newTag); err != nil {
+			if rollbackErr := s.config.UpdateSingboxInbound(newTag, originalInbound); rollbackErr != nil {
+				http.Error(w, "Failed to update inbound metadata: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				return
+			}
 			http.Error(w, "Failed to update inbound metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -821,7 +839,86 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"warnings": warnings,
+	})
+}
+
+func (s *Server) getSingboxInboundRaw(tag string) (map[string]interface{}, error) {
+	inbounds, err := s.config.GetSingboxInboundViews()
+	if err != nil {
+		return nil, err
+	}
+	for _, inbound := range inbounds {
+		if inbound.Tag != tag {
+			continue
+		}
+		cloned := map[string]interface{}{}
+		payload, err := json.Marshal(inbound.Raw)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(payload, &cloned); err != nil {
+			return nil, err
+		}
+		return cloned, nil
+	}
+	return nil, fmt.Errorf("inbound %q not found", tag)
+}
+
+func buildInboundUpdateWarnings(beforeInbound, updatedInbound map[string]interface{}) []string {
+	if beforeInbound == nil || updatedInbound == nil {
+		return []string{}
+	}
+
+	inbType, _ := updatedInbound["type"].(string)
+	if strings.ToLower(strings.TrimSpace(inbType)) != "vless" {
+		return []string{}
+	}
+
+	beforeTransport := extractTransportInfo(beforeInbound).Type
+	afterTransport := extractTransportInfo(updatedInbound).Type
+	if beforeTransport == "ws" || afterTransport != "ws" {
+		return []string{}
+	}
+
+	affected := make(map[string]struct{})
+	collectFlowUsers(beforeInbound["users"], affected)
+	collectFlowUsers(updatedInbound["users"], affected)
+	if len(affected) == 0 {
+		return []string{}
+	}
+
+	return []string{
+		fmt.Sprintf("Removed VLESS flow from %d user(s) because WebSocket transport does not support it.", len(affected)),
+	}
+}
+
+func collectFlowUsers(rawUsers interface{}, affected map[string]struct{}) {
+	users, ok := rawUsers.([]interface{})
+	if !ok {
+		return
+	}
+	for idx, rawUser := range users {
+		user, ok := rawUser.(map[string]interface{})
+		if !ok || user == nil {
+			continue
+		}
+		flow, _ := user["flow"].(string)
+		if strings.TrimSpace(flow) == "" {
+			continue
+		}
+		identifier, _ := user["name"].(string)
+		if strings.TrimSpace(identifier) == "" {
+			identifier, _ = user["uuid"].(string)
+		}
+		if strings.TrimSpace(identifier) == "" {
+			identifier = fmt.Sprintf("user-%d", idx)
+		}
+		affected[identifier] = struct{}{}
+	}
 }
 
 func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Request) {
