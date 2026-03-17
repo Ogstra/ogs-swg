@@ -235,6 +235,10 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]string{"link": link})
 }
 
+func sanitiseInboundFields(inbound map[string]interface{}) {
+	core.SanitiseManagedInboundFields(inbound)
+}
+
 func (s *Server) handleGetUserLink(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -711,6 +715,7 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	sanitiseInboundFields(newInbound)
 
 	externalPort, externalPortSet, err := popExternalPort(newInbound)
 	if err != nil {
@@ -790,6 +795,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	sanitiseInboundFields(updatedInbound)
 
 	externalPort, externalPortSet, err := popExternalPort(updatedInbound)
 	if err != nil {
