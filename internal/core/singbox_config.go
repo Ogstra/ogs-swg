@@ -148,6 +148,52 @@ func jsonSemanticallyEqual(left, right []byte) bool {
 	return reflect.DeepEqual(leftAny, rightAny)
 }
 
+// SanitiseManagedInboundFields removes protocol/transport-specific fields that
+// must not survive a managed inbound write.
+func SanitiseManagedInboundFields(inbound map[string]interface{}) {
+	if inbound == nil {
+		return
+	}
+
+	inbType, _ := inbound["type"].(string)
+	inbType = strings.ToLower(strings.TrimSpace(inbType))
+
+	transportType := "tcp"
+	if transport, ok := inbound["transport"].(map[string]interface{}); ok && transport != nil {
+		if rawType, ok := transport["type"].(string); ok && strings.TrimSpace(rawType) != "" {
+			transportType = strings.ToLower(strings.TrimSpace(rawType))
+		}
+	}
+
+	if tls, ok := inbound["tls"].(map[string]interface{}); ok && tls != nil {
+		if transportType == "ws" {
+			delete(tls, "alpn")
+		}
+		if inbType != "vless" || transportType == "ws" {
+			delete(tls, "reality")
+		}
+		if len(tls) == 0 {
+			delete(inbound, "tls")
+		}
+	}
+
+	users, ok := inbound["users"].([]interface{})
+	if !ok {
+		return
+	}
+	stripFlow := inbType != "vless" || transportType == "ws"
+	if !stripFlow {
+		return
+	}
+	for _, rawUser := range users {
+		user, ok := rawUser.(map[string]interface{})
+		if !ok || user == nil {
+			continue
+		}
+		delete(user, "flow")
+	}
+}
+
 // mergeInboundWithOriginal overlays the typed fields from typedBytes onto the
 // original raw JSON object, preserving any unknown fields present in original
 // that are not modeled by the typed struct (e.g. "x-meta").
@@ -794,6 +840,7 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 	// Check if tag is being renamed
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
+	SanitiseManagedInboundFields(updatedInbound)
 
 	err := c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
 		inbounds, err := decodeInboundRawList(cfg.Inbounds)
@@ -805,6 +852,10 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 		if err != nil {
 			return err
 		}
+		updatedTyped, err := decodeTypedInbound(updatedRaw)
+		if err != nil {
+			return err
+		}
 
 		found := false
 		for i, rawInbound := range inbounds {
@@ -812,8 +863,20 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 			if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
 				return err
 			}
+			if tagChanged {
+				if existingTag, _ := inboundMap["tag"].(string); existingTag == newTag {
+					return fmt.Errorf("inbound with tag '%s' already exists", newTag)
+				}
+			}
 			if currentTag, _ := inboundMap["tag"].(string); currentTag == tag {
-				inbounds[i] = updatedRaw
+				data, err := json.Marshal(updatedTyped)
+				if err != nil {
+					return err
+				}
+				if merged, mergeErr := mergeInboundWithOriginal(rawInbound, data); mergeErr == nil {
+					data = merged
+				}
+				inbounds[i] = data
 				found = true
 				break
 			}
