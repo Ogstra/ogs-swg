@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -82,6 +83,28 @@ func newSingboxHandlerTestServer(initialJSON string) (*Server, *singboxConfigExe
 	}
 	cfg.SetExecutor(stub)
 	return NewServer(nil, cfg, stub), stub
+}
+
+func newSingboxHandlerTestServerWithStore(t *testing.T, initialJSON string) (*Server, *singboxConfigExecutorStub, *core.Store) {
+	t.Helper()
+
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	store, err := core.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	stub := &singboxConfigExecutorStub{data: []byte(initialJSON)}
+	cfg := &core.Config{
+		EnableSingbox:     true,
+		SingboxConfigPath: "/test/config.json",
+		ManagedInbounds:   []string{"test-vless"},
+		StatsInbounds:     []string{"test-vless"},
+	}
+	cfg.SetExecutor(stub)
+	return NewServer(store, cfg, stub), stub, store
 }
 
 func readStoredInboundByTag(t *testing.T, stub *singboxConfigExecutorStub, tag string) map[string]interface{} {
@@ -442,4 +465,194 @@ func TestHandleUpdateSingboxInbound_WebSocketSubmissionOmitsALPN(t *testing.T) {
 	if got := tls["alpn"]; got != nil {
 		t.Fatalf("stored tls.alpn = %#v; want removed", got)
 	}
+}
+
+func TestHandleUpdateSingboxInbound_RenamePropagatesInboundReferences(t *testing.T) {
+	server, stub, store := newSingboxHandlerTestServerWithStore(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}
+				],
+				"tls": {"enabled": true, "server_name": "example.com"},
+				"transport": {"type": "tcp"}
+			}
+		]
+	}`)
+
+	if err := store.SaveInboundMeta("test-vless", 7443); err != nil {
+		t.Fatalf("SaveInboundMeta: %v", err)
+	}
+	if err := store.SaveUserMetadata(core.UserMetadata{
+		Email:       "alice@example.com",
+		Enabled:     true,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	payload := `{
+		"type": "vless",
+		"tag": "renamed-vless",
+		"listen": "0.0.0.0",
+		"listen_port": 443,
+		"users": [
+			{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}
+		],
+		"tls": {"enabled": true, "server_name": "example.com"},
+		"transport": {"type": "tcp"}
+	}`
+
+	req := httptest.NewRequest(http.MethodPut, "/api/singbox/inbounds?tag=test-vless", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	server.handleUpdateSingboxInbound(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	readStoredInboundByTag(t, stub, "renamed-vless")
+	if meta, err := store.GetInboundMeta("renamed-vless"); err != nil {
+		t.Fatalf("GetInboundMeta(new): %v", err)
+	} else if meta == nil || meta.ExternalPort != 7443 {
+		t.Fatalf("renamed inbound meta = %#v; want external port preserved", meta)
+	}
+	if meta, err := store.GetInboundMeta("test-vless"); err != nil {
+		t.Fatalf("GetInboundMeta(old): %v", err)
+	} else if meta != nil {
+		t.Fatalf("old inbound meta still present: %#v", meta)
+	}
+
+	userMeta, err := store.GetUserMetadata("alice@example.com")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if userMeta == nil {
+		t.Fatal("expected user metadata")
+	}
+	if len(userMeta.InboundTags) != 1 || userMeta.InboundTags[0] != "renamed-vless" {
+		t.Fatalf("inbound_tags = %#v; want [renamed-vless]", userMeta.InboundTags)
+	}
+}
+
+func TestHandleUpdateSingboxInbound_WebSocketSwitchReturnsWarningsAndStripsFlow(t *testing.T) {
+	server, stub := newSingboxHandlerTestServer(`{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}
+				],
+				"tls": {"enabled": true, "server_name": "example.com"},
+				"transport": {"type": "tcp"}
+			}
+		]
+	}`)
+
+	payload := `{
+		"type": "vless",
+		"tag": "test-vless",
+		"listen": "0.0.0.0",
+		"listen_port": 443,
+		"users": [
+			{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}
+		],
+		"tls": {"enabled": true, "server_name": "example.com"},
+		"transport": {"type": "ws", "path": "/ws"}
+	}`
+
+	req := httptest.NewRequest(http.MethodPut, "/api/singbox/inbounds?tag=test-vless", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	server.handleUpdateSingboxInbound(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%q", err, rec.Body.String())
+	}
+	if len(resp.Warnings) == 0 {
+		t.Fatalf("warnings = %#v; want at least one warning", resp.Warnings)
+	}
+	if !strings.Contains(strings.ToLower(resp.Warnings[0]), "flow") {
+		t.Fatalf("warning %q does not mention flow stripping", resp.Warnings[0])
+	}
+
+	inbound := readStoredInboundByTag(t, stub, "test-vless")
+	users, ok := inbound["users"].([]interface{})
+	if !ok || len(users) != 1 {
+		t.Fatalf("users = %#v; want one user", inbound["users"])
+	}
+	user, ok := users[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("user = %#v; want object", users[0])
+	}
+	if got := user["flow"]; got != nil {
+		t.Fatalf("stored user flow = %#v; want removed", got)
+	}
+}
+
+func TestHandleUpdateSingboxInbound_RenameFailureRollsBackConfig(t *testing.T) {
+	server, stub, store := newSingboxHandlerTestServerWithStore(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}
+				],
+				"tls": {"enabled": true, "server_name": "example.com"},
+				"transport": {"type": "tcp"}
+			}
+		]
+	}`)
+
+	if err := store.SaveInboundMeta("test-vless", 7443); err != nil {
+		t.Fatalf("SaveInboundMeta: %v", err)
+	}
+	if err := store.SaveUserMetadata(core.UserMetadata{
+		Email:       "alice@example.com",
+		Enabled:     true,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close store: %v", err)
+	}
+
+	payload := `{
+		"type": "vless",
+		"tag": "renamed-vless",
+		"listen": "0.0.0.0",
+		"listen_port": 443,
+		"users": [
+			{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}
+		],
+		"tls": {"enabled": true, "server_name": "example.com"},
+		"transport": {"type": "tcp"}
+	}`
+
+	req := httptest.NewRequest(http.MethodPut, "/api/singbox/inbounds?tag=test-vless", bytes.NewBufferString(payload))
+	rec := httptest.NewRecorder()
+	server.handleUpdateSingboxInbound(rec, req)
+
+	if rec.Code == http.StatusOK {
+		t.Fatalf("expected rename failure, got 200 body=%q", rec.Body.String())
+	}
+
+	readStoredInboundByTag(t, stub, "test-vless")
 }
