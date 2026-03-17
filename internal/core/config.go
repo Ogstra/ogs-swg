@@ -329,6 +329,17 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 					Name:     name,
 					Password: uuid,
 				})
+			case *Hysteria2Inbound:
+				for _, u := range inb.Users {
+					if u.Name == name {
+						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
+					}
+				}
+				inb.Users = append(inb.Users, Hysteria2User{
+					Name:     name,
+					Password: uuid, // caller passes password in the uuid parameter by convention
+				})
+				// flow is silently ignored — Hysteria2 has no flow field
 			default:
 				return fmt.Errorf("unsupported inbound type: %s", inbound.Base().Type)
 			}
@@ -372,6 +383,14 @@ func (c *Config) RemoveUser(name string) error {
 				}
 				inb.Users = filtered
 			case *TrojanInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name != name {
+						filtered = append(filtered, u)
+					}
+				}
+				inb.Users = filtered
+			case *Hysteria2Inbound:
 				filtered := inb.Users[:0]
 				for _, u := range inb.Users {
 					if u.Name != name {
@@ -426,6 +445,16 @@ func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
 				}
 				inb.Users = filtered
 			case *TrojanInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name == name {
+						found = true
+						continue
+					}
+					filtered = append(filtered, u)
+				}
+				inb.Users = filtered
+			case *Hysteria2Inbound:
 				filtered := inb.Users[:0]
 				for _, u := range inb.Users {
 					if u.Name == name {
@@ -491,6 +520,15 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity
 						break
 					}
 				}
+			case *Hysteria2Inbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid // uuid param carries password
+						found = true
+						break
+					}
+				}
+				// flow is silently ignored
 			}
 		}
 
@@ -549,6 +587,13 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 					}
 				}
 			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *Hysteria2Inbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == name {
 						inb.Users[i].Password = uuid
@@ -615,6 +660,14 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 					}
 				}
 			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == originalName {
+						inb.Users[i].Name = newName
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *Hysteria2Inbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == originalName {
 						inb.Users[i].Name = newName
