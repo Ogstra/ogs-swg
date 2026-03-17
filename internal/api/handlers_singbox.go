@@ -15,6 +15,10 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
+type inboundUpdateResponse struct {
+	Warnings []string `json:"warnings"`
+}
+
 func (s *Server) handleGetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -841,9 +845,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"warnings": warnings,
-	})
+	_ = json.NewEncoder(w).Encode(inboundUpdateResponse{Warnings: warnings})
 }
 
 func (s *Server) getSingboxInboundRaw(tag string) (map[string]interface{}, error) {

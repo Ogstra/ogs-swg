@@ -515,6 +515,19 @@ func TestHandleUpdateSingboxInbound_RenamePropagatesInboundReferences(t *testing
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 
+	var resp struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v body=%q", err, rec.Body.String())
+	}
+	if resp.Warnings == nil {
+		t.Fatalf("warnings = nil; want empty array")
+	}
+	if len(resp.Warnings) != 0 {
+		t.Fatalf("warnings = %#v; want empty", resp.Warnings)
+	}
+
 	readStoredInboundByTag(t, stub, "renamed-vless")
 	if meta, err := store.GetInboundMeta("renamed-vless"); err != nil {
 		t.Fatalf("GetInboundMeta(new): %v", err)
