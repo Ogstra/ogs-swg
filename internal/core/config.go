@@ -219,7 +219,7 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 				})
 				vmessAlterID = parseAlterIDValue(alterRaw)
 			}
-			if inbType == "trojan" {
+			if inbType == "trojan" || inbType == "hysteria2" {
 				uuid, _ = userMapData["password"].(string)
 				flow = ""
 			}
