@@ -150,6 +150,36 @@ func (t *TrojanInbound) UserNames() []string {
 	return names
 }
 
+type Hysteria2User struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+type Hysteria2Obfs struct {
+	Type     string `json:"type"`     // always "salamander" — no omitempty, must be present when block exists
+	Password string `json:"password"`
+}
+
+type Hysteria2Inbound struct {
+	InboundBase
+	ListenFields
+	UpMbps   int             `json:"up_mbps,omitempty"`
+	DownMbps int             `json:"down_mbps,omitempty"`
+	Obfs     *Hysteria2Obfs  `json:"obfs,omitempty"`
+	Users    []Hysteria2User `json:"users"`
+	TLS      json.RawMessage `json:"tls,omitempty"`
+}
+
+func (h *Hysteria2Inbound) Base() InboundBase { return h.InboundBase }
+
+func (h *Hysteria2Inbound) UserNames() []string {
+	names := make([]string, len(h.Users))
+	for i, u := range h.Users {
+		names[i] = u.Name
+	}
+	return names
+}
+
 type V2RayStats struct {
 	Enabled   bool     `json:"enabled"` // NO omitempty - must always be written explicitly
 	Inbounds  []string `json:"inbounds,omitempty"`
