@@ -74,7 +74,7 @@ type UserAccount struct {
 
 func isUserInboundType(inbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(inbType)) {
-	case "vless", "vmess", "trojan":
+	case "vless", "vmess", "trojan", "hysteria2":
 		return true
 	default:
 		return false
@@ -694,6 +694,12 @@ func decodeTypedInbound(raw json.RawMessage) (ManagedInbound, error) {
 			return nil, fmt.Errorf("decode trojan inbound: %w", err)
 		}
 		return &inbound, nil
+	case "hysteria2":
+		var inbound Hysteria2Inbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode hysteria2 inbound: %w", err)
+		}
+		return &inbound, nil
 	default:
 		return nil, fmt.Errorf("unsupported inbound type: %q", base.Type)
 	}
@@ -900,7 +906,7 @@ func (c *Config) SyncInboundsFromSingbox() error {
 		inbType, _ := inb["type"].(string)
 
 		// Auto-discover VLESS, VMess, Trojan
-		if inbType == "vless" || inbType == "vmess" || inbType == "trojan" {
+		if inbType == "vless" || inbType == "vmess" || inbType == "trojan" || inbType == "hysteria2" {
 			if !managedSet[tag] {
 				c.ManagedInbounds = append(c.ManagedInbounds, tag)
 				managedSet[tag] = true
