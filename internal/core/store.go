@@ -767,11 +767,17 @@ func (s *Store) RenameInboundReferences(oldTag, newTag string) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+
+	type inboundTagUpdate struct {
+		email   string
+		payload string
+	}
+	updates := make([]inboundTagUpdate, 0)
 
 	for rows.Next() {
 		var email, tagsJSON string
 		if err := rows.Scan(&email, &tagsJSON); err != nil {
+			rows.Close()
 			return err
 		}
 
@@ -791,14 +797,23 @@ func (s *Store) RenameInboundReferences(oldTag, newTag string) error {
 
 		payload, err := json.Marshal(renamedTags)
 		if err != nil {
+			rows.Close()
 			return fmt.Errorf("encode inbound_tags for %s: %w", email, err)
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE users SET inbound_tags = ? WHERE email = ?", string(payload), email); err != nil {
-			return err
-		}
+		updates = append(updates, inboundTagUpdate{email: email, payload: string(payload)})
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, update := range updates {
+		if _, err := tx.ExecContext(ctx, "UPDATE users SET inbound_tags = ? WHERE email = ?", update.payload, update.email); err != nil {
+			return err
+		}
 	}
 
 	return tx.Commit()
