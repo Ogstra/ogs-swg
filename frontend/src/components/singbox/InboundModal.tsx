@@ -17,7 +17,7 @@ interface InboundModalProps {
     isOpen: boolean
     onClose: () => void
     initialData?: any
-    onSave: (data: any) => void
+    onSave: (data: any) => void | Promise<void>
     canWrite?: boolean
 }
 
@@ -45,6 +45,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
     }, [formData, validationError, certError])
 
     const visibility = useMemo(() => computeInboundVisibility(formData), [formData])
+    const originalTag = String(initialData?.tag || '').trim()
+    const pendingRenameTag = String(pendingRenameSubmission?.tag || formData.tag || '').trim()
 
     const updateForm = (updater: (current: any) => any) => {
         setFormData((prev: any) => normalizeInboundForEditor(updater(prev)))
@@ -92,7 +94,6 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
             setValidationError(result.error || 'Failed to build inbound payload.')
             return
         }
-        const originalTag = String(initialData?.tag || '').trim()
         const nextTag = String(result.submission.tag || '').trim()
         if (originalTag && nextTag && originalTag !== nextTag) {
             setValidationError('')
@@ -763,18 +764,20 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                 }}
                 onConfirm={() => pendingRenameSubmission ? submitPayload(pendingRenameSubmission) : undefined}
                 title="Change inbound tag?"
-                message="Renaming an inbound changes its identifier across the managed Sing-box flow. Confirm before submitting this update."
+                message="Renaming an inbound changes its identifier across the managed Sing-box flow. The update will still be sent through the existing owner path keyed by the current inbound record."
                 confirmLabel="Rename Inbound"
                 confirmTone="danger"
                 isLoading={saveLoading}
             >
-                <div className="space-y-1 text-sm">
-                    <p className="text-slate-400">Current tag</p>
-                    <p className="font-mono text-slate-200">{String(initialData?.tag || '')}</p>
-                </div>
-                <div className="space-y-1 text-sm">
-                    <p className="text-slate-400">New tag</p>
-                    <p className="font-mono text-slate-200">{String(formData.tag || '')}</p>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="space-y-1">
+                        <p className="text-slate-400">Current tag</p>
+                        <p className="font-mono text-slate-200">{originalTag}</p>
+                    </div>
+                    <div className="space-y-1">
+                        <p className="text-slate-400">New tag</p>
+                        <p className="font-mono text-slate-200">{pendingRenameTag}</p>
+                    </div>
                 </div>
             </ConfirmModal>
         </>
