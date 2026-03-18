@@ -205,7 +205,7 @@ function normalizeTls(type: InboundType, tls: any, fallback: any) {
     const normalized: any = {
         ...cloneValue(fallback),
         ...(tls && typeof tls === 'object' ? cloneValue(tls) : {}),
-        enabled: !!tls?.enabled,
+        enabled: type === 'hysteria2' ? true : !!tls?.enabled,
     }
     if (type === 'vless') {
         normalized.reality = {
@@ -477,8 +477,13 @@ export function buildInboundSubmission(formData: InboundLike) {
         delete submission.transport
         delete submission.multiplex
         if (submission.tls) {
+            submission.tls.enabled = true
             delete submission.tls.alpn
             delete submission.tls.reality
+        }
+
+        if (!tlsEnabled) {
+            return { error: 'Hysteria2 requires TLS and cannot be saved with TLS disabled.' }
         }
 
         const password = getPrimaryHysteria2Password(submission).trim()
