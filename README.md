@@ -1,6 +1,6 @@
 # OGS-SWG Panel
 
-Unified control plane for **Sing-box** (**VLESS/Reality**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
+Unified control plane for **Sing-box** (**VLESS/Reality**, **VMess**, **Trojan**, **Hysteria2**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
 <img width="3024" height="1714" alt="image" src="https://github.com/user-attachments/assets/9fca6d02-1f95-406b-a59e-0127b2c693ae" />
 
@@ -26,15 +26,28 @@ A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstr
 | VLESS     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | VMess     | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
 | Trojan    | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Hysteria2 | — | ✓ | — | — | — | — | — | — | ✓ |
 | WireGuard | — | — | — | — | — | — | — | — | ✓ |
 
-*   **User Management**: create, edit, and delete Sing-box users per inbound; supports multiple inbound assignments, traffic limits, and expiry dates.
+*   **Inbound Management**: create and edit managed Sing-box inbounds for VLESS, VMess, Trojan, and Hysteria2 from the UI, including Reality, WebSocket, and protocol-specific field validation.
+*   **User Management**: create, edit, and delete Sing-box users per inbound; supports multiple inbound assignments, traffic limits, expiry dates, and Hysteria2 password-based users.
 *   **Traffic Monitoring**: per-user download/upload stats for Sing-box inbounds; per-peer rx/tx stats across all WireGuard interfaces.
 *   **WireGuard Interfaces**: create, configure, enable/disable, and delete WireGuard interfaces; raw `.conf` editing per interface.
 *   **Service Control**: restart/stop Sing-box and WireGuard services and reload configurations without leaving the UI.
 *   **Logs**: tail and filter Sing-box access logs and systemd journal entries in real time.
 *   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.
 *   **Raw Configuration**: full JSON editor for the Sing-box config file (Experimental).
+
+### Hysteria2 Notes
+
+Current Hysteria2 support includes:
+
+*   TLS-required inbound editing
+*   Password-based user management
+*   Optional `up_mbps` / `down_mbps` bandwidth limits
+*   Optional `salamander` obfuscation
+
+Hysteria2 QR/link generation is not documented as supported yet.
 
 ## Execution Modes
 
