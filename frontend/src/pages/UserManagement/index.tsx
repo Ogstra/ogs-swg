@@ -11,9 +11,11 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
+import { canSelectInboundUserFlow } from '../../components/singbox/inboundVisibility'
 import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
+const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
 
 function bytesToGbString(bytes?: number) {
     return bytes && bytes > 0 ? (bytes / BYTES_PER_GB).toFixed(2) : ''
@@ -164,6 +166,14 @@ export default function UserManagement() {
     )
 
     const getInboundType = (tag: string) => inboundTypeByTag.get(tag) as UserType | undefined
+    const getInboundByTag = (tag: string) => inbounds.find(inb => inb.tag === tag)
+    const canEditFlowForInbound = (type: string, inboundTag: string) => canSelectInboundUserFlow(type, getInboundByTag(inboundTag) || null)
+    const normalizeInboundRowsForType = (rows: { tag: string; flow: string }[], type: string) => (
+        rows.map(row => ({
+            ...row,
+            flow: canEditFlowForInbound(type, row.tag) ? (row.flow || DEFAULT_VLESS_FLOW) : '',
+        }))
+    )
 
     const getFirstInboundTagForType = (type: UserType) => {
         const match = inbounds.find(inb => String(inb.type || '').toLowerCase() === type)
@@ -333,9 +343,12 @@ export default function UserManagement() {
         })
         setOriginalInboundTags(inboundTags)
         setInboundRows(
-            inboundTags.length > 0
-                ? inboundTags.map(tag => ({ tag, flow: '' }))
-                : [{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }]
+            normalizeInboundRowsForType(
+                inboundTags.length > 0
+                    ? inboundTags.map(tag => ({ tag, flow: '' }))
+                    : [{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? DEFAULT_VLESS_FLOW : '' }],
+                nextType
+            )
         )
         setQuotaInput(bytesToGbString(user.quota_limit))
         setOriginalName(user.name)
@@ -348,7 +361,10 @@ export default function UserManagement() {
                     setInboundRows(prev => prev.map(row => {
                         const match = list.find(i => i.tag === row.tag)
                         if (!match) return row
-                        return { ...row, flow: match.flow || '' }
+                        return {
+                            ...row,
+                            flow: canEditFlowForInbound(nextType, row.tag) ? (match.flow || '') : '',
+                        }
                     }))
                 }
                 if (nextType === 'vmess') {
@@ -400,7 +416,7 @@ export default function UserManagement() {
         try {
             const normalizedRows = inboundRows.map(row => ({
                 tag: row.tag.trim(),
-                flow: userType === 'vless' ? row.flow : ''
+                flow: canEditFlowForInbound(userType, row.tag.trim()) ? row.flow : ''
             }))
             const emptyInbound = normalizedRows.some(row => !row.tag)
             const inboundTags = normalizedRows.map(row => row.tag)
@@ -636,12 +652,15 @@ export default function UserManagement() {
                             setIsEditing(false)
                             const nextType = getDefaultUserType()
                             setUserType(nextType)
-                            setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
+                            setInboundRows(normalizeInboundRowsForType(
+                                [{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? DEFAULT_VLESS_FLOW : '' }],
+                                nextType
+                            ))
                             setOriginalInboundTags([])
                             setNewUser({
                                 name: '',
                                 uuid: '',
-                                flow: 'xtls-rprx-vision',
+                                flow: DEFAULT_VLESS_FLOW,
                                 vmess_security: 'auto',
                                 vmess_alter_id: 0,
                                 quota_limit: 0,
@@ -1055,7 +1074,10 @@ export default function UserManagement() {
                                 onChange={e => {
                                     const nextType = e.target.value as UserType
                                     setUserType(nextType)
-                                    setInboundRows([{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? 'xtls-rprx-vision' : '' }])
+                                    setInboundRows(normalizeInboundRowsForType(
+                                        [{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? DEFAULT_VLESS_FLOW : '' }],
+                                        nextType
+                                    ))
                                 }}
                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                             >
@@ -1117,7 +1139,7 @@ export default function UserManagement() {
                         <div className="space-y-2">
                             {inboundRows.map((row, idx) => {
                                 const tagValue = row.tag
-                                const showFlow = userType === 'vless'
+                                const showFlow = canEditFlowForInbound(userType, row.tag)
                                 return (
                                     <div key={`${tagValue}-${idx}`} className={`grid gap-3 items-end ${showFlow ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]'}`}>
                                         <div className="space-y-1">
@@ -1126,7 +1148,13 @@ export default function UserManagement() {
                                                 value={row.tag}
                                                 onChange={e => {
                                                     const value = e.target.value
-                                                    setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, tag: value } : r))
+                                                    setInboundRows(prev => prev.map((r, rIdx) => {
+                                                        if (rIdx !== idx) return r
+                                                        const nextFlow = canEditFlowForInbound(userType, value)
+                                                            ? (r.flow || DEFAULT_VLESS_FLOW)
+                                                            : ''
+                                                        return { ...r, tag: value, flow: nextFlow }
+                                                    }))
                                                 }}
                                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                                             >
@@ -1175,7 +1203,7 @@ export default function UserManagement() {
                         <div className="flex justify-start">
                             <button
                                 type="button"
-                                onClick={() => setInboundRows(prev => [...prev, { tag: '', flow: userType === 'vless' ? 'xtls-rprx-vision' : '' }])}
+                                onClick={() => setInboundRows(prev => [...prev, { tag: '', flow: '' }])}
                                 className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 hover:text-white text-sm"
                             >
                                 Add Inbound
