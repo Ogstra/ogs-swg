@@ -138,6 +138,51 @@ func readStoredInboundByTag(t *testing.T, stub *singboxConfigExecutorStub, tag s
 	return nil
 }
 
+func readStoredConfigMap(t *testing.T, stub *singboxConfigExecutorStub) map[string]interface{} {
+	t.Helper()
+
+	raw, err := stub.ReadConfig(context.Background(), "/test/config.json")
+	if err != nil {
+		t.Fatalf("ReadConfig: %v", err)
+	}
+
+	var top map[string]interface{}
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatalf("unmarshal top-level config: %v", err)
+	}
+	return top
+}
+
+func readStoredStatsInbounds(t *testing.T, stub *singboxConfigExecutorStub) []string {
+	t.Helper()
+
+	top := readStoredConfigMap(t, stub)
+	experimental, ok := top["experimental"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("experimental missing or wrong type: %#v", top["experimental"])
+	}
+	v2rayAPI, ok := experimental["v2ray_api"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("v2ray_api missing or wrong type: %#v", experimental["v2ray_api"])
+	}
+	stats, ok := v2rayAPI["stats"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("stats missing or wrong type: %#v", v2rayAPI["stats"])
+	}
+	rawInbounds, ok := stats["inbounds"].([]interface{})
+	if !ok {
+		t.Fatalf("stats.inbounds missing or wrong type: %#v", stats["inbounds"])
+	}
+
+	out := make([]string, 0, len(rawInbounds))
+	for _, rawInbound := range rawInbounds {
+		if tag, ok := rawInbound.(string); ok {
+			out = append(out, tag)
+		}
+	}
+	return out
+}
+
 func TestBuildVlessLink_RealityOmitsALPNAndH2(t *testing.T) {
 	view := &core.SingboxInboundView{
 		Type: "vless",
@@ -429,7 +474,18 @@ func TestHandleUpdateSingboxInbound_WebSocketSubmissionOmitsALPN(t *testing.T) {
 				},
 				"transport": {"type": "tcp"}
 			}
-		]
+		],
+		"experimental": {
+			"v2ray_api": {
+				"listen": "127.0.0.1:19001",
+				"stats": {
+					"enabled": true,
+					"inbounds": ["test-vless"],
+					"outbounds": ["direct"],
+					"users": []
+				}
+			}
+		}
 	}`)
 
 	payload := `{
@@ -529,6 +585,9 @@ func TestHandleUpdateSingboxInbound_RenamePropagatesInboundReferences(t *testing
 	}
 
 	readStoredInboundByTag(t, stub, "renamed-vless")
+	if statsInbounds := readStoredStatsInbounds(t, stub); len(statsInbounds) != 1 || statsInbounds[0] != "renamed-vless" {
+		t.Fatalf("stats.inbounds = %#v; want [renamed-vless]", statsInbounds)
+	}
 	if meta, err := store.GetInboundMeta("renamed-vless"); err != nil {
 		t.Fatalf("GetInboundMeta(new): %v", err)
 	} else if meta == nil || meta.ExternalPort != 7443 {
@@ -566,7 +625,18 @@ func TestHandleUpdateSingboxInbound_WebSocketSwitchReturnsWarningsAndStripsFlow(
 				"tls": {"enabled": true, "server_name": "example.com"},
 				"transport": {"type": "tcp"}
 			}
-		]
+		],
+		"experimental": {
+			"v2ray_api": {
+				"listen": "127.0.0.1:19001",
+				"stats": {
+					"enabled": true,
+					"inbounds": ["test-vless"],
+					"outbounds": ["direct"],
+					"users": []
+				}
+			}
+		}
 	}`)
 
 	payload := `{
@@ -668,4 +738,7 @@ func TestHandleUpdateSingboxInbound_RenameFailureRollsBackConfig(t *testing.T) {
 	}
 
 	readStoredInboundByTag(t, stub, "test-vless")
+	if statsInbounds := readStoredStatsInbounds(t, stub); len(statsInbounds) != 1 || statsInbounds[0] != "test-vless" {
+		t.Fatalf("stats.inbounds = %#v; want rollback to original tag", statsInbounds)
+	}
 }

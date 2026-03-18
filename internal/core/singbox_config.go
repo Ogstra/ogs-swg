@@ -194,6 +194,51 @@ func SanitiseManagedInboundFields(inbound map[string]interface{}) {
 	}
 }
 
+func renameExperimentalStatsInbound(cfg *SingboxConfig, oldTag, newTag string) {
+	if cfg == nil || cfg.Experimental == nil || cfg.Experimental.V2RayAPI == nil || cfg.Experimental.V2RayAPI.Stats == nil {
+		return
+	}
+	for i, tag := range cfg.Experimental.V2RayAPI.Stats.Inbounds {
+		if tag == oldTag {
+			cfg.Experimental.V2RayAPI.Stats.Inbounds[i] = newTag
+		}
+	}
+}
+
+func statsInboundsForWrite(existing []string, oldTag, newTag string) []string {
+	if len(existing) == 0 {
+		return nil
+	}
+	out := make([]string, len(existing))
+	copy(out, existing)
+	if oldTag == "" || newTag == "" || oldTag == newTag {
+		return out
+	}
+	for i, tag := range out {
+		if tag == oldTag {
+			out[i] = newTag
+		}
+	}
+	return out
+}
+
+func ensureExperimentalStatsInbounds(cfg *SingboxConfig, statsInbounds []string) {
+	if cfg == nil || len(statsInbounds) == 0 {
+		return
+	}
+	if cfg.Experimental == nil {
+		cfg.Experimental = &Experimental{}
+	}
+	if cfg.Experimental.V2RayAPI == nil {
+		cfg.Experimental.V2RayAPI = &V2RayAPI{}
+	}
+	if cfg.Experimental.V2RayAPI.Stats == nil {
+		cfg.Experimental.V2RayAPI.Stats = &V2RayStats{}
+	}
+	cfg.Experimental.V2RayAPI.Stats.Enabled = true
+	cfg.Experimental.V2RayAPI.Stats.Inbounds = statsInbounds
+}
+
 // mergeInboundWithOriginal overlays the typed fields from typedBytes onto the
 // original raw JSON object, preserving any unknown fields present in original
 // that are not modeled by the typed struct (e.g. "x-meta").
@@ -841,6 +886,7 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
 	SanitiseManagedInboundFields(updatedInbound)
+	writeStatsInbounds := statsInboundsForWrite(c.StatsInbounds, tag, newTag)
 
 	err := c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
 		inbounds, err := decodeInboundRawList(cfg.Inbounds)
@@ -877,6 +923,10 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 					data = merged
 				}
 				inbounds[i] = data
+				if tagChanged {
+					renameExperimentalStatsInbound(cfg, tag, newTag)
+				}
+				ensureExperimentalStatsInbounds(cfg, writeStatsInbounds)
 				found = true
 				break
 			}
