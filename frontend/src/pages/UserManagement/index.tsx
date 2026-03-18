@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UserStatus, CreateUserRequest } from '../../services/api'
 import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check, QrCode as QrCodeIcon } from 'lucide-react'
-import { v4 as uuidv4 } from 'uuid'
 import QRCode from 'react-qr-code'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
@@ -16,6 +15,7 @@ import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
+type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2'
 
 function bytesToGbString(bytes?: number) {
     return bytes && bytes > 0 ? (bytes / BYTES_PER_GB).toFixed(2) : ''
@@ -29,6 +29,32 @@ function parseGbToBytes(input: string) {
     return Math.round(val * BYTES_PER_GB)
 }
 
+function isPasswordUserType(type: string): boolean {
+    return type === 'trojan' || type === 'hysteria2'
+}
+
+function generateRandomCredential(type: UserType): string {
+    if (isPasswordUserType(type)) {
+        if (crypto?.getRandomValues) {
+            const bytes = new Uint8Array(16)
+            crypto.getRandomValues(bytes)
+            return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+        }
+        return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+    }
+
+    if (crypto.randomUUID) return crypto.randomUUID()
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = Math.random() * 16 | 0
+        const v = c === 'x' ? r : (r & 0x3 | 0x8)
+        return v.toString(16)
+    })
+}
+
+function formatUserTypeLabel(type: UserType): string {
+    return type === 'hysteria2' ? 'Hysteria2' : type.toUpperCase()
+}
+
 export default function UserManagement() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -37,8 +63,7 @@ export default function UserManagement() {
     const canWriteConfig = !!permissions?.can_write_config
 
     const queryClient = useQueryClient()
-    type UserType = 'vless' | 'vmess' | 'trojan'
-    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan']
+    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan', 'hysteria2']
     const [userType, setUserType] = useState<UserType>('vless')
     // Modals state
     const [modalState, setModalState] = useState<{
@@ -168,6 +193,7 @@ export default function UserManagement() {
     const getInboundType = (tag: string) => inboundTypeByTag.get(tag) as UserType | undefined
     const getInboundByTag = (tag: string) => inbounds.find(inb => inb.tag === tag)
     const canEditFlowForInbound = (type: string, inboundTag: string) => canSelectInboundUserFlow(type, getInboundByTag(inboundTag) || null)
+    const canShowBulkFlow = (inboundTag: string) => getInboundType(inboundTag) === 'vless' && canEditFlowForInbound('vless', inboundTag)
     const normalizeInboundRowsForType = (rows: { tag: string; flow: string }[], type: string) => (
         rows.map(row => ({
             ...row,
@@ -440,7 +466,7 @@ export default function UserManagement() {
                     vmess_alter_id: vmessAlterID,
                     reset_day: 1,
                 }
-                if (!payload.uuid) payload.uuid = uuidv4()
+                if (!payload.uuid) payload.uuid = generateRandomCredential(userType)
 
                 await api.updateUser(payload)
 
@@ -486,7 +512,7 @@ export default function UserManagement() {
                     vmess_alter_id: userType === 'vmess' ? (newUser.vmess_alter_id || 0) : 0,
                     reset_day: 1,
                 }
-                if (!payload.uuid) payload.uuid = uuidv4()
+                if (!payload.uuid) payload.uuid = generateRandomCredential(userType)
                 for (const row of normalizedRows) {
                     await api.createUser({
                         ...payload,
@@ -531,6 +557,9 @@ export default function UserManagement() {
     const unsupportedUserType = !supportedUserTypes.includes(userType)
     const hasTypeInbounds = inbounds.some(inb => String(inb.type || '').toLowerCase() === userType)
     const inboundValid = inboundRows.length > 0 && !hasEmptyInbound && !hasDuplicateInbound && !inboundTypeMismatch && !unsupportedUserType && hasTypeInbounds
+    const credentialLabel = isPasswordUserType(userType) ? 'Password' : 'UUID'
+    const credentialActionLabel = isPasswordUserType(userType) ? 'Generate Random Password' : 'Generate Random UUID'
+    const bulkFlowVisible = canShowBulkFlow(bulkConfig.inbound_tag || '')
 
     const handleBulkCreate = async () => {
         if (!canWriteUsers) {
@@ -542,6 +571,7 @@ export default function UserManagement() {
             const bulkInboundType = getInboundType(bulkConfig.inbound_tag || '')
             const bulkVmessSecurity = bulkInboundType === 'vmess' ? 'auto' : ''
             const bulkVmessAlterID = bulkInboundType === 'vmess' ? 0 : 0
+            const bulkFlow = bulkFlowVisible ? bulkConfig.flow : ''
 
             for (let i = 0; i < bulkConfig.count; i++) {
                 let username = ''
@@ -556,8 +586,8 @@ export default function UserManagement() {
 
                 usersToCreate.push({
                     name: fullName,
-                    uuid: uuidv4(),
-                    flow: bulkInboundType === 'vless' ? bulkConfig.flow : '',
+                    uuid: generateRandomCredential((bulkInboundType || 'vless') as UserType),
+                    flow: bulkFlow,
                     vmess_security: bulkVmessSecurity,
                     vmess_alter_id: bulkVmessAlterID,
                     quota_limit: bulkConfig.quota_limit,
@@ -1036,30 +1066,22 @@ export default function UserManagement() {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">{userType === 'trojan' ? 'Password' : 'UUID'}</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">{credentialLabel}</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
                                     value={newUser.uuid || ''}
                                     onChange={e => setNewUser({ ...newUser, uuid: e.target.value })}
                                     className="flex-1 min-w-0 bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
-                                    placeholder={userType === 'trojan' ? 'Enter password' : 'Auto-generated if empty'}
+                                    placeholder={isPasswordUserType(userType) ? 'Enter password or leave empty to generate one' : 'Auto-generated if empty'}
                                 />
                                 <Button
                                     type="button"
                                     variant="icon"
                                     size="icon"
                                     className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
-                                    onClick={() => {
-                                        const uuid = crypto.randomUUID ? crypto.randomUUID() :
-                                            'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-                                                const r = Math.random() * 16 | 0
-                                                const v = c === 'x' ? r : (r & 0x3 | 0x8)
-                                                return v.toString(16)
-                                            })
-                                        setNewUser({ ...newUser, uuid })
-                                    }}
-                                    title="Generate Random UUID"
+                                    onClick={() => setNewUser({ ...newUser, uuid: generateRandomCredential(userType) })}
+                                    title={credentialActionLabel}
                                 >
                                     <RefreshCw size={16} />
                                 </Button>
@@ -1081,12 +1103,12 @@ export default function UserManagement() {
                                 }}
                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
                             >
-                                {(['vless', 'vmess', 'trojan'] as UserType[]).map(type => {
+                                {supportedUserTypes.map(type => {
                                     const hasType = inbounds.some(inb => String(inb.type || '').toLowerCase() === type)
                                     const supported = supportedUserTypes.includes(type)
                                     return (
                                         <option key={type} value={type} disabled={!hasType || !supported}>
-                                            {type.toUpperCase()}
+                                            {formatUserTypeLabel(type)}
                                         </option>
                                     )
                                 })}
@@ -1279,7 +1301,14 @@ export default function UserManagement() {
                             <label className="block text-sm font-medium text-slate-400 mb-1">Inbound (Required)</label>
                             <select
                                 value={bulkConfig.inbound_tag || ''}
-                                onChange={e => setBulkConfig({ ...bulkConfig, inbound_tag: e.target.value })}
+                                onChange={e => {
+                                    const nextTag = e.target.value
+                                    setBulkConfig(prev => ({
+                                        ...prev,
+                                        inbound_tag: nextTag,
+                                        flow: canShowBulkFlow(nextTag) ? (prev.flow || DEFAULT_VLESS_FLOW) : '',
+                                    }))
+                                }}
                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                             >
                                 <option value="">Select Inbound</option>
@@ -1288,17 +1317,26 @@ export default function UserManagement() {
                                 ))}
                             </select>
                         </div>
-                        <div>
-                            <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
-                            <select
-                                value={bulkConfig.flow}
-                                onChange={e => setBulkConfig({ ...bulkConfig, flow: e.target.value })}
-                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                            >
-                                <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                                <option value="">none</option>
-                            </select>
-                        </div>
+                        {bulkFlowVisible ? (
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
+                                <select
+                                    value={bulkConfig.flow}
+                                    onChange={e => setBulkConfig({ ...bulkConfig, flow: e.target.value })}
+                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                >
+                                    <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                                    <option value="">none</option>
+                                </select>
+                            </div>
+                        ) : (
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
+                                <div className="w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5 text-sm text-slate-500">
+                                    Not used for this inbound type
+                                </div>
+                            </div>
+                        )}
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-2 gap-4">
                         <div>
