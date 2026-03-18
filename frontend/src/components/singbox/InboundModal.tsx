@@ -47,6 +47,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
     const visibility = useMemo(() => computeInboundVisibility(formData), [formData])
     const originalTag = String(initialData?.tag || '').trim()
     const pendingRenameTag = String(pendingRenameSubmission?.tag || formData.tag || '').trim()
+    const isHysteria2 = formData.type === 'hysteria2'
 
     const updateForm = (updater: (current: any) => any) => {
         setFormData((prev: any) => normalizeInboundForEditor(updater(prev)))
@@ -198,25 +199,36 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">TLS Configuration</h3>
-                        <label className="flex cursor-pointer items-center gap-2">
-                            <input
-                                type="checkbox"
-                                checked={!!formData.tls?.enabled}
-                                onChange={e => updateForm((prev: any) => ({
-                                    ...prev,
-                                    tls: {
-                                        ...(prev.tls || {}),
-                                        enabled: e.target.checked,
-                                    },
-                                }))}
-                                className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
-                            />
-                            <span className="text-xs font-medium text-white">Enable TLS</span>
-                        </label>
+                        {isHysteria2 ? (
+                            <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-emerald-300">
+                                Required for Hysteria2
+                            </div>
+                        ) : (
+                            <label className="flex cursor-pointer items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    checked={!!formData.tls?.enabled}
+                                    onChange={e => updateForm((prev: any) => ({
+                                        ...prev,
+                                        tls: {
+                                            ...(prev.tls || {}),
+                                            enabled: e.target.checked,
+                                        },
+                                    }))}
+                                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                />
+                                <span className="text-xs font-medium text-white">Enable TLS</span>
+                            </label>
+                        )}
                     </div>
 
                     {formData.tls?.enabled && (
                         <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
+                            {isHysteria2 && (
+                                <div className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
+                                    Hysteria2 always uses TLS. Configure the certificate and key below before saving this inbound.
+                                </div>
+                            )}
                             {visibility.showAlpn && (
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-300">ALPN (comma-separated)</label>
