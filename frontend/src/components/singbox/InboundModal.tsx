@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Save } from 'lucide-react'
 import { api } from '../../services/api'
 import { Button } from '../ui/Button'
+import { ConfirmModal } from '../ui/ConfirmModal'
 import { Modal } from '../ui/Modal'
 import {
     buildInboundSubmission,
@@ -25,11 +26,17 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
     const [validationError, setValidationError] = useState('')
     const [certLoading, setCertLoading] = useState(false)
     const [certError, setCertError] = useState('')
+    const [pendingRenameSubmission, setPendingRenameSubmission] = useState<any | null>(null)
+    const [showRenameConfirm, setShowRenameConfirm] = useState(false)
+    const [saveLoading, setSaveLoading] = useState(false)
 
     useEffect(() => {
         setFormData(normalizeInboundForEditor(initialData || getDefaultInbound('vless')))
         setValidationError('')
         setCertError('')
+        setPendingRenameSubmission(null)
+        setShowRenameConfirm(false)
+        setSaveLoading(false)
     }, [initialData, isOpen])
 
     useEffect(() => {
@@ -67,33 +74,53 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
         }
     }
 
-    const handleSubmit = () => {
-        if (!canWrite) return
+    const submitPayload = async (payload: any) => {
+        setSaveLoading(true)
+        try {
+            await Promise.resolve(onSave(payload))
+            setPendingRenameSubmission(null)
+            setShowRenameConfirm(false)
+        } finally {
+            setSaveLoading(false)
+        }
+    }
+
+    const handleSubmit = async () => {
+        if (!canWrite || saveLoading) return
         const result = buildInboundSubmission(formData)
         if (result.error || !result.submission) {
             setValidationError(result.error || 'Failed to build inbound payload.')
             return
         }
+        const originalTag = String(initialData?.tag || '').trim()
+        const nextTag = String(result.submission.tag || '').trim()
+        if (originalTag && nextTag && originalTag !== nextTag) {
+            setValidationError('')
+            setPendingRenameSubmission(result.submission)
+            setShowRenameConfirm(true)
+            return
+        }
         setValidationError('')
-        onSave(result.submission)
+        await submitPayload(result.submission)
     }
 
     const hysteria2Password = getPrimaryHysteria2Password(formData)
 
     return (
-        <Modal
-            isOpen={isOpen}
-            onClose={onClose}
-            title={initialData ? 'Edit Inbound' : 'Add Inbound'}
-            size="lg"
-            footer={
-                <>
-                    <Button variant="secondary" onClick={onClose}>Cancel</Button>
-                    <Button onClick={handleSubmit} icon={<Save size={16} />} disabled={!canWrite}>Save Inbound</Button>
-                </>
-            }
-        >
-            <fieldset disabled={!canWrite} className={`space-y-6 ${!canWrite ? 'opacity-80' : ''}`}>
+        <>
+            <Modal
+                isOpen={isOpen}
+                onClose={onClose}
+                title={initialData ? 'Edit Inbound' : 'Add Inbound'}
+                size="lg"
+                footer={
+                    <>
+                        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+                        <Button onClick={() => void handleSubmit()} icon={<Save size={16} />} disabled={!canWrite || saveLoading} isLoading={saveLoading}>Save Inbound</Button>
+                    </>
+                }
+            >
+                <fieldset disabled={!canWrite} className={`space-y-6 ${!canWrite ? 'opacity-80' : ''}`}>
                 {validationError && (
                     <div className="rounded-lg border border-red-700/60 bg-red-900/30 px-3 py-2 text-xs text-red-200">
                         {validationError}
@@ -725,7 +752,31 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                         )}
                     </div>
                 )}
-            </fieldset>
-        </Modal>
+                </fieldset>
+            </Modal>
+            <ConfirmModal
+                isOpen={showRenameConfirm}
+                onClose={() => {
+                    if (saveLoading) return
+                    setShowRenameConfirm(false)
+                    setPendingRenameSubmission(null)
+                }}
+                onConfirm={() => pendingRenameSubmission ? submitPayload(pendingRenameSubmission) : undefined}
+                title="Change inbound tag?"
+                message="Renaming an inbound changes its identifier across the managed Sing-box flow. Confirm before submitting this update."
+                confirmLabel="Rename Inbound"
+                confirmTone="danger"
+                isLoading={saveLoading}
+            >
+                <div className="space-y-1 text-sm">
+                    <p className="text-slate-400">Current tag</p>
+                    <p className="font-mono text-slate-200">{String(initialData?.tag || '')}</p>
+                </div>
+                <div className="space-y-1 text-sm">
+                    <p className="text-slate-400">New tag</p>
+                    <p className="font-mono text-slate-200">{String(formData.tag || '')}</p>
+                </div>
+            </ConfirmModal>
+        </>
     )
 }
