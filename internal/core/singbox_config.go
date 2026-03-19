@@ -794,6 +794,7 @@ func (c *Config) UpdateSingboxOutboundDomainStrategies(updates []SingboxOutbound
 type UserInboundInfo struct {
 	Tag           string `json:"tag"`
 	UUID          string `json:"uuid"`
+	Password      string `json:"password,omitempty"`
 	Flow          string `json:"flow,omitempty"`
 	VmessSecurity string `json:"vmess_security,omitempty"`
 	VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
@@ -821,6 +822,12 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 			uuid := user.UUID
 			flow := user.Flow
 			switch inbound.Type {
+			case "hysteria2":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
 			case "trojan":
 				uuid = user.Password
 				flow = ""
