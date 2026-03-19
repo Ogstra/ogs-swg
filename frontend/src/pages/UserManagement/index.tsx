@@ -646,6 +646,9 @@ export default function UserManagement() {
         }
         try {
             await api.applySingboxChanges()
+            queryClient.setQueryData(['dashboard-pending-changes'], (old: any) =>
+                old ? { ...old, singbox_pending_changes: false } : old
+            )
             await pendingChangesQuery.refetch()
             success('Sing-box configuration applied successfully')
         } catch (err) {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Plus, Edit, Trash2, Shield, Radio } from 'lucide-react'
 import { api } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
@@ -11,6 +12,7 @@ import { ConfirmModal } from '../ui/ConfirmModal'
 export default function InboundList() {
     const { success, error: toastError, warning } = useToast()
     const { permissions } = useAuth()
+    const queryClient = useQueryClient()
     const canWriteConfig = !!permissions?.can_write_config
     const [inbounds, setInbounds] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
@@ -46,6 +48,8 @@ export default function InboundList() {
             success('Inbound deleted successfully')
             setConfirmDeleteTag(null)
             await loadInbounds()
+            queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] })
+            queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] })
         } catch (err) {
             toastError('Failed to delete inbound: ' + err)
         } finally {
@@ -80,6 +84,8 @@ export default function InboundList() {
             }
             setIsModalOpen(false)
             loadInbounds()
+            queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] })
+            queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] })
         } catch (err) {
             toastError('Failed to save inbound: ' + err)
         }
