@@ -76,3 +76,4 @@ config.json
 
 # sqlc dev artifacts
 db/query_test/
+.claude/settings.local.json

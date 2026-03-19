@@ -314,7 +314,7 @@ func (q *Queries) GetAdmin(ctx context.Context, username string) (string, error)
 }
 
 const getAllInboundMeta = `-- name: GetAllInboundMeta :many
-SELECT tag, external_port FROM inbound_meta
+SELECT tag, external_port, override_address FROM inbound_meta
 `
 
 func (q *Queries) GetAllInboundMeta(ctx context.Context) ([]InboundMetum, error) {
@@ -326,7 +326,7 @@ func (q *Queries) GetAllInboundMeta(ctx context.Context) ([]InboundMetum, error)
 	var items []InboundMetum
 	for rows.Next() {
 		var i InboundMetum
-		if err := rows.Scan(&i.Tag, &i.ExternalPort); err != nil {
+		if err := rows.Scan(&i.Tag, &i.ExternalPort, &i.OverrideAddress); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -569,13 +569,13 @@ func (q *Queries) GetGlobalTraffic(ctx context.Context, arg GetGlobalTrafficPara
 }
 
 const getInboundMeta = `-- name: GetInboundMeta :one
-SELECT tag, external_port FROM inbound_meta WHERE tag = ?
+SELECT tag, external_port, override_address FROM inbound_meta WHERE tag = ?
 `
 
 func (q *Queries) GetInboundMeta(ctx context.Context, tag string) (InboundMetum, error) {
 	row := q.db.QueryRowContext(ctx, getInboundMeta, tag)
 	var i InboundMetum
-	err := row.Scan(&i.Tag, &i.ExternalPort)
+	err := row.Scan(&i.Tag, &i.ExternalPort, &i.OverrideAddress)
 	return i, err
 }
 
@@ -1267,17 +1267,18 @@ func (q *Queries) UpdateWGPeerHandshake(ctx context.Context, arg UpdateWGPeerHan
 }
 
 const upsertInboundMeta = `-- name: UpsertInboundMeta :exec
-INSERT INTO inbound_meta (tag, external_port) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port
+INSERT INTO inbound_meta (tag, external_port, override_address) VALUES (?, ?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port, override_address = excluded.override_address
 `
 
 type UpsertInboundMetaParams struct {
-	Tag          string        `json:"tag"`
-	ExternalPort sql.NullInt64 `json:"external_port"`
+	Tag             string         `json:"tag"`
+	ExternalPort    sql.NullInt64  `json:"external_port"`
+	OverrideAddress sql.NullString `json:"override_address"`
 }
 
 // InboundMeta Queries --
 func (q *Queries) UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaParams) error {
-	_, err := q.db.ExecContext(ctx, upsertInboundMeta, arg.Tag, arg.ExternalPort)
+	_, err := q.db.ExecContext(ctx, upsertInboundMeta, arg.Tag, arg.ExternalPort, arg.OverrideAddress)
 	return err
 }
 
