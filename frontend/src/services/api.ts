@@ -223,7 +223,7 @@ export const api = {
         });
         await handleResponse(res, 'Failed to delete user');
     },
-    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
+    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; password?: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
         const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch user inbounds');
         return res.json();
