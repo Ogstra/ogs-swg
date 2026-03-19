@@ -224,6 +224,9 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 			if strings.TrimSpace(inbounds[i].UUID) != "" {
 				inbounds[i].UUID = maskedValue
 			}
+			if strings.TrimSpace(inbounds[i].Password) != "" {
+				inbounds[i].Password = maskedValue
+			}
 		}
 	}
 
