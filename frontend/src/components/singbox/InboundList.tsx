@@ -25,6 +25,16 @@ export default function InboundList() {
         loadInbounds()
     }, [])
 
+    const setSingboxPendingChanges = (pending: boolean) => {
+        queryClient.setQueryData(['dashboard-pending-changes'], (old: any) => ({
+            ...(old || {}),
+            singbox_pending_changes: pending,
+        }))
+        queryClient.setQueriesData({ queryKey: ['dashboard-data'] }, (old: any) =>
+            old ? { ...old, singbox_pending_changes: pending } : old
+        )
+    }
+
     const loadInbounds = async () => {
         setLoading(true)
         try {
@@ -47,9 +57,13 @@ export default function InboundList() {
             await api.deleteSingboxInbound(tag)
             success('Inbound deleted successfully')
             setConfirmDeleteTag(null)
+            setSingboxPendingChanges(true)
             await loadInbounds()
-            queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] })
-            queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] })
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
+                queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] }),
+            ])
         } catch (err) {
             toastError('Failed to delete inbound: ' + err)
         } finally {
@@ -83,9 +97,13 @@ export default function InboundList() {
                 success('Inbound created successfully')
             }
             setIsModalOpen(false)
-            loadInbounds()
-            queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] })
-            queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] })
+            setSingboxPendingChanges(true)
+            await loadInbounds()
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
+                queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] }),
+            ])
         } catch (err) {
             toastError('Failed to save inbound: ' + err)
         }

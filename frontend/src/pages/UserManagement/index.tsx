@@ -186,9 +186,23 @@ export default function UserManagement() {
     })
     const singboxPendingChanges = !!pendingChangesQuery.data?.singbox_pending_changes
 
+    const setSingboxPendingChanges = (pending: boolean) => {
+        queryClient.setQueryData(['dashboard-pending-changes'], (old: any) => ({
+            ...(old || {}),
+            singbox_pending_changes: pending,
+        }))
+        queryClient.setQueriesData({ queryKey: ['dashboard-data'] }, (old: any) =>
+            old ? { ...old, singbox_pending_changes: pending } : old
+        )
+    }
+
     const refreshUsersData = async () => {
-        await queryClient.invalidateQueries({ queryKey: ['users'] })
-        queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] })
+        setSingboxPendingChanges(true)
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['users'] }),
+            queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+            queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
+        ])
     }
 
     const inboundTypeByTag = new Map(
@@ -646,13 +660,15 @@ export default function UserManagement() {
             return
         }
         try {
-            queryClient.setQueryData(['dashboard-pending-changes'], (old: any) =>
-                old ? { ...old, singbox_pending_changes: false } : old
-            )
+            setSingboxPendingChanges(false)
             await api.applySingboxChanges()
-            await pendingChangesQuery.refetch()
+            await Promise.all([
+                pendingChangesQuery.refetch(),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
+            ])
             success('Sing-box configuration applied successfully')
         } catch (err) {
+            setSingboxPendingChanges(true)
             toastError('Failed to apply changes. Please try again.')
         }
     }
