@@ -85,8 +85,10 @@ type UserMetadata struct {
 }
 
 type InboundMeta struct {
-	Tag          string `json:"tag"`
-	ExternalPort int    `json:"external_port"`
+	Tag               string `json:"tag"`
+	ExternalPort      int    `json:"external_port"`
+	ClientSNI         string `json:"client_sni,omitempty"`
+	LinkAllowInsecure *bool  `json:"link_allow_insecure,omitempty"`
 }
 
 // DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
@@ -187,7 +189,8 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS inbound_meta (
 		tag TEXT PRIMARY KEY,
 		external_port INTEGER DEFAULT 0,
-		client_sni TEXT DEFAULT NULL
+		client_sni TEXT DEFAULT NULL,
+		link_allow_insecure INTEGER DEFAULT NULL
 	);
 	
 	CREATE TABLE IF NOT EXISTS daily_usage (
@@ -211,9 +214,12 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add client_sni to existing inbound_meta tables that predate this column.
 	// Silently ignored if column already exists (fresh installs have it from CREATE TABLE above).
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN client_sni TEXT DEFAULT NULL;")
+	// Upgrade path: add link_allow_insecure to existing inbound_meta tables that predate this column.
+	// NULL means "auto" so legacy heuristic behavior remains unchanged until an explicit choice is stored.
+	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN link_allow_insecure INTEGER DEFAULT NULL;")
 	// Upgrade path: add inbound_tags to existing users tables that predate this column.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
-	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';");
+	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';")
 	// Reset day is now fixed to 1 for all users.
 	s.db.Exec("UPDATE users SET reset_day = 1 WHERE COALESCE(reset_day, 1) != 1;")
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -661,51 +667,104 @@ func (s *Store) UpdateAdminUsername(oldUsername, newUsername string) error {
 	})
 }
 
-func (s *Store) SaveInboundMeta(tag string, externalPort int) error {
-	if tag == "" {
+func (s *Store) SaveInboundMeta(meta InboundMeta) error {
+	if meta.Tag == "" {
 		return fmt.Errorf("inbound tag required")
 	}
-	if externalPort <= 0 {
-		return s.DeleteInboundMeta(tag)
+	if meta.ExternalPort <= 0 && strings.TrimSpace(meta.ClientSNI) == "" && meta.LinkAllowInsecure == nil {
+		return s.DeleteInboundMeta(meta.Tag)
 	}
-	return s.Queries.UpsertInboundMeta(context.Background(), sqlcStore.UpsertInboundMetaParams{
-		Tag: tag,
-		ExternalPort: sql.NullInt64{
-			Int64: int64(externalPort),
-			Valid: true,
-		},
-	})
+
+	var externalPort sql.NullInt64
+	if meta.ExternalPort > 0 {
+		externalPort = sql.NullInt64{Int64: int64(meta.ExternalPort), Valid: true}
+	}
+	var clientSNI sql.NullString
+	if strings.TrimSpace(meta.ClientSNI) != "" {
+		clientSNI = sql.NullString{String: strings.TrimSpace(meta.ClientSNI), Valid: true}
+	}
+	var linkAllowInsecure sql.NullInt64
+	if meta.LinkAllowInsecure != nil {
+		if *meta.LinkAllowInsecure {
+			linkAllowInsecure = sql.NullInt64{Int64: 1, Valid: true}
+		} else {
+			linkAllowInsecure = sql.NullInt64{Int64: 0, Valid: true}
+		}
+	}
+
+	_, err := s.db.ExecContext(
+		context.Background(),
+		`INSERT INTO inbound_meta (tag, external_port, client_sni, link_allow_insecure)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(tag) DO UPDATE SET
+		   external_port = excluded.external_port,
+		   client_sni = excluded.client_sni,
+		   link_allow_insecure = excluded.link_allow_insecure`,
+		meta.Tag,
+		externalPort,
+		clientSNI,
+		linkAllowInsecure,
+	)
+	return err
 }
 
 func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
 	if tag == "" {
 		return nil, nil
 	}
-	meta, err := s.Queries.GetInboundMeta(context.Background(), tag)
+	var meta InboundMeta
+	var externalPort sql.NullInt64
+	var clientSNI sql.NullString
+	var linkAllowInsecure sql.NullInt64
+	err := s.db.QueryRowContext(
+		context.Background(),
+		`SELECT tag, external_port, client_sni, link_allow_insecure FROM inbound_meta WHERE tag = ?`,
+		tag,
+	).Scan(&meta.Tag, &externalPort, &clientSNI, &linkAllowInsecure)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &InboundMeta{
-		Tag:          meta.Tag,
-		ExternalPort: int(meta.ExternalPort.Int64),
-	}, nil
+	meta.ExternalPort = int(externalPort.Int64)
+	meta.ClientSNI = strings.TrimSpace(clientSNI.String)
+	if linkAllowInsecure.Valid {
+		value := linkAllowInsecure.Int64 != 0
+		meta.LinkAllowInsecure = &value
+	}
+	return &meta, nil
 }
 
 func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
-	rows, err := s.Queries.GetAllInboundMeta(context.Background())
+	rows, err := s.db.QueryContext(
+		context.Background(),
+		`SELECT tag, external_port, client_sni, link_allow_insecure FROM inbound_meta`,
+	)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	meta := make(map[string]InboundMeta)
-	for _, entry := range rows {
-		meta[entry.Tag] = InboundMeta{
-			Tag:          entry.Tag,
-			ExternalPort: int(entry.ExternalPort.Int64),
+	for rows.Next() {
+		var entry InboundMeta
+		var externalPort sql.NullInt64
+		var clientSNI sql.NullString
+		var linkAllowInsecure sql.NullInt64
+		if err := rows.Scan(&entry.Tag, &externalPort, &clientSNI, &linkAllowInsecure); err != nil {
+			return nil, err
 		}
+		entry.ExternalPort = int(externalPort.Int64)
+		entry.ClientSNI = strings.TrimSpace(clientSNI.String)
+		if linkAllowInsecure.Valid {
+			value := linkAllowInsecure.Int64 != 0
+			entry.LinkAllowInsecure = &value
+		}
+		meta[entry.Tag] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return meta, nil
 }

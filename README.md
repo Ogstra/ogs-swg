@@ -46,8 +46,11 @@ Current Hysteria2 support includes:
 *   Password-based user management
 *   Optional `up_mbps` / `down_mbps` bandwidth limits
 *   Optional `salamander` obfuscation
+*   Per-inbound share-link override for `allowInsecure`
 
-Hysteria2 QR/link generation is not documented as supported yet.
+Operational notes:
+
+
 
 ## Execution Modes
 
