@@ -159,17 +159,26 @@ export default function Dashboard() {
     }
     const singboxPendingChanges = !!dashboardQuery.data?.singbox_pending_changes
 
+    const setSingboxPendingChanges = (pending: boolean) => {
+        queryClient.setQueryData(['dashboard-pending-changes'], (old: any) => ({
+            ...(old || {}),
+            singbox_pending_changes: pending,
+        }))
+        queryClient.setQueriesData({ queryKey: ['dashboard-data'] }, (old: any) =>
+            old ? { ...old, singbox_pending_changes: pending } : old
+        )
+    }
+
     const handleApplySingboxChanges = async () => {
         try {
-            const qKey = requestWindow.range === 'custom'
-                ? ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText]
-                : ['dashboard-data', requestWindow.range]
-            queryClient.setQueryData(qKey, (old: any) =>
-                old ? { ...old, singbox_pending_changes: false } : old
-            )
+            setSingboxPendingChanges(false)
             await api.applySingboxChanges()
-            await dashboardQuery.refetch()
+            await Promise.all([
+                dashboardQuery.refetch(),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+            ])
         } catch (err) {
+            setSingboxPendingChanges(true)
             console.error('Failed to apply Sing-box changes:', err)
             alert('Failed to apply changes. Please try again.')
         }
