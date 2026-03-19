@@ -680,13 +680,21 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		// always show current calendar month usage.
 		now := time.Now()
 		startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		samples, err := s.store.GetSamples(name, startOfMonth.Unix(), now.Unix())
+		combinedSamples, err := s.store.GetCombinedReport(name, startOfMonth.Unix(), now.Unix())
 		var up, down int64
 		lastSeen := int64(0)
 		if err == nil {
-			for _, smp := range samples {
+			for _, smp := range combinedSamples {
 				up += smp.Uplink
 				down += smp.Downlink
+			}
+		}
+
+		// Keep lastSeen based on raw samples/threshold lookup so the activity signal
+		// remains tied to recent sample timestamps rather than compressed buckets.
+		samples, err := s.store.GetSamples(name, startOfMonth.Unix(), now.Unix())
+		if err == nil {
+			for _, smp := range samples {
 				if (smp.Uplink+smp.Downlink) >= s.config.ActiveThresholdBytes && smp.Timestamp > lastSeen {
 					lastSeen = smp.Timestamp
 				}
@@ -855,6 +863,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Failed to rename user in config: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
+			if err := s.store.RenameUserTrafficIdentity(originalName, req.Name); err != nil {
+				if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
+					http.Error(w, "Failed to rename user traffic identity: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+					return
+				}
+				http.Error(w, "Failed to rename user traffic identity: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		} else {
 			// Re-enable path: restore user in all previously known inbounds.
 			// Determine the list of inbounds to restore.
@@ -915,6 +931,16 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		InboundTags:   inboundTags,
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
+		if originalName != req.Name {
+			if rollbackErr := s.store.RenameUserTrafficIdentity(req.Name, originalName); rollbackErr != nil {
+				http.Error(w, "Failed to save metadata: "+err.Error()+" (store rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				return
+			}
+			if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
+				http.Error(w, "Failed to save metadata: "+err.Error()+" (config rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				return
+			}
+		}
 		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

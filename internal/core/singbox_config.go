@@ -148,6 +148,97 @@ func jsonSemanticallyEqual(left, right []byte) bool {
 	return reflect.DeepEqual(leftAny, rightAny)
 }
 
+// SanitiseManagedInboundFields removes protocol/transport-specific fields that
+// must not survive a managed inbound write.
+func SanitiseManagedInboundFields(inbound map[string]interface{}) {
+	if inbound == nil {
+		return
+	}
+
+	inbType, _ := inbound["type"].(string)
+	inbType = strings.ToLower(strings.TrimSpace(inbType))
+
+	transportType := "tcp"
+	if transport, ok := inbound["transport"].(map[string]interface{}); ok && transport != nil {
+		if rawType, ok := transport["type"].(string); ok && strings.TrimSpace(rawType) != "" {
+			transportType = strings.ToLower(strings.TrimSpace(rawType))
+		}
+	}
+
+	if tls, ok := inbound["tls"].(map[string]interface{}); ok && tls != nil {
+		if transportType == "ws" {
+			delete(tls, "alpn")
+		}
+		if inbType != "vless" || transportType == "ws" {
+			delete(tls, "reality")
+		}
+		if len(tls) == 0 {
+			delete(inbound, "tls")
+		}
+	}
+
+	users, ok := inbound["users"].([]interface{})
+	if !ok {
+		return
+	}
+	stripFlow := inbType != "vless" || transportType == "ws"
+	if !stripFlow {
+		return
+	}
+	for _, rawUser := range users {
+		user, ok := rawUser.(map[string]interface{})
+		if !ok || user == nil {
+			continue
+		}
+		delete(user, "flow")
+	}
+}
+
+func renameExperimentalStatsInbound(cfg *SingboxConfig, oldTag, newTag string) {
+	if cfg == nil || cfg.Experimental == nil || cfg.Experimental.V2RayAPI == nil || cfg.Experimental.V2RayAPI.Stats == nil {
+		return
+	}
+	for i, tag := range cfg.Experimental.V2RayAPI.Stats.Inbounds {
+		if tag == oldTag {
+			cfg.Experimental.V2RayAPI.Stats.Inbounds[i] = newTag
+		}
+	}
+}
+
+func statsInboundsForWrite(existing []string, oldTag, newTag string) []string {
+	if len(existing) == 0 {
+		return nil
+	}
+	out := make([]string, len(existing))
+	copy(out, existing)
+	if oldTag == "" || newTag == "" || oldTag == newTag {
+		return out
+	}
+	for i, tag := range out {
+		if tag == oldTag {
+			out[i] = newTag
+		}
+	}
+	return out
+}
+
+func ensureExperimentalStatsInbounds(cfg *SingboxConfig, statsInbounds []string) {
+	if cfg == nil || len(statsInbounds) == 0 {
+		return
+	}
+	if cfg.Experimental == nil {
+		cfg.Experimental = &Experimental{}
+	}
+	if cfg.Experimental.V2RayAPI == nil {
+		cfg.Experimental.V2RayAPI = &V2RayAPI{}
+	}
+	if cfg.Experimental.V2RayAPI.Stats == nil {
+		cfg.Experimental.V2RayAPI.Stats = &V2RayStats{}
+	}
+	cfg.Experimental.V2RayAPI.Stats.Enabled = true
+	cfg.Experimental.V2RayAPI.Stats.Inbounds = statsInbounds
+}
+
 // mergeInboundWithOriginal overlays the typed fields from typedBytes onto the
 // original raw JSON object, preserving any unknown fields present in original
 // that are not modeled by the typed struct (e.g. "x-meta").
@@ -703,6 +794,7 @@ func (c *Config) UpdateSingboxOutboundDomainStrategies(updates []SingboxOutbound
 type UserInboundInfo struct {
 	Tag           string `json:"tag"`
 	UUID          string `json:"uuid"`
+	Password      string `json:"password,omitempty"`
 	Flow          string `json:"flow,omitempty"`
 	VmessSecurity string `json:"vmess_security,omitempty"`
 	VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
@@ -730,6 +822,12 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 			uuid := user.UUID
 			flow := user.Flow
 			switch inbound.Type {
+			case "hysteria2":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
 			case "trojan":
 				uuid = user.Password
 				flow = ""
@@ -794,6 +892,8 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 	// Check if tag is being renamed
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
+	SanitiseManagedInboundFields(updatedInbound)
+	writeStatsInbounds := statsInboundsForWrite(c.StatsInbounds, tag, newTag)
 
 	err := c.ModifySingboxConfig(func(cfg *SingboxConfig) error {
 		inbounds, err := decodeInboundRawList(cfg.Inbounds)
@@ -805,6 +905,10 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 		if err != nil {
 			return err
 		}
+		updatedTyped, err := decodeTypedInbound(updatedRaw)
+		if err != nil {
+			return err
+		}
 
 		found := false
 		for i, rawInbound := range inbounds {
@@ -812,8 +916,24 @@ func (c *Config) UpdateSingboxInbound(tag string, updatedInbound map[string]inte
 			if err := json.Unmarshal(rawInbound, &inboundMap); err != nil {
 				return err
 			}
+			if tagChanged {
+				if existingTag, _ := inboundMap["tag"].(string); existingTag == newTag {
+					return fmt.Errorf("inbound with tag '%s' already exists", newTag)
+				}
+			}
 			if currentTag, _ := inboundMap["tag"].(string); currentTag == tag {
-				inbounds[i] = updatedRaw
+				data, err := json.Marshal(updatedTyped)
+				if err != nil {
+					return err
+				}
+				if merged, mergeErr := mergeInboundWithOriginal(rawInbound, data); mergeErr == nil {
+					data = merged
+				}
+				inbounds[i] = data
+				if tagChanged {
+					renameExperimentalStatsInbound(cfg, tag, newTag)
+				}
+				ensureExperimentalStatsInbounds(cfg, writeStatsInbounds)
 				found = true
 				break
 			}

@@ -136,6 +136,10 @@ export interface SingboxOutboundDomainStrategyUpdate {
     domain_strategy?: string;
 }
 
+export interface SingboxInboundUpdateResponse {
+    warnings: string[];
+}
+
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
     if (contentType) headers['Content-Type'] = contentType;
@@ -219,7 +223,7 @@ export const api = {
         });
         await handleResponse(res, 'Failed to delete user');
     },
-    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
+    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; password?: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
         const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch user inbounds');
         return res.json();
@@ -626,13 +630,21 @@ export const api = {
         });
         await handleResponse(res, 'Failed to add Sing-box inbound');
     },
-    updateSingboxInbound: async (tag: string, inbound: any): Promise<void> => {
+    updateSingboxInbound: async (tag: string, inbound: any): Promise<SingboxInboundUpdateResponse> => {
         const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
             method: 'PUT',
             headers: buildHeaders('application/json'),
             body: JSON.stringify(inbound)
         });
         await handleResponse(res, 'Failed to update Sing-box inbound');
+        const text = await res.text();
+        if (!text.trim()) {
+            return { warnings: [] };
+        }
+        const data = JSON.parse(text) as Partial<SingboxInboundUpdateResponse>;
+        return {
+            warnings: Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [],
+        };
     },
     deleteSingboxInbound: async (tag: string): Promise<void> => {
         const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {

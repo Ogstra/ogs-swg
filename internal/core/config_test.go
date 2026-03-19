@@ -221,6 +221,77 @@ func TestUpdateUserInInbound(t *testing.T) {
 	}
 }
 
+func TestUpdateSingboxInbound_WebSocketSwitchStripsStoredUserFlow(t *testing.T) {
+	cfg, stub := newTestConfig(t, `{
+		"inbounds": [
+			{
+				"type":"vless",
+				"tag":"test-vless",
+				"listen":"0.0.0.0",
+				"listen_port":443,
+				"users":[
+					{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}
+				],
+				"tls":{"enabled":true,"server_name":"example.com"},
+				"transport":{"type":"tcp"}
+			}
+		]
+	}`)
+
+	err := cfg.UpdateSingboxInbound("test-vless", map[string]interface{}{
+		"type":        "vless",
+		"tag":         "test-vless",
+		"listen":      "0.0.0.0",
+		"listen_port": float64(443),
+		"users": []interface{}{
+			map[string]interface{}{
+				"name": "alice",
+				"uuid": "11111111-1111-1111-1111-111111111111",
+				"flow": "xtls-rprx-vision",
+			},
+		},
+		"tls": map[string]interface{}{
+			"enabled":     true,
+			"server_name": "example.com",
+		},
+		"transport": map[string]interface{}{
+			"type": "ws",
+			"path": "/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateSingboxInbound: %v", err)
+	}
+
+	raw, err := stub.ReadConfig(context.Background(), "/test/config.json")
+	if err != nil {
+		t.Fatalf("ReadConfig: %v", err)
+	}
+	var top map[string]interface{}
+	if err := json.Unmarshal(raw, &top); err != nil {
+		t.Fatalf("unmarshal top-level config: %v", err)
+	}
+	inbounds, ok := top["inbounds"].([]interface{})
+	if !ok || len(inbounds) != 1 {
+		t.Fatalf("inbounds = %#v; want one inbound", top["inbounds"])
+	}
+	inbound, ok := inbounds[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("inbound = %#v; want object", inbounds[0])
+	}
+	users, ok := inbound["users"].([]interface{})
+	if !ok || len(users) != 1 {
+		t.Fatalf("users = %#v; want one user", inbound["users"])
+	}
+	user, ok := users[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("user = %#v; want object", users[0])
+	}
+	if got := user["flow"]; got != nil {
+		t.Fatalf("stored user flow = %#v; want removed", got)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // syncStatsUsers continuity (TEST-03)
 // ---------------------------------------------------------------------------

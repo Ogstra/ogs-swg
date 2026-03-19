@@ -5,6 +5,202 @@ import (
 	"testing"
 )
 
+func readInboundByTagFromStub(t *testing.T, stub *stubExecutor, tag string) map[string]interface{} {
+	t.Helper()
+
+	var top map[string]interface{}
+	if err := json.Unmarshal(stub.data, &top); err != nil {
+		t.Fatalf("unmarshal stub config: %v", err)
+	}
+
+	inbounds, ok := top["inbounds"].([]interface{})
+	if !ok {
+		t.Fatalf("inbounds missing or wrong type: %#v", top["inbounds"])
+	}
+	for _, rawInbound := range inbounds {
+		inbound, ok := rawInbound.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if currentTag, _ := inbound["tag"].(string); currentTag == tag {
+			return inbound
+		}
+	}
+
+	t.Fatalf("inbound %q not found", tag)
+	return nil
+}
+
+func TestUpdateSingboxInbound_SanitizedWriteRemovesGhostFields(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}
+				],
+				"tls": {
+					"enabled": true,
+					"server_name": "example.com",
+					"alpn": ["h2", "http/1.1"],
+					"reality": {
+						"enabled": true,
+						"public_key": "public-key",
+						"short_id": ["abcd"],
+						"handshake": {"server": "hs.example.com"}
+					}
+				},
+				"transport": {"type": "tcp"}
+			}
+		]
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+
+	updatedInbound := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "test-vless",
+		"listen":      "0.0.0.0",
+		"listen_port": 443,
+		"users": []interface{}{
+			map[string]interface{}{
+				"name": "alice",
+				"uuid": "11111111-1111-1111-1111-111111111111",
+				"flow": "xtls-rprx-vision",
+			},
+		},
+		"tls": map[string]interface{}{
+			"enabled":     true,
+			"server_name": "example.com",
+			"alpn":        []interface{}{"h2", "http/1.1"},
+			"reality": map[string]interface{}{
+				"enabled":    true,
+				"public_key": "public-key",
+				"short_id":   []interface{}{"abcd"},
+				"handshake": map[string]interface{}{
+					"server": "hs.example.com",
+				},
+			},
+		},
+		"transport": map[string]interface{}{
+			"type": "ws",
+			"path": "/ws",
+		},
+	}
+
+	if err := cfg.UpdateSingboxInbound("test-vless", updatedInbound); err != nil {
+		t.Fatalf("UpdateSingboxInbound: %v", err)
+	}
+
+	inbound := readInboundByTagFromStub(t, stub, "test-vless")
+	tls, ok := inbound["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("tls missing or wrong type: %#v", inbound["tls"])
+	}
+	if got := tls["alpn"]; got != nil {
+		t.Fatalf("stored tls.alpn = %#v; want removed", got)
+	}
+	if got := tls["reality"]; got != nil {
+		t.Fatalf("stored tls.reality = %#v; want removed", got)
+	}
+
+	users, ok := inbound["users"].([]interface{})
+	if !ok || len(users) != 1 {
+		t.Fatalf("users missing or wrong type: %#v", inbound["users"])
+	}
+	user, ok := users[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("user wrong type: %#v", users[0])
+	}
+	if got := user["flow"]; got != nil {
+		t.Fatalf("stored user.flow = %#v; want removed", got)
+	}
+}
+
+func TestUpdateSingboxInbound_PreservesUnknownFieldsWhileDroppingModeledGhostFields(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}
+				],
+				"tls": {
+					"enabled": true,
+					"server_name": "example.com",
+					"alpn": ["h2", "http/1.1"],
+					"reality": {
+						"enabled": true,
+						"public_key": "public-key",
+						"short_id": ["abcd"],
+						"handshake": {"server": "hs.example.com"}
+					}
+				},
+				"transport": {"type": "tcp"},
+				"x-meta": {"custom":"value"}
+			}
+		]
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+
+	updatedInbound := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "test-vless",
+		"listen":      "0.0.0.0",
+		"listen_port": 443,
+		"users": []interface{}{
+			map[string]interface{}{
+				"name": "alice",
+				"uuid": "11111111-1111-1111-1111-111111111111",
+				"flow": "xtls-rprx-vision",
+			},
+		},
+		"tls": map[string]interface{}{
+			"enabled":     true,
+			"server_name": "example.com",
+			"alpn":        []interface{}{"h2", "http/1.1"},
+			"reality": map[string]interface{}{
+				"enabled":    true,
+				"public_key": "public-key",
+				"short_id":   []interface{}{"abcd"},
+				"handshake": map[string]interface{}{
+					"server": "hs.example.com",
+				},
+			},
+		},
+		"transport": map[string]interface{}{
+			"type": "ws",
+			"path": "/ws",
+		},
+	}
+
+	if err := cfg.UpdateSingboxInbound("test-vless", updatedInbound); err != nil {
+		t.Fatalf("UpdateSingboxInbound: %v", err)
+	}
+
+	inbound := readInboundByTagFromStub(t, stub, "test-vless")
+	if got := inbound["x-meta"]; got == nil {
+		t.Fatalf("x-meta missing after update")
+	}
+	tls, ok := inbound["tls"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("tls missing or wrong type: %#v", inbound["tls"])
+	}
+	if got := tls["alpn"]; got != nil {
+		t.Fatalf("stored tls.alpn = %#v; want removed", got)
+	}
+	if got := tls["reality"]; got != nil {
+		t.Fatalf("stored tls.reality = %#v; want removed", got)
+	}
+}
+
 // TestRoundTrip_NonOwnedSectionsPreserved verifies that log, dns, route, and
 // outbounds sections are byte-identical (semantically) after an AddUser call.
 // These sections are stored as json.RawMessage and must not be modified.
@@ -474,5 +670,35 @@ func TestTLSTyped_AbsentTLSIsNil(t *testing.T) {
 	}
 	if view.TLS != nil {
 		t.Errorf("TLS should be nil for inbound without tls block; got %+v", view.TLS)
+	}
+}
+
+func TestGetUserInbounds_Hysteria2(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "hysteria2",
+				"tag": "hy2-in",
+				"listen_port": 8443,
+				"users": [
+					{"name": "alice", "password": "s3cr3t"}
+				]
+			}
+		]
+	}`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	results, err := cfg.GetUserInbounds("alice")
+	if err != nil {
+		t.Fatalf("GetUserInbounds() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("GetUserInbounds() returned %d entries; want 1", len(results))
+	}
+	info := results[0]
+	if info.Password != "s3cr3t" {
+		t.Errorf("Password = %q; want %q", info.Password, "s3cr3t")
+	}
+	if info.UUID != "" {
+		t.Errorf("UUID = %q; want empty string", info.UUID)
 	}
 }

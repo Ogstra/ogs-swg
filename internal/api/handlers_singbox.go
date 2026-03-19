@@ -15,6 +15,10 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
+type inboundUpdateResponse struct {
+	Warnings []string `json:"warnings"`
+}
+
 func (s *Server) handleGetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -134,21 +138,31 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 		inbounds = append(inbounds, inboundView.Raw)
 	}
 
-	if meta, err := s.store.GetAllInboundMeta(); err == nil {
-		for i := range inboundViews {
-			tag := inboundViews[i].Tag
-			if tag == "" {
-				continue
-			}
-			if entry, ok := meta[tag]; ok {
-				if inbounds[i] == nil {
-					inbounds[i] = map[string]interface{}{}
+	if s.store != nil {
+		if meta, err := s.store.GetAllInboundMeta(); err == nil {
+			for i := range inboundViews {
+				tag := inboundViews[i].Tag
+				if tag == "" {
+					continue
 				}
-				if entry.ExternalPort > 0 {
-					inbounds[i]["external_port"] = entry.ExternalPort
-				}
-				if entry.OverrideAddress != "" {
-					inbounds[i]["override_address"] = entry.OverrideAddress
+				if entry, ok := meta[tag]; ok {
+					if inbounds[i] == nil {
+						inbounds[i] = map[string]interface{}{}
+					}
+					if entry.ExternalPort > 0 {
+						inbounds[i]["external_port"] = entry.ExternalPort
+					}
+					if entry.OverrideAddress != "" {
+						inbounds[i]["override_address"] = entry.OverrideAddress
+					}
+					switch {
+					case entry.LinkAllowInsecure == nil:
+						inbounds[i]["link_allow_insecure"] = "auto"
+					case *entry.LinkAllowInsecure:
+						inbounds[i]["link_allow_insecure"] = "enabled"
+					default:
+						inbounds[i]["link_allow_insecure"] = "disabled"
+					}
 				}
 			}
 		}
@@ -192,14 +206,16 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 				tagTypes[inboundView.Tag] = inboundView.Type
 			}
 		}
-		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
-			for i := range inbounds {
-				if tagTypes[inbounds[i].Tag] == "vmess" {
-					if inbounds[i].VmessSecurity == "" && meta.VmessSecurity != "" {
-						inbounds[i].VmessSecurity = meta.VmessSecurity
-					}
-					if inbounds[i].VmessAlterID == 0 && meta.VmessAlterID != 0 {
-						inbounds[i].VmessAlterID = meta.VmessAlterID
+		if s.store != nil {
+			if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+				for i := range inbounds {
+					if tagTypes[inbounds[i].Tag] == "vmess" {
+						if inbounds[i].VmessSecurity == "" && meta.VmessSecurity != "" {
+							inbounds[i].VmessSecurity = meta.VmessSecurity
+						}
+						if inbounds[i].VmessAlterID == 0 && meta.VmessAlterID != 0 {
+							inbounds[i].VmessAlterID = meta.VmessAlterID
+						}
 					}
 				}
 			}
@@ -209,6 +225,9 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 		for i := range inbounds {
 			if strings.TrimSpace(inbounds[i].UUID) != "" {
 				inbounds[i].UUID = maskedValue
+			}
+			if strings.TrimSpace(inbounds[i].Password) != "" {
+				inbounds[i].Password = maskedValue
 			}
 		}
 	}
@@ -238,6 +257,10 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"link": link})
+}
+
+func sanitiseInboundFields(inbound map[string]interface{}) {
+	core.SanitiseManagedInboundFields(inbound)
 }
 
 func (s *Server) handleGetUserLink(w http.ResponseWriter, r *http.Request) {
@@ -281,9 +304,6 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 	if userInfo == nil {
 		return "", "", fmt.Errorf("User not found in selected inbound")
 	}
-	if userInfo.UUID == "" {
-		return "", "", fmt.Errorf("User credential missing for inbound")
-	}
 
 	inboundView, err := s.config.GetSingboxInboundView(tag)
 	if err != nil {
@@ -295,19 +315,26 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		inbType = "vless"
 	}
 
+	if inbType != "hysteria2" && inbType != "trojan" && userInfo.UUID == "" {
+		return "", "", fmt.Errorf("User credential missing for inbound")
+	}
+
 	if inboundView.ListenPort <= 0 {
 		return "", "", fmt.Errorf("Inbound listen_port missing")
 	}
 	port := strconv.Itoa(inboundView.ListenPort)
-
 	originalHost := s.resolvePublicHost(r)
 	host := originalHost
-	if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil {
-		if meta.ExternalPort > 0 {
-			port = strconv.Itoa(meta.ExternalPort)
-		}
-		if meta.OverrideAddress != "" {
-			host = meta.OverrideAddress
+	var inboundMeta *core.InboundMeta
+	if s.store != nil {
+		if meta, err := s.store.GetInboundMeta(tag); err == nil && meta != nil {
+			inboundMeta = meta
+			if meta.ExternalPort > 0 {
+				port = strconv.Itoa(meta.ExternalPort)
+			}
+			if meta.OverrideAddress != "" {
+				host = meta.OverrideAddress
+			}
 		}
 	}
 
@@ -324,22 +351,27 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 
 	switch inbType {
 	case "vless":
-		link, err := buildVlessLink(name, userInfo, inboundView, host, port, sniFallback)
+		link, err := buildVlessLink(name, userInfo, inboundView, host, port, inboundMeta, sniFallback)
 		return link, inbType, err
 	case "vmess":
 		userCopy := *userInfo
-		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
-			if meta.VmessSecurity != "" {
-				userCopy.VmessSecurity = meta.VmessSecurity
-			}
-			if userCopy.VmessAlterID == 0 && meta.VmessAlterID != 0 {
-				userCopy.VmessAlterID = meta.VmessAlterID
+		if s.store != nil {
+			if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+				if meta.VmessSecurity != "" {
+					userCopy.VmessSecurity = meta.VmessSecurity
+				}
+				if userCopy.VmessAlterID == 0 && meta.VmessAlterID != 0 {
+					userCopy.VmessAlterID = meta.VmessAlterID
+				}
 			}
 		}
-		link, err := buildVmessLink(name, &userCopy, inboundView, host, port, sniFallback)
+		link, err := buildVmessLink(name, &userCopy, inboundView, host, port, inboundMeta, sniFallback)
 		return link, inbType, err
 	case "trojan":
-		link, err := buildTrojanLink(name, userInfo, inboundView, host, port, sniFallback)
+		link, err := buildTrojanLink(name, userInfo, inboundView, host, port, inboundMeta, sniFallback)
+		return link, inbType, err
+	case "hysteria2":
+		link, err := buildHysteria2Link(name, userInfo, inboundView, host, port)
 		return link, inbType, err
 	default:
 		return "", "", fmt.Errorf("Inbound type is not supported")
@@ -479,7 +511,7 @@ func extractTLSInfo(view *core.SingboxInboundView) tlsInfo {
 	}
 }
 
-func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port, sniFallback string) (string, error) {
+func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
 	tls := extractTLSInfo(view)
 	alpn := normalizedALPN(tls.ALPN)
 	transport := extractTransportInfo(view.Raw)
@@ -530,10 +562,6 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
 			udpParam = "&udp=0"
 		}
-		alpnParam := ""
-		if alpn != "" {
-			alpnParam = "&alpn=" + url.QueryEscape(alpn)
-		}
 		link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s%s#%s",
 			url.QueryEscape(userInfo.UUID),
 			host,
@@ -543,7 +571,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 			flowParam,
 			url.QueryEscape(sni),
 			url.QueryEscape(sid),
-			alpnParam,
+			"",
 			nameTag,
 		)
 		if udpParam != "" {
@@ -564,10 +592,10 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	} else if sniFallback != "" {
 		params.Set("sni", sniFallback)
 	}
-	if alpn != "" {
+	if alpn != "" && !strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
 		params.Set("alpn", alpn)
 	}
-	if shouldAllowInsecure(tls) {
+	if shouldAllowInsecure(tls, meta) {
 		params.Set("allowInsecure", "1")
 	}
 	if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
@@ -599,7 +627,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	return base, nil
 }
 
-func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port, sniFallback string) (string, error) {
+func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User password missing for inbound")
 	}
@@ -619,7 +647,7 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 	if alpn != "" {
 		params.Set("alpn", alpn)
 	}
-	if shouldAllowInsecure(tls) {
+	if shouldAllowInsecure(tls, meta) {
 		params.Set("allowInsecure", "1")
 	}
 	trojanType := transport.Type
@@ -648,7 +676,39 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 	return base, nil
 }
 
-func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port, sniFallback string) (string, error) {
+func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+	password := strings.TrimSpace(userInfo.Password)
+	if password == "" {
+		return "", fmt.Errorf("User password missing for hysteria2 inbound")
+	}
+	tls := extractTLSInfo(view)
+	params := url.Values{}
+	if tls.ServerName != "" {
+		params.Set("sni", tls.ServerName)
+	}
+	// Extract obfs from Raw — SingboxInboundView has no typed Obfs field
+	if obfsMap, ok := view.Raw["obfs"].(map[string]interface{}); ok {
+		obfsType, _ := obfsMap["type"].(string)
+		obfsPwd, _ := obfsMap["password"].(string)
+		if obfsType != "" && obfsPwd != "" {
+			params.Set("obfs", obfsType)
+			params.Set("obfs-password", obfsPwd)
+		}
+	}
+	nameTag := url.QueryEscape("HY2-" + name)
+	base := fmt.Sprintf("hysteria2://%s@%s:%s",
+		url.QueryEscape(password),
+		host,
+		port,
+	)
+	if encoded := params.Encode(); encoded != "" {
+		base += "?" + encoded
+	}
+	base += "#" + nameTag
+	return base, nil
+}
+
+func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
 	if strings.TrimSpace(userInfo.UUID) == "" {
 		return "", fmt.Errorf("User UUID missing for inbound")
 	}
@@ -701,7 +761,7 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		if alpn != "" {
 			payload["alpn"] = alpn
 		}
-		if shouldAllowInsecure(tls) {
+		if shouldAllowInsecure(tls, meta) {
 			payload["allowInsecure"] = "1"
 		}
 	}
@@ -714,7 +774,10 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	return "vmess://" + encoded, nil
 }
 
-func shouldAllowInsecure(tls tlsInfo) bool {
+func shouldAllowInsecure(tls tlsInfo, meta *core.InboundMeta) bool {
+	if meta != nil && meta.LinkAllowInsecure != nil {
+		return *meta.LinkAllowInsecure
+	}
 	if !tls.Enabled {
 		return false
 	}
@@ -736,22 +799,37 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	sanitiseInboundFields(newInbound)
 
-	externalPort, externalPortSet, err := popExternalPort(newInbound)
+	externalPort, externalPortSet, linkAllowInsecure, linkAllowInsecureSet, err := popInboundLinkMeta(newInbound)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	overrideAddress, overrideAddressSet := popOverrideAddress(newInbound)
+	if s.store == nil && (externalPortSet || linkAllowInsecureSet || overrideAddressSet) {
+		http.Error(w, "Inbound metadata store unavailable", http.StatusInternalServerError)
+		return
+	}
 
 	if err := s.config.AddSingboxInbound(newInbound); err != nil {
 		http.Error(w, "Failed to add inbound: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	if externalPortSet || overrideAddressSet {
+	if externalPortSet || linkAllowInsecureSet || overrideAddressSet {
 		tag, _ := newInbound["tag"].(string)
-		if err := s.store.SaveInboundMeta(tag, externalPort, overrideAddress); err != nil {
+		meta := core.InboundMeta{Tag: tag}
+		if externalPortSet {
+			meta.ExternalPort = externalPort
+		}
+		if linkAllowInsecureSet {
+			meta.LinkAllowInsecure = linkAllowInsecure
+		}
+		if overrideAddressSet {
+			meta.OverrideAddress = overrideAddress
+		}
+		if err := s.store.SaveInboundMeta(meta); err != nil {
 			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -817,7 +895,18 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	externalPort, externalPortSet, err := popExternalPort(updatedInbound)
+	originalInbound, err := s.getSingboxInboundRaw(tag)
+	if err != nil {
+		http.Error(w, "Failed to load inbound before update: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	warnings := buildInboundUpdateWarnings(originalInbound, updatedInbound)
+	sanitiseInboundFields(updatedInbound)
+	if warnings == nil {
+		warnings = []string{}
+	}
+
+	externalPort, externalPortSet, linkAllowInsecure, linkAllowInsecureSet, err := popInboundLinkMeta(updatedInbound)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -826,6 +915,10 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
+	if s.store == nil && (tagChanged || externalPortSet || linkAllowInsecureSet || overrideAddressSet) {
+		http.Error(w, "Inbound metadata store unavailable", http.StatusInternalServerError)
+		return
+	}
 
 	if err := s.config.UpdateSingboxInbound(tag, updatedInbound); err != nil {
 		http.Error(w, "Failed to update inbound: "+err.Error(), http.StatusInternalServerError)
@@ -833,20 +926,118 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 	}
 
 	if tagChanged {
-		if err := s.store.RenameInboundMeta(tag, newTag); err != nil {
+		if err := s.store.RenameInboundReferences(tag, newTag); err != nil {
+			if rollbackErr := s.config.UpdateSingboxInbound(newTag, originalInbound); rollbackErr != nil {
+				http.Error(w, "Failed to update inbound metadata: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				return
+			}
 			http.Error(w, "Failed to update inbound metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		tag = newTag
 	}
-	if externalPortSet || overrideAddressSet {
-		if err := s.store.SaveInboundMeta(tag, externalPort, overrideAddress); err != nil {
+	if externalPortSet || linkAllowInsecureSet || overrideAddressSet {
+		meta, err := s.store.GetInboundMeta(tag)
+		if err != nil {
+			http.Error(w, "Failed to load inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if meta == nil {
+			meta = &core.InboundMeta{Tag: tag}
+		}
+		if externalPortSet {
+			meta.ExternalPort = externalPort
+		}
+		if linkAllowInsecureSet {
+			meta.LinkAllowInsecure = linkAllowInsecure
+		}
+		if overrideAddressSet {
+			meta.OverrideAddress = overrideAddress
+		}
+		if err := s.store.SaveInboundMeta(*meta); err != nil {
 			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(inboundUpdateResponse{Warnings: warnings})
+}
+
+func (s *Server) getSingboxInboundRaw(tag string) (map[string]interface{}, error) {
+	inbounds, err := s.config.GetSingboxInboundViews()
+	if err != nil {
+		return nil, err
+	}
+	for _, inbound := range inbounds {
+		if inbound.Tag != tag {
+			continue
+		}
+		cloned := map[string]interface{}{}
+		payload, err := json.Marshal(inbound.Raw)
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(payload, &cloned); err != nil {
+			return nil, err
+		}
+		return cloned, nil
+	}
+	return nil, fmt.Errorf("inbound %q not found", tag)
+}
+
+func buildInboundUpdateWarnings(beforeInbound, updatedInbound map[string]interface{}) []string {
+	if beforeInbound == nil || updatedInbound == nil {
+		return []string{}
+	}
+
+	inbType, _ := updatedInbound["type"].(string)
+	if strings.ToLower(strings.TrimSpace(inbType)) != "vless" {
+		return []string{}
+	}
+
+	beforeTransport := extractTransportInfo(beforeInbound).Type
+	afterTransport := extractTransportInfo(updatedInbound).Type
+	if beforeTransport == "ws" || afterTransport != "ws" {
+		return []string{}
+	}
+
+	affected := make(map[string]struct{})
+	collectFlowUsers(beforeInbound["users"], affected)
+	collectFlowUsers(updatedInbound["users"], affected)
+	if len(affected) == 0 {
+		return []string{}
+	}
+
+	return []string{
+		fmt.Sprintf("Removed VLESS flow from %d user(s) because WebSocket transport does not support it.", len(affected)),
+	}
+}
+
+func collectFlowUsers(rawUsers interface{}, affected map[string]struct{}) {
+	users, ok := rawUsers.([]interface{})
+	if !ok {
+		return
+	}
+	for idx, rawUser := range users {
+		user, ok := rawUser.(map[string]interface{})
+		if !ok || user == nil {
+			continue
+		}
+		flow, _ := user["flow"].(string)
+		if strings.TrimSpace(flow) == "" {
+			continue
+		}
+		identifier, _ := user["name"].(string)
+		if strings.TrimSpace(identifier) == "" {
+			identifier, _ = user["uuid"].(string)
+		}
+		if strings.TrimSpace(identifier) == "" {
+			identifier = fmt.Sprintf("user-%d", idx)
+		}
+		affected[identifier] = struct{}{}
+	}
 }
 
 func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Request) {
@@ -865,43 +1056,67 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	_ = s.store.DeleteInboundMeta(tag)
+	if s.store != nil {
+		_ = s.store.DeleteInboundMeta(tag)
+	}
 
 	w.WriteHeader(http.StatusOK)
 }
 
-func popExternalPort(inbound map[string]interface{}) (int, bool, error) {
+func popInboundLinkMeta(inbound map[string]interface{}) (int, bool, *bool, bool, error) {
 	if inbound == nil {
-		return 0, false, nil
+		return 0, false, nil, false, nil
 	}
-	raw, ok := inbound["external_port"]
-	if !ok {
-		return 0, false, nil
-	}
-	delete(inbound, "external_port")
 
-	switch v := raw.(type) {
-	case nil:
-		return 0, true, nil
-	case float64:
-		return int(v), true, nil
-	case int:
-		return v, true, nil
-	case int64:
-		return int(v), true, nil
-	case string:
-		trimmed := strings.TrimSpace(v)
-		if trimmed == "" {
-			return 0, true, nil
+	externalPort := 0
+	externalPortSet := false
+	if raw, ok := inbound["external_port"]; ok {
+		delete(inbound, "external_port")
+		externalPortSet = true
+		switch v := raw.(type) {
+		case nil:
+			externalPort = 0
+		case float64:
+			externalPort = int(v)
+		case int:
+			externalPort = v
+		case int64:
+			externalPort = int(v)
+		case string:
+			trimmed := strings.TrimSpace(v)
+			if trimmed == "" {
+				externalPort = 0
+			} else {
+				parsed, err := strconv.Atoi(trimmed)
+				if err != nil {
+					return 0, false, nil, false, fmt.Errorf("external_port must be a number")
+				}
+				externalPort = parsed
+			}
+		default:
+			return 0, false, nil, false, fmt.Errorf("external_port must be a number")
 		}
-		parsed, err := strconv.Atoi(trimmed)
-		if err != nil {
-			return 0, true, fmt.Errorf("external_port must be a number")
-		}
-		return parsed, true, nil
-	default:
-		return 0, true, fmt.Errorf("external_port must be a number")
 	}
+
+	linkAllowInsecure := (*bool)(nil)
+	linkAllowInsecureSet := false
+	if raw, ok := inbound["link_allow_insecure"]; ok {
+		delete(inbound, "link_allow_insecure")
+		linkAllowInsecureSet = true
+		switch v := strings.ToLower(strings.TrimSpace(fmt.Sprintf("%v", raw))); v {
+		case "", "auto":
+			linkAllowInsecure = nil
+		case "enabled", "true", "1":
+			value := true
+			linkAllowInsecure = &value
+		case "disabled", "false", "0":
+			value := false
+			linkAllowInsecure = &value
+		default:
+			return 0, false, nil, false, fmt.Errorf("link_allow_insecure must be auto, enabled, or disabled")
+		}
+	}
+	return externalPort, externalPortSet, linkAllowInsecure, linkAllowInsecureSet, nil
 }
 
 func popOverrideAddress(inbound map[string]interface{}) (string, bool) {
