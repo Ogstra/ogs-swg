@@ -15,6 +15,7 @@ import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
+const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2'])
 type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2'
 
 function bytesToGbString(bytes?: number) {
@@ -127,7 +128,10 @@ export default function UserManagement() {
         setQrLoading(true)
         setQrLink('')
         setQrError('')
-        setSelectedQrInbound(user.inbound_tags?.[0] || '')
+        const firstSupportedTag = (user.inbound_tags || []).find(
+            tag => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || '')
+        ) || ''
+        setSelectedQrInbound(firstSupportedTag)
         setQrLinkCache({})
         setModalState({ type: 'qr', data: user })
     }
@@ -215,7 +219,10 @@ export default function UserManagement() {
 
     useEffect(() => {
         if (modalState.type === 'qr' && modalState.data?.inbound_tags?.length > 0) {
-            setSelectedQrInbound(modalState.data.inbound_tags[0])
+            const firstSupported = (modalState.data.inbound_tags as string[]).find(
+                (tag: string) => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || '')
+            ) || ''
+            setSelectedQrInbound(firstSupported)
             setQrLink('')
             setQrError('')
             setQrLinkCache({})
@@ -1530,23 +1537,28 @@ export default function UserManagement() {
                 <div className="flex flex-col items-center space-y-4">
                     {modalState.data && (
                         <>
-                            {modalState.data.inbound_tags && modalState.data.inbound_tags.length > 1 && (
-                                <div className="w-full flex flex-wrap gap-2">
-                                    {modalState.data.inbound_tags.map((tag: string) => (
-                                        <button
-                                            key={tag}
-                                            type="button"
-                                            onClick={() => setSelectedQrInbound(tag)}
-                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${selectedQrInbound === tag
-                                                ? 'bg-slate-800 text-white border-slate-700'
-                                                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                                                }`}
-                                        >
-                                            {tag}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
+                            {(() => {
+                                const qrTags = (modalState.data.inbound_tags || []).filter(
+                                    (tag: string) => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || '')
+                                )
+                                return qrTags.length > 1 && (
+                                    <div className="w-full flex flex-wrap gap-2">
+                                        {qrTags.map((tag: string) => (
+                                            <button
+                                                key={tag}
+                                                type="button"
+                                                onClick={() => setSelectedQrInbound(tag)}
+                                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${selectedQrInbound === tag
+                                                    ? 'bg-slate-800 text-white border-slate-700'
+                                                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
+                                                    }`}
+                                            >
+                                                {tag}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )
+                            })()}
                             {qrError && !qrLoading ? (
                                 <div className="w-full bg-red-900/20 border border-red-700/40 rounded-lg p-3 text-xs text-red-300">
                                     {qrError}
