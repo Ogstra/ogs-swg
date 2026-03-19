@@ -10,6 +10,7 @@ export default function LogViewer() {
     const [searchQuery, setSearchQuery] = useState<string>('')
     const [logSource, setLogSource] = useState<'journal' | 'file'>('journal')
     const containerRef = useRef<HTMLDivElement>(null)
+    const initialTailScrollPendingRef = useRef(true)
     const [autoScroll, setAutoScroll] = useState(true)
     const [searchLimit, setSearchLimit] = useState(500)
     const [searching, setSearching] = useState(false)
@@ -17,22 +18,14 @@ export default function LogViewer() {
     const [tailLimit, setTailLimit] = useState<number>(50)
     const demoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
 
-    const fetchLogs = (forceTail = false, silent = false) => {
+    const fetchLogs = (silent = false) => {
         if (!silent) setLoading(true)
         api.getLogs({ user: query || undefined, limit: tailLimit }).then(data => {
             setLines(data.logs)
-            if (forceTail) {
-                setViewMode('tail')
-                setAutoScroll(true)
-            }
             if (!silent) setLoading(false)
         }).catch(err => {
             console.error(err)
             setLines(['Error loading logs: ' + err.message])
-            if (forceTail) {
-                setViewMode('tail')
-                setAutoScroll(true)
-            }
             if (!silent) setLoading(false)
         })
     }
@@ -50,10 +43,19 @@ export default function LogViewer() {
     }, [demoMode])
 
     useEffect(() => {
+        if (viewMode !== 'tail') {
+            initialTailScrollPendingRef.current = false
+            return
+        }
+        initialTailScrollPendingRef.current = true
+        setAutoScroll(true)
+    }, [viewMode])
+
+    useEffect(() => {
         if (viewMode !== 'tail') return
-        fetchLogs(true, true)
+        fetchLogs(true)
         const interval = setInterval(() => {
-            fetchLogs(true, true)
+            fetchLogs(true)
         }, refreshInterval)
         return () => clearInterval(interval)
     }, [refreshInterval, query, viewMode, tailLimit])
@@ -61,7 +63,10 @@ export default function LogViewer() {
     useLayoutEffect(() => {
         const el = containerRef.current
         if (!el || !autoScroll || viewMode !== 'tail') return
+        if (!initialTailScrollPendingRef.current) return
         el.scrollTop = el.scrollHeight
+        initialTailScrollPendingRef.current = false
+        setAutoScroll(false)
     }, [lines, autoScroll, viewMode])
 
     const handleScroll = () => {
@@ -200,7 +205,7 @@ export default function LogViewer() {
                             </button>
                         </div>
                         <button
-                            onClick={() => fetchLogs(true)}
+                            onClick={() => fetchLogs()}
                             className="w-[38px] h-[38px] shrink-0 flex items-center justify-center rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 text-xs border border-slate-700 transition-colors"
                             title="Refresh Now"
                         >
@@ -230,7 +235,7 @@ export default function LogViewer() {
 
                         <div className="flex items-center gap-3 shrink-0">
                             <button
-                                onClick={() => fetchLogs(true)}
+                                onClick={() => fetchLogs()}
                                 disabled={loading}
                                 className="h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
                             >
