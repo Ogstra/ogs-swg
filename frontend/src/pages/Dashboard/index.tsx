@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
@@ -52,6 +52,7 @@ const WireGuardIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
 )
 
 export default function Dashboard() {
+    const queryClient = useQueryClient()
     const [timeRange, setTimeRange] = useState<DashboardRange>('24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [refreshInterval, setRefreshInterval] = useState<number>(10000)
@@ -161,6 +162,12 @@ export default function Dashboard() {
     const handleApplySingboxChanges = async () => {
         try {
             await api.applySingboxChanges()
+            const qKey = requestWindow.range === 'custom'
+                ? ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText]
+                : ['dashboard-data', requestWindow.range]
+            queryClient.setQueryData(qKey, (old: any) =>
+                old ? { ...old, singbox_pending_changes: false } : old
+            )
             await dashboardQuery.refetch()
         } catch (err) {
             console.error('Failed to apply Sing-box changes:', err)
