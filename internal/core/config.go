@@ -921,6 +921,12 @@ func (c *Config) MarkSingboxPending() {
 	c.SingboxPendingChanges = true
 }
 
+func (c *Config) GetSingboxPendingChanges() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.SingboxPendingChanges
+}
+
 // ApplySingboxChanges applies pending Sing-box configuration changes by reloading the service
 func (c *Config) ApplySingboxChanges() error {
 	c.mu.Lock()
