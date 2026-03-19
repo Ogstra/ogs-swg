@@ -4,6 +4,36 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App.tsx'
 import './index.css'
 
+const disableMobileZoom = () => {
+    if (typeof window === 'undefined') return
+
+    let lastTouchEnd = 0
+
+    document.addEventListener('gesturestart', (event) => {
+        event.preventDefault()
+    }, { passive: false })
+
+    document.addEventListener('gesturechange', (event) => {
+        event.preventDefault()
+    }, { passive: false })
+
+    document.addEventListener('touchmove', (event) => {
+        if (event.touches.length > 1) {
+            event.preventDefault()
+        }
+    }, { passive: false })
+
+    document.addEventListener('touchend', (event) => {
+        const now = Date.now()
+        if (now - lastTouchEnd <= 300) {
+            event.preventDefault()
+        }
+        lastTouchEnd = now
+    }, { passive: false })
+}
+
+disableMobileZoom()
+
 const queryClient = new QueryClient({
     defaultOptions: {
         queries: {
