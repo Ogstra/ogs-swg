@@ -193,6 +193,21 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 placeholder="e.g. 443"
                             />
                         </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-300">Link TLS Verification</label>
+                            <select
+                                value={formData.link_allow_insecure || 'auto'}
+                                onChange={e => updateForm(prev => ({ ...prev, link_allow_insecure: e.target.value }))}
+                                className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                            >
+                                <option value="auto">Auto</option>
+                                <option value="enabled">Force allowInsecure=1</option>
+                                <option value="disabled">Force strict verification</option>
+                            </select>
+                            <p className="text-[11px] text-slate-400">
+                                Controls whether generated share links include <code>allowInsecure=1</code>. Auto keeps the backend heuristic.
+                            </p>
+                        </div>
                     </div>
                 </div>
 
@@ -226,7 +241,28 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                         <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
                             {isHysteria2 && (
                                 <div className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
-                                    Hysteria2 always uses TLS. Configure the certificate and key below before saving this inbound.
+                                    Hysteria2 always uses TLS. Use a trusted certificate when possible, and set Server Name to the public hostname clients will validate.
+                                </div>
+                            )}
+                            {!visibility.showRealitySection && (
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-300">Server Name for clients</label>
+                                    <input
+                                        type="text"
+                                        value={formData.tls?.server_name || ''}
+                                        onChange={e => updateForm((prev: any) => ({
+                                            ...prev,
+                                            tls: {
+                                                ...prev.tls,
+                                                server_name: e.target.value || undefined,
+                                            },
+                                        }))}
+                                        className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                                        placeholder={isHysteria2 ? 'e.g. vpn.example.com' : 'Optional SNI/hostname for clients'}
+                                    />
+                                    <p className="text-[11px] text-slate-400">
+                                        Clients use this hostname for TLS verification. Hysteria2 usually needs it to match the public certificate name.
+                                    </p>
                                 </div>
                             )}
                             {visibility.showAlpn && (
@@ -411,18 +447,22 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                             </div>
 
                             {!visibility.showRealitySection && (
-                                <div className="flex flex-wrap items-center gap-3">
-                                    <Button
-                                        type="button"
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={handleGenerateCert}
-                                        disabled={certLoading}
-                                    >
-                                        {certLoading ? 'Generating...' : 'Generate Self-Signed'}
-                                    </Button>
-                                    <span className="text-[10px] text-slate-400">Writes cert/key next to the sing-box config.</span>
-                                    {certError && <span className="text-[10px] text-red-400">{certError}</span>}
+                                <div className="space-y-3">
+                                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                                        The self-signed helper writes PEM-encoded cert/key files next to the sing-box config. Most clients will still reject them unless that certificate is explicitly trusted.
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={handleGenerateCert}
+                                            disabled={certLoading}
+                                        >
+                                            {certLoading ? 'Generating...' : 'Generate Self-Signed'}
+                                        </Button>
+                                        {certError && <span className="text-[10px] text-red-400">{certError}</span>}
+                                    </div>
                                 </div>
                             )}
                         </div>

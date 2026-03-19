@@ -23,6 +23,7 @@ const DEFAULT_VLESS = {
     listen: '0.0.0.0',
     listen_port: 443,
     external_port: '',
+    link_allow_insecure: 'auto',
     tls: {
         enabled: false,
         server_name: '',
@@ -66,6 +67,7 @@ const DEFAULT_VMESS = {
     listen: '0.0.0.0',
     listen_port: 443,
     external_port: '',
+    link_allow_insecure: 'auto',
     tls: {
         enabled: false,
         server_name: '',
@@ -99,6 +101,7 @@ const DEFAULT_TROJAN = {
     listen: '0.0.0.0',
     listen_port: 443,
     external_port: '',
+    link_allow_insecure: 'auto',
     tls: {
         enabled: false,
         server_name: '',
@@ -132,6 +135,7 @@ const DEFAULT_HYSTERIA2 = {
     listen: '0.0.0.0',
     listen_port: 443,
     external_port: '',
+    link_allow_insecure: 'auto',
     up_mbps: '',
     down_mbps: '',
     users: [
@@ -375,6 +379,7 @@ export function normalizeInboundForEditor(value: InboundLike | null | undefined)
         ...source,
         type,
         external_port: source.external_port ? String(source.external_port) : '',
+        link_allow_insecure: source.link_allow_insecure || 'auto',
         listen_port: source.listen_port ?? fallback.listen_port,
         tls: normalizeTls(type, source.tls, fallback.tls),
     }
@@ -456,6 +461,15 @@ export function buildInboundSubmission(formData: InboundLike) {
         submission.external_port = parsedExternalPort
     } else {
         delete submission.external_port
+    }
+
+    const linkAllowInsecure = String(submission.link_allow_insecure || 'auto').trim().toLowerCase()
+    if (linkAllowInsecure === '' || linkAllowInsecure === 'auto') {
+        delete submission.link_allow_insecure
+    } else if (linkAllowInsecure === 'enabled' || linkAllowInsecure === 'disabled') {
+        submission.link_allow_insecure = linkAllowInsecure
+    } else {
+        return { error: 'Link allowInsecure must be auto, enabled, or disabled.' }
     }
 
     const tlsEnabled = !!submission.tls?.enabled
