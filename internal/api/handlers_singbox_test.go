@@ -206,7 +206,7 @@ func TestBuildVlessLink_RealityOmitsALPNAndH2(t *testing.T) {
 		Flow: "xtls-rprx-vision",
 	}
 
-	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil)
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -240,7 +240,7 @@ func TestBuildVlessLink_VisionOmitsALPN(t *testing.T) {
 		Flow: "xtls-rprx-vision",
 	}
 
-	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil)
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -268,7 +268,7 @@ func TestBuildVlessLink_IncludesALPN(t *testing.T) {
 	}
 	user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
 
-	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil)
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -294,7 +294,7 @@ func TestBuildTrojanLink_IncludesALPN(t *testing.T) {
 	}
 	user := &core.UserInboundInfo{UUID: "secret-password"}
 
-	link, err := buildTrojanLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildTrojanLink("alice", user, view, "1.2.3.4", "443", nil)
 	if err != nil {
 		t.Fatalf("buildTrojanLink() error = %v", err)
 	}
@@ -325,7 +325,7 @@ func TestBuildVmessLink_IncludesALPN(t *testing.T) {
 		VmessSecurity: "auto",
 	}
 
-	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", nil)
 	if err != nil {
 		t.Fatalf("buildVmessLink() error = %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBuildVmessLink_HTTPTransportMapsToH2(t *testing.T) {
 		VmessSecurity: "auto",
 	}
 
-	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443")
+	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", nil)
 	if err != nil {
 		t.Fatalf("buildVmessLink() error = %v", err)
 	}
@@ -376,6 +376,52 @@ func TestBuildVmessLink_HTTPTransportMapsToH2(t *testing.T) {
 	}
 	if got := payload["net"]; got != "h2" {
 		t.Fatalf("payload net = %q; want %q", got, "h2")
+	}
+}
+
+func TestBuildVlessLink_AllowInsecureMetadataOverride(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "vless",
+		TLS: &core.TLSConfig{
+			Enabled:         true,
+			CertificatePath: "/etc/sing-box/certs/selfsigned_test.crt",
+		},
+		Raw: map[string]interface{}{
+			"transport": map[string]interface{}{"type": "tcp"},
+		},
+	}
+	user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
+
+	forcedOff := false
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", &core.InboundMeta{
+		Tag:               "test-vless",
+		LinkAllowInsecure: &forcedOff,
+	})
+	if err != nil {
+		t.Fatalf("buildVlessLink() error = %v", err)
+	}
+	u, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("parse link: %v", err)
+	}
+	if got := u.Query().Get("allowInsecure"); got != "" {
+		t.Fatalf("allowInsecure = %q; want empty when metadata disables it", got)
+	}
+
+	forcedOn := true
+	link, err = buildVlessLink("alice", user, view, "1.2.3.4", "443", &core.InboundMeta{
+		Tag:               "test-vless",
+		LinkAllowInsecure: &forcedOn,
+	})
+	if err != nil {
+		t.Fatalf("buildVlessLink() error = %v", err)
+	}
+	u, err = url.Parse(link)
+	if err != nil {
+		t.Fatalf("parse link: %v", err)
+	}
+	if got := u.Query().Get("allowInsecure"); got != "1" {
+		t.Fatalf("allowInsecure = %q; want %q when metadata enables it", got, "1")
 	}
 }
 
@@ -540,7 +586,7 @@ func TestHandleUpdateSingboxInbound_RenamePropagatesInboundReferences(t *testing
 		]
 	}`)
 
-	if err := store.SaveInboundMeta("test-vless", 7443); err != nil {
+	if err := store.SaveInboundMeta(core.InboundMeta{Tag: "test-vless", ExternalPort: 7443}); err != nil {
 		t.Fatalf("SaveInboundMeta: %v", err)
 	}
 	if err := store.SaveUserMetadata(core.UserMetadata{
@@ -703,7 +749,7 @@ func TestHandleUpdateSingboxInbound_RenameFailureRollsBackConfig(t *testing.T) {
 		]
 	}`)
 
-	if err := store.SaveInboundMeta("test-vless", 7443); err != nil {
+	if err := store.SaveInboundMeta(core.InboundMeta{Tag: "test-vless", ExternalPort: 7443}); err != nil {
 		t.Fatalf("SaveInboundMeta: %v", err)
 	}
 	if err := store.SaveUserMetadata(core.UserMetadata{
@@ -740,5 +786,115 @@ func TestHandleUpdateSingboxInbound_RenameFailureRollsBackConfig(t *testing.T) {
 	readStoredInboundByTag(t, stub, "test-vless")
 	if statsInbounds := readStoredStatsInbounds(t, stub); len(statsInbounds) != 1 || statsInbounds[0] != "test-vless" {
 		t.Fatalf("stats.inbounds = %#v; want rollback to original tag", statsInbounds)
+	}
+}
+
+func TestBuildHysteria2Link_Basic(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "hysteria2",
+		TLS:  nil,
+		Raw:  map[string]interface{}{},
+	}
+	user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+	link, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildHysteria2Link() error = %v", err)
+	}
+	if !strings.HasPrefix(link, "hysteria2://alice:s3cr3t@1.2.3.4:443") {
+		t.Errorf("link = %q; want prefix hysteria2://alice:s3cr3t@1.2.3.4:443", link)
+	}
+	if !strings.HasSuffix(link, "#HY2-alice") {
+		t.Errorf("link = %q; want suffix #HY2-alice", link)
+	}
+	if strings.Contains(link, "sni=") {
+		t.Errorf("link should not contain sni=; got %q", link)
+	}
+	if strings.Contains(link, "obfs=") {
+		t.Errorf("link should not contain obfs=; got %q", link)
+	}
+}
+
+func TestBuildHysteria2Link_TLS(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "hysteria2",
+		TLS: &core.TLSConfig{
+			Enabled:    true,
+			ServerName: "example.com",
+		},
+		Raw: map[string]interface{}{},
+	}
+	user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+	link, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildHysteria2Link() error = %v", err)
+	}
+	u, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("parse link: %v", err)
+	}
+	if got := u.Query().Get("sni"); got != "example.com" {
+		t.Errorf("sni = %q; want %q", got, "example.com")
+	}
+}
+
+func TestBuildHysteria2Link_Obfs(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "hysteria2",
+		TLS:  nil,
+		Raw: map[string]interface{}{
+			"obfs": map[string]interface{}{
+				"type":     "salamander",
+				"password": "obfs-secret",
+			},
+		},
+	}
+	user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+	link, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildHysteria2Link() error = %v", err)
+	}
+	u, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("parse link: %v", err)
+	}
+	if got := u.Query().Get("obfs"); got != "salamander" {
+		t.Errorf("obfs = %q; want %q", got, "salamander")
+	}
+	if got := u.Query().Get("obfs-password"); got != "obfs-secret" {
+		t.Errorf("obfs-password = %q; want %q", got, "obfs-secret")
+	}
+}
+
+func TestBuildHysteria2Link_NoObfs(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "hysteria2",
+		TLS:  nil,
+		Raw:  map[string]interface{}{},
+	}
+	user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+	link, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildHysteria2Link() error = %v", err)
+	}
+	if strings.Contains(link, "obfs") {
+		t.Errorf("link should not contain obfs; got %q", link)
+	}
+}
+
+func TestBuildHysteria2Link_EmptyPassword(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "hysteria2",
+		TLS:  nil,
+		Raw:  map[string]interface{}{},
+	}
+	user := &core.UserInboundInfo{Password: ""}
+
+	_, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err == nil {
+		t.Fatal("buildHysteria2Link() expected error for empty password; got nil")
 	}
 }

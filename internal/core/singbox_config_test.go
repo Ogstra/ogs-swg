@@ -672,3 +672,33 @@ func TestTLSTyped_AbsentTLSIsNil(t *testing.T) {
 		t.Errorf("TLS should be nil for inbound without tls block; got %+v", view.TLS)
 	}
 }
+
+func TestGetUserInbounds_Hysteria2(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "hysteria2",
+				"tag": "hy2-in",
+				"listen_port": 8443,
+				"users": [
+					{"name": "alice", "password": "s3cr3t"}
+				]
+			}
+		]
+	}`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	results, err := cfg.GetUserInbounds("alice")
+	if err != nil {
+		t.Fatalf("GetUserInbounds() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("GetUserInbounds() returned %d entries; want 1", len(results))
+	}
+	info := results[0]
+	if info.Password != "s3cr3t" {
+		t.Errorf("Password = %q; want %q", info.Password, "s3cr3t")
+	}
+	if info.UUID != "" {
+		t.Errorf("UUID = %q; want empty string", info.UUID)
+	}
+}
