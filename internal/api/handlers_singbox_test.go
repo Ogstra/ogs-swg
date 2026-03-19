@@ -206,7 +206,7 @@ func TestBuildVlessLink_RealityOmitsALPNAndH2(t *testing.T) {
 		Flow: "xtls-rprx-vision",
 	}
 
-	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil)
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil, "")
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -240,7 +240,7 @@ func TestBuildVlessLink_VisionOmitsALPN(t *testing.T) {
 		Flow: "xtls-rprx-vision",
 	}
 
-	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil)
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil, "")
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -268,7 +268,7 @@ func TestBuildVlessLink_IncludesALPN(t *testing.T) {
 	}
 	user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
 
-	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil)
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil, "")
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -294,7 +294,7 @@ func TestBuildTrojanLink_IncludesALPN(t *testing.T) {
 	}
 	user := &core.UserInboundInfo{UUID: "secret-password"}
 
-	link, err := buildTrojanLink("alice", user, view, "1.2.3.4", "443", nil)
+	link, err := buildTrojanLink("alice", user, view, "1.2.3.4", "443", nil, "")
 	if err != nil {
 		t.Fatalf("buildTrojanLink() error = %v", err)
 	}
@@ -325,7 +325,7 @@ func TestBuildVmessLink_IncludesALPN(t *testing.T) {
 		VmessSecurity: "auto",
 	}
 
-	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", nil)
+	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", nil, "")
 	if err != nil {
 		t.Fatalf("buildVmessLink() error = %v", err)
 	}
@@ -360,7 +360,7 @@ func TestBuildVmessLink_HTTPTransportMapsToH2(t *testing.T) {
 		VmessSecurity: "auto",
 	}
 
-	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", nil)
+	link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", nil, "")
 	if err != nil {
 		t.Fatalf("buildVmessLink() error = %v", err)
 	}
@@ -396,7 +396,7 @@ func TestBuildVlessLink_AllowInsecureMetadataOverride(t *testing.T) {
 	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", &core.InboundMeta{
 		Tag:               "test-vless",
 		LinkAllowInsecure: &forcedOff,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
@@ -412,7 +412,7 @@ func TestBuildVlessLink_AllowInsecureMetadataOverride(t *testing.T) {
 	link, err = buildVlessLink("alice", user, view, "1.2.3.4", "443", &core.InboundMeta{
 		Tag:               "test-vless",
 		LinkAllowInsecure: &forcedOn,
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("buildVlessLink() error = %v", err)
 	}
