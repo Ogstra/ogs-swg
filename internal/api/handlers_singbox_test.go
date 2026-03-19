@@ -898,3 +898,67 @@ func TestBuildHysteria2Link_EmptyPassword(t *testing.T) {
 		t.Fatal("buildHysteria2Link() expected error for empty password; got nil")
 	}
 }
+
+func TestHandleGetUserInbounds_Hysteria2Redaction(t *testing.T) {
+	const hy2Config = `{"inbounds":[{"type":"hysteria2","tag":"hy2-in","listen":"::","listen_port":8443,"tls":{"enabled":true},"users":[{"name":"alice","password":"s3cr3t"}]}]}`
+
+	server, _ := newSingboxHandlerTestServer(hy2Config)
+
+	withPerms := func(perms core.PanelUserPermissions) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/api/users/alice/inbounds", nil)
+		req.SetPathValue("name", "alice")
+		ctx := context.WithValue(req.Context(), permissionsContextKey, &perms)
+		return req.WithContext(ctx)
+	}
+
+	decodeInbounds := func(t *testing.T, rec *httptest.ResponseRecorder) []core.UserInboundInfo {
+		t.Helper()
+		var inbounds []core.UserInboundInfo
+		if err := json.NewDecoder(rec.Body).Decode(&inbounds); err != nil {
+			t.Fatalf("decode inbounds: %v body=%q", err, rec.Body.String())
+		}
+		return inbounds
+	}
+
+	// Sub-test 1: read-only token → password masked, uuid unchanged (empty)
+	t.Run("read-only masks Hysteria2 password", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.handleGetUserInbounds(rec, withPerms(core.PanelUserPermissions{
+			CanReadUsers:  true,
+			CanWriteUsers: false,
+		}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+		inbounds := decodeInbounds(t, rec)
+		if len(inbounds) == 0 {
+			t.Fatal("expected at least one inbound; got none")
+		}
+		if got := inbounds[0].Password; got != maskedValue {
+			t.Errorf("password = %q; want %q (masked)", got, maskedValue)
+		}
+		// UUID is empty for hysteria2 users — should NOT be masked
+		if got := inbounds[0].UUID; got != "" {
+			t.Errorf("uuid = %q; want empty (not masked when empty)", got)
+		}
+	})
+
+	// Sub-test 2: write-capable token → password returned plaintext
+	t.Run("write-capable preserves plaintext password", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.handleGetUserInbounds(rec, withPerms(core.PanelUserPermissions{
+			CanReadUsers:  true,
+			CanWriteUsers: true,
+		}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+		inbounds := decodeInbounds(t, rec)
+		if len(inbounds) == 0 {
+			t.Fatal("expected at least one inbound; got none")
+		}
+		if got := inbounds[0].Password; got != "s3cr3t" {
+			t.Errorf("password = %q; want %q (plaintext)", got, "s3cr3t")
+		}
+	})
+}

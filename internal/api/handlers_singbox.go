@@ -204,14 +204,16 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 				tagTypes[inboundView.Tag] = inboundView.Type
 			}
 		}
-		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
-			for i := range inbounds {
-				if tagTypes[inbounds[i].Tag] == "vmess" {
-					if inbounds[i].VmessSecurity == "" && meta.VmessSecurity != "" {
-						inbounds[i].VmessSecurity = meta.VmessSecurity
-					}
-					if inbounds[i].VmessAlterID == 0 && meta.VmessAlterID != 0 {
-						inbounds[i].VmessAlterID = meta.VmessAlterID
+		if s.store != nil {
+			if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+				for i := range inbounds {
+					if tagTypes[inbounds[i].Tag] == "vmess" {
+						if inbounds[i].VmessSecurity == "" && meta.VmessSecurity != "" {
+							inbounds[i].VmessSecurity = meta.VmessSecurity
+						}
+						if inbounds[i].VmessAlterID == 0 && meta.VmessAlterID != 0 {
+							inbounds[i].VmessAlterID = meta.VmessAlterID
+						}
 					}
 				}
 			}
