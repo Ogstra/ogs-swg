@@ -1848,12 +1848,21 @@ func (s *Store) GetSBTrafficBuckets(start, end, interval int64) (map[int64]Traff
 func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, error) {
 	rows, err := s.db.Query(`
 		SELECT user, SUM(uplink) AS up, SUM(downlink) AS down
-		FROM samples
-		WHERE ts >= ? AND ts <= ?
+		FROM (
+			SELECT user, uplink, downlink
+			FROM samples
+			WHERE ts >= ? AND ts <= ?
+
+			UNION ALL
+
+			SELECT user, uplink, downlink
+			FROM daily_usage
+			WHERE ts >= ? AND ts <= ?
+		)
 		GROUP BY user
 		ORDER BY (up + down) DESC
 		LIMIT ?
-	`, start, end, limit)
+	`, start, end, start, end, limit)
 	if err != nil {
 		return nil, err
 	}
