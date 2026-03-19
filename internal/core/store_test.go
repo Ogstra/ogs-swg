@@ -34,6 +34,16 @@ func TestRenameUserTrafficIdentity_MigratesSamplesAndDailyUsage(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("BulkInsert: %v", err)
 	}
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  1024,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     true,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
 
 	if err := store.CompressOldSamples(now - 24*3600); err != nil {
 		t.Fatalf("CompressOldSamples: %v", err)
@@ -81,5 +91,24 @@ func TestRenameUserTrafficIdentity_MigratesSamplesAndDailyUsage(t *testing.T) {
 	}
 	if len(oldCombined) != 0 {
 		t.Fatalf("GetCombinedReport(old) returned %d rows; want 0 after migration", len(oldCombined))
+	}
+
+	newMeta, err := store.GetUserMetadata("alice-renamed")
+	if err != nil {
+		t.Fatalf("GetUserMetadata(new): %v", err)
+	}
+	if newMeta == nil || newMeta.Email != "alice-renamed" {
+		t.Fatalf("GetUserMetadata(new) = %#v; want renamed metadata row", newMeta)
+	}
+	if len(newMeta.InboundTags) != 1 || newMeta.InboundTags[0] != "test-vless" {
+		t.Fatalf("GetUserMetadata(new).InboundTags = %#v; want [test-vless]", newMeta.InboundTags)
+	}
+
+	oldMeta, err := store.GetUserMetadata("alice")
+	if err != nil {
+		t.Fatalf("GetUserMetadata(old): %v", err)
+	}
+	if oldMeta != nil {
+		t.Fatalf("GetUserMetadata(old) = %#v; want nil after migration", oldMeta)
 	}
 }

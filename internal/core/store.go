@@ -1094,6 +1094,53 @@ func (s *Store) DeleteUserMetadata(email string) error {
 	return s.Queries.DeleteUser(context.Background(), email)
 }
 
+func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return fmt.Errorf("old and new user names are required")
+	}
+	if oldName == newName {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, conflict := range []struct {
+		table  string
+		column string
+	}{
+		{table: "users", column: "email"},
+		{table: "samples", column: "user"},
+		{table: "daily_usage", column: "user"},
+	} {
+		var exists int
+		query := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s = ?)", conflict.table, conflict.column)
+		if err := tx.QueryRow(query, newName).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != 0 {
+			return fmt.Errorf("destination identity %q already exists in %s", newName, conflict.table)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE samples SET user = ? WHERE user = ?", newName, oldName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE daily_usage SET user = ? WHERE user = ?", newName, oldName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE users SET email = ? WHERE email = ?", newName, oldName); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
 	rows, err := s.Queries.GetAllUsers(context.Background())
 	if err != nil {
