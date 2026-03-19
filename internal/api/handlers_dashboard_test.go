@@ -213,6 +213,11 @@ func TestDashboard_SingboxTopConsumersIncludeCompressedHistoryAfterRename(t *tes
 	if consumer.QuotaLimit != 1024 {
 		t.Fatalf("consumer quota_limit = %d; want 1024", consumer.QuotaLimit)
 	}
+	for _, stale := range topSB {
+		if stale.Name == "alice" || stale.Key == "alice" {
+			t.Fatalf("stale old-name consumer leaked into dashboard response: %+v", stale)
+		}
+	}
 }
 
 func newDashboardTestServer(t *testing.T) (*Server, string, string) {
