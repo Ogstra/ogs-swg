@@ -154,6 +154,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                         listen: prev.listen || nextDefaults.listen,
                                         listen_port: prev.listen_port || nextDefaults.listen_port,
                                         external_port: prev.external_port || '',
+                                        override_address: prev.override_address || '',
+                                        link_allow_insecure: prev.link_allow_insecure || 'auto',
                                     }))
                                 }}
                                 className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
@@ -192,6 +194,19 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
                                 placeholder="e.g. 443"
                             />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-300">Override Address (optional)</label>
+                            <input
+                                type="text"
+                                value={formData.override_address ?? ''}
+                                onChange={e => updateForm(prev => ({ ...prev, override_address: e.target.value }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                                placeholder="e.g. 1.2.3.4 or other.domain.com"
+                            />
+                            <p className="text-[11px] text-slate-400">
+                                Overrides the generated share-link host while preserving the original public hostname as TLS SNI fallback.
+                            </p>
                         </div>
                         <div className="space-y-1">
                             <label className="text-xs font-medium text-slate-300">Link TLS Verification</label>

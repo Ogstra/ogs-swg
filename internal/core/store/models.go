@@ -33,8 +33,9 @@ type ImportState struct {
 }
 
 type InboundMetum struct {
-	Tag          string        `json:"tag"`
-	ExternalPort sql.NullInt64 `json:"external_port"`
+	Tag             string         `json:"tag"`
+	ExternalPort    sql.NullInt64  `json:"external_port"`
+	OverrideAddress sql.NullString `json:"override_address"`
 }
 
 type PanelUser struct {

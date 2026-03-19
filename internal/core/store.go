@@ -89,6 +89,7 @@ type InboundMeta struct {
 	ExternalPort      int    `json:"external_port"`
 	ClientSNI         string `json:"client_sni,omitempty"`
 	LinkAllowInsecure *bool  `json:"link_allow_insecure,omitempty"`
+	OverrideAddress   string `json:"override_address,omitempty"`
 }
 
 // DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
@@ -190,7 +191,8 @@ func (s *Store) initSchema() error {
 		tag TEXT PRIMARY KEY,
 		external_port INTEGER DEFAULT 0,
 		client_sni TEXT DEFAULT NULL,
-		link_allow_insecure INTEGER DEFAULT NULL
+		link_allow_insecure INTEGER DEFAULT NULL,
+		override_address TEXT DEFAULT NULL
 	);
 	
 	CREATE TABLE IF NOT EXISTS daily_usage (
@@ -217,6 +219,7 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add link_allow_insecure to existing inbound_meta tables that predate this column.
 	// NULL means "auto" so legacy heuristic behavior remains unchanged until an explicit choice is stored.
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN link_allow_insecure INTEGER DEFAULT NULL;")
+	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN override_address TEXT DEFAULT NULL;")
 	// Upgrade path: add inbound_tags to existing users tables that predate this column.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';")
@@ -671,7 +674,10 @@ func (s *Store) SaveInboundMeta(meta InboundMeta) error {
 	if meta.Tag == "" {
 		return fmt.Errorf("inbound tag required")
 	}
-	if meta.ExternalPort <= 0 && strings.TrimSpace(meta.ClientSNI) == "" && meta.LinkAllowInsecure == nil {
+	if meta.ExternalPort <= 0 &&
+		strings.TrimSpace(meta.ClientSNI) == "" &&
+		meta.LinkAllowInsecure == nil &&
+		strings.TrimSpace(meta.OverrideAddress) == "" {
 		return s.DeleteInboundMeta(meta.Tag)
 	}
 
@@ -691,19 +697,25 @@ func (s *Store) SaveInboundMeta(meta InboundMeta) error {
 			linkAllowInsecure = sql.NullInt64{Int64: 0, Valid: true}
 		}
 	}
+	var overrideAddress sql.NullString
+	if strings.TrimSpace(meta.OverrideAddress) != "" {
+		overrideAddress = sql.NullString{String: strings.TrimSpace(meta.OverrideAddress), Valid: true}
+	}
 
 	_, err := s.db.ExecContext(
 		context.Background(),
-		`INSERT INTO inbound_meta (tag, external_port, client_sni, link_allow_insecure)
-		 VALUES (?, ?, ?, ?)
+		`INSERT INTO inbound_meta (tag, external_port, client_sni, link_allow_insecure, override_address)
+		 VALUES (?, ?, ?, ?, ?)
 		 ON CONFLICT(tag) DO UPDATE SET
 		   external_port = excluded.external_port,
 		   client_sni = excluded.client_sni,
-		   link_allow_insecure = excluded.link_allow_insecure`,
+		   link_allow_insecure = excluded.link_allow_insecure,
+		   override_address = excluded.override_address`,
 		meta.Tag,
 		externalPort,
 		clientSNI,
 		linkAllowInsecure,
+		overrideAddress,
 	)
 	return err
 }
@@ -716,11 +728,12 @@ func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
 	var externalPort sql.NullInt64
 	var clientSNI sql.NullString
 	var linkAllowInsecure sql.NullInt64
+	var overrideAddress sql.NullString
 	err := s.db.QueryRowContext(
 		context.Background(),
-		`SELECT tag, external_port, client_sni, link_allow_insecure FROM inbound_meta WHERE tag = ?`,
+		`SELECT tag, external_port, client_sni, link_allow_insecure, override_address FROM inbound_meta WHERE tag = ?`,
 		tag,
-	).Scan(&meta.Tag, &externalPort, &clientSNI, &linkAllowInsecure)
+	).Scan(&meta.Tag, &externalPort, &clientSNI, &linkAllowInsecure, &overrideAddress)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -733,13 +746,14 @@ func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
 		value := linkAllowInsecure.Int64 != 0
 		meta.LinkAllowInsecure = &value
 	}
+	meta.OverrideAddress = strings.TrimSpace(overrideAddress.String)
 	return &meta, nil
 }
 
 func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
 	rows, err := s.db.QueryContext(
 		context.Background(),
-		`SELECT tag, external_port, client_sni, link_allow_insecure FROM inbound_meta`,
+		`SELECT tag, external_port, client_sni, link_allow_insecure, override_address FROM inbound_meta`,
 	)
 	if err != nil {
 		return nil, err
@@ -752,7 +766,8 @@ func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
 		var externalPort sql.NullInt64
 		var clientSNI sql.NullString
 		var linkAllowInsecure sql.NullInt64
-		if err := rows.Scan(&entry.Tag, &externalPort, &clientSNI, &linkAllowInsecure); err != nil {
+		var overrideAddress sql.NullString
+		if err := rows.Scan(&entry.Tag, &externalPort, &clientSNI, &linkAllowInsecure, &overrideAddress); err != nil {
 			return nil, err
 		}
 		entry.ExternalPort = int(externalPort.Int64)
@@ -761,6 +776,7 @@ func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
 			value := linkAllowInsecure.Int64 != 0
 			entry.LinkAllowInsecure = &value
 		}
+		entry.OverrideAddress = strings.TrimSpace(overrideAddress.String)
 		meta[entry.Tag] = entry
 	}
 	if err := rows.Err(); err != nil {
