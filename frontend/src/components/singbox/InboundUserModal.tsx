@@ -3,39 +3,63 @@ import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { RefreshCw } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
+import { canSelectInboundUserFlow } from './inboundVisibility'
 
 interface InboundUserModalProps {
     isOpen: boolean
     onClose: () => void
     initialData?: { name: string; uuid: string; flow: string } | null
+    userType?: string
+    parentInbound?: any | null
+    canEditFlow?: boolean
     onSave: (user: { name: string; uuid: string; flow: string }) => void
 }
 
-export default function InboundUserModal({ isOpen, onClose, initialData, onSave }: InboundUserModalProps) {
+export default function InboundUserModal({
+    isOpen,
+    onClose,
+    initialData,
+    userType = 'vless',
+    parentInbound = null,
+    canEditFlow,
+    onSave,
+}: InboundUserModalProps) {
     const [formData, setFormData] = useState({
         name: '',
         uuid: '',
         flow: 'xtls-rprx-vision'
     })
+    const flowAllowed = canEditFlow ?? canSelectInboundUserFlow(userType, parentInbound)
 
     useEffect(() => {
         if (initialData) {
-            setFormData(initialData)
+            setFormData({
+                ...initialData,
+                flow: flowAllowed ? (initialData.flow || 'xtls-rprx-vision') : '',
+            })
         } else {
             setFormData({
                 name: '',
                 uuid: uuidv4(),
-                flow: 'xtls-rprx-vision'
+                flow: flowAllowed ? 'xtls-rprx-vision' : ''
             })
         }
-    }, [initialData, isOpen])
+    }, [flowAllowed, initialData, isOpen])
+
+    useEffect(() => {
+        if (flowAllowed || !formData.flow) return
+        setFormData(prev => ({ ...prev, flow: '' }))
+    }, [flowAllowed, formData.flow])
 
     const handleSubmit = () => {
         if (!formData.name || !formData.uuid) {
             // Simple validation, parent should handle better alerts if needed, or we use toast
             return
         }
-        onSave(formData)
+        onSave({
+            ...formData,
+            flow: flowAllowed ? formData.flow : '',
+        })
         onClose()
     }
 
@@ -84,17 +108,19 @@ export default function InboundUserModal({ isOpen, onClose, initialData, onSave 
                     </div>
                 </div>
 
-                <div>
-                    <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
-                    <select
-                        value={formData.flow}
-                        onChange={e => setFormData({ ...formData, flow: e.target.value })}
-                        className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
-                    >
-                        <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                        <option value="">none</option>
-                    </select>
-                </div>
+                {flowAllowed && (
+                    <div>
+                        <label className="block text-sm font-medium text-slate-400 mb-1">Flow</label>
+                        <select
+                            value={formData.flow}
+                            onChange={e => setFormData({ ...formData, flow: e.target.value })}
+                            className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                        >
+                            <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                            <option value="">none</option>
+                        </select>
+                    </div>
+                )}
             </div>
         </Modal>
     )

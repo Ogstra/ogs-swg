@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Plus, Edit, Trash2, Shield, Radio } from 'lucide-react'
 import { api } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
@@ -6,19 +7,33 @@ import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import InboundModal from './InboundModal'
 import { useAuth } from '../../context/AuthContext'
+import { ConfirmModal } from '../ui/ConfirmModal'
 
 export default function InboundList() {
-    const { success, error: toastError } = useToast()
+    const { success, error: toastError, warning } = useToast()
     const { permissions } = useAuth()
+    const queryClient = useQueryClient()
     const canWriteConfig = !!permissions?.can_write_config
     const [inbounds, setInbounds] = useState<any[]>([])
     const [loading, setLoading] = useState(false)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [editingInbound, setEditingInbound] = useState<any>(null)
+    const [confirmDeleteTag, setConfirmDeleteTag] = useState<string | null>(null)
+    const [deleteLoading, setDeleteLoading] = useState(false)
 
     useEffect(() => {
         loadInbounds()
     }, [])
+
+    const setSingboxPendingChanges = (pending: boolean) => {
+        queryClient.setQueryData(['dashboard-pending-changes'], (old: any) => ({
+            ...(old || {}),
+            singbox_pending_changes: pending,
+        }))
+        queryClient.setQueriesData({ queryKey: ['dashboard-data'] }, (old: any) =>
+            old ? { ...old, singbox_pending_changes: pending } : old
+        )
+    }
 
     const loadInbounds = async () => {
         setLoading(true)
@@ -33,15 +48,26 @@ export default function InboundList() {
         }
     }
 
-    const handleDelete = async (tag: string) => {
+    const handleDelete = async () => {
+        const tag = confirmDeleteTag
+        if (!tag) return
         if (!canWriteConfig) return
-        if (!confirm(`Are you sure you want to delete inbound "${tag}"?`)) return
+        setDeleteLoading(true)
         try {
             await api.deleteSingboxInbound(tag)
             success('Inbound deleted successfully')
-            loadInbounds()
+            setConfirmDeleteTag(null)
+            setSingboxPendingChanges(true)
+            await loadInbounds()
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
+                queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] }),
+            ])
         } catch (err) {
             toastError('Failed to delete inbound: ' + err)
+        } finally {
+            setDeleteLoading(false)
         }
     }
 
@@ -61,14 +87,23 @@ export default function InboundList() {
         if (!canWriteConfig) return
         try {
             if (editingInbound) {
-                await api.updateSingboxInbound(editingInbound.tag, config)
+                const res = await api.updateSingboxInbound(editingInbound.tag, config)
                 success('Inbound updated successfully')
+                for (const warningMessage of res.warnings || []) {
+                    warning(warningMessage, 0)
+                }
             } else {
                 await api.addSingboxInbound(config)
                 success('Inbound created successfully')
             }
             setIsModalOpen(false)
-            loadInbounds()
+            setSingboxPendingChanges(true)
+            await loadInbounds()
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
+                queryClient.invalidateQueries({ queryKey: ['singbox-inbounds'] }),
+            ])
         } catch (err) {
             toastError('Failed to save inbound: ' + err)
         }
@@ -109,7 +144,7 @@ export default function InboundList() {
                                             <Edit size={17} strokeWidth={1.6} />
                                         </button>
                                         <button
-                                            onClick={() => handleDelete(inbound.tag)}
+                                            onClick={() => setConfirmDeleteTag(inbound.tag)}
                                             disabled={!canWriteConfig}
                                             className="w-10 h-10 flex items-center justify-center text-slate-300 hover:text-white rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-slate-800 disabled:hover:text-slate-300"
                                             title="Delete"
@@ -151,6 +186,21 @@ export default function InboundList() {
                 onSave={handleSave}
                 canWrite={canWriteConfig}
             />
+
+            <ConfirmModal
+                isOpen={!!confirmDeleteTag}
+                onClose={() => !deleteLoading && setConfirmDeleteTag(null)}
+                onConfirm={handleDelete}
+                title="Delete inbound?"
+                message="This removes the inbound from the Sing-box configuration."
+                confirmLabel="Delete"
+                confirmTone="danger"
+                isLoading={deleteLoading}
+            >
+                {confirmDeleteTag && (
+                    <p className="text-sm text-slate-400">{confirmDeleteTag}</p>
+                )}
+            </ConfirmModal>
         </div>
     )
 }

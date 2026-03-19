@@ -108,7 +108,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/ogs-swg:latest
+            ${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.ref == 'refs/heads/main' && 'latest' || 'develop' }}
             ${{ secrets.DOCKER_USERNAME }}/ogs-swg:${{ github.sha }}
           build-args: |
             APP_COMMIT_SHA=${{ github.sha }}
@@ -120,7 +120,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     timeout-minutes: 30
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

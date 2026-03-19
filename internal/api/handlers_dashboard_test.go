@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -133,6 +134,89 @@ func TestDashboard_TopConsumersIncludeInterfaceLabel(t *testing.T) {
 	}
 	if !foundWG0 || !foundWG1 {
 		t.Fatalf("missing expected wireguard consumers: foundWG0=%v foundWG1=%v", foundWG0, foundWG1)
+	}
+}
+
+func TestDashboard_SingboxTopConsumersIncludeCompressedHistoryAfterRename(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	store, err := core.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now().Unix()
+	oldRawTs := now - 72*3600
+	recentRawTs := now - 1800
+
+	if err := store.BulkInsert([]core.Sample{
+		{User: "alice", Timestamp: oldRawTs, Uplink: 120, Downlink: 240},
+		{User: "alice", Timestamp: recentRawTs, Uplink: 30, Downlink: 60},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	if err := store.SaveUserMetadata(core.UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  1024,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     true,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	if err := store.CompressOldSamples(now - 24*3600); err != nil {
+		t.Fatalf("CompressOldSamples: %v", err)
+	}
+
+	if err := store.RenameUserTrafficIdentity("alice", "alice-renamed"); err != nil {
+		t.Fatalf("RenameUserTrafficIdentity: %v", err)
+	}
+
+	server := NewServer(store, &core.Config{
+		EnableSingbox:        true,
+		ActiveThresholdBytes: 1,
+		DemoMode:             true,
+	}, &dashboardExecutorStub{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard?start=1&end="+strconv.FormatInt(now, 10), nil)
+	rec := httptest.NewRecorder()
+	server.handleGetDashboardData(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var payload DashboardData
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	topSB := payload.TopConsumers["singbox"]
+	if len(topSB) != 1 {
+		t.Fatalf("expected exactly 1 singbox consumer, got %d (%+v)", len(topSB), topSB)
+	}
+
+	consumer := topSB[0]
+	if consumer.Name != "alice-renamed" {
+		t.Fatalf("consumer name = %q; want %q", consumer.Name, "alice-renamed")
+	}
+	if consumer.Key != "alice-renamed" {
+		t.Fatalf("consumer key = %q; want %q", consumer.Key, "alice-renamed")
+	}
+	if consumer.Total != 450 {
+		t.Fatalf("consumer total = %d; want 450", consumer.Total)
+	}
+	if consumer.QuotaLimit != 1024 {
+		t.Fatalf("consumer quota_limit = %d; want 1024", consumer.QuotaLimit)
+	}
+	for _, stale := range topSB {
+		if stale.Name == "alice" || stale.Key == "alice" {
+			t.Fatalf("stale old-name consumer leaked into dashboard response: %+v", stale)
+		}
 	}
 }
 

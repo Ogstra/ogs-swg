@@ -181,6 +181,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 
 	if cachedPayload, found := s.cache.Get(cacheKey); found {
 		if payload, ok := cachedPayload.(DashboardData); ok {
+			payload.SingboxPendingChanges = s.config.GetSingboxPendingChanges()
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(payload)
 			return
@@ -403,7 +404,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 			"wireguard": topWG,
 			"singbox":   topSB,
 		},
-		SingboxPendingChanges: s.config.SingboxPendingChanges,
+		SingboxPendingChanges: s.config.GetSingboxPendingChanges(),
 		PublicIP:              getPublicIP(s.config),
 	}
 

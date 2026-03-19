@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
@@ -52,6 +52,7 @@ const WireGuardIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
 )
 
 export default function Dashboard() {
+    const queryClient = useQueryClient()
     const [timeRange, setTimeRange] = useState<DashboardRange>('24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [refreshInterval, setRefreshInterval] = useState<number>(10000)
@@ -158,11 +159,26 @@ export default function Dashboard() {
     }
     const singboxPendingChanges = !!dashboardQuery.data?.singbox_pending_changes
 
+    const setSingboxPendingChanges = (pending: boolean) => {
+        queryClient.setQueryData(['dashboard-pending-changes'], (old: any) => ({
+            ...(old || {}),
+            singbox_pending_changes: pending,
+        }))
+        queryClient.setQueriesData({ queryKey: ['dashboard-data'] }, (old: any) =>
+            old ? { ...old, singbox_pending_changes: pending } : old
+        )
+    }
+
     const handleApplySingboxChanges = async () => {
         try {
+            setSingboxPendingChanges(false)
             await api.applySingboxChanges()
-            await dashboardQuery.refetch()
+            await Promise.all([
+                dashboardQuery.refetch(),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+            ])
         } catch (err) {
+            setSingboxPendingChanges(true)
             console.error('Failed to apply Sing-box changes:', err)
             alert('Failed to apply changes. Please try again.')
         }

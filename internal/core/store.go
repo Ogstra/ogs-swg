@@ -85,9 +85,11 @@ type UserMetadata struct {
 }
 
 type InboundMeta struct {
-	Tag             string `json:"tag"`
-	ExternalPort    int    `json:"external_port"`
-	OverrideAddress string `json:"override_address,omitempty"`
+	Tag               string `json:"tag"`
+	ExternalPort      int    `json:"external_port"`
+	ClientSNI         string `json:"client_sni,omitempty"`
+	LinkAllowInsecure *bool  `json:"link_allow_insecure,omitempty"`
+	OverrideAddress   string `json:"override_address,omitempty"`
 }
 
 // DailyUsage represents aggregated traffic data for a user on a specific bucket (8h).
@@ -188,7 +190,9 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS inbound_meta (
 		tag TEXT PRIMARY KEY,
 		external_port INTEGER DEFAULT 0,
-		client_sni TEXT DEFAULT NULL
+		client_sni TEXT DEFAULT NULL,
+		link_allow_insecure INTEGER DEFAULT NULL,
+		override_address TEXT DEFAULT NULL
 	);
 	
 	CREATE TABLE IF NOT EXISTS daily_usage (
@@ -212,10 +216,13 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add client_sni to existing inbound_meta tables that predate this column.
 	// Silently ignored if column already exists (fresh installs have it from CREATE TABLE above).
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN client_sni TEXT DEFAULT NULL;")
+	// Upgrade path: add link_allow_insecure to existing inbound_meta tables that predate this column.
+	// NULL means "auto" so legacy heuristic behavior remains unchanged until an explicit choice is stored.
+	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN link_allow_insecure INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE inbound_meta ADD COLUMN override_address TEXT DEFAULT NULL;")
 	// Upgrade path: add inbound_tags to existing users tables that predate this column.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
-	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';");
+	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';")
 	// Reset day is now fixed to 1 for all users.
 	s.db.Exec("UPDATE users SET reset_day = 1 WHERE COALESCE(reset_day, 1) != 1;")
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -663,58 +670,117 @@ func (s *Store) UpdateAdminUsername(oldUsername, newUsername string) error {
 	})
 }
 
-func (s *Store) SaveInboundMeta(tag string, externalPort int, overrideAddress string) error {
-	if tag == "" {
+func (s *Store) SaveInboundMeta(meta InboundMeta) error {
+	if meta.Tag == "" {
 		return fmt.Errorf("inbound tag required")
 	}
-	overrideAddress = strings.TrimSpace(overrideAddress)
-	if externalPort <= 0 && overrideAddress == "" {
-		return s.DeleteInboundMeta(tag)
+	if meta.ExternalPort <= 0 &&
+		strings.TrimSpace(meta.ClientSNI) == "" &&
+		meta.LinkAllowInsecure == nil &&
+		strings.TrimSpace(meta.OverrideAddress) == "" {
+		return s.DeleteInboundMeta(meta.Tag)
 	}
-	return s.Queries.UpsertInboundMeta(context.Background(), sqlcStore.UpsertInboundMetaParams{
-		Tag: tag,
-		ExternalPort: sql.NullInt64{
-			Int64: int64(externalPort),
-			Valid: externalPort > 0,
-		},
-		OverrideAddress: sql.NullString{
-			String: overrideAddress,
-			Valid:  overrideAddress != "",
-		},
-	})
+
+	var externalPort sql.NullInt64
+	if meta.ExternalPort > 0 {
+		externalPort = sql.NullInt64{Int64: int64(meta.ExternalPort), Valid: true}
+	}
+	var clientSNI sql.NullString
+	if strings.TrimSpace(meta.ClientSNI) != "" {
+		clientSNI = sql.NullString{String: strings.TrimSpace(meta.ClientSNI), Valid: true}
+	}
+	var linkAllowInsecure sql.NullInt64
+	if meta.LinkAllowInsecure != nil {
+		if *meta.LinkAllowInsecure {
+			linkAllowInsecure = sql.NullInt64{Int64: 1, Valid: true}
+		} else {
+			linkAllowInsecure = sql.NullInt64{Int64: 0, Valid: true}
+		}
+	}
+	var overrideAddress sql.NullString
+	if strings.TrimSpace(meta.OverrideAddress) != "" {
+		overrideAddress = sql.NullString{String: strings.TrimSpace(meta.OverrideAddress), Valid: true}
+	}
+
+	_, err := s.db.ExecContext(
+		context.Background(),
+		`INSERT INTO inbound_meta (tag, external_port, client_sni, link_allow_insecure, override_address)
+		 VALUES (?, ?, ?, ?, ?)
+		 ON CONFLICT(tag) DO UPDATE SET
+		   external_port = excluded.external_port,
+		   client_sni = excluded.client_sni,
+		   link_allow_insecure = excluded.link_allow_insecure,
+		   override_address = excluded.override_address`,
+		meta.Tag,
+		externalPort,
+		clientSNI,
+		linkAllowInsecure,
+		overrideAddress,
+	)
+	return err
 }
 
 func (s *Store) GetInboundMeta(tag string) (*InboundMeta, error) {
 	if tag == "" {
 		return nil, nil
 	}
-	meta, err := s.Queries.GetInboundMeta(context.Background(), tag)
+	var meta InboundMeta
+	var externalPort sql.NullInt64
+	var clientSNI sql.NullString
+	var linkAllowInsecure sql.NullInt64
+	var overrideAddress sql.NullString
+	err := s.db.QueryRowContext(
+		context.Background(),
+		`SELECT tag, external_port, client_sni, link_allow_insecure, override_address FROM inbound_meta WHERE tag = ?`,
+		tag,
+	).Scan(&meta.Tag, &externalPort, &clientSNI, &linkAllowInsecure, &overrideAddress)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &InboundMeta{
-		Tag:             meta.Tag,
-		ExternalPort:    int(meta.ExternalPort.Int64),
-		OverrideAddress: meta.OverrideAddress.String,
-	}, nil
+	meta.ExternalPort = int(externalPort.Int64)
+	meta.ClientSNI = strings.TrimSpace(clientSNI.String)
+	if linkAllowInsecure.Valid {
+		value := linkAllowInsecure.Int64 != 0
+		meta.LinkAllowInsecure = &value
+	}
+	meta.OverrideAddress = strings.TrimSpace(overrideAddress.String)
+	return &meta, nil
 }
 
 func (s *Store) GetAllInboundMeta() (map[string]InboundMeta, error) {
-	rows, err := s.Queries.GetAllInboundMeta(context.Background())
+	rows, err := s.db.QueryContext(
+		context.Background(),
+		`SELECT tag, external_port, client_sni, link_allow_insecure, override_address FROM inbound_meta`,
+	)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
 	meta := make(map[string]InboundMeta)
-	for _, entry := range rows {
-		meta[entry.Tag] = InboundMeta{
-			Tag:             entry.Tag,
-			ExternalPort:    int(entry.ExternalPort.Int64),
-			OverrideAddress: entry.OverrideAddress.String,
+	for rows.Next() {
+		var entry InboundMeta
+		var externalPort sql.NullInt64
+		var clientSNI sql.NullString
+		var linkAllowInsecure sql.NullInt64
+		var overrideAddress sql.NullString
+		if err := rows.Scan(&entry.Tag, &externalPort, &clientSNI, &linkAllowInsecure, &overrideAddress); err != nil {
+			return nil, err
 		}
+		entry.ExternalPort = int(externalPort.Int64)
+		entry.ClientSNI = strings.TrimSpace(clientSNI.String)
+		if linkAllowInsecure.Valid {
+			value := linkAllowInsecure.Int64 != 0
+			entry.LinkAllowInsecure = &value
+		}
+		entry.OverrideAddress = strings.TrimSpace(overrideAddress.String)
+		meta[entry.Tag] = entry
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return meta, nil
 }
@@ -734,6 +800,98 @@ func (s *Store) RenameInboundMeta(oldTag, newTag string) error {
 		Tag:   newTag,
 		Tag_2: oldTag,
 	})
+}
+
+func renameInboundTagReferences(tags []string, oldTag, newTag string) ([]string, bool) {
+	if oldTag == "" || newTag == "" || oldTag == newTag {
+		return tags, false
+	}
+	changed := false
+	out := make([]string, len(tags))
+	copy(out, tags)
+	for i, tag := range out {
+		if tag == oldTag {
+			out[i] = newTag
+			changed = true
+		}
+	}
+	return out, changed
+}
+
+func (s *Store) RenameInboundReferences(oldTag, newTag string) error {
+	if oldTag == "" || newTag == "" || oldTag == newTag {
+		return nil
+	}
+
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := s.Queries.WithTx(tx)
+	if err := qtx.RenameInboundMeta(ctx, sqlcStore.RenameInboundMetaParams{
+		Tag:   newTag,
+		Tag_2: oldTag,
+	}); err != nil {
+		return err
+	}
+
+	rows, err := tx.QueryContext(ctx, "SELECT email, COALESCE(inbound_tags, '') FROM users")
+	if err != nil {
+		return err
+	}
+
+	type inboundTagUpdate struct {
+		email   string
+		payload string
+	}
+	updates := make([]inboundTagUpdate, 0)
+
+	for rows.Next() {
+		var email, tagsJSON string
+		if err := rows.Scan(&email, &tagsJSON); err != nil {
+			rows.Close()
+			return err
+		}
+
+		if tagsJSON == "" || tagsJSON == "[]" {
+			continue
+		}
+
+		var tags []string
+		if err := json.Unmarshal([]byte(tagsJSON), &tags); err != nil {
+			return fmt.Errorf("decode inbound_tags for %s: %w", email, err)
+		}
+
+		renamedTags, changed := renameInboundTagReferences(tags, oldTag, newTag)
+		if !changed {
+			continue
+		}
+
+		payload, err := json.Marshal(renamedTags)
+		if err != nil {
+			rows.Close()
+			return fmt.Errorf("encode inbound_tags for %s: %w", email, err)
+		}
+		updates = append(updates, inboundTagUpdate{email: email, payload: string(payload)})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, update := range updates {
+		if _, err := tx.ExecContext(ctx, "UPDATE users SET inbound_tags = ? WHERE email = ?", update.payload, update.email); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (s *Store) EnsureDefaultAdmin() error {
@@ -950,6 +1108,53 @@ func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
 
 func (s *Store) DeleteUserMetadata(email string) error {
 	return s.Queries.DeleteUser(context.Background(), email)
+}
+
+func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" {
+		return fmt.Errorf("old and new user names are required")
+	}
+	if oldName == newName {
+		return nil
+	}
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, conflict := range []struct {
+		table  string
+		column string
+	}{
+		{table: "users", column: "email"},
+		{table: "samples", column: "user"},
+		{table: "daily_usage", column: "user"},
+	} {
+		var exists int
+		query := fmt.Sprintf("SELECT EXISTS(SELECT 1 FROM %s WHERE %s = ?)", conflict.table, conflict.column)
+		if err := tx.QueryRow(query, newName).Scan(&exists); err != nil {
+			return err
+		}
+		if exists != 0 {
+			return fmt.Errorf("destination identity %q already exists in %s", newName, conflict.table)
+		}
+	}
+
+	if _, err := tx.Exec("UPDATE samples SET user = ? WHERE user = ?", newName, oldName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE daily_usage SET user = ? WHERE user = ?", newName, oldName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE users SET email = ? WHERE email = ?", newName, oldName); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
@@ -1659,12 +1864,21 @@ func (s *Store) GetSBTrafficBuckets(start, end, interval int64) (map[int64]Traff
 func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, error) {
 	rows, err := s.db.Query(`
 		SELECT user, SUM(uplink) AS up, SUM(downlink) AS down
-		FROM samples
-		WHERE ts >= ? AND ts <= ?
+		FROM (
+			SELECT user, uplink, downlink
+			FROM samples
+			WHERE ts >= ? AND ts <= ?
+
+			UNION ALL
+
+			SELECT user, uplink, downlink
+			FROM daily_usage
+			WHERE ts >= ? AND ts <= ?
+		)
 		GROUP BY user
 		ORDER BY (up + down) DESC
 		LIMIT ?
-	`, start, end, limit)
+	`, start, end, start, end, limit)
 	if err != nil {
 		return nil, err
 	}
