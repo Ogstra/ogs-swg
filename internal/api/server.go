@@ -680,13 +680,21 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		// always show current calendar month usage.
 		now := time.Now()
 		startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		samples, err := s.store.GetSamples(name, startOfMonth.Unix(), now.Unix())
+		combinedSamples, err := s.store.GetCombinedReport(name, startOfMonth.Unix(), now.Unix())
 		var up, down int64
 		lastSeen := int64(0)
 		if err == nil {
-			for _, smp := range samples {
+			for _, smp := range combinedSamples {
 				up += smp.Uplink
 				down += smp.Downlink
+			}
+		}
+
+		// Keep lastSeen based on raw samples/threshold lookup so the activity signal
+		// remains tied to recent sample timestamps rather than compressed buckets.
+		samples, err := s.store.GetSamples(name, startOfMonth.Unix(), now.Unix())
+		if err == nil {
+			for _, smp := range samples {
 				if (smp.Uplink+smp.Downlink) >= s.config.ActiveThresholdBytes && smp.Timestamp > lastSeen {
 					lastSeen = smp.Timestamp
 				}
