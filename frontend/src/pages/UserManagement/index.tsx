@@ -188,6 +188,7 @@ export default function UserManagement() {
 
     const refreshUsersData = async () => {
         await queryClient.invalidateQueries({ queryKey: ['users'] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] })
     }
 
     const inboundTypeByTag = new Map(
@@ -645,10 +646,10 @@ export default function UserManagement() {
             return
         }
         try {
-            await api.applySingboxChanges()
             queryClient.setQueryData(['dashboard-pending-changes'], (old: any) =>
                 old ? { ...old, singbox_pending_changes: false } : old
             )
+            await api.applySingboxChanges()
             await pendingChangesQuery.refetch()
             success('Sing-box configuration applied successfully')
         } catch (err) {

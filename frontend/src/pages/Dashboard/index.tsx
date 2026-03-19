@@ -161,13 +161,13 @@ export default function Dashboard() {
 
     const handleApplySingboxChanges = async () => {
         try {
-            await api.applySingboxChanges()
             const qKey = requestWindow.range === 'custom'
                 ? ['dashboard-data', requestWindow.range, requestWindow.startText, requestWindow.endText]
                 : ['dashboard-data', requestWindow.range]
             queryClient.setQueryData(qKey, (old: any) =>
                 old ? { ...old, singbox_pending_changes: false } : old
             )
+            await api.applySingboxChanges()
             await dashboardQuery.refetch()
         } catch (err) {
             console.error('Failed to apply Sing-box changes:', err)
