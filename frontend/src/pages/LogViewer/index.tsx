@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { api } from '../../services/api'
 import { Terminal, RefreshCw, Search } from 'lucide-react'
 
@@ -9,7 +9,6 @@ export default function LogViewer() {
     const [query, setQuery] = useState<string>('')
     const [searchQuery, setSearchQuery] = useState<string>('')
     const [logSource, setLogSource] = useState<'journal' | 'file'>('journal')
-    const bottomRef = useRef<HTMLDivElement>(null)
     const containerRef = useRef<HTMLDivElement>(null)
     const [autoScroll, setAutoScroll] = useState(true)
     const [searchLimit, setSearchLimit] = useState(500)
@@ -22,12 +21,18 @@ export default function LogViewer() {
         if (!silent) setLoading(true)
         api.getLogs({ user: query || undefined, limit: tailLimit }).then(data => {
             setLines(data.logs)
-            if (forceTail) setViewMode('tail')
+            if (forceTail) {
+                setViewMode('tail')
+                setAutoScroll(true)
+            }
             if (!silent) setLoading(false)
         }).catch(err => {
             console.error(err)
             setLines(['Error loading logs: ' + err.message])
-            if (forceTail) setViewMode('tail')
+            if (forceTail) {
+                setViewMode('tail')
+                setAutoScroll(true)
+            }
             if (!silent) setLoading(false)
         })
     }
@@ -53,11 +58,11 @@ export default function LogViewer() {
         return () => clearInterval(interval)
     }, [refreshInterval, query, viewMode, tailLimit])
 
-    useEffect(() => {
-        if (autoScroll && bottomRef.current) {
-            bottomRef.current.scrollIntoView({ behavior: 'smooth' })
-        }
-    }, [lines, autoScroll])
+    useLayoutEffect(() => {
+        const el = containerRef.current
+        if (!el || !autoScroll || viewMode !== 'tail') return
+        el.scrollTop = el.scrollHeight
+    }, [lines, autoScroll, viewMode])
 
     const handleScroll = () => {
         const el = containerRef.current
@@ -303,7 +308,7 @@ export default function LogViewer() {
                             </div>
                         ))
                     )}
-                    <div ref={bottomRef} className="h-4" />
+                    <div className="h-4" />
                 </div>
             </div>
         </div>
