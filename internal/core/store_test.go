@@ -112,3 +112,57 @@ func TestRenameUserTrafficIdentity_MigratesSamplesAndDailyUsage(t *testing.T) {
 		t.Fatalf("GetUserMetadata(old) = %#v; want nil after migration", oldMeta)
 	}
 }
+
+func TestGetSBTopTotals_IncludesCompressedHistory(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now().Unix()
+	oldRawTs := now - 72*3600
+	recentRawTs := now - 1800
+
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: oldRawTs, Uplink: 120, Downlink: 240},
+		{User: "alice", Timestamp: recentRawTs, Uplink: 30, Downlink: 60},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  1024,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     true,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	if err := store.CompressOldSamples(now - 24*3600); err != nil {
+		t.Fatalf("CompressOldSamples: %v", err)
+	}
+	if err := store.RenameUserTrafficIdentity("alice", "alice-renamed"); err != nil {
+		t.Fatalf("RenameUserTrafficIdentity: %v", err)
+	}
+
+	totals, err := store.GetSBTopTotals(1, now, 10)
+	if err != nil {
+		t.Fatalf("GetSBTopTotals: %v", err)
+	}
+	if len(totals) != 1 {
+		t.Fatalf("GetSBTopTotals returned %d rows; want 1 renamed identity", len(totals))
+	}
+	if totals[0].Key != "alice-renamed" {
+		t.Fatalf("GetSBTopTotals key = %q; want %q", totals[0].Key, "alice-renamed")
+	}
+	if totals[0].Total != 450 {
+		t.Fatalf("GetSBTopTotals total = %d; want %d", totals[0].Total, 450)
+	}
+	if totals[0].Rx != 300 || totals[0].Tx != 150 {
+		t.Fatalf("GetSBTopTotals rx/tx = (%d, %d); want (300, 150)", totals[0].Rx, totals[0].Tx)
+	}
+}
