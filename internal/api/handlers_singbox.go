@@ -664,8 +664,7 @@ func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.
 		}
 	}
 	nameTag := url.QueryEscape("HY2-" + name)
-	base := fmt.Sprintf("hysteria2://%s:%s@%s:%s",
-		url.QueryEscape(name),
+	base := fmt.Sprintf("hysteria2://%s@%s:%s",
 		url.QueryEscape(password),
 		host,
 		port,

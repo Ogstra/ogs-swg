@@ -801,8 +801,8 @@ func TestBuildHysteria2Link_Basic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildHysteria2Link() error = %v", err)
 	}
-	if !strings.HasPrefix(link, "hysteria2://alice:s3cr3t@1.2.3.4:443") {
-		t.Errorf("link = %q; want prefix hysteria2://alice:s3cr3t@1.2.3.4:443", link)
+	if !strings.HasPrefix(link, "hysteria2://s3cr3t@1.2.3.4:443") {
+		t.Errorf("link = %q; want prefix hysteria2://s3cr3t@1.2.3.4:443", link)
 	}
 	if !strings.HasSuffix(link, "#HY2-alice") {
 		t.Errorf("link = %q; want suffix #HY2-alice", link)
