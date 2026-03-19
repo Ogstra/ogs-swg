@@ -855,6 +855,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "Failed to rename user in config: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
+			if err := s.store.RenameUserTrafficIdentity(originalName, req.Name); err != nil {
+				if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
+					http.Error(w, "Failed to rename user traffic identity: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+					return
+				}
+				http.Error(w, "Failed to rename user traffic identity: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		} else {
 			// Re-enable path: restore user in all previously known inbounds.
 			// Determine the list of inbounds to restore.
@@ -915,6 +923,16 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		InboundTags:   inboundTags,
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
+		if originalName != req.Name {
+			if rollbackErr := s.store.RenameUserTrafficIdentity(req.Name, originalName); rollbackErr != nil {
+				http.Error(w, "Failed to save metadata: "+err.Error()+" (store rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				return
+			}
+			if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
+				http.Error(w, "Failed to save metadata: "+err.Error()+" (config rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				return
+			}
+		}
 		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
