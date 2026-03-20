@@ -601,9 +601,8 @@ export function buildInboundSubmission(formData: InboundLike) {
         delete submission.tls.reality
     }
 
-    if (type !== 'vless' || !submission.tls?.reality?.enabled) {
-        delete submission.tls?.reality?.public_key
-    }
+    // public_key is display-only (client-side); never include in server inbound config
+    delete submission.tls?.reality?.public_key
 
     return { submission }
 }
