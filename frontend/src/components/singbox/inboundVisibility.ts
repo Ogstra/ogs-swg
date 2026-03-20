@@ -185,6 +185,7 @@ function normalizePortInput(value: unknown): string | number {
 
 function isTransportConfigured(transport: any): boolean {
     if (!transport || typeof transport !== 'object') return false
+    if (transport.enabled === false) return false
     if (transport.enabled === true) return true
     const transportType = String(transport.type || '').trim()
     return transportType !== ''
