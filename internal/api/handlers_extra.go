@@ -21,6 +21,40 @@ type ServiceActionRequest struct {
 	Service string `json:"service" validate:"required"`
 }
 
+var (
+	detachedServiceActionDelay   = 150 * time.Millisecond
+	detachedServiceActionTimeout = 15 * time.Second
+)
+
+func (s *Server) shouldDetachServiceAction(action, service string) bool {
+	return service == "sing-box" && (action == "restart" || action == "stop")
+}
+
+func (s *Server) writeAcceptedServiceAction(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, `{"status":"accepted"}`)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (s *Server) dispatchDetachedServiceAction(action, service string, run func(context.Context, string) error, afterSuccess func()) {
+	time.AfterFunc(detachedServiceActionDelay, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), detachedServiceActionTimeout)
+		defer cancel()
+
+		if err := run(ctx, service); err != nil {
+			log.Printf("service action failed after response: action=%s service=%s err=%v", action, service, err)
+			return
+		}
+
+		if afterSuccess != nil {
+			afterSuccess()
+		}
+	})
+}
+
 func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -34,6 +68,17 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 
 	if err := validateService(req.Service); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if s.executor == nil {
+		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	if s.shouldDetachServiceAction("restart", req.Service) {
+		s.writeAcceptedServiceAction(w)
+		s.dispatchDetachedServiceAction("restart", req.Service, s.executor.RestartService, nil)
 		return
 	}
 
@@ -94,13 +139,19 @@ func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.executor != nil {
-		if err := s.executor.StopService(r.Context(), req.Service); err != nil {
-			http.Error(w, "Failed to stop service: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-	} else {
+	if s.executor == nil {
 		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	if s.shouldDetachServiceAction("stop", req.Service) {
+		s.writeAcceptedServiceAction(w)
+		s.dispatchDetachedServiceAction("stop", req.Service, s.executor.StopService, nil)
+		return
+	}
+
+	if err := s.executor.StopService(r.Context(), req.Service); err != nil {
+		http.Error(w, "Failed to stop service: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
