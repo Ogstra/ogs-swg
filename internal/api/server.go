@@ -40,6 +40,7 @@ type Server struct {
 	wgSamplerStop    chan struct{}
 	wgSamplerPaused  bool
 	wgLast           map[string]core.WGSample
+	loginLimiter     *loginLimiter
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -72,6 +73,7 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		wgMux:            sync.RWMutex{},
 		wgLast:           make(map[string]core.WGSample),
 		wgSamplerPaused:  false,
+		loginLimiter:     newLoginLimiter(),
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -43,12 +44,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if blocked, retryAfter := s.loginLimiter.isBlocked(req.Username); blocked {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+		http.Error(w, "Too many failed login attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
+
 	perms, err := s.store.VerifyPanelUser(req.Username, req.Password)
 	if err != nil {
 		http.Error(w, "Authentication error", http.StatusInternalServerError)
 		return
 	}
 	if perms == nil {
+		s.loginLimiter.recordFailure(req.Username)
 		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
 		return
 	}
