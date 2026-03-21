@@ -79,6 +79,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     useEffect(() => {
         const handleUnauthorized = () => {
+            // In demo mode the api_key is injected by the autologin script on
+            // every page load and never expires. A 401 here means the server
+            // was briefly unavailable (e.g. container restart). Reload the page
+            // so the autologin script re-runs and auth is restored automatically.
+            if (localStorage.getItem('demo_mode') === '1') {
+                window.location.reload();
+                return;
+            }
             logout();
         };
         window.addEventListener('auth:unauthorized', handleUnauthorized);
