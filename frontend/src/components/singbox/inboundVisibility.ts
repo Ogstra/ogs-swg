@@ -27,7 +27,6 @@ const DEFAULT_VLESS = {
     override_address: '',
     link_allow_insecure: 'auto',
     sniff: false,
-    sniff_override_destination: false,
     tls: {
         enabled: false,
         server_name: '',
@@ -74,7 +73,6 @@ const DEFAULT_VMESS = {
     override_address: '',
     link_allow_insecure: 'auto',
     sniff: false,
-    sniff_override_destination: false,
     tls: {
         enabled: false,
         server_name: '',
@@ -111,7 +109,6 @@ const DEFAULT_TROJAN = {
     override_address: '',
     link_allow_insecure: 'auto',
     sniff: false,
-    sniff_override_destination: false,
     tls: {
         enabled: false,
         server_name: '',
@@ -402,7 +399,6 @@ export function normalizeInboundForEditor(value: InboundLike | null | undefined)
         normalized.transport = normalizeTransport(type, source.transport, fallback.transport)
         normalized.multiplex = normalizeMultiplex(type, source.multiplex, fallback.multiplex)
         normalized.sniff = !!source.sniff
-        normalized.sniff_override_destination = !!source.sniff_override_destination
     } else {
         normalized.up_mbps = source.up_mbps ?? ''
         normalized.down_mbps = source.down_mbps ?? ''
@@ -554,7 +550,6 @@ export function buildInboundSubmission(formData: InboundLike) {
 
         // Hysteria2 does not support sniff fields
         delete submission.sniff
-        delete submission.sniff_override_destination
 
         return { submission }
     }
@@ -621,7 +616,6 @@ export function buildInboundSubmission(formData: InboundLike) {
 
     // Omit sniff fields when false (sing-box treats absence as false)
     if (!submission.sniff) delete submission.sniff
-    if (!submission.sniff_override_destination) delete submission.sniff_override_destination
 
     return { submission }
 }
