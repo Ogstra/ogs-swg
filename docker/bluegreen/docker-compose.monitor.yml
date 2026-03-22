@@ -3,6 +3,7 @@
 # Lightweight sidecar that manages the blue/green lifecycle:
 #   - Stops the old slot after the baking window expires
 #   - Polls the active slot health; rolls back to the previous slot on failure
+#   - Restarts generic unhealthy containers (for example, the public demo)
 #   - Logs all events to EVENTS_FILE
 #
 # The monitor needs the Docker socket to start/stop app containers,
@@ -47,6 +48,12 @@ services:
 
       # Consecutive failures before triggering rollback
       - FAIL_THRESHOLD=4
+
+      # Generic autoheal for containers with Docker healthcheck status=unhealthy.
+      # Keep the blue/green slots, proxy, and monitor under their own control flow.
+      - AUTOHEAL_ENABLED=true
+      - AUTOHEAL_COOLDOWN_SEC=120
+      - AUTOHEAL_IGNORE_REGEX=^ogs-swg-(blue|green|proxy|monitor)$
 
     volumes:
       # Docker socket — needed to start/stop blue and green containers
