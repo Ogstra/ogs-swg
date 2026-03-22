@@ -6,6 +6,115 @@ import (
 	"time"
 )
 
+// ---------------------------------------------------------------------------
+// PanelUser permission tests — can_read_logs_censored
+// ---------------------------------------------------------------------------
+
+func TestPanelUserCanReadLogsCensored_CreateAndVerify(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	perms := PanelUserPermissions{
+		CanReadLogs:         false,
+		CanReadLogsCensored: true,
+	}
+	if err := store.CreatePanelUser("bob", "secret", perms); err != nil {
+		t.Fatalf("CreatePanelUser: %v", err)
+	}
+
+	got, err := store.VerifyPanelUser("bob", "secret")
+	if err != nil {
+		t.Fatalf("VerifyPanelUser: %v", err)
+	}
+	if got == nil {
+		t.Fatal("VerifyPanelUser returned nil; want permissions struct")
+	}
+	if !got.CanReadLogsCensored {
+		t.Errorf("CanReadLogsCensored = false after Create; want true")
+	}
+	// Normalize() must have implied CanReadLogs=true
+	if !got.CanReadLogs {
+		t.Errorf("CanReadLogs = false after Normalize; want true (implied by CanReadLogsCensored)")
+	}
+}
+
+func TestPanelUserCanReadLogsCensored_UpdateAndGetAll(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// Create with censored=false
+	if err := store.CreatePanelUser("carol", "pass", PanelUserPermissions{}); err != nil {
+		t.Fatalf("CreatePanelUser: %v", err)
+	}
+
+	// Update with censored=true
+	if err := store.UpdatePanelUserPermissions("carol", PanelUserPermissions{CanReadLogsCensored: true}); err != nil {
+		t.Fatalf("UpdatePanelUserPermissions: %v", err)
+	}
+
+	users, err := store.GetAllPanelUsers()
+	if err != nil {
+		t.Fatalf("GetAllPanelUsers: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("GetAllPanelUsers returned %d users; want 1", len(users))
+	}
+	if !users[0].Permissions.CanReadLogsCensored {
+		t.Errorf("CanReadLogsCensored = false after Update; want true")
+	}
+	if !users[0].Permissions.CanReadLogs {
+		t.Errorf("CanReadLogs = false after Normalize; want true (implied by CanReadLogsCensored)")
+	}
+}
+
+func TestPanelUserCanReadLogsCensored_DefaultFalse(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// Create without CanReadLogsCensored
+	if err := store.CreatePanelUser("dave", "pw", PanelUserPermissions{CanReadLogs: true}); err != nil {
+		t.Fatalf("CreatePanelUser: %v", err)
+	}
+
+	got, err := store.VerifyPanelUser("dave", "pw")
+	if err != nil {
+		t.Fatalf("VerifyPanelUser: %v", err)
+	}
+	if got == nil {
+		t.Fatal("VerifyPanelUser returned nil")
+	}
+	if got.CanReadLogsCensored {
+		t.Errorf("CanReadLogsCensored = true; want false (was not set)")
+	}
+}
+
+func TestPanelUserNormalize_CensoredImpliesRead(t *testing.T) {
+	p := PanelUserPermissions{CanReadLogsCensored: true}
+	p.Normalize()
+	if !p.CanReadLogs {
+		t.Errorf("Normalize(): CanReadLogs = false; want true when CanReadLogsCensored=true")
+	}
+}
+
+func TestFullPanelUserPermissions_IncludesCensored(t *testing.T) {
+	p := fullPanelUserPermissions()
+	if !p.CanReadLogsCensored {
+		t.Errorf("fullPanelUserPermissions().CanReadLogsCensored = false; want true")
+	}
+}
+
 func sumSamples(samples []Sample) (int64, int64) {
 	var uplink int64
 	var downlink int64
