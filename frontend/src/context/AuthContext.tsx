@@ -12,6 +12,7 @@ export interface PanelUserPermissions {
     can_read_panel_users: boolean;
     can_write_panel_users: boolean;
     can_read_logs: boolean;
+    can_read_logs_censored: boolean;
 }
 
 interface AuthContextType {
@@ -39,6 +40,7 @@ const normalizePermissions = (raw: any): PanelUserPermissions => ({
     can_read_panel_users: !!raw?.can_read_panel_users,
     can_write_panel_users: !!raw?.can_write_panel_users,
     can_read_logs: !!raw?.can_read_logs,
+    can_read_logs_censored: !!raw?.can_read_logs_censored,
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
