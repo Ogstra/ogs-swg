@@ -33,6 +33,7 @@ func ensureGrantablePermissions(caller *core.PanelUserPermissions, requested cor
 		{"can_read_panel_users", c.CanReadPanelUsers, requested.CanReadPanelUsers},
 		{"can_write_panel_users", c.CanWritePanelUsers, requested.CanWritePanelUsers},
 		{"can_read_logs", c.CanReadLogs, requested.CanReadLogs},
+		{"can_read_logs_censored", c.CanReadLogsCensored, requested.CanReadLogsCensored},
 	}
 
 	for _, chk := range checks {
