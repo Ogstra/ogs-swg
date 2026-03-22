@@ -97,44 +97,44 @@ func requestWithPerms(r *http.Request, perms *core.PanelUserPermissions) *http.R
 func TestEnsureGrantablePermissions_CanReadLogsCensored(t *testing.T) {
 	tests := []struct {
 		name        string
-		callerHas   bool
-		grantTo     bool
+		caller      core.PanelUserPermissions
+		requested   core.PanelUserPermissions
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name:        "caller without censored cannot grant it",
-			callerHas:   false,
-			grantTo:     true,
-			wantErr:     true,
-			errContains: "cannot grant can_read_logs_censored",
-		},
-		{
-			name:      "caller with censored can grant it",
-			callerHas: true,
-			grantTo:   true,
+			name:      "caller with logs-only (no censored) can grant censored",
+			caller:    core.PanelUserPermissions{CanReadLogs: true, CanReadLogsCensored: false},
+			requested: core.PanelUserPermissions{CanReadLogs: true, CanReadLogsCensored: true},
 			wantErr:   false,
 		},
 		{
+			name:      "caller with censored can grant censored",
+			caller:    core.PanelUserPermissions{CanReadLogs: true, CanReadLogsCensored: true},
+			requested: core.PanelUserPermissions{CanReadLogs: true, CanReadLogsCensored: true},
+			wantErr:   false,
+		},
+		{
+			// Normalize implies CanReadLogs when CanReadLogsCensored is true, so the
+			// can_read_logs check fires before can_read_logs_censored — either way the
+			// caller without any log access is blocked.
+			name:        "caller without any log access cannot grant censored",
+			caller:      core.PanelUserPermissions{CanReadLogs: false, CanReadLogsCensored: false},
+			requested:   core.PanelUserPermissions{CanReadLogs: true, CanReadLogsCensored: true},
+			wantErr:     true,
+			errContains: "cannot grant can_read_logs",
+		},
+		{
 			name:      "granting false is always allowed",
-			callerHas: false,
-			grantTo:   false,
+			caller:    core.PanelUserPermissions{CanReadLogs: true, CanReadLogsCensored: false},
+			requested: core.PanelUserPermissions{CanReadLogs: true, CanReadLogsCensored: false},
 			wantErr:   false,
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			// Caller always has CanReadLogs so we isolate the CanReadLogsCensored check.
-			caller := &core.PanelUserPermissions{
-				CanReadLogs:         true,
-				CanReadLogsCensored: tc.callerHas,
-			}
-			// requested also has CanReadLogs=true to avoid tripping the can_read_logs check
-			// (Normalize sets it anyway when CanReadLogsCensored=true, but be explicit).
-			requested := core.PanelUserPermissions{
-				CanReadLogs:         true,
-				CanReadLogsCensored: tc.grantTo,
-			}
+			caller := &tc.caller
+			requested := tc.requested
 			err := ensureGrantablePermissions(caller, requested)
 			if tc.wantErr {
 				if err == nil {
