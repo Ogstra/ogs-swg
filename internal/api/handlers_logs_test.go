@@ -1,0 +1,360 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"testing"
+
+	"github.com/Ogstra/ogs-swg/internal/core"
+)
+
+// logsExecutorStub overrides ReadJournal and SearchJournal to return controlled lines.
+type logsExecutorStub struct {
+	singboxConfigExecutorStub
+	journalLines []string
+}
+
+func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, _ int) ([]string, error) {
+	out := make([]string, len(s.journalLines))
+	copy(out, s.journalLines)
+	return out, nil
+}
+
+func (s *logsExecutorStub) SearchJournal(_ context.Context, _ string, query string, _ int) ([]string, error) {
+	// Return all lines that contain the query (case-insensitive not required by stub —
+	// just do a simple substring match so tests can reason about it).
+	var result []string
+	q := query
+	for _, ln := range s.journalLines {
+		if containsInsensitive(ln, q) {
+			result = append(result, ln)
+		}
+	}
+	return result, nil
+}
+
+func containsInsensitive(s, substr string) bool {
+	sl := make([]byte, len(s))
+	copy(sl, s)
+	subl := make([]byte, len(substr))
+	copy(subl, substr)
+	for i := range sl {
+		if sl[i] >= 'A' && sl[i] <= 'Z' {
+			sl[i] += 32
+		}
+	}
+	for i := range subl {
+		if subl[i] >= 'A' && subl[i] <= 'Z' {
+			subl[i] += 32
+		}
+	}
+	return len(subl) == 0 || contains(string(sl), string(subl))
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || indexStr(s, substr) >= 0)
+}
+
+func indexStr(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
+func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub) {
+	t.Helper()
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	store, err := core.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	stub := &logsExecutorStub{journalLines: lines}
+	cfg := &core.Config{
+		EnableSingbox: true,
+		LogSource:     "journal",
+	}
+	return NewServer(store, cfg, stub), stub
+}
+
+func requestWithPerms(r *http.Request, perms *core.PanelUserPermissions) *http.Request {
+	ctx := context.WithValue(r.Context(), permissionsContextKey, perms)
+	return r.WithContext(ctx)
+}
+
+// ---------------------------------------------------------------------------
+// TestEnsureGrantablePermissions — can_read_logs_censored privilege escalation guard
+// ---------------------------------------------------------------------------
+
+func TestEnsureGrantablePermissions_CanReadLogsCensored(t *testing.T) {
+	tests := []struct {
+		name        string
+		callerHas   bool
+		grantTo     bool
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "caller without censored cannot grant it",
+			callerHas:   false,
+			grantTo:     true,
+			wantErr:     true,
+			errContains: "cannot grant can_read_logs_censored",
+		},
+		{
+			name:      "caller with censored can grant it",
+			callerHas: true,
+			grantTo:   true,
+			wantErr:   false,
+		},
+		{
+			name:      "granting false is always allowed",
+			callerHas: false,
+			grantTo:   false,
+			wantErr:   false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Caller always has CanReadLogs so we isolate the CanReadLogsCensored check.
+			caller := &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: tc.callerHas,
+			}
+			// requested also has CanReadLogs=true to avoid tripping the can_read_logs check
+			// (Normalize sets it anyway when CanReadLogsCensored=true, but be explicit).
+			requested := core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: tc.grantTo,
+			}
+			err := ensureGrantablePermissions(caller, requested)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tc.errContains != "" && !containsInsensitive(err.Error(), tc.errContains) {
+					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestHandleGetLogs
+// ---------------------------------------------------------------------------
+
+const rawLogLine = "2024/01/01 12:00:00 accepted from 1.2.3.4:5678 to example.com:443"
+const censoredLogLine = "2024/01/01 12:00:00 accepted from ***:*** to ***:***"
+
+func TestHandleGetLogs(t *testing.T) {
+	tests := []struct {
+		name          string
+		perms         *core.PanelUserPermissions
+		query         string // ?user= filter
+		wantInBody    string
+		wantNotInBody string
+		wantEmpty     bool // expect no real log lines (only the "no log lines found" sentinel)
+	}{
+		{
+			name: "censored user sees redacted line",
+			perms: &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: true,
+			},
+			wantInBody:    "***:***",
+			wantNotInBody: "1.2.3.4",
+		},
+		{
+			name: "full-permission user sees original line",
+			perms: &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: false,
+			},
+			wantInBody: "1.2.3.4",
+		},
+		{
+			name: "censored user filter on raw IP returns empty",
+			perms: &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: true,
+			},
+			query:     "1.2.3.4",
+			wantEmpty: true,
+		},
+		{
+			name: "censored user filter on non-IP term (accepted) returns censored line",
+			perms: &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: true,
+			},
+			query:         "accepted",
+			wantInBody:    "***:***",
+			wantNotInBody: "1.2.3.4",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newLogsTestServer(t, []string{rawLogLine})
+
+			url := "/api/logs"
+			if tc.query != "" {
+				url += "?user=" + tc.query
+			}
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req = requestWithPerms(req, tc.perms)
+			rr := httptest.NewRecorder()
+
+			srv.handleGetLogs(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			logsRaw, ok := resp["logs"].([]interface{})
+			if !ok {
+				t.Fatalf("logs field missing or wrong type: %#v", resp["logs"])
+			}
+
+			logs := make([]string, len(logsRaw))
+			for i, v := range logsRaw {
+				logs[i], _ = v.(string)
+			}
+
+			body := joinLines(logs)
+
+			if tc.wantEmpty {
+				// All lines should be sentinel "(no log lines found...)" — none should be rawLogLine
+				if containsInsensitive(body, "1.2.3.4") || containsInsensitive(body, "***:***") {
+					t.Fatalf("expected empty results but got: %v", logs)
+				}
+				return
+			}
+
+			if tc.wantInBody != "" && !containsInsensitive(body, tc.wantInBody) {
+				t.Fatalf("expected %q in response body, got: %v", tc.wantInBody, logs)
+			}
+			if tc.wantNotInBody != "" && containsInsensitive(body, tc.wantNotInBody) {
+				t.Fatalf("expected %q NOT in response body, but it was present: %v", tc.wantNotInBody, logs)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestHandleSearchLogs
+// ---------------------------------------------------------------------------
+
+func TestHandleSearchLogs(t *testing.T) {
+	tests := []struct {
+		name          string
+		perms         *core.PanelUserPermissions
+		query         string
+		wantInBody    string
+		wantNotInBody string
+		wantEmpty     bool
+	}{
+		{
+			name: "censored user search on non-IP term sees censored lines",
+			perms: &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: true,
+			},
+			query:         "accepted",
+			wantInBody:    "***:***",
+			wantNotInBody: "1.2.3.4",
+		},
+		{
+			name: "censored user search on raw IP returns empty",
+			perms: &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: true,
+			},
+			query:     "1.2.3.4",
+			wantEmpty: true,
+		},
+		{
+			name: "full-permission user search on raw IP returns unredacted line",
+			perms: &core.PanelUserPermissions{
+				CanReadLogs:         true,
+				CanReadLogsCensored: false,
+			},
+			query:      "1.2.3.4",
+			wantInBody: "1.2.3.4",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, _ := newLogsTestServer(t, []string{rawLogLine})
+
+			url := "/api/logs/search?q=" + tc.query
+			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req = requestWithPerms(req, tc.perms)
+			rr := httptest.NewRecorder()
+
+			srv.handleSearchLogs(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+			}
+
+			var resp map[string]interface{}
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			logsRaw, ok := resp["logs"].([]interface{})
+			if !ok {
+				t.Fatalf("logs field missing or wrong type: %#v", resp["logs"])
+			}
+
+			logs := make([]string, len(logsRaw))
+			for i, v := range logsRaw {
+				logs[i], _ = v.(string)
+			}
+
+			body := joinLines(logs)
+
+			if tc.wantEmpty {
+				if containsInsensitive(body, "1.2.3.4") || containsInsensitive(body, "***:***") {
+					t.Fatalf("expected empty results but got: %v", logs)
+				}
+				return
+			}
+
+			if tc.wantInBody != "" && !containsInsensitive(body, tc.wantInBody) {
+				t.Fatalf("expected %q in response body, got: %v", tc.wantInBody, logs)
+			}
+			if tc.wantNotInBody != "" && containsInsensitive(body, tc.wantNotInBody) {
+				t.Fatalf("expected %q NOT in response body, but it was present: %v", tc.wantNotInBody, logs)
+			}
+		})
+	}
+}
+
+func joinLines(lines []string) string {
+	result := ""
+	for _, l := range lines {
+		result += l + "\n"
+	}
+	return result
+}
