@@ -62,4 +62,4 @@ Location: `${DEPLOY_PATH}` on VPS.
 
 - Runtime SSH executor support was removed from the application.
 - Secrets like `OGS_AGENT_SSH_KEY_B64`, `OGS_AGENT_USER`, and `OGS_SSH_KNOWN_HOSTS_CONTENT*` are no longer used.
-- Health check still validates slots via `POST /api/login` expecting `401/405`.
+- Health checks validate slots via `GET /health` expecting `204`.
