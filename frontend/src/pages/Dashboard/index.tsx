@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../../services/api'
-import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield } from 'lucide-react'
+import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -57,6 +57,10 @@ export default function Dashboard() {
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
     const [refreshInterval, setRefreshInterval] = useState<number>(10000)
     const [prefsLoaded, setPrefsLoaded] = useState(false)
+    const [selectedConsumers, setSelectedConsumers] = useState<Record<'singbox' | 'wireguard', Consumer | null>>({
+        singbox: null,
+        wireguard: null,
+    })
 
     const now = new Date()
     const today = now.toISOString().split('T')[0]
@@ -186,6 +190,47 @@ export default function Dashboard() {
 
     // Derived values for UI
     const topConsumers = (topConsumersMap[chartMode] || []).slice(0, 20)
+    const selectedConsumer = selectedConsumers[chartMode]
+    const selectedConsumerQuery = useQuery({
+        queryKey: requestWindow.range === 'custom'
+            ? ['dashboard-consumer-chart', chartMode, selectedConsumer?.key, requestWindow.range, requestWindow.startText, requestWindow.endText]
+            : ['dashboard-consumer-chart', chartMode, selectedConsumer?.key, requestWindow.range],
+        queryFn: () => requestWindow.range === 'custom'
+            ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, requestWindow.range, requestWindow.startText, requestWindow.endText)
+            : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, requestWindow.range),
+        enabled: prefsLoaded && !!selectedConsumer?.key && selectedConsumer.key !== '********',
+        refetchInterval: selectedConsumer ? refreshInterval : false,
+    })
+    const detailChartData = selectedConsumerQuery.data?.chart_data || []
+    const activeChartData = selectedConsumer ? detailChartData : chartData
+    const chartIsLoading = loading || (!!selectedConsumer && selectedConsumerQuery.isPending)
+
+    useEffect(() => {
+        setSelectedConsumers(prev => {
+            const next = { ...prev }
+            let changed = false
+
+            for (const mode of ['singbox', 'wireguard'] as const) {
+                const current = prev[mode]
+                if (!current) continue
+
+                const stillExists = (topConsumersMap[mode] || []).some(item => item.key === current.key)
+                if (!stillExists) {
+                    next[mode] = null
+                    changed = true
+                }
+            }
+
+            return changed ? next : prev
+        })
+    }, [topConsumersMap])
+
+    const handleRefreshDashboard = async () => {
+        await Promise.all([
+            dashboardQuery.refetch(),
+            selectedConsumer ? selectedConsumerQuery.refetch() : Promise.resolve(),
+        ])
+    }
 
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
@@ -255,7 +300,7 @@ export default function Dashboard() {
                     )}
 
                     <Button
-                        onClick={() => dashboardQuery.refetch()}
+                        onClick={handleRefreshDashboard}
                         isLoading={loading}
                         variant="icon"
                         size="icon"
@@ -380,31 +425,55 @@ export default function Dashboard() {
                 {/* Traffic Chart */}
                 <div className="lg:col-span-2">
                     <Card
-                        title="Traffic Overview"
+                        title={selectedConsumer ? `Traffic Overview · ${selectedConsumer.name}` : "Traffic Overview"}
                         className="h-full"
                         action={
-                            <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                                <button
-                                    onClick={() => setChartMode('singbox')}
-                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
-                                >
-                                    Sing-Box
-                                </button>
-                                <button
-                                    onClick={() => setChartMode('wireguard')}
-                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'wireguard' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
-                                >
-                                    WireGuard
-                                </button>
+                            <div className="flex items-center gap-2">
+                                {selectedConsumer && (
+                                    <button
+                                        onClick={() => setSelectedConsumers(prev => ({ ...prev, [chartMode]: null }))}
+                                        className="inline-flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950 px-2.5 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:border-slate-700 hover:text-white"
+                                    >
+                                        <X size={12} />
+                                        Clear
+                                    </button>
+                                )}
+                                <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                                    <button
+                                        onClick={() => setChartMode('singbox')}
+                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                    >
+                                        Sing-Box
+                                    </button>
+                                    <button
+                                        onClick={() => setChartMode('wireguard')}
+                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'wireguard' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                    >
+                                        WireGuard
+                                    </button>
+                                </div>
                             </div>
                         }
                     >
                         <div ref={chartContainerRef} className="h-[300px] min-h-[300px] w-full min-w-0 mt-4">
-                            {chartSize.width > 0 && (
+                            {chartIsLoading ? (
+                                <div className="h-full w-full animate-pulse rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                                    <div className="flex h-full items-end gap-3">
+                                        {Array.from({ length: 8 }).map((_, idx) => (
+                                            <div key={idx} className="flex flex-1 items-end">
+                                                <div
+                                                    className="w-full rounded-t-md bg-slate-800/80"
+                                                    style={{ height: `${35 + ((idx * 13) % 45)}%` }}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ) : chartSize.width > 0 ? (
                                 <AreaChart
                                     width={chartSize.width}
                                     height={chartSize.height}
-                                    data={chartData}
+                                    data={activeChartData}
                                     margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
                                 >
                                     <defs>
@@ -471,7 +540,7 @@ export default function Dashboard() {
                                         fill={chartMode === 'singbox' ? "url(#colorDown)" : "url(#colorUp)"}
                                     />
                                 </AreaChart>
-                            )}
+                            ) : null}
                         </div>
                     </Card>
                 </div>
@@ -501,8 +570,27 @@ export default function Dashboard() {
                         {topConsumers.length === 0 ? (
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
                         ) : (
-                            topConsumers.map((u, i) => (
-                                <div key={u.key || u.name} className="flex h-[62px] items-center justify-between gap-3 overflow-hidden rounded-lg border border-slate-800/50 bg-slate-950/50 p-3 transition-colors hover:border-slate-800">
+                            topConsumers.map((u, i) => {
+                                const isSelected = selectedConsumer?.key === u.key
+                                const canSelect = !!u.key && u.key !== '********'
+
+                                return (
+                                <button
+                                    key={u.key || u.name}
+                                    type="button"
+                                    disabled={!canSelect}
+                                    onClick={() => {
+                                        setSelectedConsumers(prev => ({
+                                            ...prev,
+                                            [chartMode]: prev[chartMode]?.key === u.key ? null : u,
+                                        }))
+                                    }}
+                                    className={`flex h-[62px] w-full items-center justify-between gap-3 overflow-hidden rounded-lg border p-3 text-left transition-colors ${
+                                        isSelected
+                                            ? 'border-blue-500/60 bg-blue-500/10'
+                                            : 'border-slate-800/50 bg-slate-950/50 hover:border-slate-800'
+                                    } ${canSelect ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                                >
                                     <div className="flex min-w-0 items-center gap-3">
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
                                             {i + 1}
@@ -519,8 +607,8 @@ export default function Dashboard() {
                                     <div className="shrink-0 text-right">
                                         <div className="font-mono text-sm text-blue-400">{formatBytes(u.total)}</div>
                                     </div>
-                                </div>
-                            ))
+                                </button>
+                            )})
                         )}
                     </div>
                 </Card>

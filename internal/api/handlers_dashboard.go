@@ -46,12 +46,109 @@ type Consumer struct {
 	Key        string `json:"key"`         // For linking/identification
 }
 
+type DashboardConsumerChartData struct {
+	ChartData []UnifiedChartPoint `json:"chart_data"`
+}
+
 func wireGuardFlowLabel(interfaceName string) string {
 	iface := strings.TrimSpace(interfaceName)
 	if iface == "" {
 		return "WireGuard"
 	}
 	return fmt.Sprintf("WireGuard:%s", iface)
+}
+
+func resolveDashboardWindow(rangeStr, startStr, endStr string) (int64, int64, int64) {
+	var start, end int64
+	now := time.Now().Unix()
+
+	if startStr != "" && endStr != "" {
+		sVal, _ := strconv.ParseInt(startStr, 10, 64)
+		eVal, _ := strconv.ParseInt(endStr, 10, 64)
+		start = sVal
+		end = eVal
+	}
+
+	if start == 0 || end == 0 {
+		var duration time.Duration
+		switch rangeStr {
+		case "30m":
+			duration = 30 * time.Minute
+		case "1h":
+			duration = 1 * time.Hour
+		case "6h":
+			duration = 6 * time.Hour
+		case "24h":
+			duration = 24 * time.Hour
+		case "1w":
+			duration = 7 * 24 * time.Hour
+		case "1m":
+			duration = 30 * 24 * time.Hour
+		default:
+			duration = 24 * time.Hour
+		}
+
+		var baseRes int64 = 60
+		if duration >= 6*time.Hour && duration <= 24*time.Hour {
+			baseRes = 300
+		} else if duration > 24*time.Hour {
+			baseRes = 3600
+		}
+
+		quantizedEnd := (now / baseRes) * baseRes
+		end = quantizedEnd
+		start = end - int64(duration.Seconds())
+	}
+
+	diff := end - start
+	var interval int64
+	if diff <= 1800 {
+		interval = 60
+	} else if diff <= 3600 {
+		interval = 120
+	} else if diff <= 21600 {
+		interval = 900
+	} else if diff <= 86400 {
+		interval = 3600
+	} else if diff <= 604800 {
+		interval = 21600
+	} else {
+		interval = 86400
+	}
+
+	return start, end, interval
+}
+
+func buildConsumerChartData(start, end, interval int64, buckets map[int64]TrafficStats, mode string) []UnifiedChartPoint {
+	var chartData []UnifiedChartPoint
+	var accUp, accDown int64
+	gridStart := (start / interval) * interval
+
+	for t := gridStart; t <= end; t += interval {
+		stat := buckets[t]
+		accUp += stat.Uplink
+		accDown += stat.Downlink
+
+		point := UnifiedChartPoint{Timestamp: t}
+		if mode == "wireguard" {
+			point.UpWG = accUp
+			point.DownWG = accDown
+		} else {
+			point.UpSB = accUp
+			point.DownSB = accDown
+		}
+		chartData = append(chartData, point)
+	}
+
+	return chartData
+}
+
+func apiTrafficBucketsFromCore(in map[int64]core.TrafficStats) map[int64]TrafficStats {
+	out := make(map[int64]TrafficStats, len(in))
+	for ts, stat := range in {
+		out[ts] = TrafficStats{Uplink: stat.Uplink, Downlink: stat.Downlink}
+	}
+	return out
 }
 
 func sumCoreTrafficMap(stats map[int64]core.TrafficStats) TrafficStats {
@@ -116,53 +213,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	startStr := r.URL.Query().Get("start")
 	endStr := r.URL.Query().Get("end")
 
-	var start, end int64
-	now := time.Now().Unix()
-
-	// Custom range (explicit start/end from client)
-	if startStr != "" && endStr != "" {
-		sVal, _ := strconv.ParseInt(startStr, 10, 64)
-		eVal, _ := strconv.ParseInt(endStr, 10, 64)
-		start = sVal
-		end = eVal
-	}
-
-	// Preset ranges (30m, 1h, 6h, 24h, 1w, 1m, etc.)
-	// Here we quantize the end timestamp so that repeated calls within a small window
-	// hit the in-memory cache instead of recomputing everything on every refresh.
-	if start == 0 || end == 0 {
-		var duration time.Duration
-		switch rangeStr {
-		case "30m":
-			duration = 30 * time.Minute
-		case "1h":
-			duration = 1 * time.Hour
-		case "6h":
-			duration = 6 * time.Hour
-		case "24h":
-			duration = 24 * time.Hour
-		case "1w":
-			duration = 7 * 24 * time.Hour
-		case "1m":
-			duration = 30 * 24 * time.Hour
-		default:
-			duration = 24 * time.Hour
-		}
-
-		// Choose a base resolution for quantization based on range size.
-		// Smaller ranges use 1-minute buckets, larger ranges use coarser buckets
-		// to maximize cache hits without losing meaningful precision.
-		var baseRes int64 = 60 // 1 minute
-		if duration >= 6*time.Hour && duration <= 24*time.Hour {
-			baseRes = 300 // 5 minutes
-		} else if duration > 24*time.Hour {
-			baseRes = 3600 // 1 hour
-		}
-
-		quantizedEnd := (now / baseRes) * baseRes
-		end = quantizedEnd
-		start = end - int64(duration.Seconds())
-	}
+	start, end, interval := resolveDashboardWindow(rangeStr, startStr, endStr)
 
 	// Cache key
 	// For presets we key by (rangeStr, quantized end), so multiple requests in the same
@@ -213,23 +264,6 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 				wgPeerKeys = append(wgPeerKeys, key)
 			}
 		}
-	}
-
-	// 3. Aggregate Chart Data (Downsampling)
-	diff := end - start
-	var interval int64
-	if diff <= 1800 {
-		interval = 60
-	} else if diff <= 3600 {
-		interval = 120
-	} else if diff <= 21600 {
-		interval = 900
-	} else if diff <= 86400 {
-		interval = 3600
-	} else if diff <= 604800 {
-		interval = 21600
-	} else {
-		interval = 86400
 	}
 
 	// 4. Fetch buckets
@@ -414,6 +448,54 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.Request) {
+	mode := strings.TrimSpace(r.URL.Query().Get("mode"))
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	rangeStr := r.URL.Query().Get("range")
+	startStr := r.URL.Query().Get("start")
+	endStr := r.URL.Query().Get("end")
+
+	if key == "" || key == maskedValue {
+		http.Error(w, "Missing consumer key", http.StatusBadRequest)
+		return
+	}
+	if mode != "singbox" && mode != "wireguard" {
+		http.Error(w, "Invalid consumer mode", http.StatusBadRequest)
+		return
+	}
+
+	start, end, interval := resolveDashboardWindow(rangeStr, startStr, endStr)
+	if end <= start {
+		http.Error(w, "Invalid dashboard window", http.StatusBadRequest)
+		return
+	}
+
+	var (
+		buckets map[int64]TrafficStats
+		err     error
+	)
+
+	switch mode {
+	case "singbox":
+		var coreBuckets map[int64]core.TrafficStats
+		coreBuckets, err = s.store.GetSBUserTrafficBuckets(key, start, end, interval)
+		buckets = apiTrafficBucketsFromCore(coreBuckets)
+	case "wireguard":
+		var coreBuckets map[int64]core.TrafficStats
+		coreBuckets, err = s.store.GetWGTrafficBuckets([]string{key}, start, end, interval)
+		buckets = apiTrafficBucketsFromCore(coreBuckets)
+	}
+	if err != nil {
+		http.Error(w, "Failed to fetch consumer chart: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DashboardConsumerChartData{
+		ChartData: buildConsumerChartData(start, end, interval, buckets, mode),
+	})
 }
 
 func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{} {
