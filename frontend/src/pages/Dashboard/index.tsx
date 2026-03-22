@@ -21,6 +21,18 @@ type DashboardRequestWindow =
     | { range: 'custom'; start: number; end: number; startText: string; endText: string }
     | { range: Exclude<DashboardRange, 'custom'> }
 
+const padDatePart = (value: number) => value.toString().padStart(2, '0')
+
+const formatDateTimeLocalValue = (date: Date) => (
+    `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}T${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`
+)
+
+const toUnixSeconds = (value: string) => {
+    const ms = new Date(value).getTime()
+    if (!Number.isFinite(ms)) return 0
+    return Math.floor(ms / 1000)
+}
+
 const loadDashboardPrefs = (): DashboardPrefs => {
     try {
         const raw = localStorage.getItem(DASHBOARD_PREF_KEY)
@@ -63,9 +75,10 @@ export default function Dashboard() {
     })
 
     const now = new Date()
-    const today = now.toISOString().split('T')[0]
-    const [customStart, setCustomStart] = useState(today)
-    const [customEnd, setCustomEnd] = useState(today)
+    const initialCustomStart = new Date(now)
+    initialCustomStart.setHours(0, 0, 0, 0)
+    const [customStart, setCustomStart] = useState(formatDateTimeLocalValue(initialCustomStart))
+    const [customEnd, setCustomEnd] = useState(formatDateTimeLocalValue(now))
     const chartContainerRef = useRef<HTMLDivElement | null>(null)
     const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
 
@@ -105,14 +118,28 @@ export default function Dashboard() {
         return () => ro.disconnect()
     }, [])
 
+    const customRangeState = useMemo(() => {
+        const start = toUnixSeconds(customStart)
+        const end = toUnixSeconds(customEnd)
+        return {
+            start,
+            end,
+            isValid: start > 0 && end > start,
+        }
+    }, [customStart, customEnd])
+
     const requestWindow = useMemo<DashboardRequestWindow>(() => {
         if (timeRange === 'custom') {
-            const start = Math.floor(new Date(customStart).getTime() / 1000)
-            const end = Math.floor(new Date(customEnd).getTime() / 1000) + 24 * 60 * 60
-            return { range: 'custom' as const, start, end, startText: String(start), endText: String(end) }
+            return {
+                range: 'custom' as const,
+                start: customRangeState.start,
+                end: customRangeState.end,
+                startText: String(customRangeState.start),
+                endText: String(customRangeState.end),
+            }
         }
         return { range: timeRange }
-    }, [timeRange, customStart, customEnd])
+    }, [timeRange, customRangeState])
 
     const dashboardQuery = useQuery({
         queryKey: requestWindow.range === 'custom'
@@ -121,7 +148,7 @@ export default function Dashboard() {
         queryFn: () => requestWindow.range === 'custom'
             ? api.getDashboardData(requestWindow.range, requestWindow.startText, requestWindow.endText)
             : api.getDashboardData(requestWindow.range),
-        enabled: prefsLoaded,
+        enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid),
         refetchInterval: refreshInterval,
         placeholderData: previousData => previousData,
     })
@@ -198,7 +225,7 @@ export default function Dashboard() {
         queryFn: () => requestWindow.range === 'custom'
             ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, requestWindow.range, requestWindow.startText, requestWindow.endText)
             : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, requestWindow.range),
-        enabled: prefsLoaded && !!selectedConsumer?.key && selectedConsumer.key !== '********',
+        enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid) && !!selectedConsumer?.key && selectedConsumer.key !== '********',
         refetchInterval: selectedConsumer ? refreshInterval : false,
     })
     const detailChartData = selectedConsumerQuery.data?.chart_data || []
@@ -226,6 +253,9 @@ export default function Dashboard() {
     }, [topConsumersMap])
 
     const handleRefreshDashboard = async () => {
+        if (timeRange === 'custom' && !customRangeState.isValid) {
+            return
+        }
         await Promise.all([
             dashboardQuery.refetch(),
             selectedConsumer ? selectedConsumerQuery.refetch() : Promise.resolve(),
@@ -282,26 +312,32 @@ export default function Dashboard() {
                     </div>
 
                     {timeRange === 'custom' && (
-                        <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm">
-                            <input
-                                type="date"
-                                value={customStart}
-                                onChange={e => setCustomStart(e.target.value)}
-                                className="bg-transparent text-xs text-slate-300 border-none outline-none focus:ring-0 cursor-pointer"
-                            />
-                            <span className="text-slate-500">-</span>
-                            <input
-                                type="date"
-                                value={customEnd}
-                                onChange={e => setCustomEnd(e.target.value)}
-                                className="bg-transparent text-xs text-slate-300 border-none outline-none focus:ring-0 cursor-pointer"
-                            />
+                        <div className="flex flex-col gap-1">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm">
+                                <input
+                                    type="datetime-local"
+                                    value={customStart}
+                                    onChange={e => setCustomStart(e.target.value)}
+                                    className="bg-transparent text-xs text-slate-300 border-none outline-none focus:ring-0 cursor-pointer"
+                                />
+                                <span className="hidden sm:inline text-slate-500">-</span>
+                                <input
+                                    type="datetime-local"
+                                    value={customEnd}
+                                    onChange={e => setCustomEnd(e.target.value)}
+                                    className="bg-transparent text-xs text-slate-300 border-none outline-none focus:ring-0 cursor-pointer"
+                                />
+                            </div>
+                            {!customRangeState.isValid && (
+                                <span className="text-[11px] text-amber-400">The end date/time must be after the start date/time.</span>
+                            )}
                         </div>
                     )}
 
                     <Button
                         onClick={handleRefreshDashboard}
                         isLoading={loading}
+                        disabled={timeRange === 'custom' && !customRangeState.isValid}
                         variant="icon"
                         size="icon"
                         icon={<RefreshCw size={16} />}
