@@ -38,10 +38,10 @@ services:
       - NGINX_CONF=docker/bluegreen/nginx/default.conf
 
       # Health probe — polled on the active slot container
-      - HEALTH_URL_PATH=/api/login             # endpoint path inside the app
-      - HEALTH_METHOD=POST
-      - HEALTH_BODY={"username":"invalid","password":"invalid"}
-      - HEALTH_EXPECT=401,405                  # expected HTTP codes for a live app
+      - HEALTH_URL_PATH=/health                # endpoint path inside the app
+      - HEALTH_METHOD=GET
+      - HEALTH_BODY=
+      - HEALTH_EXPECT=204                      # expected HTTP codes for a live app
 
       # Polling interval in seconds
       - CHECK_INTERVAL_SEC=15
