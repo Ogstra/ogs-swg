@@ -50,6 +50,41 @@ type DashboardConsumerChartData struct {
 	ChartData []UnifiedChartPoint `json:"chart_data"`
 }
 
+func resolveConsumerKey(rawKey, mode, name, iface string, s *Server, r *http.Request) string {
+	key := strings.TrimSpace(rawKey)
+	if key != "" && key != maskedValue {
+		return key
+	}
+
+	displayName := strings.TrimSpace(name)
+	if displayName == "" {
+		return ""
+	}
+
+	switch mode {
+	case "singbox":
+		return displayName
+	case "wireguard":
+		_, aliases, interfaces := s.discoverWireGuardPeersByInterface(r.Context())
+		targetIface := strings.TrimSpace(iface)
+		matches := make([]string, 0, 1)
+		for candidateKey, alias := range aliases {
+			if targetIface != "" && interfaces[candidateKey] != targetIface {
+				continue
+			}
+			trimmedAlias := strings.TrimSpace(alias)
+			if trimmedAlias == displayName || (trimmedAlias == "" && strings.HasPrefix(candidateKey, displayName)) {
+				matches = append(matches, candidateKey)
+			}
+		}
+		if len(matches) == 1 {
+			return matches[0]
+		}
+	}
+
+	return ""
+}
+
 func wireGuardFlowLabel(interfaceName string) string {
 	iface := strings.TrimSpace(interfaceName)
 	if iface == "" {
@@ -453,10 +488,13 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.Request) {
 	mode := strings.TrimSpace(r.URL.Query().Get("mode"))
 	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	iface := strings.TrimSpace(r.URL.Query().Get("interface_name"))
 	rangeStr := r.URL.Query().Get("range")
 	startStr := r.URL.Query().Get("start")
 	endStr := r.URL.Query().Get("end")
 
+	key = resolveConsumerKey(key, mode, name, iface, s, r)
 	if key == "" || key == maskedValue {
 		http.Error(w, "Missing consumer key", http.StatusBadRequest)
 		return

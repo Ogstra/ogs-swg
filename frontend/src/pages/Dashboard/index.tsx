@@ -33,6 +33,14 @@ const toUnixSeconds = (value: string) => {
     return Math.floor(ms / 1000)
 }
 
+const maskedConsumerKey = '********'
+
+const getConsumerSelectionId = (consumer: Consumer | null | undefined, mode: 'singbox' | 'wireguard') => {
+    if (!consumer) return ''
+    if (consumer.key && consumer.key !== maskedConsumerKey) return `${mode}:${consumer.key}`
+    return `${mode}:${consumer.name}:${consumer.interface_name || ''}:${consumer.flow || ''}`
+}
+
 const loadDashboardPrefs = (): DashboardPrefs => {
     try {
         const raw = localStorage.getItem(DASHBOARD_PREF_KEY)
@@ -218,14 +226,15 @@ export default function Dashboard() {
     // Derived values for UI
     const topConsumers = (topConsumersMap[chartMode] || []).slice(0, 20)
     const selectedConsumer = selectedConsumers[chartMode]
+    const selectedConsumerSelectionId = getConsumerSelectionId(selectedConsumer, chartMode)
     const selectedConsumerQuery = useQuery({
         queryKey: requestWindow.range === 'custom'
-            ? ['dashboard-consumer-chart', chartMode, selectedConsumer?.key, requestWindow.range, requestWindow.startText, requestWindow.endText]
-            : ['dashboard-consumer-chart', chartMode, selectedConsumer?.key, requestWindow.range],
+            ? ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, requestWindow.range, requestWindow.startText, requestWindow.endText]
+            : ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, requestWindow.range],
         queryFn: () => requestWindow.range === 'custom'
-            ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, requestWindow.range, requestWindow.startText, requestWindow.endText)
-            : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, requestWindow.range),
-        enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid) && !!selectedConsumer?.key && selectedConsumer.key !== '********',
+            ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range, requestWindow.startText, requestWindow.endText)
+            : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range),
+        enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid) && !!selectedConsumerSelectionId,
         refetchInterval: selectedConsumer ? refreshInterval : false,
     })
     const detailChartData = selectedConsumerQuery.data?.chart_data || []
@@ -241,7 +250,8 @@ export default function Dashboard() {
                 const current = prev[mode]
                 if (!current) continue
 
-                const stillExists = (topConsumersMap[mode] || []).some(item => item.key === current.key)
+                const currentSelectionId = getConsumerSelectionId(current, mode)
+                const stillExists = (topConsumersMap[mode] || []).some(item => getConsumerSelectionId(item, mode) === currentSelectionId)
                 if (!stillExists) {
                     next[mode] = null
                     changed = true
@@ -607,25 +617,26 @@ export default function Dashboard() {
                             <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
                         ) : (
                             topConsumers.map((u, i) => {
-                                const isSelected = selectedConsumer?.key === u.key
-                                const canSelect = !!u.key && u.key !== '********'
+                                const selectionId = getConsumerSelectionId(u, chartMode)
+                                const isSelected = selectedConsumerSelectionId === selectionId
+                                const canSelect = !!selectionId
 
                                 return (
                                 <button
-                                    key={u.key || u.name}
+                                    key={selectionId || u.name}
                                     type="button"
                                     disabled={!canSelect}
                                     onClick={() => {
                                         setSelectedConsumers(prev => ({
                                             ...prev,
-                                            [chartMode]: prev[chartMode]?.key === u.key ? null : u,
+                                            [chartMode]: getConsumerSelectionId(prev[chartMode], chartMode) === selectionId ? null : u,
                                         }))
                                     }}
                                     className={`flex h-[62px] w-full items-center justify-between gap-3 overflow-hidden rounded-lg border p-3 text-left transition-colors ${
                                         isSelected
                                             ? 'border-blue-500/60 bg-blue-500/10'
                                             : 'border-slate-800/50 bg-slate-950/50 hover:border-slate-800'
-                                    } ${canSelect ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                                    } ${canSelect ? 'cursor-pointer' : 'cursor-not-allowed'}`}
                                 >
                                     <div className="flex min-w-0 items-center gap-3">
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
