@@ -509,27 +509,7 @@ func StartServer(cfg *core.Config) *Server {
 		log.Printf("Serving static files from %s", distDir)
 	}
 
-	fs := http.FileServer(http.Dir(distDir))
-	router.Handle("/assets/", http.StripPrefix("/", fs))
-	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			http.NotFound(w, r)
-			return
-		}
-		if distDir == "" {
-			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
-			return
-		}
-		relPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-		if relPath != "" && relPath != "." {
-			fullPath := filepath.Join(distDir, filepath.FromSlash(relPath))
-			if st, err := os.Stat(fullPath); err == nil && !st.IsDir() {
-				http.ServeFile(w, r, fullPath)
-				return
-			}
-		}
-		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
-	})
+	registerFrontendRoutes(router, distDir)
 
 	// Start server in goroutine so we can return the server instance
 	go func() {
@@ -539,6 +519,56 @@ func StartServer(cfg *core.Config) *Server {
 	}()
 
 	return server
+}
+
+const (
+	frontendDocumentCacheControl = "no-store, no-cache, must-revalidate"
+	frontendAssetCacheControl    = "public, max-age=31536000, immutable"
+)
+
+func registerFrontendRoutes(router *http.ServeMux, distDir string) {
+	fs := http.FileServer(http.Dir(distDir))
+	assetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if distDir == "" {
+			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Cache-Control", frontendAssetCacheControl)
+		http.StripPrefix("/", fs).ServeHTTP(w, r)
+	})
+
+	router.Handle("/assets/", assetHandler)
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		if distDir == "" {
+			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
+			return
+		}
+
+		relPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if relPath != "" && relPath != "." {
+			fullPath := filepath.Join(distDir, filepath.FromSlash(relPath))
+			if st, err := os.Stat(fullPath); err == nil && !st.IsDir() {
+				if strings.EqualFold(filepath.Ext(fullPath), ".html") {
+					setFrontendDocumentCacheHeaders(w)
+				}
+				http.ServeFile(w, r, fullPath)
+				return
+			}
+		}
+
+		setFrontendDocumentCacheHeaders(w)
+		http.ServeFile(w, r, filepath.Join(distDir, "index.html"))
+	})
+}
+
+func setFrontendDocumentCacheHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", frontendDocumentCacheControl)
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 type UserStatus struct {
