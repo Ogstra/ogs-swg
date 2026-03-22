@@ -1291,6 +1291,11 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if p := getPermissions(r); p != nil && p.CanReadLogsCensored {
+		for i, ln := range lines {
+			lines[i] = core.CensorLine(ln)
+		}
+	}
 	if filterUser != "" {
 		f := strings.ToLower(filterUser)
 		filtered := make([]string, 0, len(lines))
@@ -1349,24 +1354,69 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	var lines []string
 	var err error
 
-	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		if s.executor != nil {
-			lines, err = s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit)
-		} else {
-			lines, err = searchJournalLines("sing-box", q, effectiveLimit)
-		}
-	} else {
-		lines, err = searchFileLines(s.config.AccessLogPath, q, effectiveLimit)
-		if (err != nil || len(lines) == 0) && s.config.LogSource == "file" {
-			// Fallback to journal if file missing/unreadable or no matches
+	// For censored callers, we must match the query against the censored version of each
+	// line — otherwise a caller could search for a raw IP and find it. We achieve this by
+	// reading ALL lines, censoring them, then doing a manual substring filter. The normal
+	// SearchJournal/searchFileLines path is used only for uncensored callers.
+	censoredSearch := func() bool {
+		p := getPermissions(r)
+		return p != nil && p.CanReadLogsCensored
+	}()
+
+	if censoredSearch {
+		// Fetch all lines without query filtering, then censor and filter manually.
+		if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
 			if s.executor != nil {
-				if linesJ, jErr := s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit); jErr == nil {
+				lines, err = s.executor.ReadJournal(r.Context(), "sing-box", effectiveLimit)
+			} else {
+				lines, err = readJournalLines("sing-box", effectiveLimit)
+			}
+		} else {
+			lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, effectiveLimit)
+			if err != nil && s.config.LogSource == "file" {
+				if s.executor != nil {
+					if linesJ, jErr := s.executor.ReadJournal(r.Context(), "sing-box", effectiveLimit); jErr == nil {
+						lines = linesJ
+						err = nil
+					}
+				} else if linesJ, jErr := readJournalLines("sing-box", effectiveLimit); jErr == nil {
 					lines = linesJ
 					err = nil
 				}
-			} else if linesJ, jErr := searchJournalLines("sing-box", q, effectiveLimit); jErr == nil {
-				lines = linesJ
-				err = nil
+			}
+		}
+		if err == nil {
+			// Censor all lines, then filter against q.
+			qLower := strings.ToLower(q)
+			filtered := lines[:0]
+			for _, ln := range lines {
+				censored := core.CensorLine(ln)
+				if strings.Contains(strings.ToLower(censored), qLower) {
+					filtered = append(filtered, censored)
+				}
+			}
+			lines = filtered
+		}
+	} else {
+		if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
+			if s.executor != nil {
+				lines, err = s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit)
+			} else {
+				lines, err = searchJournalLines("sing-box", q, effectiveLimit)
+			}
+		} else {
+			lines, err = searchFileLines(s.config.AccessLogPath, q, effectiveLimit)
+			if (err != nil || len(lines) == 0) && s.config.LogSource == "file" {
+				// Fallback to journal if file missing/unreadable or no matches
+				if s.executor != nil {
+					if linesJ, jErr := s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit); jErr == nil {
+						lines = linesJ
+						err = nil
+					}
+				} else if linesJ, jErr := searchJournalLines("sing-box", q, effectiveLimit); jErr == nil {
+					lines = linesJ
+					err = nil
+				}
 			}
 		}
 	}
