@@ -287,6 +287,57 @@ func TestDashboard_ConsumerChartLoadsWireGuardPeerOnDemand(t *testing.T) {
 	}
 }
 
+func TestDashboard_ConsumerChartResolvesMaskedSingboxKeyByName(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	store, err := core.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if err := store.BulkInsert([]core.Sample{
+		{User: "alice", Timestamp: 100, Uplink: 80, Downlink: 20},
+		{User: "alice", Timestamp: 160, Uplink: 20, Downlink: 40},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	server := NewServer(store, &core.Config{
+		EnableSingbox: true,
+		DemoMode:      true,
+	}, &dashboardExecutorStub{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/consumer-chart?mode=singbox&key=********&name=alice&start=100&end=200", nil)
+	rec := httptest.NewRecorder()
+	server.handleGetDashboardConsumerChart(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDashboard_ConsumerChartResolvesMaskedWireGuardKeyByAliasAndInterface(t *testing.T) {
+	server, _, _ := newDashboardTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard/consumer-chart?mode=wireguard&key=********&name=alice&interface_name=wg0&start=100&end=200", nil)
+	rec := httptest.NewRecorder()
+	server.handleGetDashboardConsumerChart(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var payload DashboardConsumerChartData
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	last := payload.ChartData[len(payload.ChartData)-1]
+	if last.UpWG != 600 || last.DownWG != 300 {
+		t.Fatalf("last wireguard point got up_wg=%d down_wg=%d", last.UpWG, last.DownWG)
+	}
+}
+
 func newDashboardTestServer(t *testing.T) (*Server, string, string) {
 	t.Helper()
 
