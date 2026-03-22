@@ -237,16 +237,16 @@ func (s *Store) initSchema() error {
 
 // PanelUserPermissions holds the set of permissions for a panel user.
 type PanelUserPermissions struct {
-	CanReadUsers       bool `json:"can_read_users"`
-	CanWriteUsers      bool `json:"can_write_users"`
-	CanReadWireguard   bool `json:"can_read_wireguard"`
-	CanWriteWireguard  bool `json:"can_write_wireguard"`
-	CanReadConfig      bool `json:"can_read_config"`
-	CanWriteConfig     bool `json:"can_write_config"`
-	CanReadSettings    bool `json:"can_read_settings"`
-	CanWriteSettings   bool `json:"can_write_settings"`
-	CanReadPanelUsers  bool `json:"can_read_panel_users"`
-	CanWritePanelUsers bool `json:"can_write_panel_users"`
+	CanReadUsers        bool `json:"can_read_users"`
+	CanWriteUsers       bool `json:"can_write_users"`
+	CanReadWireguard    bool `json:"can_read_wireguard"`
+	CanWriteWireguard   bool `json:"can_write_wireguard"`
+	CanReadConfig       bool `json:"can_read_config"`
+	CanWriteConfig      bool `json:"can_write_config"`
+	CanReadSettings     bool `json:"can_read_settings"`
+	CanWriteSettings    bool `json:"can_write_settings"`
+	CanReadPanelUsers   bool `json:"can_read_panel_users"`
+	CanWritePanelUsers  bool `json:"can_write_panel_users"`
 	CanReadLogs         bool `json:"can_read_logs"`
 	CanReadLogsCensored bool `json:"can_read_logs_censored"`
 }
@@ -282,16 +282,16 @@ func (p *PanelUserPermissions) Normalize() {
 
 func fullPanelUserPermissions() PanelUserPermissions {
 	p := PanelUserPermissions{
-		CanReadUsers:       true,
-		CanWriteUsers:      true,
-		CanReadWireguard:   true,
-		CanWriteWireguard:  true,
-		CanReadConfig:      true,
-		CanWriteConfig:     true,
-		CanReadSettings:    true,
-		CanWriteSettings:   true,
-		CanReadPanelUsers:  true,
-		CanWritePanelUsers: true,
+		CanReadUsers:        true,
+		CanWriteUsers:       true,
+		CanReadWireguard:    true,
+		CanWriteWireguard:   true,
+		CanReadConfig:       true,
+		CanWriteConfig:      true,
+		CanReadSettings:     true,
+		CanWriteSettings:    true,
+		CanReadPanelUsers:   true,
+		CanWritePanelUsers:  true,
 		CanReadLogs:         true,
 		CanReadLogsCensored: true,
 	}
@@ -1862,6 +1862,42 @@ func (s *Store) GetSBTrafficBuckets(start, end, interval int64) (map[int64]Traff
 		GROUP BY bucket_ts
 		ORDER BY bucket_ts ASC
 	`, interval, interval, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ts int64
+		var up, down sql.NullInt64
+		if err := rows.Scan(&ts, &up, &down); err != nil {
+			return nil, err
+		}
+		out[ts] = TrafficStats{Uplink: up.Int64, Downlink: down.Int64}
+	}
+	return out, nil
+}
+
+func (s *Store) GetSBUserTrafficBuckets(user string, start, end, interval int64) (map[int64]TrafficStats, error) {
+	out := make(map[int64]TrafficStats)
+	if interval <= 0 {
+		interval = 60
+	}
+	rows, err := s.db.Query(`
+		SELECT (ts / ?) * ? AS bucket_ts, SUM(uplink), SUM(downlink)
+		FROM (
+			SELECT ts, uplink, downlink
+			FROM samples
+			WHERE user = ? AND ts >= ? AND ts <= ?
+
+			UNION ALL
+
+			SELECT ts, uplink, downlink
+			FROM daily_usage
+			WHERE user = ? AND ts >= ? AND ts <= ?
+		)
+		GROUP BY bucket_ts
+		ORDER BY bucket_ts ASC
+	`, interval, interval, user, start, end, user, start, end)
 	if err != nil {
 		return nil, err
 	}

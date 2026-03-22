@@ -214,6 +214,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/logs", s.secure(s.requirePerm(canReadLogs, s.handleGetLogs)))
 	protected.HandleFunc("GET /api/logs/search", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogs)))
 	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
+	protected.HandleFunc("GET /api/dashboard/consumer-chart", s.secure(s.handleGetDashboardConsumerChart))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
 	// WireGuard
