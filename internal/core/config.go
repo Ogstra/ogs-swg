@@ -41,6 +41,7 @@ type Config struct {
 	AggregationEnabled    bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
 	AggregationDays       int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
 	PublicIP              string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
+	SubscriptionDomain    string   `json:"subscription_domain" env:"OGS_SUBSCRIPTION_DOMAIN"`
 	SingboxPendingChanges bool     `json:"-"` // Not persisted, runtime flag
 	ConfigPath            string   `json:"-"`
 	APIKey                string   `json:"api_key" env:"OGS_API_KEY"`

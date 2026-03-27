@@ -191,4 +191,8 @@ func (s *StatsSampler) sampleOnce() {
 		s.store.LogSamplerRun(now, time.Since(start).Milliseconds(), int64(len(batch)), "", "sing-box")
 	}
 	log.Printf("StatsSampler: inserted %d samples", len(batch))
+	// Enforce subscription quotas after each sample cycle (bidirectional: disable over-limit, re-enable under-limit).
+	if s.store != nil && s.cfg != nil {
+		go s.store.EnforceSubscriptionQuotas(s.cfg)
+	}
 }

@@ -95,3 +95,22 @@ CREATE TABLE IF NOT EXISTS daily_wg_usage (
 	tx INTEGER NOT NULL,
 	PRIMARY KEY (public_key, ts)
 );
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	token TEXT UNIQUE NOT NULL,
+	name TEXT NOT NULL,
+	quota_limit INTEGER DEFAULT 0,
+	quota_period TEXT DEFAULT 'monthly',
+	reset_day INTEGER DEFAULT 1,
+	created_at INTEGER DEFAULT (strftime('%s','now')),
+	updated_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
+CREATE TABLE IF NOT EXISTS subscription_users (
+	sub_id INTEGER NOT NULL,
+	user_name TEXT NOT NULL,
+	PRIMARY KEY (sub_id, user_name),
+	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+	FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
+);

@@ -3,7 +3,7 @@ import { useLocation, Link, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson } from 'lucide-react';
+import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson, Link as LinkIcon } from 'lucide-react';
 
 export const Layout: React.FC = () => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -27,6 +27,7 @@ export const Layout: React.FC = () => {
     const allNavItems = [
         { path: '/', label: 'Dashboard', icon: LayoutDashboard, permission: null },
         { path: '/users', label: 'sing-box Users', icon: Users, permission: 'can_read_users' as const },
+        { path: '/subscriptions', label: 'Subscriptions', icon: LinkIcon, permission: 'can_read_users' as const },
         { path: '/wireguard', label: 'WireGuard', icon: Shield, permission: 'can_read_wireguard' as const },
         { path: '/logs', label: 'System Logs', icon: Activity, permission: 'can_read_logs' as const },
         { path: '/raw-config', label: 'Raw Config', icon: FileJson, permission: 'can_read_config' as const },

@@ -209,6 +209,22 @@ func (s *Store) initSchema() error {
 		tx INTEGER NOT NULL,
 		PRIMARY KEY (public_key, ts)
 	);
+
+	CREATE TABLE IF NOT EXISTS subscriptions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		token TEXT UNIQUE NOT NULL,
+		name TEXT NOT NULL,
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
+
+	CREATE TABLE IF NOT EXISTS subscription_users (
+		sub_id INTEGER NOT NULL,
+		user_name TEXT NOT NULL,
+		PRIMARY KEY (sub_id, user_name),
+		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+		FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
+	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
@@ -232,6 +248,10 @@ func (s *Store) initSchema() error {
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
+	// Upgrade path: add quota fields to subscriptions for existing rows that predate this feature.
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_limit INTEGER DEFAULT 0;")
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_period TEXT DEFAULT 'monthly';")
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN reset_day INTEGER DEFAULT 1;")
 	return nil
 }
 
@@ -1143,6 +1163,10 @@ func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
 	}
 	defer tx.Rollback()
 
+	if _, err := tx.Exec("PRAGMA defer_foreign_keys = ON;"); err != nil {
+		return err
+	}
+
 	for _, conflict := range []struct {
 		table  string
 		column string
@@ -1168,6 +1192,9 @@ func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
 		return err
 	}
 	if _, err := tx.Exec("UPDATE users SET email = ? WHERE email = ?", newName, oldName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE subscription_users SET user_name = ? WHERE user_name = ?", newName, oldName); err != nil {
 		return err
 	}
 

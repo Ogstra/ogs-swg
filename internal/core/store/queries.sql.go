@@ -10,6 +10,21 @@ import (
 	"database/sql"
 )
 
+const addUserToSubscription = `-- name: AddUserToSubscription :exec
+INSERT OR IGNORE INTO subscription_users (sub_id, user_name) VALUES (?, ?)
+`
+
+type AddUserToSubscriptionParams struct {
+	SubID    int64  `json:"sub_id"`
+	UserName string `json:"user_name"`
+}
+
+// Subscription Users Queries --
+func (q *Queries) AddUserToSubscription(ctx context.Context, arg AddUserToSubscriptionParams) error {
+	_, err := q.db.ExecContext(ctx, addUserToSubscription, arg.SubID, arg.UserName)
+	return err
+}
+
 const checkAdminExists = `-- name: CheckAdminExists :one
 SELECT COUNT(*) FROM admins WHERE username = ?
 `
@@ -30,6 +45,15 @@ func (q *Queries) CheckPanelUserExists(ctx context.Context, username string) (in
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const clearSubscriptionUsers = `-- name: ClearSubscriptionUsers :exec
+DELETE FROM subscription_users WHERE sub_id = ?
+`
+
+func (q *Queries) ClearSubscriptionUsers(ctx context.Context, subID int64) error {
+	_, err := q.db.ExecContext(ctx, clearSubscriptionUsers, subID)
+	return err
 }
 
 const countAdmins = `-- name: CountAdmins :one
@@ -130,8 +154,7 @@ INSERT INTO panel_users (
 	can_read_panel_users,
 	can_write_panel_users,
 	can_read_logs
-)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreatePanelUserParams struct {
@@ -170,6 +193,26 @@ func (q *Queries) CreatePanelUser(ctx context.Context, arg CreatePanelUserParams
 	return err
 }
 
+const createSubscription = `-- name: CreateSubscription :one
+INSERT INTO subscriptions (token, name, quota_limit, quota_period, reset_day) VALUES (?, ?, ?, ?, ?) RETURNING id
+`
+
+type CreateSubscriptionParams struct {
+	Token       string `json:"token"`
+	Name        string `json:"name"`
+	QuotaLimit  int64  `json:"quota_limit"`
+	QuotaPeriod string `json:"quota_period"`
+	ResetDay    int64  `json:"reset_day"`
+}
+
+// Subscriptions Queries --
+func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, createSubscription, arg.Token, arg.Name, arg.QuotaLimit, arg.QuotaPeriod, arg.ResetDay)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const deleteInboundMeta = `-- name: DeleteInboundMeta :exec
 DELETE FROM inbound_meta WHERE tag = ?
 `
@@ -185,6 +228,15 @@ DELETE FROM panel_users WHERE username = ?
 
 func (q *Queries) DeletePanelUser(ctx context.Context, username string) error {
 	_, err := q.db.ExecContext(ctx, deletePanelUser, username)
+	return err
+}
+
+const deleteSubscription = `-- name: DeleteSubscription :exec
+DELETE FROM subscriptions WHERE id = ?
+`
+
+func (q *Queries) DeleteSubscription(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteSubscription, id)
 	return err
 }
 
@@ -314,19 +366,24 @@ func (q *Queries) GetAdmin(ctx context.Context, username string) (string, error)
 }
 
 const getAllInboundMeta = `-- name: GetAllInboundMeta :many
-SELECT tag, external_port, override_address FROM inbound_meta
+SELECT tag, external_port FROM inbound_meta
 `
 
-func (q *Queries) GetAllInboundMeta(ctx context.Context) ([]InboundMetum, error) {
+type GetAllInboundMetaRow struct {
+	Tag          string        `json:"tag"`
+	ExternalPort sql.NullInt64 `json:"external_port"`
+}
+
+func (q *Queries) GetAllInboundMeta(ctx context.Context) ([]GetAllInboundMetaRow, error) {
 	rows, err := q.db.QueryContext(ctx, getAllInboundMeta)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []InboundMetum
+	var items []GetAllInboundMetaRow
 	for rows.Next() {
-		var i InboundMetum
-		if err := rows.Scan(&i.Tag, &i.ExternalPort, &i.OverrideAddress); err != nil {
+		var i GetAllInboundMetaRow
+		if err := rows.Scan(&i.Tag, &i.ExternalPort); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -398,6 +455,42 @@ func (q *Queries) GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, 
 			&i.CanWritePanelUsers,
 			&i.CanReadLogs,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllSubscriptions = `-- name: GetAllSubscriptions :many
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions ORDER BY created_at DESC
+`
+
+func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
+	rows, err := q.db.QueryContext(ctx, getAllSubscriptions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Subscription
+	for rows.Next() {
+		var i Subscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.Token,
+			&i.Name,
+			&i.QuotaLimit,
+			&i.QuotaPeriod,
+			&i.ResetDay,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -569,13 +662,18 @@ func (q *Queries) GetGlobalTraffic(ctx context.Context, arg GetGlobalTrafficPara
 }
 
 const getInboundMeta = `-- name: GetInboundMeta :one
-SELECT tag, external_port, override_address FROM inbound_meta WHERE tag = ?
+SELECT tag, external_port FROM inbound_meta WHERE tag = ?
 `
 
-func (q *Queries) GetInboundMeta(ctx context.Context, tag string) (InboundMetum, error) {
+type GetInboundMetaRow struct {
+	Tag          string        `json:"tag"`
+	ExternalPort sql.NullInt64 `json:"external_port"`
+}
+
+func (q *Queries) GetInboundMeta(ctx context.Context, tag string) (GetInboundMetaRow, error) {
 	row := q.db.QueryRowContext(ctx, getInboundMeta, tag)
-	var i InboundMetum
-	err := row.Scan(&i.Tag, &i.ExternalPort, &i.OverrideAddress)
+	var i GetInboundMetaRow
+	err := row.Scan(&i.Tag, &i.ExternalPort)
 	return i, err
 }
 
@@ -789,6 +887,105 @@ func (q *Queries) GetSamplesForUser(ctx context.Context, arg GetSamplesForUserPa
 	return items, nil
 }
 
+const getSubscriptionByID = `-- name: GetSubscriptionByID :one
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE id = ?
+`
+
+func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error) {
+	row := q.db.QueryRowContext(ctx, getSubscriptionByID, id)
+	var i Subscription
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
+		&i.Name,
+		&i.QuotaLimit,
+		&i.QuotaPeriod,
+		&i.ResetDay,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSubscriptionByToken = `-- name: GetSubscriptionByToken :one
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE token = ?
+`
+
+func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error) {
+	row := q.db.QueryRowContext(ctx, getSubscriptionByToken, token)
+	var i Subscription
+	err := row.Scan(
+		&i.ID,
+		&i.Token,
+		&i.Name,
+		&i.QuotaLimit,
+		&i.QuotaPeriod,
+		&i.ResetDay,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSubscriptionsForUser = `-- name: GetSubscriptionsForUser :many
+SELECT s.id, s.token, s.name, s.quota_limit, s.quota_period, s.reset_day, s.created_at, s.updated_at
+FROM subscriptions s
+INNER JOIN subscription_users su ON su.sub_id = s.id
+WHERE su.user_name = ?
+`
+
+func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error) {
+	rows, err := q.db.QueryContext(ctx, getSubscriptionsForUser, userName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Subscription
+	for rows.Next() {
+		var i Subscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.Token,
+			&i.Name,
+			&i.QuotaLimit,
+			&i.QuotaPeriod,
+			&i.ResetDay,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getSubscriptionUsageInRange = `-- name: GetSubscriptionUsageInRange :one
+SELECT COALESCE(SUM(s.uplink + s.downlink), 0) as total
+FROM samples s
+INNER JOIN subscription_users su ON su.user_name = s.user
+WHERE su.sub_id = ? AND s.ts >= ? AND s.ts < ?
+`
+
+type GetSubscriptionUsageInRangeParams struct {
+	SubID int64 `json:"sub_id"`
+	Ts    int64 `json:"ts"`
+	Ts2   int64 `json:"ts_2"`
+}
+
+func (q *Queries) GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getSubscriptionUsageInRange, arg.SubID, arg.Ts, arg.Ts2)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const getTrafficPerUser = `-- name: GetTrafficPerUser :many
 SELECT user, SUM(uplink) as up, SUM(downlink) as down
 FROM samples
@@ -847,6 +1044,33 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 		&i.VmessAlterID,
 	)
 	return i, err
+}
+
+const getUsersForSubscription = `-- name: GetUsersForSubscription :many
+SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY user_name ASC
+`
+
+func (q *Queries) GetUsersForSubscription(ctx context.Context, subID int64) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, getUsersForSubscription, subID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var user_name string
+		if err := rows.Scan(&user_name); err != nil {
+			return nil, err
+		}
+		items = append(items, user_name)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getWGBoundarySamples = `-- name: GetWGBoundarySamples :many
@@ -1120,6 +1344,34 @@ func (q *Queries) PruneWGSamplesOlderThan(ctx context.Context, ts int64) error {
 	return err
 }
 
+const regenerateSubscriptionToken = `-- name: RegenerateSubscriptionToken :exec
+UPDATE subscriptions SET token = ?, updated_at = strftime('%s','now') WHERE id = ?
+`
+
+type RegenerateSubscriptionTokenParams struct {
+	Token string `json:"token"`
+	ID    int64  `json:"id"`
+}
+
+func (q *Queries) RegenerateSubscriptionToken(ctx context.Context, arg RegenerateSubscriptionTokenParams) error {
+	_, err := q.db.ExecContext(ctx, regenerateSubscriptionToken, arg.Token, arg.ID)
+	return err
+}
+
+const removeUserFromSubscription = `-- name: RemoveUserFromSubscription :exec
+DELETE FROM subscription_users WHERE sub_id = ? AND user_name = ?
+`
+
+type RemoveUserFromSubscriptionParams struct {
+	SubID    int64  `json:"sub_id"`
+	UserName string `json:"user_name"`
+}
+
+func (q *Queries) RemoveUserFromSubscription(ctx context.Context, arg RemoveUserFromSubscriptionParams) error {
+	_, err := q.db.ExecContext(ctx, removeUserFromSubscription, arg.SubID, arg.UserName)
+	return err
+}
+
 const renameInboundMeta = `-- name: RenameInboundMeta :exec
 UPDATE inbound_meta SET tag = ? WHERE tag = ?
 `
@@ -1250,6 +1502,23 @@ func (q *Queries) UpdatePanelUsername(ctx context.Context, arg UpdatePanelUserna
 	return err
 }
 
+const updateSubscription = `-- name: UpdateSubscription :exec
+UPDATE subscriptions SET name = ?, quota_limit = ?, quota_period = ?, reset_day = ?, updated_at = strftime('%s','now') WHERE id = ?
+`
+
+type UpdateSubscriptionParams struct {
+	Name        string `json:"name"`
+	QuotaLimit  int64  `json:"quota_limit"`
+	QuotaPeriod string `json:"quota_period"`
+	ResetDay    int64  `json:"reset_day"`
+	ID          int64  `json:"id"`
+}
+
+func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error {
+	_, err := q.db.ExecContext(ctx, updateSubscription, arg.Name, arg.QuotaLimit, arg.QuotaPeriod, arg.ResetDay, arg.ID)
+	return err
+}
+
 const updateWGPeerHandshake = `-- name: UpdateWGPeerHandshake :exec
 UPDATE wg_peers
 SET last_handshake = ?, updated_at = strftime('%s','now')
@@ -1267,18 +1536,17 @@ func (q *Queries) UpdateWGPeerHandshake(ctx context.Context, arg UpdateWGPeerHan
 }
 
 const upsertInboundMeta = `-- name: UpsertInboundMeta :exec
-INSERT INTO inbound_meta (tag, external_port, override_address) VALUES (?, ?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port, override_address = excluded.override_address
+INSERT INTO inbound_meta (tag, external_port) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port
 `
 
 type UpsertInboundMetaParams struct {
-	Tag             string         `json:"tag"`
-	ExternalPort    sql.NullInt64  `json:"external_port"`
-	OverrideAddress sql.NullString `json:"override_address"`
+	Tag          string        `json:"tag"`
+	ExternalPort sql.NullInt64 `json:"external_port"`
 }
 
 // InboundMeta Queries --
 func (q *Queries) UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaParams) error {
-	_, err := q.db.ExecContext(ctx, upsertInboundMeta, arg.Tag, arg.ExternalPort, arg.OverrideAddress)
+	_, err := q.db.ExecContext(ctx, upsertInboundMeta, arg.Tag, arg.ExternalPort)
 	return err
 }
 

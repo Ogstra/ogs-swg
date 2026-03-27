@@ -144,6 +144,19 @@ export interface SingboxInboundUpdateResponse {
     warnings: string[];
 }
 
+export interface Subscription {
+    id: number;
+    token: string;
+    name: string;
+    quota_limit: number;
+    quota_period: string;
+    used_bytes: number;
+    users: string[];
+    created_at: number;
+    updated_at: number;
+}
+
+
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
     if (contentType) headers['Content-Type'] = contentType;
@@ -832,5 +845,58 @@ export const api = {
             headers: buildHeaders(),
         });
         await handleResponse(res, 'Failed to delete panel user');
+    },
+
+    // Subscriptions
+    getSubscriptions: async (): Promise<Subscription[]> => {
+        const res = await fetch('/api/subscriptions', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscriptions');
+        return res.json();
+    },
+    createSubscription: async (data: { name: string; quota_limit: number; quota_period: string; users: string[] }): Promise<{ id: number; token: string }> => {
+        const res = await fetch('/api/subscriptions', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(data),
+        });
+        await handleResponse(res, 'Failed to create subscription');
+        return res.json();
+    },
+    updateSubscription: async (id: number, data: { name: string; quota_limit: number; quota_period: string; users: string[] }): Promise<void> => {
+        const res = await fetch(`/api/subscriptions/${id}`, {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(data),
+        });
+        await handleResponse(res, 'Failed to update subscription');
+    },
+    deleteSubscription: async (id: number): Promise<void> => {
+        const res = await fetch(`/api/subscriptions/${id}`, {
+            method: 'DELETE',
+            headers: buildHeaders(),
+        });
+        await handleResponse(res, 'Failed to delete subscription');
+    },
+    regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> => {
+        const res = await fetch(`/api/subscriptions/${id}/regenerate`, {
+            method: 'POST',
+            headers: buildHeaders(),
+        });
+        await handleResponse(res, 'Failed to regenerate token');
+        return res.json();
+    },
+    getSubscriptionDomain: async (): Promise<string> => {
+        const res = await fetch('/api/settings/subscription-domain', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription domain');
+        const data = await res.json();
+        return data.subscription_domain || '';
+    },
+    updateSubscriptionDomain: async (domain: string): Promise<void> => {
+        const res = await fetch('/api/settings/subscription-domain', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ subscription_domain: domain }),
+        });
+        await handleResponse(res, 'Failed to update subscription domain');
     },
 };
