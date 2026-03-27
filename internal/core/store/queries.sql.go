@@ -194,17 +194,20 @@ func (q *Queries) CreatePanelUser(ctx context.Context, arg CreatePanelUserParams
 }
 
 const createSubscription = `-- name: CreateSubscription :one
-INSERT INTO subscriptions (token, name) VALUES (?, ?) RETURNING id
+INSERT INTO subscriptions (token, name, quota_limit, quota_period, reset_day) VALUES (?, ?, ?, ?, ?) RETURNING id
 `
 
 type CreateSubscriptionParams struct {
-	Token string `json:"token"`
-	Name  string `json:"name"`
+	Token       string `json:"token"`
+	Name        string `json:"name"`
+	QuotaLimit  int64  `json:"quota_limit"`
+	QuotaPeriod string `json:"quota_period"`
+	ResetDay    int64  `json:"reset_day"`
 }
 
 // Subscriptions Queries --
 func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, createSubscription, arg.Token, arg.Name)
+	row := q.db.QueryRowContext(ctx, createSubscription, arg.Token, arg.Name, arg.QuotaLimit, arg.QuotaPeriod, arg.ResetDay)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -467,7 +470,7 @@ func (q *Queries) GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, 
 }
 
 const getAllSubscriptions = `-- name: GetAllSubscriptions :many
-SELECT id, token, name, created_at, updated_at FROM subscriptions ORDER BY created_at DESC
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions ORDER BY created_at DESC
 `
 
 func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
@@ -483,6 +486,9 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 			&i.ID,
 			&i.Token,
 			&i.Name,
+			&i.QuotaLimit,
+			&i.QuotaPeriod,
+			&i.ResetDay,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -882,7 +888,7 @@ func (q *Queries) GetSamplesForUser(ctx context.Context, arg GetSamplesForUserPa
 }
 
 const getSubscriptionByID = `-- name: GetSubscriptionByID :one
-SELECT id, token, name, created_at, updated_at FROM subscriptions WHERE id = ?
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE id = ?
 `
 
 func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error) {
@@ -892,6 +898,9 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 		&i.ID,
 		&i.Token,
 		&i.Name,
+		&i.QuotaLimit,
+		&i.QuotaPeriod,
+		&i.ResetDay,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -899,7 +908,7 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 }
 
 const getSubscriptionByToken = `-- name: GetSubscriptionByToken :one
-SELECT id, token, name, created_at, updated_at FROM subscriptions WHERE token = ?
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE token = ?
 `
 
 func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error) {
@@ -909,6 +918,9 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 		&i.ID,
 		&i.Token,
 		&i.Name,
+		&i.QuotaLimit,
+		&i.QuotaPeriod,
+		&i.ResetDay,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -916,22 +928,34 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 }
 
 const getSubscriptionsForUser = `-- name: GetSubscriptionsForUser :many
-SELECT sub_id FROM subscription_users WHERE user_name = ?
+SELECT s.id, s.token, s.name, s.quota_limit, s.quota_period, s.reset_day, s.created_at, s.updated_at
+FROM subscriptions s
+INNER JOIN subscription_users su ON su.sub_id = s.id
+WHERE su.user_name = ?
 `
 
-func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) ([]int64, error) {
+func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error) {
 	rows, err := q.db.QueryContext(ctx, getSubscriptionsForUser, userName)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []int64
+	var items []Subscription
 	for rows.Next() {
-		var sub_id int64
-		if err := rows.Scan(&sub_id); err != nil {
+		var i Subscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.Token,
+			&i.Name,
+			&i.QuotaLimit,
+			&i.QuotaPeriod,
+			&i.ResetDay,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
-		items = append(items, sub_id)
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -940,6 +964,26 @@ func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const getSubscriptionUsageInRange = `-- name: GetSubscriptionUsageInRange :one
+SELECT COALESCE(SUM(s.uplink + s.downlink), 0) as total
+FROM samples s
+INNER JOIN subscription_users su ON su.user_name = s.user
+WHERE su.sub_id = ? AND s.ts >= ? AND s.ts < ?
+`
+
+type GetSubscriptionUsageInRangeParams struct {
+	SubID int64 `json:"sub_id"`
+	Ts    int64 `json:"ts"`
+	Ts2   int64 `json:"ts_2"`
+}
+
+func (q *Queries) GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getSubscriptionUsageInRange, arg.SubID, arg.Ts, arg.Ts2)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
 }
 
 const getTrafficPerUser = `-- name: GetTrafficPerUser :many
@@ -1458,17 +1502,20 @@ func (q *Queries) UpdatePanelUsername(ctx context.Context, arg UpdatePanelUserna
 	return err
 }
 
-const updateSubscriptionName = `-- name: UpdateSubscriptionName :exec
-UPDATE subscriptions SET name = ?, updated_at = strftime('%s','now') WHERE id = ?
+const updateSubscription = `-- name: UpdateSubscription :exec
+UPDATE subscriptions SET name = ?, quota_limit = ?, quota_period = ?, reset_day = ?, updated_at = strftime('%s','now') WHERE id = ?
 `
 
-type UpdateSubscriptionNameParams struct {
-	Name string `json:"name"`
-	ID   int64  `json:"id"`
+type UpdateSubscriptionParams struct {
+	Name        string `json:"name"`
+	QuotaLimit  int64  `json:"quota_limit"`
+	QuotaPeriod string `json:"quota_period"`
+	ResetDay    int64  `json:"reset_day"`
+	ID          int64  `json:"id"`
 }
 
-func (q *Queries) UpdateSubscriptionName(ctx context.Context, arg UpdateSubscriptionNameParams) error {
-	_, err := q.db.ExecContext(ctx, updateSubscriptionName, arg.Name, arg.ID)
+func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error {
+	_, err := q.db.ExecContext(ctx, updateSubscription, arg.Name, arg.QuotaLimit, arg.QuotaPeriod, arg.ResetDay, arg.ID)
 	return err
 }
 

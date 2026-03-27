@@ -55,7 +55,8 @@ type Querier interface {
 	GetSamplesForUser(ctx context.Context, arg GetSamplesForUserParams) ([]Sample, error)
 	GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error)
 	GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error)
-	GetSubscriptionsForUser(ctx context.Context, userName string) ([]int64, error)
+	GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error)
+	GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error)
 	GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserParams) ([]GetTrafficPerUserRow, error)
 	GetUser(ctx context.Context, email string) (User, error)
 	GetUsersForSubscription(ctx context.Context, subID int64) ([]string, error)
@@ -81,7 +82,7 @@ type Querier interface {
 	UpdatePanelUserPassword(ctx context.Context, arg UpdatePanelUserPasswordParams) error
 	UpdatePanelUserPermissions(ctx context.Context, arg UpdatePanelUserPermissionsParams) error
 	UpdatePanelUsername(ctx context.Context, arg UpdatePanelUsernameParams) error
-	UpdateSubscriptionName(ctx context.Context, arg UpdateSubscriptionNameParams) error
+	UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error
 	UpdateWGPeerHandshake(ctx context.Context, arg UpdateWGPeerHandshakeParams) error
 	// InboundMeta Queries --
 	UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaParams) error

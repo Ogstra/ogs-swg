@@ -73,11 +73,14 @@ type SamplerRun struct {
 }
 
 type Subscription struct {
-	ID        int64         `json:"id"`
-	Token     string        `json:"token"`
-	Name      string        `json:"name"`
-	CreatedAt sql.NullInt64 `json:"created_at"`
-	UpdatedAt sql.NullInt64 `json:"updated_at"`
+	ID          int64         `json:"id"`
+	Token       string        `json:"token"`
+	Name        string        `json:"name"`
+	QuotaLimit  sql.NullInt64 `json:"quota_limit"`
+	QuotaPeriod sql.NullString `json:"quota_period"`
+	ResetDay    sql.NullInt64 `json:"reset_day"`
+	CreatedAt   sql.NullInt64 `json:"created_at"`
+	UpdatedAt   sql.NullInt64 `json:"updated_at"`
 }
 
 type SubscriptionUser struct {

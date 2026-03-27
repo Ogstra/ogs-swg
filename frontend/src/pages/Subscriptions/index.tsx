@@ -10,6 +10,17 @@ import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon } from 'lucide-react'
 import QRCode from 'react-qr-code'
 
+const formatBytes = (bytes: number): string => {
+    if (!bytes || bytes === 0) return '—'
+    if (bytes < 1024 ** 3) return (bytes / 1024 ** 2).toFixed(1) + ' MB'
+    return (bytes / 1024 ** 3).toFixed(2) + ' GB'
+}
+
+const parseGBInput = (value: string): number => {
+    const n = parseFloat(value)
+    return isNaN(n) ? 0 : Math.round(n * 1024 ** 3)
+}
+
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -20,8 +31,9 @@ export default function Subscriptions() {
     const [confirmRegenerate, setConfirmRegenerate] = useState<Subscription | null>(null)
 
     const [nameInput, setNameInput] = useState('')
+    const [quotaGB, setQuotaGB] = useState('0')
     const [selectedUsers, setSelectedUsers] = useState<string[]>([])
-    
+
     // queries
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
@@ -33,24 +45,27 @@ export default function Subscriptions() {
 
     const openCreate = () => {
         setNameInput('')
+        setQuotaGB('0')
         setSelectedUsers([])
         setModalState({ type: 'create' })
     }
 
     const openEdit = (sub: Subscription) => {
         setNameInput(sub.name)
+        setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
         setSelectedUsers(sub.users || [])
         setModalState({ type: 'edit', data: sub })
     }
 
     const handleSave = async () => {
         if (!nameInput.trim()) return toastError('Name is required')
+        const quotaLimit = parseGBInput(quotaGB)
         try {
             if (modalState.type === 'create') {
-                await api.createSubscription({ name: nameInput.trim(), users: selectedUsers })
+                await api.createSubscription({ name: nameInput.trim(), quota_limit: quotaLimit, quota_period: 'monthly', users: selectedUsers })
                 success('Subscription created')
             } else if (modalState.type === 'edit' && modalState.data) {
-                await api.updateSubscription(modalState.data.id, { name: nameInput.trim(), users: selectedUsers })
+                await api.updateSubscription(modalState.data.id, { name: nameInput.trim(), quota_limit: quotaLimit, quota_period: 'monthly', users: selectedUsers })
                 success('Subscription updated')
             }
             setModalState({ type: null })
@@ -115,6 +130,26 @@ export default function Subscriptions() {
         setSelectedUsers(prev => prev.includes(userName) ? prev.filter(u => u !== userName) : [...prev, userName])
     }
 
+    const getQuotaPill = (sub: Subscription) => {
+        if (!sub.quota_limit || sub.quota_limit === 0) return <span className="text-slate-500 text-xs">Unlimited</span>
+        const pct = Math.min(100, Math.round((sub.used_bytes / sub.quota_limit) * 100))
+        const over = sub.used_bytes >= sub.quota_limit
+        const barColor = over ? 'bg-red-500' : pct > 80 ? 'bg-yellow-500' : 'bg-emerald-500'
+        return (
+            <div className="flex flex-col gap-1 min-w-[120px]">
+                <div className="flex justify-between text-xs">
+                    <span className={over ? 'text-red-400 font-semibold' : 'text-slate-300'}>
+                        {formatBytes(sub.used_bytes)}
+                    </span>
+                    <span className="text-slate-500">{formatBytes(sub.quota_limit)}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-800">
+                    <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+                </div>
+            </div>
+        )
+    }
+
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -132,13 +167,14 @@ export default function Subscriptions() {
                                 <th className="p-4 font-semibold">Name</th>
                                 <th className="p-4 font-semibold">Token</th>
                                 <th className="p-4 font-semibold">Users</th>
+                                <th className="p-4 font-semibold">Quota</th>
                                 <th className="p-4 font-semibold text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {subs.length === 0 ? (
                                 <tr>
-                                    <td colSpan={4} className="p-12 text-center text-slate-500">
+                                    <td colSpan={5} className="p-12 text-center text-slate-500">
                                         <LinkIcon size={48} className="mx-auto mb-4 opacity-20" />
                                         <p>No subscriptions found.</p>
                                     </td>
@@ -149,6 +185,9 @@ export default function Subscriptions() {
                                     <td className="p-4 text-slate-400 font-mono text-sm max-w-[200px] truncate" title={sub.token}>{sub.token}</td>
                                     <td className="p-4 text-slate-400">
                                         {sub.users?.length || 0} users
+                                    </td>
+                                    <td className="p-4">
+                                        {getQuotaPill(sub)}
                                     </td>
                                     <td className="p-4">
                                         <div className="flex items-center justify-end gap-2">
@@ -170,9 +209,10 @@ export default function Subscriptions() {
                 </div>
             </div>
 
+            {/* Create / Edit Modal */}
             <Modal
                 title={modalState.type === 'create' ? 'Create Subscription' : 'Edit Subscription'}
-                isOpen={modalState.type !== null}
+                isOpen={modalState.type === 'create' || modalState.type === 'edit'}
                 onClose={() => setModalState({ type: null })}
                 footer={
                     <div className="flex gap-3 justify-end w-full">
@@ -185,6 +225,25 @@ export default function Subscriptions() {
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
                         <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="e.g. Family Pack" />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">
+                            Quota Limit (GB) <span className="text-slate-500 font-normal">— 0 = unlimited</span>
+                        </label>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={quotaGB}
+                            onChange={e => setQuotaGB(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                            placeholder="e.g. 100"
+                        />
+                        {parseFloat(quotaGB) > 0 && (
+                            <p className="text-xs text-slate-500 mt-1">
+                                = {parseGBInput(quotaGB).toLocaleString()} bytes. When total sub usage exceeds this, all assigned users are disabled automatically.
+                            </p>
+                        )}
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
@@ -234,7 +293,7 @@ export default function Subscriptions() {
                 onClose={() => setConfirmDelete(null)}
                 confirmTone="danger"
             />
-            
+
             <ConfirmModal
                 isOpen={!!confirmRegenerate}
                 title="Regenerate Token"
