@@ -290,3 +290,50 @@ SELECT COUNT(*) FROM daily_wg_usage;
 SELECT user, ts, uplink, downlink
 FROM daily_usage
 WHERE user = ? AND ts >= ? AND ts <= ?;
+
+-- Subscriptions Queries --
+-- name: CreateSubscription :one
+INSERT INTO subscriptions (token, name, quota_limit, quota_period, reset_day) VALUES (?, ?, ?, ?, ?) RETURNING id;
+
+-- name: GetSubscriptionByToken :one
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE token = ?;
+
+-- name: GetSubscriptionByID :one
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE id = ?;
+
+-- name: GetAllSubscriptions :many
+SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions ORDER BY created_at DESC;
+
+-- name: UpdateSubscription :exec
+UPDATE subscriptions SET name = ?, quota_limit = ?, quota_period = ?, reset_day = ?, updated_at = strftime('%s','now') WHERE id = ?;
+
+-- name: RegenerateSubscriptionToken :exec
+UPDATE subscriptions SET token = ?, updated_at = strftime('%s','now') WHERE id = ?;
+
+-- name: DeleteSubscription :exec
+DELETE FROM subscriptions WHERE id = ?;
+
+-- name: GetSubscriptionUsageInRange :one
+SELECT COALESCE(SUM(s.uplink + s.downlink), 0) as total
+FROM samples s
+INNER JOIN subscription_users su ON su.user_name = s.user
+WHERE su.sub_id = ? AND s.ts >= ? AND s.ts < ?;
+
+-- name: GetSubscriptionsForUser :many
+SELECT s.id, s.token, s.name, s.quota_limit, s.quota_period, s.reset_day, s.created_at, s.updated_at
+FROM subscriptions s
+INNER JOIN subscription_users su ON su.sub_id = s.id
+WHERE su.user_name = ?;
+
+-- Subscription Users Queries --
+-- name: AddUserToSubscription :exec
+INSERT OR IGNORE INTO subscription_users (sub_id, user_name) VALUES (?, ?);
+
+-- name: RemoveUserFromSubscription :exec
+DELETE FROM subscription_users WHERE sub_id = ? AND user_name = ?;
+
+-- name: ClearSubscriptionUsers :exec
+DELETE FROM subscription_users WHERE sub_id = ?;
+
+-- name: GetUsersForSubscription :many
+SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY user_name ASC;

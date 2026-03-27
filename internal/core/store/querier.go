@@ -9,8 +9,11 @@ import (
 )
 
 type Querier interface {
+	// Subscription Users Queries --
+	AddUserToSubscription(ctx context.Context, arg AddUserToSubscriptionParams) error
 	CheckAdminExists(ctx context.Context, username string) (int64, error)
 	CheckPanelUserExists(ctx context.Context, username string) (int64, error)
+	ClearSubscriptionUsers(ctx context.Context, subID int64) error
 	CountAdmins(ctx context.Context) (int64, error)
 	CountDailyUsage(ctx context.Context) (int64, error)
 	CountPanelUsers(ctx context.Context) (int64, error)
@@ -23,21 +26,25 @@ type Querier interface {
 	CreateAdmin(ctx context.Context, arg CreateAdminParams) error
 	// Panel Users Queries --
 	CreatePanelUser(ctx context.Context, arg CreatePanelUserParams) error
+	// Subscriptions Queries --
+	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (int64, error)
 	DeleteInboundMeta(ctx context.Context, tag string) error
 	DeletePanelUser(ctx context.Context, username string) error
+	DeleteSubscription(ctx context.Context, id int64) error
 	DeleteUser(ctx context.Context, email string) error
 	GetActiveUserCount(ctx context.Context, ts int64) (int64, error)
 	GetActiveUserCountWithThreshold(ctx context.Context, arg GetActiveUserCountWithThresholdParams) (int64, error)
 	GetActiveUsersWithThreshold(ctx context.Context, arg GetActiveUsersWithThresholdParams) ([]GetActiveUsersWithThresholdRow, error)
 	GetActiveUsersWithTraffic(ctx context.Context, ts int64) ([]string, error)
 	GetAdmin(ctx context.Context, username string) (string, error)
-	GetAllInboundMeta(ctx context.Context) ([]InboundMetum, error)
+	GetAllInboundMeta(ctx context.Context) ([]GetAllInboundMetaRow, error)
 	GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, error)
+	GetAllSubscriptions(ctx context.Context) ([]Subscription, error)
 	GetAllUsers(ctx context.Context) ([]User, error)
 	GetAllWGPeers(ctx context.Context) ([]GetAllWGPeersRow, error)
 	GetDailyUsageInDateRange(ctx context.Context, arg GetDailyUsageInDateRangeParams) ([]DailyUsage, error)
 	GetGlobalTraffic(ctx context.Context, arg GetGlobalTrafficParams) ([]GetGlobalTrafficRow, error)
-	GetInboundMeta(ctx context.Context, tag string) (InboundMetum, error)
+	GetInboundMeta(ctx context.Context, tag string) (GetInboundMetaRow, error)
 	GetLastSeenMap(ctx context.Context) ([]GetLastSeenMapRow, error)
 	GetLastSeenUserAndThreshold(ctx context.Context, arg GetLastSeenUserAndThresholdParams) (interface{}, error)
 	GetLastSeenUserWithTraffic(ctx context.Context, user string) (interface{}, error)
@@ -46,8 +53,13 @@ type Querier interface {
 	GetPanelUser(ctx context.Context, username string) (PanelUser, error)
 	GetSamplerRuns(ctx context.Context, limit int64) ([]GetSamplerRunsRow, error)
 	GetSamplesForUser(ctx context.Context, arg GetSamplesForUserParams) ([]Sample, error)
+	GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error)
+	GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error)
+	GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error)
+	GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error)
 	GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserParams) ([]GetTrafficPerUserRow, error)
 	GetUser(ctx context.Context, email string) (User, error)
+	GetUsersForSubscription(ctx context.Context, subID int64) ([]string, error)
 	GetWGBoundarySamples(ctx context.Context, arg GetWGBoundarySamplesParams) ([]GetWGBoundarySamplesRow, error)
 	// Note: the descending query will need its own query name
 	GetWGLastBoundarySample(ctx context.Context, arg GetWGLastBoundarySampleParams) ([]GetWGLastBoundarySampleRow, error)
@@ -61,6 +73,8 @@ type Querier interface {
 	InsertWGSample(ctx context.Context, arg InsertWGSampleParams) error
 	PruneSamplesOlderThan(ctx context.Context, ts int64) error
 	PruneWGSamplesOlderThan(ctx context.Context, ts int64) error
+	RegenerateSubscriptionToken(ctx context.Context, arg RegenerateSubscriptionTokenParams) error
+	RemoveUserFromSubscription(ctx context.Context, arg RemoveUserFromSubscriptionParams) error
 	RenameInboundMeta(ctx context.Context, arg RenameInboundMetaParams) error
 	TruncateSamples(ctx context.Context) error
 	UpdateAdminPassword(ctx context.Context, arg UpdateAdminPasswordParams) error
@@ -68,6 +82,7 @@ type Querier interface {
 	UpdatePanelUserPassword(ctx context.Context, arg UpdatePanelUserPasswordParams) error
 	UpdatePanelUserPermissions(ctx context.Context, arg UpdatePanelUserPermissionsParams) error
 	UpdatePanelUsername(ctx context.Context, arg UpdatePanelUsernameParams) error
+	UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error
 	UpdateWGPeerHandshake(ctx context.Context, arg UpdateWGPeerHandshakeParams) error
 	// InboundMeta Queries --
 	UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaParams) error

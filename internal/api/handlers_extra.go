@@ -728,6 +728,33 @@ func (s *Server) handleUpdatePublicIP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleGetSubscriptionDomain(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"subscription_domain": s.config.SubscriptionDomain})
+}
+
+func (s *Server) handleUpdateSubscriptionDomain(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+	var payload struct {
+		SubscriptionDomain string `json:"subscription_domain"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	s.config.SubscriptionDomain = strings.TrimSpace(payload.SubscriptionDomain)
+	if err := s.config.SaveAppConfig(); err != nil {
+		http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleBackupConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
