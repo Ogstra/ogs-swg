@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	sqlcStore "github.com/Ogstra/ogs-swg/internal/core/store"
 	"github.com/Ogstra/ogs-swg/internal/sys"
 	"github.com/alitto/pond"
 	"github.com/dgraph-io/ristretto"
@@ -585,21 +586,29 @@ func setFrontendDocumentCacheHeaders(w http.ResponseWriter) {
 	w.Header().Set("Expires", "0")
 }
 
+// SubQuotaInfo carries subscription-level quota context for a user.
+type SubQuotaInfo struct {
+	Name       string `json:"name"`
+	QuotaLimit int64  `json:"quota_limit"`
+	UsedBytes  int64  `json:"used_bytes"`
+}
+
 type UserStatus struct {
-	Name          string   `json:"name"`
-	UUID          string   `json:"uuid"`
-	Flow          string   `json:"flow"`
-	VmessSecurity string   `json:"vmess_security,omitempty"`
-	VmessAlterID  int      `json:"vmess_alter_id,omitempty"`
-	Uplink        int64    `json:"uplink"`
-	Downlink      int64    `json:"downlink"`
-	Total         int64    `json:"total"`
-	QuotaLimit    int64    `json:"quota_limit"`
-	QuotaPeriod   string   `json:"quota_period"`
-	ResetDay      int      `json:"reset_day"`
-	Enabled       bool     `json:"enabled"`
-	LastSeen      int64    `json:"last_seen"`
-	InboundTags   []string `json:"inbound_tags"`
+	Name              string       `json:"name"`
+	UUID              string       `json:"uuid"`
+	Flow              string       `json:"flow"`
+	VmessSecurity     string       `json:"vmess_security,omitempty"`
+	VmessAlterID      int          `json:"vmess_alter_id,omitempty"`
+	Uplink            int64        `json:"uplink"`
+	Downlink          int64        `json:"downlink"`
+	Total             int64        `json:"total"`
+	QuotaLimit        int64        `json:"quota_limit"`
+	QuotaPeriod       string       `json:"quota_period"`
+	ResetDay          int          `json:"reset_day"`
+	Enabled           bool         `json:"enabled"`
+	LastSeen          int64        `json:"last_seen"`
+	InboundTags       []string     `json:"inbound_tags"`
+	SubscriptionQuota *SubQuotaInfo `json:"subscription_quota,omitempty"`
 }
 
 func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
@@ -760,21 +769,42 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// Subscription quota: check if this user belongs to a subscription with quota_limit > 0.
+		var subQuota *SubQuotaInfo
+		if subs, subErr := s.store.Queries.GetSubscriptionsForUser(r.Context(), name); subErr == nil {
+			for _, sub := range subs {
+				if sub.QuotaLimit.Int64 > 0 {
+					subUsed, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), sqlcStore.GetSubscriptionUsageInRangeParams{
+						SubID: sub.ID,
+						Ts:    startOfMonth.Unix(),
+						Ts2:   now.Unix(),
+					})
+					subQuota = &SubQuotaInfo{
+						Name:       sub.Name,
+						QuotaLimit: sub.QuotaLimit.Int64,
+						UsedBytes:  subUsed,
+					}
+					break // first sub with quota wins
+				}
+			}
+		}
+
 		result = append(result, UserStatus{
-			Name:          name,
-			UUID:          uuid,
-			Flow:          flow,
-			VmessSecurity: vmessSecurity,
-			VmessAlterID:  vmessAlterID,
-			Uplink:        up,
-			Downlink:      down,
-			Total:         up + down,
-			QuotaLimit:    limit,
-			QuotaPeriod:   period,
-			ResetDay:      1,
-			Enabled:       enabled,
-			LastSeen:      lastSeen,
-			InboundTags:   inboundTags,
+			Name:              name,
+			UUID:              uuid,
+			Flow:              flow,
+			VmessSecurity:     vmessSecurity,
+			VmessAlterID:      vmessAlterID,
+			Uplink:            up,
+			Downlink:          down,
+			Total:             up + down,
+			QuotaLimit:        limit,
+			QuotaPeriod:       period,
+			ResetDay:          1,
+			Enabled:           enabled,
+			LastSeen:          lastSeen,
+			InboundTags:       inboundTags,
+			SubscriptionQuota: subQuota,
 		})
 	}
 

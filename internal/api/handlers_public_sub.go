@@ -47,8 +47,15 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	var links []string
-	var totalUp, totalDown, totalLimit, earliestExp int64
-	hasLimit := false
+	var totalUp, totalDown int64
+
+	// Use subscription-level quota if set; otherwise fall back to summing individual user quotas.
+	var totalLimit int64
+	hasSubQuota := sub.QuotaLimit.Int64 > 0
+	if hasSubQuota {
+		totalLimit = sub.QuotaLimit.Int64
+	}
+	var earliestExp int64
 
 	host := s.resolvePublicHost(r)
 
@@ -69,8 +76,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 		userMeta, _ := s.store.GetUserMetadata(username)
 		if userMeta != nil {
-			if userMeta.QuotaLimit > 0 {
-				hasLimit = true
+			// Only accumulate individual quota when there is no subscription-level quota set.
+			if !hasSubQuota && userMeta.QuotaLimit > 0 {
 				totalLimit += userMeta.QuotaLimit
 			}
 			// Add user traffic
@@ -82,13 +89,6 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 					totalUp += smp.Uplink
 					totalDown += smp.Downlink
 				}
-			}
-
-			// Wait, expiry logic isn't explicitly in userMeta for ogs-swg (QuotaPeriod resets).
-			// If there's no fixed expiry timestamp, we leave expire=0 initially
-			// or we can calculate the end of the current period.
-			if userMeta.QuotaPeriod != "" {
-				// We don't have a direct 'expiry' field, so we just use 0 or leave it out if we want.
 			}
 		}
 
@@ -156,8 +156,9 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(joined)))
 	base64.StdEncoding.Encode(encoded, []byte(joined))
 
-	if !hasLimit {
-		totalLimit = 0
+	// total=0 means "no limit" for most clients; only send if we have either sub or individual quotas.
+	if !hasSubQuota && totalLimit == 0 {
+		// no limit at all — leave totalLimit as 0
 	}
 
 	// Save to cache (TTL: 2 minutes to protect against flood, but fast enough for normal use)
