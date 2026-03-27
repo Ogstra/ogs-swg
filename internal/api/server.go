@@ -174,6 +174,9 @@ func (s *Server) Routes() *http.ServeMux {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	// Public Subscription
+	mux.HandleFunc("GET /s/{token}", s.handlePublicSubscription)
+
 	// Public Login
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 
@@ -281,6 +284,8 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/settings/features", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateFeatures)))
 	protected.HandleFunc("GET /api/settings/public-ip", s.secure(s.requirePerm(canReadSettings, s.handleGetPublicIP)))
 	protected.HandleFunc("PUT /api/settings/public-ip", s.secure(s.requirePerm(canWriteSettings, s.handleUpdatePublicIP)))
+	protected.HandleFunc("GET /api/settings/subscription-domain", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionDomain)))
+	protected.HandleFunc("PUT /api/settings/subscription-domain", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateSubscriptionDomain)))
 	protected.HandleFunc("POST /api/sampler/run", s.secure(s.requirePerm(canWriteSettings, s.handleRunSampler)))
 	protected.HandleFunc("GET /api/sampler/history", s.secure(s.requirePerm(canReadSettings, s.handleSamplerHistory)))
 	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.requirePerm(canWriteSettings, s.handlePauseSampler)))
@@ -294,6 +299,14 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/panel-users/username", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserUsername)))
 	protected.HandleFunc("PUT /api/panel-users/password", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserPassword)))
 	protected.HandleFunc("DELETE /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.handleDeletePanelUser)))
+
+	// Subscriptions
+	protected.HandleFunc("GET /api/subscriptions", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscriptions)))
+	protected.HandleFunc("POST /api/subscriptions", s.secure(s.requirePerm(canWriteUsers, s.handleCreateSubscription)))
+	protected.HandleFunc("GET /api/subscriptions/{id}", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscription)))
+	protected.HandleFunc("PUT /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscription)))
+	protected.HandleFunc("DELETE /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteSubscription)))
+	protected.HandleFunc("POST /api/subscriptions/{id}/regenerate", s.secure(s.requirePerm(canWriteUsers, s.handleRegenerateSubscriptionToken)))
 
 	// Mount protected routes under /api/
 	mux.Handle("/api/", s.AuthMiddleware(s.PondMiddleware(s.GzipMiddleware(protected))))
@@ -982,6 +995,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1006,6 +1020,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1028,6 +1043,7 @@ func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Note: We don't delete metadata here since user might still exist in other inbounds
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1075,6 +1091,7 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
 

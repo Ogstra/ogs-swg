@@ -33,9 +33,9 @@ type ImportState struct {
 }
 
 type InboundMetum struct {
-	Tag             string         `json:"tag"`
-	ExternalPort    sql.NullInt64  `json:"external_port"`
-	OverrideAddress sql.NullString `json:"override_address"`
+	Tag          string         `json:"tag"`
+	ExternalPort sql.NullInt64  `json:"external_port"`
+	ClientSni    sql.NullString `json:"client_sni"`
 }
 
 type PanelUser struct {
@@ -70,6 +70,19 @@ type SamplerRun struct {
 	Inserted   int64          `json:"inserted"`
 	Error      sql.NullString `json:"error"`
 	Source     sql.NullString `json:"source"`
+}
+
+type Subscription struct {
+	ID        int64         `json:"id"`
+	Token     string        `json:"token"`
+	Name      string        `json:"name"`
+	CreatedAt sql.NullInt64 `json:"created_at"`
+	UpdatedAt sql.NullInt64 `json:"updated_at"`
+}
+
+type SubscriptionUser struct {
+	SubID    int64  `json:"sub_id"`
+	UserName string `json:"user_name"`
 }
 
 type User struct {

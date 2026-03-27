@@ -53,6 +53,7 @@ export default function Settings() {
     const [historyLimit, setHistoryLimit] = useState(10)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
     const [publicIP, setPublicIP] = useState<string>('')
+    const [subscriptionDomain, setSubscriptionDomain] = useState<string>('')
     const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>({
         defaultService: 'singbox',
         refreshMs: 10000,
@@ -79,6 +80,12 @@ export default function Settings() {
     const publicIPQuery = useQuery({
         queryKey: ['settings-public-ip'],
         queryFn: () => api.getPublicIP(),
+        placeholderData: previousData => previousData,
+    })
+
+    const subDomainQuery = useQuery({
+        queryKey: ['settings-subscription-domain'],
+        queryFn: () => api.getSubscriptionDomain(),
         placeholderData: previousData => previousData,
     })
 
@@ -132,6 +139,11 @@ export default function Settings() {
         setPublicIP(publicIPQuery.data || '')
     }, [publicIPQuery.data])
 
+    useEffect(() => {
+        if (typeof subDomainQuery.data !== 'string') return
+        setSubscriptionDomain(subDomainQuery.data || '')
+    }, [subDomainQuery.data])
+
     const loadFeatures = async () => {
         await featuresQuery.refetch()
     }
@@ -152,6 +164,7 @@ export default function Settings() {
                 loadDbStats(),
                 loadSamplerHistory(),
                 publicIPQuery.refetch(),
+                subDomainQuery.refetch(),
             ])
         } finally {
             setLoading(false)
@@ -181,6 +194,19 @@ export default function Settings() {
             success('Public IP saved')
         } catch (err) {
             toastError('Failed to save public IP: ' + err)
+        }
+    }
+
+    const handleSaveSubscriptionDomain = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
+        try {
+            await api.updateSubscriptionDomain(subscriptionDomain.trim())
+            success('Subscription Domain saved')
+        } catch (err) {
+            toastError('Failed to save subscription domain: ' + err)
         }
     }
 
@@ -272,10 +298,13 @@ export default function Settings() {
                     setFeatures={setFeatures}
                     handleSaveFeatures={handleSaveFeatures}
                     handleSavePublicIP={handleSavePublicIP}
+                    handleSaveSubscriptionDomain={handleSaveSubscriptionDomain}
                     handleServiceAction={handleServiceAction}
                     serviceStatus={serviceStatus}
                     publicIP={publicIP}
                     setPublicIP={setPublicIP}
+                    subscriptionDomain={subscriptionDomain}
+                    setSubscriptionDomain={setSubscriptionDomain}
                     canWriteSettings={canWriteSettings}
                     canWriteConfig={canWriteConfig}
                 />
@@ -439,10 +468,13 @@ function GeneralTab({
     setFeatures,
     handleSaveFeatures,
     handleSavePublicIP,
+    handleSaveSubscriptionDomain,
     handleServiceAction,
     serviceStatus,
     publicIP,
     setPublicIP,
+    subscriptionDomain,
+    setSubscriptionDomain,
     canWriteSettings,
     canWriteConfig,
 }: {
@@ -450,10 +482,13 @@ function GeneralTab({
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
     handleSaveFeatures: () => void
     handleSavePublicIP: () => void
+    handleSaveSubscriptionDomain: () => void
     handleServiceAction: (service: string, action: 'restart' | 'stop' | 'start') => void
     serviceStatus: ServiceStatus
     publicIP: string
     setPublicIP: Dispatch<SetStateAction<string>>
+    subscriptionDomain: string
+    setSubscriptionDomain: Dispatch<SetStateAction<string>>
     canWriteSettings: boolean
     canWriteConfig: boolean
 }) {
@@ -542,11 +577,33 @@ function GeneralTab({
                         <p className="text-xs text-slate-500 mt-1">
                             This IP will be used in QR codes and connection links. Leave empty for auto-detection.
                         </p>
+                        <div className="flex justify-end mt-2">
+                            <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
+                                Save Public IP
+                            </Button>
+                        </div>
                     </div>
-                    <div className="flex justify-end">
-                        <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
-                            Save Public IP
-                        </Button>
+
+                    <div className="pt-4 border-t border-slate-800">
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                            Subscription API Domain
+                        </label>
+                        <input
+                            type="text"
+                            value={subscriptionDomain}
+                            onChange={e => setSubscriptionDomain(e.target.value)}
+                            disabled={!canWriteSettings}
+                            placeholder="e.g. sub.example.com or leave empty"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                            This domain will be used to generate the copyable subscription link (/s/[token]).
+                        </p>
+                        <div className="flex justify-end mt-2">
+                            <Button onClick={handleSaveSubscriptionDomain} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
+                                Save Subscription Domain
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </Card>
