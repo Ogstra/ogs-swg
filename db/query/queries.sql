@@ -290,3 +290,41 @@ SELECT COUNT(*) FROM daily_wg_usage;
 SELECT user, ts, uplink, downlink
 FROM daily_usage
 WHERE user = ? AND ts >= ? AND ts <= ?;
+
+-- Subscriptions Queries --
+-- name: CreateSubscription :one
+INSERT INTO subscriptions (token, name) VALUES (?, ?) RETURNING id;
+
+-- name: GetSubscriptionByToken :one
+SELECT id, token, name, created_at, updated_at FROM subscriptions WHERE token = ?;
+
+-- name: GetSubscriptionByID :one
+SELECT id, token, name, created_at, updated_at FROM subscriptions WHERE id = ?;
+
+-- name: GetAllSubscriptions :many
+SELECT id, token, name, created_at, updated_at FROM subscriptions ORDER BY created_at DESC;
+
+-- name: UpdateSubscriptionName :exec
+UPDATE subscriptions SET name = ?, updated_at = strftime('%s','now') WHERE id = ?;
+
+-- name: RegenerateSubscriptionToken :exec
+UPDATE subscriptions SET token = ?, updated_at = strftime('%s','now') WHERE id = ?;
+
+-- name: DeleteSubscription :exec
+DELETE FROM subscriptions WHERE id = ?;
+
+-- Subscription Users Queries --
+-- name: AddUserToSubscription :exec
+INSERT OR IGNORE INTO subscription_users (sub_id, user_name) VALUES (?, ?);
+
+-- name: RemoveUserFromSubscription :exec
+DELETE FROM subscription_users WHERE sub_id = ? AND user_name = ?;
+
+-- name: ClearSubscriptionUsers :exec
+DELETE FROM subscription_users WHERE sub_id = ?;
+
+-- name: GetUsersForSubscription :many
+SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY user_name ASC;
+
+-- name: GetSubscriptionsForUser :many
+SELECT sub_id FROM subscription_users WHERE user_name = ?;
