@@ -148,6 +148,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		})
 	}
 
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -165,6 +166,7 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -186,6 +188,7 @@ func (s *Server) handleRegenerateSubscriptionToken(w http.ResponseWriter, r *htt
 		return
 	}
 
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
