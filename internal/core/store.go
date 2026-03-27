@@ -1159,6 +1159,10 @@ func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
 	}
 	defer tx.Rollback()
 
+	if _, err := tx.Exec("PRAGMA defer_foreign_keys = ON;"); err != nil {
+		return err
+	}
+
 	for _, conflict := range []struct {
 		table  string
 		column string
@@ -1184,6 +1188,9 @@ func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
 		return err
 	}
 	if _, err := tx.Exec("UPDATE users SET email = ? WHERE email = ?", newName, oldName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE subscription_users SET user_name = ? WHERE user_name = ?", newName, oldName); err != nil {
 		return err
 	}
 
