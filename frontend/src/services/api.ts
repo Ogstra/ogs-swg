@@ -93,6 +93,10 @@ export interface DashboardData {
     public_ip: string;
 }
 
+export interface DashboardConsumerChartData {
+    chart_data: UnifiedChartPoint[];
+}
+
 export interface CreateWireGuardInterfaceRequest {
     name: string;
     subnet: string;
@@ -741,6 +745,24 @@ export const api = {
         if (end) params.append('end', end);
         const res = await fetch(`/api/dashboard?${params.toString()}`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch dashboard data');
+        return res.json();
+    },
+    getDashboardConsumerChart: async (
+        mode: 'singbox' | 'wireguard',
+        key: string,
+        name?: string,
+        interfaceName?: string,
+        range: string = '24h',
+        start?: string,
+        end?: string,
+    ): Promise<DashboardConsumerChartData> => {
+        const params = new URLSearchParams({ mode, key, range });
+        if (name) params.append('name', name);
+        if (interfaceName) params.append('interface_name', interfaceName);
+        if (start) params.append('start', start);
+        if (end) params.append('end', end);
+        const res = await fetch(`/api/dashboard/consumer-chart?${params.toString()}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch consumer chart');
         return res.json();
     },
     generateRealityKeys: async (): Promise<{ private_key: string; public_key: string; short_id: string[] }> => {

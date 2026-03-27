@@ -225,6 +225,9 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';")
 	// Reset day is now fixed to 1 for all users.
 	s.db.Exec("UPDATE users SET reset_day = 1 WHERE COALESCE(reset_day, 1) != 1;")
+	// Upgrade path: add can_read_logs_censored to existing panel_users tables.
+	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs_censored INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -234,17 +237,18 @@ func (s *Store) initSchema() error {
 
 // PanelUserPermissions holds the set of permissions for a panel user.
 type PanelUserPermissions struct {
-	CanReadUsers       bool `json:"can_read_users"`
-	CanWriteUsers      bool `json:"can_write_users"`
-	CanReadWireguard   bool `json:"can_read_wireguard"`
-	CanWriteWireguard  bool `json:"can_write_wireguard"`
-	CanReadConfig      bool `json:"can_read_config"`
-	CanWriteConfig     bool `json:"can_write_config"`
-	CanReadSettings    bool `json:"can_read_settings"`
-	CanWriteSettings   bool `json:"can_write_settings"`
-	CanReadPanelUsers  bool `json:"can_read_panel_users"`
-	CanWritePanelUsers bool `json:"can_write_panel_users"`
-	CanReadLogs        bool `json:"can_read_logs"`
+	CanReadUsers        bool `json:"can_read_users"`
+	CanWriteUsers       bool `json:"can_write_users"`
+	CanReadWireguard    bool `json:"can_read_wireguard"`
+	CanWriteWireguard   bool `json:"can_write_wireguard"`
+	CanReadConfig       bool `json:"can_read_config"`
+	CanWriteConfig      bool `json:"can_write_config"`
+	CanReadSettings     bool `json:"can_read_settings"`
+	CanWriteSettings    bool `json:"can_write_settings"`
+	CanReadPanelUsers   bool `json:"can_read_panel_users"`
+	CanWritePanelUsers  bool `json:"can_write_panel_users"`
+	CanReadLogs         bool `json:"can_read_logs"`
+	CanReadLogsCensored bool `json:"can_read_logs_censored"`
 }
 
 // PanelUserInfo is a safe (no password hash) representation of a panel user.
@@ -273,21 +277,23 @@ func (p *PanelUserPermissions) Normalize() {
 	p.CanReadConfig = p.CanReadConfig || p.CanWriteConfig
 	p.CanReadSettings = p.CanReadSettings || p.CanWriteSettings
 	p.CanReadPanelUsers = p.CanReadPanelUsers || p.CanWritePanelUsers
+	p.CanReadLogs = p.CanReadLogs || p.CanReadLogsCensored
 }
 
 func fullPanelUserPermissions() PanelUserPermissions {
 	p := PanelUserPermissions{
-		CanReadUsers:       true,
-		CanWriteUsers:      true,
-		CanReadWireguard:   true,
-		CanWriteWireguard:  true,
-		CanReadConfig:      true,
-		CanWriteConfig:     true,
-		CanReadSettings:    true,
-		CanWriteSettings:   true,
-		CanReadPanelUsers:  true,
-		CanWritePanelUsers: true,
-		CanReadLogs:        true,
+		CanReadUsers:        true,
+		CanWriteUsers:       true,
+		CanReadWireguard:    true,
+		CanWriteWireguard:   true,
+		CanReadConfig:       true,
+		CanWriteConfig:      true,
+		CanReadSettings:     true,
+		CanWriteSettings:    true,
+		CanReadPanelUsers:   true,
+		CanWritePanelUsers:  true,
+		CanReadLogs:         true,
+		CanReadLogsCensored: true,
 	}
 	p.Normalize()
 	return p
@@ -307,7 +313,7 @@ func (s *Store) CreatePanelUser(username, password string, perms PanelUserPermis
 			 can_read_config, can_write_config,
 			 can_read_settings, can_write_settings,
 			 can_read_panel_users, can_write_panel_users,
-			 can_read_logs,
+			 can_read_logs, can_read_logs_censored,
 			 created_at, updated_at)
 		VALUES (?, ?,
 		        ?, ?,
@@ -315,7 +321,7 @@ func (s *Store) CreatePanelUser(username, password string, perms PanelUserPermis
 		        ?, ?,
 		        ?, ?,
 		        ?, ?,
-		        ?,
+		        ?, ?,
 		        strftime('%s','now'), strftime('%s','now'))`,
 		username, string(hash),
 		boolToInt64(perms.CanReadUsers),
@@ -329,6 +335,7 @@ func (s *Store) CreatePanelUser(username, password string, perms PanelUserPermis
 		boolToInt64(perms.CanReadPanelUsers),
 		boolToInt64(perms.CanWritePanelUsers),
 		boolToInt64(perms.CanReadLogs),
+		boolToInt64(perms.CanReadLogsCensored),
 	)
 	return err
 }
@@ -348,24 +355,26 @@ func (s *Store) VerifyPanelUser(username, password string) (*PanelUserPermission
 			COALESCE(can_write_settings, 0),
 			COALESCE(can_read_panel_users, 0),
 			COALESCE(can_write_panel_users, 0),
-			COALESCE(can_read_logs, 0)
+			COALESCE(can_read_logs, 0),
+			COALESCE(can_read_logs_censored, 0)
 		FROM panel_users
 		WHERE username = ?
 	`, username)
 
 	var (
-		passwordHash       string
-		canReadUsers       int64
-		canWriteUsers      int64
-		canReadWireguard   int64
-		canWriteWireguard  int64
-		canReadConfig      int64
-		canWriteConfig     int64
-		canReadSettings    int64
-		canWriteSettings   int64
-		canReadPanelUsers  int64
-		canWritePanelUsers int64
-		canReadLogs        int64
+		passwordHash        string
+		canReadUsers        int64
+		canWriteUsers       int64
+		canReadWireguard    int64
+		canWriteWireguard   int64
+		canReadConfig       int64
+		canWriteConfig      int64
+		canReadSettings     int64
+		canWriteSettings    int64
+		canReadPanelUsers   int64
+		canWritePanelUsers  int64
+		canReadLogs         int64
+		canReadLogsCensored int64
 	)
 
 	err := row.Scan(
@@ -381,6 +390,7 @@ func (s *Store) VerifyPanelUser(username, password string) (*PanelUserPermission
 		&canReadPanelUsers,
 		&canWritePanelUsers,
 		&canReadLogs,
+		&canReadLogsCensored,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -392,17 +402,18 @@ func (s *Store) VerifyPanelUser(username, password string) (*PanelUserPermission
 		return nil, nil
 	}
 	perms := &PanelUserPermissions{
-		CanReadUsers:       canReadUsers != 0,
-		CanWriteUsers:      canWriteUsers != 0,
-		CanReadWireguard:   canReadWireguard != 0,
-		CanWriteWireguard:  canWriteWireguard != 0,
-		CanReadConfig:      canReadConfig != 0,
-		CanWriteConfig:     canWriteConfig != 0,
-		CanReadSettings:    canReadSettings != 0,
-		CanWriteSettings:   canWriteSettings != 0,
-		CanReadPanelUsers:  canReadPanelUsers != 0,
-		CanWritePanelUsers: canWritePanelUsers != 0,
-		CanReadLogs:        canReadLogs != 0,
+		CanReadUsers:        canReadUsers != 0,
+		CanWriteUsers:       canWriteUsers != 0,
+		CanReadWireguard:    canReadWireguard != 0,
+		CanWriteWireguard:   canWriteWireguard != 0,
+		CanReadConfig:       canReadConfig != 0,
+		CanWriteConfig:      canWriteConfig != 0,
+		CanReadSettings:     canReadSettings != 0,
+		CanWriteSettings:    canWriteSettings != 0,
+		CanReadPanelUsers:   canReadPanelUsers != 0,
+		CanWritePanelUsers:  canWritePanelUsers != 0,
+		CanReadLogs:         canReadLogs != 0,
+		CanReadLogsCensored: canReadLogsCensored != 0,
 	}
 	perms.Normalize()
 	return perms, nil
@@ -423,6 +434,7 @@ func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
 			COALESCE(can_read_panel_users, 0),
 			COALESCE(can_write_panel_users, 0),
 			COALESCE(can_read_logs, 0),
+			COALESCE(can_read_logs_censored, 0),
 			COALESCE(created_at, 0)
 		FROM panel_users
 		ORDER BY username ASC
@@ -435,19 +447,20 @@ func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
 	result := make([]PanelUserInfo, 0)
 	for rows.Next() {
 		var (
-			username           string
-			canReadUsers       int64
-			canWriteUsers      int64
-			canReadWireguard   int64
-			canWriteWireguard  int64
-			canReadConfig      int64
-			canWriteConfig     int64
-			canReadSettings    int64
-			canWriteSettings   int64
-			canReadPanelUsers  int64
-			canWritePanelUsers int64
-			canReadLogs        int64
-			createdAt          int64
+			username            string
+			canReadUsers        int64
+			canWriteUsers       int64
+			canReadWireguard    int64
+			canWriteWireguard   int64
+			canReadConfig       int64
+			canWriteConfig      int64
+			canReadSettings     int64
+			canWriteSettings    int64
+			canReadPanelUsers   int64
+			canWritePanelUsers  int64
+			canReadLogs         int64
+			canReadLogsCensored int64
+			createdAt           int64
 		)
 		if err := rows.Scan(
 			&username,
@@ -462,22 +475,24 @@ func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
 			&canReadPanelUsers,
 			&canWritePanelUsers,
 			&canReadLogs,
+			&canReadLogsCensored,
 			&createdAt,
 		); err != nil {
 			return nil, err
 		}
 		perms := PanelUserPermissions{
-			CanReadUsers:       canReadUsers != 0,
-			CanWriteUsers:      canWriteUsers != 0,
-			CanReadWireguard:   canReadWireguard != 0,
-			CanWriteWireguard:  canWriteWireguard != 0,
-			CanReadConfig:      canReadConfig != 0,
-			CanWriteConfig:     canWriteConfig != 0,
-			CanReadSettings:    canReadSettings != 0,
-			CanWriteSettings:   canWriteSettings != 0,
-			CanReadPanelUsers:  canReadPanelUsers != 0,
-			CanWritePanelUsers: canWritePanelUsers != 0,
-			CanReadLogs:        canReadLogs != 0,
+			CanReadUsers:        canReadUsers != 0,
+			CanWriteUsers:       canWriteUsers != 0,
+			CanReadWireguard:    canReadWireguard != 0,
+			CanWriteWireguard:   canWriteWireguard != 0,
+			CanReadConfig:       canReadConfig != 0,
+			CanWriteConfig:      canWriteConfig != 0,
+			CanReadSettings:     canReadSettings != 0,
+			CanWriteSettings:    canWriteSettings != 0,
+			CanReadPanelUsers:   canReadPanelUsers != 0,
+			CanWritePanelUsers:  canWritePanelUsers != 0,
+			CanReadLogs:         canReadLogs != 0,
+			CanReadLogsCensored: canReadLogsCensored != 0,
 		}
 		perms.Normalize()
 
@@ -519,6 +534,7 @@ func (s *Store) UpdatePanelUserPermissions(username string, perms PanelUserPermi
 			can_read_panel_users = ?,
 			can_write_panel_users = ?,
 			can_read_logs = ?,
+			can_read_logs_censored = ?,
 			updated_at = strftime('%s','now')
 		WHERE username = ?`,
 		boolToInt64(perms.CanReadUsers),
@@ -532,6 +548,7 @@ func (s *Store) UpdatePanelUserPermissions(username string, perms PanelUserPermi
 		boolToInt64(perms.CanReadPanelUsers),
 		boolToInt64(perms.CanWritePanelUsers),
 		boolToInt64(perms.CanReadLogs),
+		boolToInt64(perms.CanReadLogsCensored),
 		username,
 	)
 	return err
@@ -1845,6 +1862,42 @@ func (s *Store) GetSBTrafficBuckets(start, end, interval int64) (map[int64]Traff
 		GROUP BY bucket_ts
 		ORDER BY bucket_ts ASC
 	`, interval, interval, start, end)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var ts int64
+		var up, down sql.NullInt64
+		if err := rows.Scan(&ts, &up, &down); err != nil {
+			return nil, err
+		}
+		out[ts] = TrafficStats{Uplink: up.Int64, Downlink: down.Int64}
+	}
+	return out, nil
+}
+
+func (s *Store) GetSBUserTrafficBuckets(user string, start, end, interval int64) (map[int64]TrafficStats, error) {
+	out := make(map[int64]TrafficStats)
+	if interval <= 0 {
+		interval = 60
+	}
+	rows, err := s.db.Query(`
+		SELECT (ts / ?) * ? AS bucket_ts, SUM(uplink), SUM(downlink)
+		FROM (
+			SELECT ts, uplink, downlink
+			FROM samples
+			WHERE user = ? AND ts >= ? AND ts <= ?
+
+			UNION ALL
+
+			SELECT ts, uplink, downlink
+			FROM daily_usage
+			WHERE user = ? AND ts >= ? AND ts <= ?
+		)
+		GROUP BY bucket_ts
+		ORDER BY bucket_ts ASC
+	`, interval, interval, user, start, end, user, start, end)
 	if err != nil {
 		return nil, err
 	}

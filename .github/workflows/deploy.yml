@@ -282,10 +282,8 @@ jobs:
 
               CODE="$(docker run --rm --network ogs-bg-net "${CURL_HOST_ARGS[@]}" curlimages/curl:8.12.1 \
                 -s -o /dev/null -w '%{http_code}' \
-                -X POST "${TARGET_BASE_URL}/api/login" \
-                -H 'Content-Type: application/json' \
-                -d '{"username":"invalid","password":"invalid"}' || true)"
-              if [ "$CODE" = '401' ] || [ "$CODE" = '405' ]; then
+                -X GET "${TARGET_BASE_URL}/health" || true)"
+              if [ "$CODE" = '204' ]; then
                 HEALTH_OK=1
                 break
               fi

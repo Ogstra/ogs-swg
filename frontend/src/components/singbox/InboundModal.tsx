@@ -226,6 +226,23 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                     </div>
                 </div>
 
+                {visibility.showSniff && (
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">Protocol Sniffing</h3>
+                    <div className="flex flex-col gap-3">
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!formData.sniff}
+                          onChange={e => updateForm(prev => ({ ...prev, sniff: e.target.checked }))}
+                          className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                        />
+                        <span className="text-xs font-medium text-white">Enable Sniff</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
+
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">TLS Configuration</h3>

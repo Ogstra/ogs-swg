@@ -12,6 +12,7 @@ export interface PanelUserPermissions {
     can_read_panel_users: boolean;
     can_write_panel_users: boolean;
     can_read_logs: boolean;
+    can_read_logs_censored: boolean;
 }
 
 interface AuthContextType {
@@ -39,6 +40,7 @@ const normalizePermissions = (raw: any): PanelUserPermissions => ({
     can_read_panel_users: !!raw?.can_read_panel_users,
     can_write_panel_users: !!raw?.can_write_panel_users,
     can_read_logs: !!raw?.can_read_logs,
+    can_read_logs_censored: !!raw?.can_read_logs_censored,
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -79,6 +81,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     useEffect(() => {
         const handleUnauthorized = () => {
+            // In demo mode the api_key is injected by the autologin script on
+            // every page load and never expires. A 401 here means the server
+            // was briefly unavailable (e.g. container restart). Reload the page
+            // so the autologin script re-runs and auth is restored automatically.
+            if (localStorage.getItem('demo_mode') === '1') {
+                window.location.reload();
+                return;
+            }
             logout();
         };
         window.addEventListener('auth:unauthorized', handleUnauthorized);
