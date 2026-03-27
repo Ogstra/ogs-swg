@@ -4,6 +4,13 @@ services:
     image: ogs-swg:demo
     container_name: ogs-swg-demo
     restart: unless-stopped
+    cpus: 0.20
+    cpu_shares: 128
+    mem_limit: 128m
+    memswap_limit: 128m
+    pids_limit: 64
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${OGS_DEMO_PORT:-8119}:8080"
     environment:
@@ -22,4 +29,17 @@ services:
     volumes:
       - ./docker/demo:/demo:ro
       - ./data-demo:/app/data
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     command: ["/bin/bash", "/demo/start-demo.sh"]

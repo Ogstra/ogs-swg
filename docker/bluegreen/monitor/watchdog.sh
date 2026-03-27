@@ -17,8 +17,12 @@ FAIL_THRESHOLD="${FAIL_THRESHOLD:-4}"
 EXECUTION_MODE="${EXECUTION_MODE:-ssh}"
 SLOT_BLUE_PORT="${SLOT_BLUE_PORT:-18080}"
 SLOT_GREEN_PORT="${SLOT_GREEN_PORT:-18081}"
+AUTOHEAL_ENABLED="${AUTOHEAL_ENABLED:-true}"
+AUTOHEAL_COOLDOWN_SEC="${AUTOHEAL_COOLDOWN_SEC:-120}"
+AUTOHEAL_IGNORE_REGEX="${AUTOHEAL_IGNORE_REGEX:-^ogs-swg-(blue|green|proxy|monitor)$}"
 
 IFS=',' read -r -a _EXPECTED_CODES <<< "$HEALTH_EXPECT"
+declare -A _AUTOHEAL_LAST_RESTART=()
 
 log_event() {
   printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$1" >> "$EVENTS_FILE"
@@ -47,6 +51,36 @@ slot_exists() {
 
 slot_running() {
   [ "$(docker inspect -f '{{.State.Running}}' "$(slot_container "$1")" 2>/dev/null || echo false)" = "true" ]
+}
+
+autoheal_should_ignore() {
+  local container_name="$1"
+  [ -n "$AUTOHEAL_IGNORE_REGEX" ] && [[ "$container_name" =~ $AUTOHEAL_IGNORE_REGEX ]]
+}
+
+autoheal_unhealthy_containers() {
+  local now="$1" name="" last_restart=0
+  [ "$AUTOHEAL_ENABLED" = "true" ] || return 0
+
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+
+    if autoheal_should_ignore "$name"; then
+      continue
+    fi
+
+    last_restart="${_AUTOHEAL_LAST_RESTART[$name]:-0}"
+    if [ "$AUTOHEAL_COOLDOWN_SEC" -gt 0 ] && [ $(( now - last_restart )) -lt "$AUTOHEAL_COOLDOWN_SEC" ]; then
+      continue
+    fi
+
+    if docker restart "$name" >/dev/null 2>&1; then
+      _AUTOHEAL_LAST_RESTART["$name"]="$now"
+      log_event "autoheal restarted container=${name}"
+    else
+      log_event "autoheal restart_failed container=${name}"
+    fi
+  done < <(docker ps --filter health=unhealthy --format '{{.Names}}' 2>/dev/null || true)
 }
 
 slot_health_ok() {
@@ -140,6 +174,9 @@ main_loop() {
   log_event "watchdog started"
 
   while true; do
+    now="$(date +%s)"
+    autoheal_unhealthy_containers "$now"
+
     if [ ! -f "$ACTIVE_FILE" ]; then
       sleep "$CHECK_INTERVAL_SEC"
       continue
@@ -151,7 +188,6 @@ main_loop() {
       continue
     fi
 
-    now="$(date +%s)"
     ensure_previous_is_stopped_after_bake "$now"
 
     if slot_health_ok "$active"; then
