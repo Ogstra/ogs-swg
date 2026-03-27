@@ -13,6 +13,7 @@ const PERMISSION_GROUPS: {
     description: string
     readKey?: keyof PanelUserPermissions
     writeKey?: keyof PanelUserPermissions
+    dependsOn?: keyof PanelUserPermissions
 }[] = [
         {
             id: 'singbox',
@@ -55,6 +56,13 @@ const PERMISSION_GROUPS: {
             description: '',
             readKey: 'can_read_logs',
         },
+        {
+            id: 'logs-censored',
+            label: 'Censored Logs',
+            description: 'Hides IPs and hosts; requires Logs access',
+            readKey: 'can_read_logs_censored',
+            dependsOn: 'can_read_logs',
+        },
     ];
 
 const emptyPerms = (): PanelUserPermissions => ({
@@ -69,6 +77,7 @@ const emptyPerms = (): PanelUserPermissions => ({
     can_read_panel_users: false,
     can_write_panel_users: false,
     can_read_logs: false,
+    can_read_logs_censored: false,
 });
 
 const WRITE_TO_READ: Partial<Record<keyof PanelUserPermissions, keyof PanelUserPermissions>> = {
@@ -77,6 +86,7 @@ const WRITE_TO_READ: Partial<Record<keyof PanelUserPermissions, keyof PanelUserP
     can_write_config: 'can_read_config',
     can_write_settings: 'can_read_settings',
     can_write_panel_users: 'can_read_panel_users',
+    can_read_logs_censored: 'can_read_logs',
 };
 
 const READ_TO_WRITE: Partial<Record<keyof PanelUserPermissions, keyof PanelUserPermissions>> = {
@@ -85,6 +95,7 @@ const READ_TO_WRITE: Partial<Record<keyof PanelUserPermissions, keyof PanelUserP
     can_read_config: 'can_write_config',
     can_read_settings: 'can_write_settings',
     can_read_panel_users: 'can_write_panel_users',
+    can_read_logs: 'can_read_logs_censored',
 };
 
 const applyPermissionToggle = (current: PanelUserPermissions, key: keyof PanelUserPermissions, nextValue: boolean): PanelUserPermissions => {
@@ -349,9 +360,11 @@ const PanelUsers: React.FC = () => {
                             <div className="text-center">Read</div>
                             <div className="text-center">Write</div>
                         </div>
-                        {PERMISSION_GROUPS.map(({ id, label, description, readKey, writeKey }) => {
+                        {PERMISSION_GROUPS.map(({ id, label, description, readKey, writeKey, dependsOn }) => {
                             const disabled = !canWritePanelUsers;
                             const current = editorPerms;
+                            const readDependencyMet = !dependsOn || !!current[dependsOn];
+                            const effectiveDisabled = disabled || !readDependencyMet;
                             return (
                                 <div
                                     key={id}
@@ -366,7 +379,7 @@ const PanelUsers: React.FC = () => {
                                             <input
                                                 type="checkbox"
                                                 checked={current[readKey]}
-                                                disabled={disabled}
+                                                disabled={effectiveDisabled}
                                                 onChange={() => toggleEditorPerm(readKey)}
                                                 className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                                             />

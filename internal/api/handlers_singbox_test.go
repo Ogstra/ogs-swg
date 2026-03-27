@@ -221,6 +221,12 @@ func TestBuildVlessLink_RealityOmitsALPNAndH2(t *testing.T) {
 	if got := u.Query().Get("alpn"); got != "" {
 		t.Fatalf("alpn = %q; want empty", got)
 	}
+	if got := u.Query().Get("packetEncoding"); got != "xudp" {
+		t.Fatalf("packetEncoding = %q; want %q", got, "xudp")
+	}
+	if got := u.Query().Get("udp"); got != "" {
+		t.Fatalf("udp = %q; want empty", got)
+	}
 }
 
 func TestBuildVlessLink_VisionOmitsALPN(t *testing.T) {
@@ -252,6 +258,12 @@ func TestBuildVlessLink_VisionOmitsALPN(t *testing.T) {
 	if got := u.Query().Get("alpn"); got != "" {
 		t.Fatalf("alpn = %q; want empty", got)
 	}
+	if got := u.Query().Get("packetEncoding"); got != "xudp" {
+		t.Fatalf("packetEncoding = %q; want %q", got, "xudp")
+	}
+	if got := u.Query().Get("udp"); got != "" {
+		t.Fatalf("udp = %q; want empty", got)
+	}
 }
 
 func TestBuildVlessLink_IncludesALPN(t *testing.T) {
@@ -279,6 +291,125 @@ func TestBuildVlessLink_IncludesALPN(t *testing.T) {
 	}
 	if got := u.Query().Get("alpn"); got != "h2,http/1.1" {
 		t.Fatalf("alpn = %q; want %q", got, "h2,http/1.1")
+	}
+	if got := u.Query().Get("packetEncoding"); got != "" {
+		t.Fatalf("packetEncoding = %q; want empty for non-direct transport", got)
+	}
+}
+
+func TestBuildVlessLink_DirectTCPIncludesXUDPWithoutFlow(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "vless",
+		TLS: &core.TLSConfig{
+			Enabled:    true,
+			ServerName: "example.com",
+			ALPN:       []string{"h2", "http/1.1"},
+		},
+		Raw: map[string]interface{}{
+			"transport": map[string]interface{}{"type": "tcp"},
+		},
+	}
+	user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
+
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil, "")
+	if err != nil {
+		t.Fatalf("buildVlessLink() error = %v", err)
+	}
+
+	u, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("parse link: %v", err)
+	}
+	if got := u.Query().Get("packetEncoding"); got != "xudp" {
+		t.Fatalf("packetEncoding = %q; want %q", got, "xudp")
+	}
+	if got := u.Query().Get("alpn"); got != "h2,http/1.1" {
+		t.Fatalf("alpn = %q; want %q", got, "h2,http/1.1")
+	}
+}
+
+func TestBuildVlessLink_RealityDirectTCPIncludesXUDPWithoutFlow(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "vless",
+		TLS: &core.TLSConfig{
+			Enabled:    true,
+			ServerName: "tls.example.com",
+			Reality: &core.RealityConfig{
+				Enabled:   true,
+				PublicKey: "public-key",
+				ShortIDs:  []string{"abcd"},
+				Handshake: core.RealityHandshake{Server: "hs.example.com"},
+			},
+		},
+		Raw: map[string]interface{}{
+			"transport": map[string]interface{}{"type": "tcp"},
+		},
+	}
+	user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
+
+	link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil, "")
+	if err != nil {
+		t.Fatalf("buildVlessLink() error = %v", err)
+	}
+
+	u, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("parse link: %v", err)
+	}
+	if got := u.Query().Get("packetEncoding"); got != "xudp" {
+		t.Fatalf("packetEncoding = %q; want %q", got, "xudp")
+	}
+}
+
+func TestBuildVlessLink_NonDirectTransportOmitsXUDP(t *testing.T) {
+	testCases := []struct {
+		name      string
+		transport map[string]interface{}
+	}{
+		{
+			name:      "ws",
+			transport: map[string]interface{}{"type": "ws", "path": "/ws"},
+		},
+		{
+			name:      "grpc",
+			transport: map[string]interface{}{"type": "grpc", "service_name": "svc"},
+		},
+		{
+			name:      "httpupgrade",
+			transport: map[string]interface{}{"type": "httpupgrade", "path": "/up"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			view := &core.SingboxInboundView{
+				Type: "vless",
+				TLS: &core.TLSConfig{
+					Enabled:    true,
+					ServerName: "example.com",
+				},
+				Raw: map[string]interface{}{
+					"transport": tc.transport,
+				},
+			}
+			user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
+
+			link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil, "")
+			if err != nil {
+				t.Fatalf("buildVlessLink() error = %v", err)
+			}
+
+			u, err := url.Parse(link)
+			if err != nil {
+				t.Fatalf("parse link: %v", err)
+			}
+			if got := u.Query().Get("packetEncoding"); got != "" {
+				t.Fatalf("packetEncoding = %q; want empty", got)
+			}
+			if got := u.Query().Get("udp"); got != "" {
+				t.Fatalf("udp = %q; want empty", got)
+			}
+		})
 	}
 }
 

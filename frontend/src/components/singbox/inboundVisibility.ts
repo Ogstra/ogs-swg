@@ -15,6 +15,7 @@ export interface InboundVisibility {
     showHysteria2Obfs: boolean
     showWsHeaders: boolean
     showWsEarlyData: boolean
+    showSniff: boolean
 }
 
 const DEFAULT_VLESS = {
@@ -25,6 +26,7 @@ const DEFAULT_VLESS = {
     external_port: '',
     override_address: '',
     link_allow_insecure: 'auto',
+    sniff: false,
     tls: {
         enabled: false,
         server_name: '',
@@ -70,6 +72,7 @@ const DEFAULT_VMESS = {
     external_port: '',
     override_address: '',
     link_allow_insecure: 'auto',
+    sniff: false,
     tls: {
         enabled: false,
         server_name: '',
@@ -105,6 +108,7 @@ const DEFAULT_TROJAN = {
     external_port: '',
     override_address: '',
     link_allow_insecure: 'auto',
+    sniff: false,
     tls: {
         enabled: false,
         server_name: '',
@@ -332,6 +336,7 @@ export function computeInboundVisibility(inbound: InboundLike | null | undefined
         showHysteria2Obfs: type === 'hysteria2',
         showWsHeaders: showWsFields,
         showWsEarlyData: showWsFields,
+        showSniff: type !== 'hysteria2',
     }
 }
 
@@ -393,6 +398,7 @@ export function normalizeInboundForEditor(value: InboundLike | null | undefined)
     if (type !== 'hysteria2') {
         normalized.transport = normalizeTransport(type, source.transport, fallback.transport)
         normalized.multiplex = normalizeMultiplex(type, source.multiplex, fallback.multiplex)
+        normalized.sniff = !!source.sniff
     } else {
         normalized.up_mbps = source.up_mbps ?? ''
         normalized.down_mbps = source.down_mbps ?? ''
@@ -542,6 +548,9 @@ export function buildInboundSubmission(formData: InboundLike) {
             delete submission.obfs
         }
 
+        // Hysteria2 does not support sniff fields
+        delete submission.sniff
+
         return { submission }
     }
 
@@ -604,6 +613,9 @@ export function buildInboundSubmission(formData: InboundLike) {
 
     // public_key is display-only (client-side); never include in server inbound config
     delete submission.tls?.reality?.public_key
+
+    // Omit sniff fields when false (sing-box treats absence as false)
+    if (!submission.sniff) delete submission.sniff
 
     return { submission }
 }
