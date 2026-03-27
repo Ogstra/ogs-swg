@@ -13,6 +13,7 @@
 body {
     background-color: #0f172a;
     color: #f8fafc;
+    overscroll-behavior-y: none;
 }
 
 /* Prevent iOS/Safari auto-zoom on focused form controls */
