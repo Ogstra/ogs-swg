@@ -511,10 +511,22 @@ func extractTLSInfo(view *core.SingboxInboundView) tlsInfo {
 	}
 }
 
+func vlessPacketEncoding(transportType string) string {
+	if strings.EqualFold(strings.TrimSpace(transportType), "tcp") || strings.TrimSpace(transportType) == "" {
+		return "xudp"
+	}
+	return ""
+}
+
 func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
 	tls := extractTLSInfo(view)
 	alpn := normalizedALPN(tls.ALPN)
 	transport := extractTransportInfo(view.Raw)
+	typeVal := transport.Type
+	if typeVal == "" {
+		typeVal = "tcp"
+	}
+	packetEncoding := vlessPacketEncoding(typeVal)
 	var reality *core.RealityConfig
 	if view.TLS != nil {
 		reality = view.TLS.Reality
@@ -554,30 +566,32 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 
 		flowParam := ""
 		if userInfo.Flow != "" {
-			flowParam = "&flow=" + url.QueryEscape(userInfo.Flow)
+			flowParam = userInfo.Flow
+		}
+
+		params := url.Values{}
+		params.Set("security", "reality")
+		params.Set("encryption", "none")
+		params.Set("pbk", pbk)
+		params.Set("headerType", "none")
+		params.Set("fp", "chrome")
+		params.Set("type", typeVal)
+		params.Set("sni", sni)
+		params.Set("sid", sid)
+		if flowParam != "" {
+			params.Set("flow", flowParam)
+		}
+		if packetEncoding != "" {
+			params.Set("packetEncoding", packetEncoding)
 		}
 
 		nameTag := url.QueryEscape("VLESS-" + name)
-		udpParam := ""
-		if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
-			udpParam = "&udp=0"
+		base := fmt.Sprintf("vless://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
+		if encoded := params.Encode(); encoded != "" {
+			base += "?" + encoded
 		}
-		link := fmt.Sprintf("vless://%s@%s:%s?security=reality&encryption=none&pbk=%s&headerType=none&fp=chrome&type=%s%s&sni=%s&sid=%s%s#%s",
-			url.QueryEscape(userInfo.UUID),
-			host,
-			port,
-			url.QueryEscape(pbk),
-			url.QueryEscape(transport.Type),
-			flowParam,
-			url.QueryEscape(sni),
-			url.QueryEscape(sid),
-			"",
-			nameTag,
-		)
-		if udpParam != "" {
-			link = strings.Replace(link, "#"+nameTag, udpParam+"#"+nameTag, 1)
-		}
-		return link, nil
+		base += "#" + nameTag
+		return base, nil
 	}
 
 	params := url.Values{}
@@ -598,12 +612,8 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	if shouldAllowInsecure(tls, meta) {
 		params.Set("allowInsecure", "1")
 	}
-	if strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
-		params.Set("udp", "0")
-	}
-	typeVal := transport.Type
-	if typeVal == "" {
-		typeVal = "tcp"
+	if packetEncoding != "" {
+		params.Set("packetEncoding", packetEncoding)
 	}
 	params.Set("type", typeVal)
 	if typeVal == "ws" || typeVal == "http" || typeVal == "httpupgrade" {
