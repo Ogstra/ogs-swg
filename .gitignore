@@ -79,3 +79,4 @@ db/query_test/
 
 # GSD planning artifacts (local-only, never commit)
 .planning/
+.claude/
