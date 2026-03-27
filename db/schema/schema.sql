@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 	id INTEGER PRIMARY KEY AUTOINCREMENT,
 	token TEXT UNIQUE NOT NULL,
 	name TEXT NOT NULL,
+	quota_limit INTEGER DEFAULT 0,
+	quota_period TEXT DEFAULT 'monthly',
+	reset_day INTEGER DEFAULT 1,
 	created_at INTEGER DEFAULT (strftime('%s','now')),
 	updated_at INTEGER DEFAULT (strftime('%s','now'))
 );

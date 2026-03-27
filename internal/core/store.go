@@ -248,6 +248,10 @@ func (s *Store) initSchema() error {
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
+	// Upgrade path: add quota fields to subscriptions for existing rows that predate this feature.
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_limit INTEGER DEFAULT 0;")
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_period TEXT DEFAULT 'monthly';")
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN reset_day INTEGER DEFAULT 1;")
 	return nil
 }
 
