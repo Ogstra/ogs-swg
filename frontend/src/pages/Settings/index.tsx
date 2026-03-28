@@ -561,7 +561,7 @@ function GeneralTab({
 
             {/* Server Configuration */}
             <Card title="Server Configuration">
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">
                             Public IP Address / Domain
@@ -575,16 +575,16 @@ function GeneralTab({
                             className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
                         />
                         <p className="text-xs text-slate-500 mt-1">
-                            This IP will be used in QR codes and connection links. Leave empty for auto-detection.
+                            Used in QR codes and connection links. Leave empty for auto-detection.
                         </p>
                         <div className="flex justify-end mt-2">
                             <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
-                                Save Public IP
+                                Save
                             </Button>
                         </div>
                     </div>
 
-                    <div className="pt-4 border-t border-slate-800">
+                    <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">
                             Subscription API Domain
                         </label>
@@ -593,15 +593,15 @@ function GeneralTab({
                             value={subscriptionDomain}
                             onChange={e => setSubscriptionDomain(e.target.value)}
                             disabled={!canWriteSettings}
-                            placeholder="e.g. sub.example.com or leave empty"
+                            placeholder="e.g. sub.example.com"
                             className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
                         />
                         <p className="text-xs text-slate-500 mt-1">
-                            This domain will be used to generate the copyable subscription link (/s/[token]).
+                            Domain for subscription links (/s/[token]).
                         </p>
                         <div className="flex justify-end mt-2">
                             <Button onClick={handleSaveSubscriptionDomain} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
-                                Save Subscription Domain
+                                Save
                             </Button>
                         </div>
                     </div>
