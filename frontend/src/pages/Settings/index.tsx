@@ -494,120 +494,6 @@ function GeneralTab({
 }) {
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
-            {/* Features & Configuration */}
-            <Card
-                title="System Features"
-                action={
-                    <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
-                        Save Changes
-                    </Button>
-                }
-            >
-                <div className="space-y-4 sm:space-y-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
-                            <input
-                                type="checkbox"
-                                checked={features.enable_singbox}
-                                onChange={e => setFeatures(prev => ({ ...prev, enable_singbox: e.target.checked }))}
-                                disabled={!canWriteSettings}
-                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
-                            />
-                            <div>
-                                <div className="font-semibold text-white">Enable sing-box</div>
-                            </div>
-                        </label>
-                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
-                            <input
-                                type="checkbox"
-                                checked={features.enable_wireguard}
-                                onChange={e => setFeatures(prev => ({ ...prev, enable_wireguard: e.target.checked }))}
-                                disabled={!canWriteSettings}
-                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
-                            />
-                            <div>
-                                <div className="font-semibold text-white">Enable WireGuard</div>
-                            </div>
-                        </label>
-                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
-                            <input
-                                type="checkbox"
-                                checked={!!features.retention_enabled}
-                                onChange={e => setFeatures(prev => ({ ...prev, retention_enabled: e.target.checked }))}
-                                disabled={!canWriteSettings}
-                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
-                            />
-                            <div>
-                                <div className="font-semibold text-white">Data Retention</div>
-                                <div className="text-xs text-slate-400 mt-1">Auto-prune old stats</div>
-                            </div>
-                        </label>
-                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
-                            <input
-                                type="checkbox"
-                                checked={!!features.aggregation_enabled}
-                                onChange={e => setFeatures(prev => ({ ...prev, aggregation_enabled: e.target.checked }))}
-                                disabled={!canWriteSettings}
-                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
-                            />
-                            <div>
-                                <div className="font-semibold text-white">Data Aggregation</div>
-                                <div className="text-xs text-slate-400 mt-1">Compress old history</div>
-                            </div>
-                        </label>
-                    </div>
-                </div>
-            </Card>
-
-            {/* Server Configuration */}
-            <Card title="Server Configuration">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Public IP Address / Domain
-                        </label>
-                        <input
-                            type="text"
-                            value={publicIP}
-                            onChange={e => setPublicIP(e.target.value)}
-                            disabled={!canWriteSettings}
-                            placeholder="Auto-detected or enter manually"
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
-                        />
-                        <p className="text-xs text-slate-500 mt-1">
-                            Used in QR codes and connection links. Leave empty for auto-detection.
-                        </p>
-                        <div className="flex justify-end mt-2">
-                            <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
-                                Save
-                            </Button>
-                        </div>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Subscription API Domain
-                        </label>
-                        <input
-                            type="text"
-                            value={subscriptionDomain}
-                            onChange={e => setSubscriptionDomain(e.target.value)}
-                            disabled={!canWriteSettings}
-                            placeholder="e.g. sub.example.com"
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
-                        />
-                        <p className="text-xs text-slate-500 mt-1">
-                            Domain for subscription links (/s/[token]).
-                        </p>
-                        <div className="flex justify-end mt-2">
-                            <Button onClick={handleSaveSubscriptionDomain} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
-                                Save
-                            </Button>
-                        </div>
-                    </div>
-                </div>
-            </Card>
-
             {/* Service Control */}
             <Card title="Service Control">
                 {features.systemctl_available === false ? (
@@ -679,6 +565,120 @@ function GeneralTab({
                         </div>
                     </div>
                 )}
+            </Card>
+
+            {/* Server Configuration */}
+            <Card title="Server Configuration">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                            Public IP Address / Domain
+                        </label>
+                        <input
+                            type="text"
+                            value={publicIP}
+                            onChange={e => setPublicIP(e.target.value)}
+                            disabled={!canWriteSettings}
+                            placeholder="Auto-detected or enter manually"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                            Used in QR codes and connection links. Leave empty for auto-detection.
+                        </p>
+                        <div className="flex justify-end mt-2">
+                            <Button onClick={handleSavePublicIP} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
+                                Save
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                            Subscription API Domain
+                        </label>
+                        <input
+                            type="text"
+                            value={subscriptionDomain}
+                            onChange={e => setSubscriptionDomain(e.target.value)}
+                            disabled={!canWriteSettings}
+                            placeholder="e.g. sub.example.com"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                            Domain for subscription links (/s/[token]).
+                        </p>
+                        <div className="flex justify-end mt-2">
+                            <Button onClick={handleSaveSubscriptionDomain} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
+                                Save
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </Card>
+
+            {/* Features & Configuration */}
+            <Card
+                title="System Features"
+                action={
+                    <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
+                        Save Changes
+                    </Button>
+                }
+            >
+                <div className="space-y-4 sm:space-y-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={features.enable_singbox}
+                                onChange={e => setFeatures(prev => ({ ...prev, enable_singbox: e.target.checked }))}
+                                disabled={!canWriteSettings}
+                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                            />
+                            <div>
+                                <div className="font-semibold text-white">Enable sing-box</div>
+                            </div>
+                        </label>
+                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={features.enable_wireguard}
+                                onChange={e => setFeatures(prev => ({ ...prev, enable_wireguard: e.target.checked }))}
+                                disabled={!canWriteSettings}
+                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                            />
+                            <div>
+                                <div className="font-semibold text-white">Enable WireGuard</div>
+                            </div>
+                        </label>
+                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={!!features.retention_enabled}
+                                onChange={e => setFeatures(prev => ({ ...prev, retention_enabled: e.target.checked }))}
+                                disabled={!canWriteSettings}
+                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                            />
+                            <div>
+                                <div className="font-semibold text-white">Data Retention</div>
+                                <div className="text-xs text-slate-400 mt-1">Auto-prune old stats</div>
+                            </div>
+                        </label>
+                        <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                            <input
+                                type="checkbox"
+                                checked={!!features.aggregation_enabled}
+                                onChange={e => setFeatures(prev => ({ ...prev, aggregation_enabled: e.target.checked }))}
+                                disabled={!canWriteSettings}
+                                className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                            />
+                            <div>
+                                <div className="font-semibold text-white">Data Aggregation</div>
+                                <div className="text-xs text-slate-400 mt-1">Compress old history</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
             </Card>
         </div>
     )
