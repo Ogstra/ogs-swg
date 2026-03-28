@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UserStatus, CreateUserRequest } from '../../services/api'
-import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, Copy, Check, QrCode as QrCodeIcon } from 'lucide-react'
-import QRCode from 'react-qr-code'
+import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon } from 'lucide-react'
+import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { Button } from '../../components/ui/Button'
@@ -117,7 +117,6 @@ export default function UserManagement() {
         inbound_tag: ''
     })
     const [bulkQuotaInput, setBulkQuotaInput] = useState<string>('')
-    const [copied, setCopied] = useState(false)
     const [selectedQrInbound, setSelectedQrInbound] = useState<string>('')
     const [qrLink, setQrLink] = useState<string>('')
     const [qrLoading, setQrLoading] = useState(false)
@@ -628,30 +627,6 @@ export default function UserManagement() {
         }
     }
 
-
-    const handleCopyLink = async (link: string) => {
-        try {
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(link)
-            } else {
-                const textarea = document.createElement('textarea')
-                textarea.value = link
-                textarea.setAttribute('readonly', '')
-                textarea.style.position = 'absolute'
-                textarea.style.left = '-9999px'
-                document.body.appendChild(textarea)
-                textarea.select()
-                const ok = document.execCommand('copy')
-                document.body.removeChild(textarea)
-                if (!ok) throw new Error('Copy failed')
-            }
-            setCopied(true)
-            setTimeout(() => setCopied(false), 2000)
-            success('Link copied to clipboard')
-        } catch (err) {
-            toastError('Failed to copy link')
-        }
-    }
 
 
     const handleApplySingboxChanges = async () => {
@@ -1545,84 +1520,14 @@ export default function UserManagement() {
             </Modal >
 
             {/* QR Code Modal */}
-            < Modal
+            <QrLinkModal
                 isOpen={modalState.type === 'qr'}
                 onClose={() => setModalState({ type: null })}
-                title="User Configuration"
-                size="sm"
-                footer={
-                    < Button variant="ghost" className="w-full" onClick={() => setModalState({ type: null })}> Close</Button >
-                }
-            >
-                <div className="flex flex-col items-center space-y-4">
-                    {modalState.data && (
-                        <>
-                            {(() => {
-                                const qrTags = (modalState.data.inbound_tags || []).filter(
-                                    (tag: string) => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || '')
-                                )
-                                return qrTags.length > 1 && (
-                                    <div className="w-full flex flex-wrap gap-2">
-                                        {qrTags.map((tag: string) => (
-                                            <button
-                                                key={tag}
-                                                type="button"
-                                                onClick={() => setSelectedQrInbound(tag)}
-                                                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${selectedQrInbound === tag
-                                                    ? 'bg-slate-800 text-white border-slate-700'
-                                                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:border-slate-700'
-                                                    }`}
-                                            >
-                                                {tag}
-                                            </button>
-                                        ))}
-                                    </div>
-                                )
-                            })()}
-                            {qrError && !qrLoading ? (
-                                <div className="w-full bg-red-900/20 border border-red-700/40 rounded-lg p-3 text-xs text-red-300">
-                                    {qrError}
-                                </div>
-                            ) : (
-                                <div className="relative p-4 bg-white rounded-xl shadow-lg w-full">
-                                    <div className={qrLoading ? 'blur-sm opacity-70' : ''}>
-                                        <QRCode
-                                            size={256}
-                                            style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                                            value={qrLink || 'loading-placeholder'}
-                                            viewBox={`0 0 256 256`}
-                                        />
-                                    </div>
-                                    {qrLoading && (
-                                        <div className="absolute inset-0 flex items-center justify-center">
-                                            <div className="w-8 h-8 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                            <div className="w-full space-y-2">
-                                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Link</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        readOnly
-                                        value={qrLoading ? 'Loading link...' : qrLink}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-400 font-mono focus:outline-none"
-                                    />
-                                    <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        onClick={() => qrLink && handleCopyLink(qrLink)}
-                                        icon={copied ? <Check size={14} /> : <Copy size={14} />}
-                                        disabled={!qrLink}
-                                    >
-                                        {copied ? 'Copied' : 'Copy'}
-                                    </Button>
-                                </div>
-                            </div>
-                        </>
-                    )}
-                </div>
-            </Modal >
+                title={modalState.data ? `${modalState.data.name} — Configuration` : 'User Configuration'}
+                link={qrLoading ? '' : qrLink}
+                loading={qrLoading}
+                error={qrError && !qrLoading ? qrError : undefined}
+            />
 
             {/* Inbound Selection Modal */}
             <Modal

@@ -8,7 +8,7 @@ import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon } from 'lucide-react'
-import QRCode from 'react-qr-code'
+import { QrLinkModal } from '../../components/ui/QrLinkModal'
 
 const formatBytes = (bytes: number): string => {
     if (!bytes || bytes === 0) return '0'
@@ -295,32 +295,12 @@ export default function Subscriptions() {
             </Modal>
 
             {/* QR Modal */}
-            <Modal
-                title="Subscription QR Code"
+            <QrLinkModal
                 isOpen={modalState.type === 'qr'}
                 onClose={() => setModalState({ type: null })}
-                footer={
-                    <div className="flex justify-center gap-3 w-full">
-                        <Button variant="secondary" onClick={() => copyLink(modalState.data?.token || '')}>Copy Link</Button>
-                        <Button variant="secondary" onClick={() => setModalState({ type: null })}>Close</Button>
-                    </div>
-                }
-            >
-                <div className="flex flex-col items-center justify-center p-4 space-y-6">
-                    <div className="bg-white p-4 rounded-xl">
-                        <QRCode
-                            value={modalState.data ? subLink(modalState.data.token) : ''}
-                            size={200}
-                        />
-                    </div>
-                    <p className="text-sm text-slate-400 text-center px-4">
-                        Scan with V2rayTun, Shadowrocket, or any supported client to import "{modalState.data?.name}".
-                    </p>
-                    <p className="text-xs text-slate-600 font-mono text-center break-all px-2">
-                        {modalState.data ? subLink(modalState.data.token) : ''}
-                    </p>
-                </div>
-            </Modal>
+                title={`Subscription — ${modalState.data?.name || ''}`}
+                link={modalState.data ? subLink(modalState.data.token) : ''}
+            />
 
             <ConfirmModal
                 isOpen={!!confirmDelete}
