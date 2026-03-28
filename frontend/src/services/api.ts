@@ -621,6 +621,19 @@ export const api = {
     },
 
     // Sing-box Configuration
+    getSingboxRouteRules: async (): Promise<any[]> => {
+        const res = await fetch('/api/singbox/route/rules', { headers: buildHeaders() });
+        const handled = await handleResponse(res, 'Failed to fetch route rules');
+        return handled.json();
+    },
+    upsertSingboxRouteRules: async (rules: any[]): Promise<void> => {
+        const res = await fetch('/api/singbox/route/rules/upsert', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(rules),
+        });
+        await handleResponse(res, 'Failed to upsert route rules');
+    },
     getSingboxConfig: async (): Promise<string> => {
         const res = await fetch('/api/singbox/config', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch Sing-box config');

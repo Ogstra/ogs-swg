@@ -525,6 +525,30 @@ function RulesTab({
 
     const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
 
+    const applyRealityRules = async () => {
+        if (!canWrite) return
+        if (!confirm('Apply recommended DNS hijack and direct rules for "in-reality" inbound?')) return
+        try {
+            const realityRules = [
+                {
+                    inbound: ['in-reality'],
+                    protocol: 'dns',
+                    action: 'hijack-dns',
+                },
+                {
+                    inbound: ['in-reality'],
+                    outbound: 'direct',
+                },
+            ]
+            await api.upsertSingboxRouteRules(realityRules)
+            alert('Reality rules applied successfully')
+            reload()
+        } catch (err: any) {
+            console.error('Failed to apply reality rules', err)
+            alert('Failed to apply reality rules: ' + (err.message || err))
+        }
+    }
+
     return (
         <div className="space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -622,13 +646,22 @@ function RulesTab({
                 ))}
             </div>
 
-            <button
-                onClick={addRule}
-                disabled={!canWrite}
-                className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
-            >
-                Add Rule
-            </button>
+            <div className="flex flex-wrap gap-2">
+                <button
+                    onClick={addRule}
+                    disabled={!canWrite}
+                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
+                >
+                    Add Rule
+                </button>
+                <button
+                    onClick={applyRealityRules}
+                    disabled={!canWrite}
+                    className="px-3 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/30 transition-colors text-sm font-medium"
+                >
+                    Apply 'in-reality' rules
+                </button>
+            </div>
         </div>
     )
 }

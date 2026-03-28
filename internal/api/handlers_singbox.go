@@ -1276,3 +1276,37 @@ func (s *Server) handleApplySingboxChanges(w http.ResponseWriter, r *http.Reques
 		"message": "Sing-box configuration applied successfully",
 	})
 }
+
+func (s *Server) handleGetSingboxRouteRules(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	rules, err := s.config.GetSingboxRouteRules()
+	if err != nil {
+		http.Error(w, "Failed to get route rules: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rules)
+}
+
+func (s *Server) handleUpsertSingboxRouteRules(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+
+	var rules []map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
+		http.Error(w, "Failed to decode rules: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.config.UpsertSingboxRouteRules(rules); err != nil {
+		http.Error(w, "Failed to upsert route rules: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
