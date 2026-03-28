@@ -219,11 +219,6 @@ export default function RawConfig() {
 
     return (
         <div className="h-full min-h-0 flex flex-col gap-0 sm:gap-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-white hidden sm:block">Raw Config</h1>
-                </div>
-            </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex-1 min-h-0 flex flex-col">
                 <div className="flex border-b border-slate-800 bg-slate-950/50">
