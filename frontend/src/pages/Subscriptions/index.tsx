@@ -258,11 +258,11 @@ export default function Subscriptions() {
                 <div className="space-y-4">
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
-                        <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="e.g. Family Pack" />
+                        <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="" />
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">
-                            Quota Limit (GB) <span className="text-slate-500 font-normal">— 0 = unlimited</span>
+                            Quota Limit (GB)
                         </label>
                         <input
                             type="number"
@@ -271,13 +271,8 @@ export default function Subscriptions() {
                             value={quotaGB}
                             onChange={e => setQuotaGB(e.target.value)}
                             className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                            placeholder="e.g. 100"
+                            placeholder="0 = unlimited"
                         />
-                        {parseFloat(quotaGB) > 0 && (
-                            <p className="text-xs text-slate-500 mt-1">
-                                = {formatBytes(parseGBInput(quotaGB))}. When total sub usage exceeds this, all assigned users are disabled automatically.
-                            </p>
-                        )}
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
