@@ -1523,7 +1523,7 @@ export default function UserManagement() {
             <QrLinkModal
                 isOpen={modalState.type === 'qr'}
                 onClose={() => setModalState({ type: null })}
-                title={modalState.data ? `${modalState.data.name} — Configuration` : 'User Configuration'}
+                title={modalState.data ? `${modalState.data.name}` : 'User Configuration'}
                 link={qrLoading ? '' : qrLink}
                 loading={qrLoading}
                 error={qrError && !qrLoading ? qrError : undefined}
