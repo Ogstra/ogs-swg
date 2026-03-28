@@ -293,7 +293,7 @@ export default function Subscriptions() {
             <QrLinkModal
                 isOpen={modalState.type === 'qr'}
                 onClose={() => setModalState({ type: null })}
-                title={`Subscription — ${modalState.data?.name || ''}`}
+                title={`${modalState.data?.name || ''}`}
                 link={modalState.data ? subLink(modalState.data.token) : ''}
             />
 

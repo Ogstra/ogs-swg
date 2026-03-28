@@ -353,7 +353,11 @@ export default function Settings() {
             label: <span className="flex items-center gap-2"><UserCog size={16} /> Admins</span>,
             content: <PanelUsers />,
         }] : []),
-    ]
+    ].filter(tab => {
+        if (tab.id === 'singbox') return !!permissions?.can_read_config
+        if (tab.id === 'wireguard-interfaces') return !!permissions?.can_read_wireguard
+        return true
+    })
 
     return (
         <div className="h-full min-h-0 flex flex-col gap-0 sm:gap-6">
