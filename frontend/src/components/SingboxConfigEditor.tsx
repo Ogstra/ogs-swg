@@ -246,7 +246,7 @@ export default function SingboxConfigEditor() {
     return (
         <div className="h-full min-h-0 flex flex-col">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
                 <div />
             </div>
 
@@ -386,29 +386,24 @@ function OutboundsTab({
 
     return (
         <div className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                    <h3 className="text-lg font-semibold text-white">Outbounds Domain Strategy</h3>
-                </div>
-                <div className="flex gap-2 w-full sm:w-auto">
-                    <button
-                        onClick={reload}
-                        className="flex-1 sm:flex-none px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
-                        disabled={loading}
-                    >
-                        {loading ? 'Refreshing...' : 'Refresh'}
-                    </button>
-                    <button
-                        onClick={save}
-                        disabled={!canWrite || saving}
-                        className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!canWrite || saving
-                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white'
-                            }`}
-                    >
-                        {saving ? 'Saving...' : 'Save Outbounds'}
-                    </button>
-                </div>
+            <div className="flex justify-end mb-4 gap-2">
+                <button
+                    onClick={reload}
+                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
+                    disabled={loading}
+                >
+                    {loading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button
+                    onClick={save}
+                    disabled={!canWrite || saving}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!canWrite || saving
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white'
+                        }`}
+                >
+                    {saving ? 'Saving...' : 'Save Outbounds'}
+                </button>
             </div>
 
             <div className="space-y-3">
@@ -492,7 +487,7 @@ function RulesTab({
     setRules,
     availableInbounds,
     availableOutbounds,
-    preservedCount,
+    preservedCount: _preservedCount,
     loading,
     saving,
     canWrite,
@@ -525,61 +520,26 @@ function RulesTab({
 
     const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
 
-    const applyRealityRules = async () => {
-        if (!canWrite) return
-        if (!confirm('Apply recommended DNS hijack and direct rules for "in-reality" inbound?')) return
-        try {
-            const realityRules = [
-                {
-                    inbound: ['in-reality'],
-                    protocol: 'dns',
-                    action: 'hijack-dns',
-                },
-                {
-                    inbound: ['in-reality'],
-                    outbound: 'direct',
-                },
-            ]
-            await api.upsertSingboxRouteRules(realityRules)
-            alert('Reality rules applied successfully')
-            reload()
-        } catch (err: any) {
-            console.error('Failed to apply reality rules', err)
-            alert('Failed to apply reality rules: ' + (err.message || err))
-        }
-    }
-
     return (
         <div className="space-y-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                    <h3 className="text-lg font-semibold text-white">Rules (inbound → outbound)</h3>
-                    <p className="text-sm text-slate-400">Simple rules only. Other rules remain unchanged.</p>
-                    {preservedCount > 0 && (
-                        <p className="text-xs text-amber-400 mt-1">
-                            {preservedCount} non-editable rule(s) detected. Edit them in Raw Config if needed.
-                        </p>
-                    )}
-                </div>
-                <div className="flex gap-2 w-full sm:w-auto">
-                    <button
-                        onClick={reload}
-                        className="flex-1 sm:flex-none px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
-                        disabled={loading}
-                    >
-                        {loading ? 'Refreshing...' : 'Refresh'}
-                    </button>
-                    <button
-                        onClick={save}
-                        disabled={!canWrite || saving || hasInvalid}
-                        className={`flex-1 sm:flex-none px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!canWrite || saving || hasInvalid
-                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                            : 'bg-blue-600 hover:bg-blue-500 text-white'
-                            }`}
-                    >
-                        {saving ? 'Saving...' : 'Save Rules'}
-                    </button>
-                </div>
+            <div className="flex justify-end mb-4 gap-2">
+                <button
+                    onClick={reload}
+                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
+                    disabled={loading}
+                >
+                    {loading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button
+                    onClick={save}
+                    disabled={!canWrite || saving || hasInvalid}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!canWrite || saving || hasInvalid
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-500 text-white'
+                        }`}
+                >
+                    {saving ? 'Saving...' : 'Save Rules'}
+                </button>
             </div>
 
             <div className="space-y-3">
@@ -646,22 +606,13 @@ function RulesTab({
                 ))}
             </div>
 
-            <div className="flex flex-wrap gap-2">
-                <button
-                    onClick={addRule}
-                    disabled={!canWrite}
-                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
-                >
-                    Add Rule
-                </button>
-                <button
-                    onClick={applyRealityRules}
-                    disabled={!canWrite}
-                    className="px-3 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/30 transition-colors text-sm font-medium"
-                >
-                    Apply 'in-reality' rules
-                </button>
-            </div>
+            <button
+                onClick={addRule}
+                disabled={!canWrite}
+                className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium"
+            >
+                Add Rule
+            </button>
         </div>
     )
 }

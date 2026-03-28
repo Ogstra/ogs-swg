@@ -673,7 +673,7 @@ export default function UserManagement() {
                 </div>
             )}
 
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
 
                 <div className="grid grid-cols-2 gap-3 w-full md:w-auto md:flex md:flex-wrap">
                     <Button

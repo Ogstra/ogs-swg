@@ -111,8 +111,7 @@ export default function InboundList() {
 
     return (
         <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <h3 className="text-lg font-semibold text-white">Configured Inbounds</h3>
+            <div className="flex justify-end mb-4">
                 <Button onClick={handleAdd} size="sm" icon={<Plus size={16} />} disabled={!canWriteConfig}>
                     Add Inbound
                 </Button>
