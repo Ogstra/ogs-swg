@@ -239,7 +239,6 @@ export default function Dashboard() {
     })
     const detailChartData = selectedConsumerQuery.data?.chart_data || []
     const activeChartData = selectedConsumer ? detailChartData : chartData
-    const chartIsLoading = loading || (!!selectedConsumer && selectedConsumerQuery.isPending)
 
     useEffect(() => {
         setSelectedConsumers(prev => {
@@ -502,20 +501,7 @@ export default function Dashboard() {
                         }
                     >
                         <div ref={chartContainerRef} className="h-[300px] min-h-[300px] w-full min-w-0 mt-4">
-                            {chartIsLoading ? (
-                                <div className="h-full w-full animate-pulse rounded-xl border border-slate-800 bg-slate-950/60 p-4">
-                                    <div className="flex h-full items-end gap-3">
-                                        {Array.from({ length: 8 }).map((_, idx) => (
-                                            <div key={idx} className="flex flex-1 items-end">
-                                                <div
-                                                    className="w-full rounded-t-md bg-slate-800/80"
-                                                    style={{ height: `${35 + ((idx * 13) % 45)}%` }}
-                                                />
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            ) : chartSize.width > 0 ? (
+                            {chartSize.width > 0 ? (
                                 <AreaChart
                                     width={chartSize.width}
                                     height={chartSize.height}
