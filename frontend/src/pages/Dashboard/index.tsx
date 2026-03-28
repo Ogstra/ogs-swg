@@ -295,7 +295,7 @@ export default function Dashboard() {
             )}
 
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
                 <div className="hidden sm:block">
                     <div className="flex items-center gap-2">
                         <span className="text-slate-500 text-xs">Updated {lastUpdated.toLocaleTimeString()}</span>

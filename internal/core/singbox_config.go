@@ -1224,20 +1224,3 @@ func (c *Config) UpsertSingboxRouteRules(newRules []map[string]interface{}) erro
 	c.SingboxPendingChanges = true
 	return nil
 }
-
-// EnsureSingboxInboundRouteDefaults upserts the two standard rules for an
-// inbound tag: DNS hijack and direct routing. Compatible with sing-box 1.11+.
-func (c *Config) EnsureSingboxInboundRouteDefaults(inboundTag string) error {
-	rules := []map[string]interface{}{
-		{
-			"inbound":  []interface{}{inboundTag},
-			"protocol": "dns",
-			"action":   "hijack-dns",
-		},
-		{
-			"inbound":  []interface{}{inboundTag},
-			"outbound": "direct",
-		},
-	}
-	return c.UpsertSingboxRouteRules(rules)
-}

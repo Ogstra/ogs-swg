@@ -155,7 +155,7 @@ export default function Subscriptions() {
 
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
 
                 <Button onClick={openCreate} icon={<Plus size={16} />} variant="primary" disabled={!canWriteUsers}>
                     Create Subscription

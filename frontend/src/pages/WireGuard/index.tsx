@@ -388,7 +388,7 @@ export default function WireGuard() {
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-0 sm:gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
 
                 {pendingRestart && (
                     <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 px-4 py-2 rounded-lg">
