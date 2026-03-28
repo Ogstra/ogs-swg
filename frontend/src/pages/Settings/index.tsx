@@ -362,9 +362,7 @@ export default function Settings() {
     return (
         <div className="h-full min-h-0 flex flex-col gap-0 sm:gap-6">
             <div className="flex items-center justify-between">
-                <div>
-                    <h1 className="text-2xl font-bold text-white hidden sm:block">Settings</h1>
-                </div>
+
                 <div className="flex gap-3">
                     <Button
                         onClick={loadAll}
