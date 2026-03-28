@@ -269,6 +269,8 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxInbound)))
 	protected.HandleFunc("DELETE /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.handleDeleteSingboxInbound)))
 	protected.HandleFunc("POST /api/singbox/apply", s.secure(s.requirePerm(canWriteConfig, s.handleApplySingboxChanges)))
+	protected.HandleFunc("GET /api/singbox/route/rules", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxRouteRules)))
+	protected.HandleFunc("POST /api/singbox/route/rules/upsert", s.secure(s.requirePerm(canWriteConfig, s.handleUpsertSingboxRouteRules)))
 	protected.HandleFunc("POST /api/service/restart", s.secure(s.requirePerm(canWriteConfig, s.handleRestartService)))
 	protected.HandleFunc("POST /api/service/start", s.secure(s.requirePerm(canWriteConfig, s.handleStartService)))
 	protected.HandleFunc("POST /api/service/stop", s.secure(s.requirePerm(canWriteConfig, s.handleStopService)))

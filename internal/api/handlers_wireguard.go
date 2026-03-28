@@ -229,7 +229,7 @@ func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.R
 	if _, err := os.Stat(path); err == nil {
 		http.Error(w, "wireguard interface already exists", http.StatusConflict)
 		return
-	} else if err != nil && !os.IsNotExist(err) {
+	} else if !os.IsNotExist(err) {
 		http.Error(w, "Failed to check interface path: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

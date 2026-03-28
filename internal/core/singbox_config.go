@@ -1126,3 +1126,118 @@ func (c *Config) ReloadSingbox() error {
 	cmd := exec.Command("systemctl", "restart", "sing-box")
 	return cmd.Run()
 }
+
+// GetSingboxRouteRules reads the current route.rules array from the config.
+func (c *Config) GetSingboxRouteRules() ([]map[string]interface{}, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	raw, err := c.readSingboxConfigMapLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	route, _ := raw["route"].(map[string]interface{})
+	if route == nil {
+		return []map[string]interface{}{}, nil
+	}
+
+	rulesRaw, _ := route["rules"].([]interface{})
+	rules := make([]map[string]interface{}, 0, len(rulesRaw))
+	for _, r := range rulesRaw {
+		if m, ok := r.(map[string]interface{}); ok {
+			rules = append(rules, m)
+		}
+	}
+	return rules, nil
+}
+
+// UpsertSingboxRouteRules merges newRules into route.rules, skipping duplicates.
+// Two rules are considered identical when their inbound+protocol+action+outbound fields match.
+func (c *Config) UpsertSingboxRouteRules(newRules []map[string]interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	raw, err := c.readSingboxConfigMapLocked()
+	if err != nil {
+		return err
+	}
+
+	// Ensure route map exists.
+	route, _ := raw["route"].(map[string]interface{})
+	if route == nil {
+		route = map[string]interface{}{}
+	}
+
+	// Read existing rules.
+	existingRaw, _ := route["rules"].([]interface{})
+	existing := make([]map[string]interface{}, 0, len(existingRaw))
+	for _, r := range existingRaw {
+		if m, ok := r.(map[string]interface{}); ok {
+			existing = append(existing, m)
+		}
+	}
+
+	ruleKey := func(m map[string]interface{}) string {
+		data, _ := json.Marshal([]interface{}{m["inbound"], m["protocol"], m["action"], m["outbound"]})
+		return string(data)
+	}
+
+	seen := make(map[string]struct{}, len(existing))
+	for _, r := range existing {
+		seen[ruleKey(r)] = struct{}{}
+	}
+
+	added := 0
+	for _, nr := range newRules {
+		k := ruleKey(nr)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		existing = append(existing, nr)
+		seen[k] = struct{}{}
+		added++
+	}
+
+	if added == 0 {
+		return nil // nothing changed
+	}
+
+	// Convert []map back to []interface{} for JSON compatibility.
+	merged := make([]interface{}, len(existing))
+	for i, m := range existing {
+		merged[i] = m
+	}
+	route["rules"] = merged
+	raw["route"] = route
+
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := c.ValidateConfig(data); err != nil {
+		return fmt.Errorf("sing-box validation failed: %v", err)
+	}
+	if err := c.writeSingboxConfigLocked(data); err != nil {
+		return err
+	}
+	c.SingboxPendingChanges = true
+	return nil
+}
+
+// EnsureSingboxInboundRouteDefaults upserts the two standard rules for an
+// inbound tag: DNS hijack and direct routing. Compatible with sing-box 1.11+.
+func (c *Config) EnsureSingboxInboundRouteDefaults(inboundTag string) error {
+	rules := []map[string]interface{}{
+		{
+			"inbound":  []interface{}{inboundTag},
+			"protocol": "dns",
+			"action":   "hijack-dns",
+		},
+		{
+			"inbound":  []interface{}{inboundTag},
+			"outbound": "direct",
+		},
+	}
+	return c.UpsertSingboxRouteRules(rules)
+}
