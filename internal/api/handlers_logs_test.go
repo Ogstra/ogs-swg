@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -96,8 +97,8 @@ func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub
 					"type": "vless",
 					"tag": "in-reality",
 					"users": [
-						{"name":"OGS","uuid":"11111111-1111-1111-1111-111111111111"},
-						{"name":"BOB","uuid":"22222222-2222-2222-2222-222222222222"}
+						{"name":"ALPHA","uuid":"11111111-1111-1111-1111-111111111111"},
+						{"name":"BETA","uuid":"22222222-2222-2222-2222-222222222222"}
 					]
 				}
 			]
@@ -113,6 +114,18 @@ func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub
 	}
 	cfg.SetExecutor(stub)
 	return NewServer(store, cfg, stub), stub
+}
+
+func newLogsTestServerWithFileSource(t *testing.T, journalLines, fileLines []string) (*Server, *logsExecutorStub) {
+	t.Helper()
+	srv, stub := newLogsTestServer(t, journalLines)
+	accessLogPath := filepath.Join(t.TempDir(), "access.log")
+	if err := os.WriteFile(accessLogPath, []byte(joinLines(fileLines)), 0644); err != nil {
+		t.Fatalf("WriteFile(access.log): %v", err)
+	}
+	srv.config.LogSource = "file"
+	srv.config.AccessLogPath = accessLogPath
+	return srv, stub
 }
 
 func requestWithPerms(r *http.Request, perms *core.PanelUserPermissions) *http.Request {
@@ -188,10 +201,12 @@ func TestEnsureGrantablePermissions_CanReadLogsCensored(t *testing.T) {
 
 const rawLogLine = "2024/01/01 12:00:00 accepted from 1.2.3.4:5678 to example.com:443"
 const censoredLogLine = "2024/01/01 12:00:00 accepted from ***:*** to ***:***"
-const userTaggedLogLine = "2024/01/01 12:00:01 INFO [3814834843 76ms] inbound/vless[in-reality]: [OGS] inbound connection to example.com"
+const userTaggedLogLine = "2024/01/01 12:00:01 INFO [3814834843 76ms] inbound/vless[in-reality]: [ALPHA] inbound connection to example.com"
 const userOutboundLogLine = "2024/01/01 12:00:02 INFO [3814834843 76ms] outbound/direct[direct]: outbound connection to example.com:443"
-const otherUserTaggedLogLine = "2024/01/01 12:00:03 INFO [99887766 18ms] inbound/vless[in-reality]: [BOB] inbound connection to example.net"
+const otherUserTaggedLogLine = "2024/01/01 12:00:03 INFO [99887766 18ms] inbound/vless[in-reality]: [BETA] inbound connection to example.net"
 const textAndLogLine = "2024/01/01 12:00:04 ERROR timeout while dialing upstream"
+const hysteriaUserTaggedLogLine = "-0300 2026-04-01 23:05:23 INFO [2254766407 0ms] inbound/hysteria2[hysteria2]: [ALPHA-H2] inbound connection to service.example:443"
+const hysteriaOutboundLogLine = "-0300 2026-04-01 23:05:23 INFO [2254766407 1ms] outbound/direct[direct]: outbound connection to service.example:443"
 
 func TestHandleGetLogs(t *testing.T) {
 	tests := []struct {
@@ -391,7 +406,7 @@ func TestHandleGetLogs_UserQueryFollowsConnectionID(t *testing.T) {
 		otherUserTaggedLogLine,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BOGS%5D", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
 	rr := httptest.NewRecorder()
 
@@ -427,7 +442,7 @@ func TestHandleGetLogs_PlainTermDoesNotTriggerUserCorrelation(t *testing.T) {
 		otherUserTaggedLogLine,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=OGS", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=ALPHA", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
 	rr := httptest.NewRecorder()
 
@@ -462,7 +477,7 @@ func TestHandleGetLogs_UserQueryUsesFullHistoryNotJustTailWindow(t *testing.T) {
 
 	srv, _ := newLogsTestServer(t, lines)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BOGS%5D&limit=20", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D&limit=20", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
 	rr := httptest.NewRecorder()
 
@@ -504,19 +519,19 @@ func TestHandleSearchLogs_UserQuerySupportsBracketedUserAndAndOperator(t *testin
 	}{
 		{
 			name:       "bracketed user query follows connection id",
-			query:      "[OGS]",
+			query:      "[ALPHA]",
 			wantInBody: userOutboundLogLine,
 			wantNotIn:  otherUserTaggedLogLine,
 		},
 		{
 			name:       "user and term narrows to correlated line",
-			query:      "[OGS] AND outbound/direct",
+			query:      "[ALPHA] AND outbound/direct",
 			wantInBody: userOutboundLogLine,
 			wantNotIn:  userTaggedLogLine,
 		},
 		{
 			name:       "or returns either text or user-correlated matches",
-			query:      "[BOB] OR timeout",
+			query:      "[BETA] OR timeout",
 			wantInBody: otherUserTaggedLogLine,
 			wantNotIn:  userOutboundLogLine,
 		},
@@ -555,6 +570,38 @@ func TestHandleSearchLogs_UserQuerySupportsBracketedUserAndAndOperator(t *testin
 				t.Fatalf("expected %q not to appear in response body, got: %v", tc.wantNotIn, resp.Logs)
 			}
 		})
+	}
+}
+
+func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T) {
+	srv, _ := newLogsTestServerWithFileSource(t,
+		[]string{hysteriaUserTaggedLogLine, hysteriaOutboundLogLine},
+		[]string{textAndLogLine},
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA-H2%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, hysteriaUserTaggedLogLine) {
+		t.Fatalf("expected journal fallback to include hysteria user line, got: %v", resp.Logs)
+	}
+	if !containsInsensitive(body, hysteriaOutboundLogLine) {
+		t.Fatalf("expected journal fallback to include correlated outbound line, got: %v", resp.Logs)
 	}
 }
 

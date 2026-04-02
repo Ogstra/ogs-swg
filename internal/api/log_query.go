@@ -212,10 +212,7 @@ func (s *Server) compileLogQuery(raw string) compiledLogQuery {
 
 func (s *Server) readAllSearchableLogLines(ctx context.Context) ([]string, error) {
 	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		if s.executor != nil {
-			return s.executor.ReadAllJournal(ctx, "sing-box")
-		}
-		return readAllJournalLines("sing-box")
+		return s.readAllJournalLogLines(ctx)
 	}
 
 	lines, err := readAllFileLines(s.config.AccessLogPath)
@@ -223,12 +220,16 @@ func (s *Server) readAllSearchableLogLines(ctx context.Context) ([]string, error
 		return lines, nil
 	}
 	if s.config.LogSource == "file" {
-		if s.executor != nil {
-			return s.executor.ReadAllJournal(ctx, "sing-box")
-		}
-		return readAllJournalLines("sing-box")
+		return s.readAllJournalLogLines(ctx)
 	}
 	return nil, err
+}
+
+func (s *Server) readAllJournalLogLines(ctx context.Context) ([]string, error) {
+	if s.executor != nil {
+		return s.executor.ReadAllJournal(ctx, "sing-box")
+	}
+	return readAllJournalLines("sing-box")
 }
 
 func readAllJournalLines(unit string) ([]string, error) {
