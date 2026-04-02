@@ -186,7 +186,7 @@ func readStoredStatsInbounds(t *testing.T, stub *singboxConfigExecutorStub) []st
 	return out
 }
 
-func TestBuildVlessLink_RealityOmitsALPNAndH2(t *testing.T) {
+func TestBuildVlessLink_RealityVisionIncludesALPNAndXUDP(t *testing.T) {
 	view := &core.SingboxInboundView{
 		Type: "vless",
 		TLS: &core.TLSConfig{
@@ -221,8 +221,8 @@ func TestBuildVlessLink_RealityOmitsALPNAndH2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse link: %v", err)
 	}
-	if got := u.Query().Get("alpn"); got != "" {
-		t.Fatalf("alpn = %q; want empty", got)
+	if got := u.Query().Get("alpn"); got != "h2,http/1.1" {
+		t.Fatalf("alpn = %q; want %q", got, "h2,http/1.1")
 	}
 	if got := u.Query().Get("packetEncoding"); got != "xudp" {
 		t.Fatalf("packetEncoding = %q; want %q", got, "xudp")
@@ -232,7 +232,7 @@ func TestBuildVlessLink_RealityOmitsALPNAndH2(t *testing.T) {
 	}
 }
 
-func TestBuildVlessLink_VisionOmitsALPN(t *testing.T) {
+func TestBuildVlessLink_VisionIncludesALPN(t *testing.T) {
 	view := &core.SingboxInboundView{
 		Type: "vless",
 		TLS: &core.TLSConfig{
@@ -258,8 +258,8 @@ func TestBuildVlessLink_VisionOmitsALPN(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse link: %v", err)
 	}
-	if got := u.Query().Get("alpn"); got != "" {
-		t.Fatalf("alpn = %q; want empty", got)
+	if got := u.Query().Get("alpn"); got != "h2,http/1.1" {
+		t.Fatalf("alpn = %q; want %q", got, "h2,http/1.1")
 	}
 	if got := u.Query().Get("packetEncoding"); got != "xudp" {
 		t.Fatalf("packetEncoding = %q; want %q", got, "xudp")
