@@ -12,162 +12,181 @@ import (
 
 var (
 	logQueryAndSplitter = regexp.MustCompile(`(?i)\s+\bAND\b\s+`)
+	logQueryOrSplitter  = regexp.MustCompile(`(?i)\s+\bOR\b\s+`)
 	logConnectionIDRe   = regexp.MustCompile(`\[(\d+)(?:\s+[^\]]*)?\]`)
+	logUserTermRe       = regexp.MustCompile(`^\[[^\[\]]+\]$`)
+	logUserLineRe       = regexp.MustCompile(`:\s*(\[[^\[\]]+\])\s+inbound connection\b`)
 )
 
 type logQueryTerm struct {
 	raw      string
 	needle   string
-	userName string
+	userTerm string
+}
+
+type logQueryGroup struct {
+	terms []logQueryTerm
 }
 
 type compiledLogQuery struct {
-	terms     []logQueryTerm
-	textTerms []logQueryTerm
-	userTerms []logQueryTerm
+	raw        string
+	groups     []logQueryGroup
+	hasUser    bool
+	hasOr      bool
+	hasAnd     bool
+	simpleText string
 }
 
 func (q compiledLogQuery) requiresPostFilter() bool {
-	return len(q.userTerms) > 0 || len(q.terms) > 1
+	return q.hasUser || q.hasOr || q.hasAnd
 }
 
-func compileLogQuery(raw string, knownUsers map[string]string) compiledLogQuery {
-	parts := splitLogQueryTerms(raw)
-	query := compiledLogQuery{
-		terms: make([]logQueryTerm, 0, len(parts)),
+func (q compiledLogQuery) isEmpty() bool {
+	return len(q.groups) == 0
+}
+
+func compileLogQuery(raw string) compiledLogQuery {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return compiledLogQuery{}
 	}
 
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed == "" {
-			continue
+	orParts := logQueryOrSplitter.Split(trimmed, -1)
+	query := compiledLogQuery{
+		raw:    trimmed,
+		groups: make([]logQueryGroup, 0, len(orParts)),
+		hasOr:  len(orParts) > 1,
+	}
+
+	for _, orPart := range orParts {
+		andParts := logQueryAndSplitter.Split(strings.TrimSpace(orPart), -1)
+		if len(andParts) > 1 {
+			query.hasAnd = true
 		}
 
-		term := logQueryTerm{
-			raw:    trimmed,
-			needle: strings.ToLower(trimmed),
-		}
-		if knownUsers != nil {
-			if userName, ok := knownUsers[normalizeLogUserLookup(trimmed)]; ok {
-				term.userName = userName
+		group := logQueryGroup{terms: make([]logQueryTerm, 0, len(andParts))}
+		for _, andPart := range andParts {
+			term := compileLogQueryTerm(andPart)
+			if term.raw == "" {
+				continue
 			}
+			if term.userTerm != "" {
+				query.hasUser = true
+			}
+			group.terms = append(group.terms, term)
 		}
 
-		query.terms = append(query.terms, term)
-		if term.userName != "" {
-			query.userTerms = append(query.userTerms, term)
-			continue
+		if len(group.terms) > 0 {
+			query.groups = append(query.groups, group)
 		}
-		query.textTerms = append(query.textTerms, term)
+	}
+
+	if len(query.groups) == 0 {
+		fallback := compileLogQueryTerm(trimmed)
+		if fallback.raw == "" {
+			return compiledLogQuery{}
+		}
+		query.groups = []logQueryGroup{{terms: []logQueryTerm{fallback}}}
+		query.hasUser = fallback.userTerm != ""
+	}
+
+	if !query.hasUser && !query.hasOr && !query.hasAnd && len(query.groups) == 1 && len(query.groups[0].terms) == 1 {
+		query.simpleText = query.groups[0].terms[0].needle
 	}
 
 	return query
 }
 
-func splitLogQueryTerms(raw string) []string {
+func compileLogQueryTerm(raw string) logQueryTerm {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return nil
+		return logQueryTerm{}
 	}
 
-	parts := logQueryAndSplitter.Split(trimmed, -1)
-	if len(parts) == 0 {
-		return []string{trimmed}
+	term := logQueryTerm{
+		raw:    trimmed,
+		needle: strings.ToLower(trimmed),
 	}
-	return parts
-}
-
-func normalizeLogUserLookup(term string) string {
-	trimmed := strings.TrimSpace(term)
-	trimmed = strings.Trim(trimmed, `"'`)
-	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") && len(trimmed) >= 2 {
-		trimmed = trimmed[1 : len(trimmed)-1]
+	if logUserTermRe.MatchString(trimmed) {
+		term.userTerm = strings.ToLower(trimmed)
 	}
-	return strings.ToLower(strings.TrimSpace(trimmed))
+	return term
 }
 
 func filterLogLines(lines []string, query compiledLogQuery) []string {
-	if len(query.terms) == 0 {
+	if query.isEmpty() {
 		return lines
 	}
 
-	var matchingConnectionIDs map[string]struct{}
-	if len(query.userTerms) > 0 {
-		matchingConnectionIDs = resolveUserConnectionIDs(lines, query.userTerms)
-		if len(matchingConnectionIDs) == 0 {
-			return nil
-		}
-	}
-
+	userConnIDs := resolveUserConnectionIDsByToken(lines)
 	filtered := make([]string, 0, len(lines))
 	for _, line := range lines {
-		lineLower := strings.ToLower(line)
-		if len(query.userTerms) > 0 {
-			connID := extractLogConnectionID(line)
-			if connID == "" {
-				continue
-			}
-			if _, ok := matchingConnectionIDs[connID]; !ok {
-				continue
-			}
-		}
-
-		matchesTextTerms := true
-		for _, term := range query.textTerms {
-			if !strings.Contains(lineLower, term.needle) {
-				matchesTextTerms = false
-				break
-			}
-		}
-		if matchesTextTerms {
+		if logLineMatchesQuery(line, query, userConnIDs) {
 			filtered = append(filtered, line)
 		}
 	}
-
 	return filtered
 }
 
-func resolveUserConnectionIDs(lines []string, userTerms []logQueryTerm) map[string]struct{} {
-	if len(userTerms) == 0 {
-		return nil
-	}
+func logLineMatchesQuery(line string, query compiledLogQuery, userConnIDs map[string]map[string]struct{}) bool {
+	lineLower := strings.ToLower(line)
+	connID := ""
 
-	uniqueUsers := make(map[string]struct{}, len(userTerms))
-	for _, term := range userTerms {
-		userLower := strings.ToLower(strings.TrimSpace(term.userName))
-		if userLower != "" {
-			uniqueUsers[userLower] = struct{}{}
-		}
-	}
-
-	var sets []map[string]struct{}
-	for userLower := range uniqueUsers {
-		userToken := "[" + userLower + "]"
-		userConnIDs := make(map[string]struct{})
-		for _, line := range lines {
-			if !strings.Contains(strings.ToLower(line), userToken) {
+	for _, group := range query.groups {
+		groupMatches := true
+		for _, term := range group.terms {
+			if term.userTerm != "" {
+				if connID == "" {
+					connID = extractLogConnectionID(line)
+				}
+				if connID == "" {
+					groupMatches = false
+					break
+				}
+				idsForUser := userConnIDs[term.userTerm]
+				if len(idsForUser) == 0 {
+					groupMatches = false
+					break
+				}
+				if _, ok := idsForUser[connID]; !ok {
+					groupMatches = false
+					break
+				}
 				continue
 			}
-			connID := extractLogConnectionID(line)
-			if connID == "" {
-				continue
-			}
-			userConnIDs[connID] = struct{}{}
-		}
-		sets = append(sets, userConnIDs)
-	}
-
-	if len(sets) == 0 {
-		return nil
-	}
-
-	result := sets[0]
-	for _, set := range sets[1:] {
-		for connID := range result {
-			if _, ok := set[connID]; !ok {
-				delete(result, connID)
+			if !strings.Contains(lineLower, term.needle) {
+				groupMatches = false
+				break
 			}
 		}
+		if groupMatches {
+			return true
+		}
+	}
+
+	return false
+}
+
+func resolveUserConnectionIDsByToken(lines []string) map[string]map[string]struct{} {
+	result := make(map[string]map[string]struct{})
+	for _, line := range lines {
+		connID := extractLogConnectionID(line)
+		if connID == "" {
+			continue
+		}
+
+		match := logUserLineRe.FindStringSubmatch(line)
+		if len(match) < 2 {
+			continue
+		}
+		token := strings.ToLower(match[1])
+		if !logUserTermRe.MatchString(token) {
+			continue
+		}
+		if _, ok := result[token]; !ok {
+			result[token] = make(map[string]struct{})
+		}
+		result[token][connID] = struct{}{}
 	}
 	return result
 }
@@ -188,29 +207,7 @@ func truncateRecentLogMatches(lines []string, limit int) ([]string, bool) {
 }
 
 func (s *Server) compileLogQuery(raw string) compiledLogQuery {
-	return compileLogQuery(raw, s.knownLogUsers())
-}
-
-func (s *Server) knownLogUsers() map[string]string {
-	if s == nil || s.config == nil {
-		return nil
-	}
-
-	users, err := s.config.GetActiveUsers()
-	if err != nil {
-		log.Printf("log query: cannot load sing-box users: %v", err)
-		return nil
-	}
-
-	knownUsers := make(map[string]string, len(users))
-	for _, user := range users {
-		name := strings.TrimSpace(user.Name)
-		if name == "" {
-			continue
-		}
-		knownUsers[strings.ToLower(name)] = name
-	}
-	return knownUsers
+	return compileLogQuery(raw)
 }
 
 func (s *Server) readAllSearchableLogLines(ctx context.Context) ([]string, error) {

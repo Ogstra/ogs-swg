@@ -2,8 +2,25 @@ import { useEffect, useLayoutEffect, useState, useRef } from 'react'
 import { api } from '../../services/api'
 import { Terminal, RefreshCw, Search } from 'lucide-react'
 
+function hasBooleanOperator(query: string): boolean {
+    return /\b(AND|OR)\b/i.test(query)
+}
+
+function shouldUseServerTailQuery(query: string): boolean {
+    const trimmed = query.trim()
+    if (!trimmed) return false
+    return trimmed.includes('[') || trimmed.includes(']') || hasBooleanOperator(trimmed)
+}
+
+function filterTailLinesLocally(lines: string[], query: string): string[] {
+    const trimmed = query.trim().toLowerCase()
+    if (!trimmed) return lines
+    return lines.filter(line => line.toLowerCase().includes(trimmed))
+}
+
 export default function LogViewer() {
     const [lines, setLines] = useState<string[]>([])
+    const [tailRawLines, setTailRawLines] = useState<string[]>([])
     const [loading, setLoading] = useState(false)
     const [refreshInterval, setRefreshInterval] = useState<number>(5000)
     const [query, setQuery] = useState<string>('')
@@ -17,14 +34,19 @@ export default function LogViewer() {
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
     const demoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
+    const backendTailQuery = shouldUseServerTailQuery(query) ? query.trim() : ''
 
-    const fetchLogs = (silent = false) => {
+    const fetchLogs = (silent = false, currentQuery = query) => {
         if (!silent) setLoading(true)
-        api.getLogs({ user: query || undefined, limit: tailLimit }).then(data => {
-            setLines(data.logs)
+        const serverQuery = shouldUseServerTailQuery(currentQuery) ? currentQuery.trim() : ''
+        api.getLogs({ q: serverQuery || undefined, limit: tailLimit }).then(data => {
+            const nextLines = data.logs || []
+            setTailRawLines(nextLines)
+            setLines(serverQuery ? nextLines : filterTailLinesLocally(nextLines, currentQuery))
             if (!silent) setLoading(false)
         }).catch(err => {
             console.error(err)
+            setTailRawLines([])
             setLines(['Error loading logs: ' + err.message])
             if (!silent) setLoading(false)
         })
@@ -53,12 +75,18 @@ export default function LogViewer() {
 
     useEffect(() => {
         if (viewMode !== 'tail') return
-        fetchLogs(true)
+        fetchLogs(true, query)
         const interval = setInterval(() => {
-            fetchLogs(true)
+            fetchLogs(true, query)
         }, refreshInterval)
         return () => clearInterval(interval)
-    }, [refreshInterval, query, viewMode, tailLimit])
+    }, [refreshInterval, backendTailQuery, viewMode, tailLimit])
+
+    useEffect(() => {
+        if (viewMode !== 'tail') return
+        if (backendTailQuery) return
+        setLines(filterTailLinesLocally(tailRawLines, query))
+    }, [tailRawLines, query, backendTailQuery, viewMode])
 
     useLayoutEffect(() => {
         const el = containerRef.current
@@ -228,7 +256,7 @@ export default function LogViewer() {
                                     setQuery(e.target.value)
                                     setAutoScroll(false)
                                 }}
-                                placeholder="Filter logs, user or foo AND bar..."
+                                placeholder="Live tail: text local, [user], AND, OR..."
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600"
                             />
                         </div>
@@ -255,7 +283,7 @@ export default function LogViewer() {
                                     setSearchQuery(e.target.value)
                                 }}
                                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                                placeholder="Search logs, user or foo AND bar..."
+                                placeholder="History: text, [user], AND, OR..."
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600"
                             />
                         </div>
