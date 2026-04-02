@@ -207,6 +207,10 @@ const otherUserTaggedLogLine = "2024/01/01 12:00:03 INFO [99887766 18ms] inbound
 const textAndLogLine = "2024/01/01 12:00:04 ERROR timeout while dialing upstream"
 const hysteriaUserTaggedLogLine = "-0300 2026-04-01 23:05:23 INFO [2254766407 0ms] inbound/hysteria2[hysteria2]: [ALPHA-H2] inbound connection to service.example:443"
 const hysteriaOutboundLogLine = "-0300 2026-04-01 23:05:23 INFO [2254766407 1ms] outbound/direct[direct]: outbound connection to service.example:443"
+const ansiUserTaggedLogLineRaw = "-0300 2026-04-01 23:24:36 \x1b[36mINFO\x1b[0m [\x1b[38;5;155m625305227\x1b[0m 35ms] inbound/vless[in-reality]: [ALPHA] inbound connection to service.example:5228"
+const ansiUserTaggedLogLineSanitized = "-0300 2026-04-01 23:24:36 INFO [625305227 35ms] inbound/vless[in-reality]: [ALPHA] inbound connection to service.example:5228"
+const ansiUserOutboundLogLineRaw = "-0300 2026-04-01 23:24:36 \x1b[36mINFO\x1b[0m [\x1b[38;5;155m625305227\x1b[0m 35ms] outbound/direct[direct]: outbound connection to service.example:5228"
+const ansiUserOutboundLogLineSanitized = "-0300 2026-04-01 23:24:36 INFO [625305227 35ms] outbound/direct[direct]: outbound connection to service.example:5228"
 
 func TestHandleGetLogs(t *testing.T) {
 	tests := []struct {
@@ -534,6 +538,42 @@ func TestHandleGetLogs_UserQueryMatchesDirectTaggedLineWithoutCorrelation(t *tes
 	}
 	if containsInsensitive(body, textAndLogLine) {
 		t.Fatalf("did not expect unrelated line in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleGetLogs_UserQueryStripsANSIAndFollowsConnectionID(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		ansiUserTaggedLogLineRaw,
+		ansiUserOutboundLogLineRaw,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, ansiUserTaggedLogLineSanitized) {
+		t.Fatalf("expected sanitized tagged user line in response, got: %v", resp.Logs)
+	}
+	if !containsInsensitive(body, ansiUserOutboundLogLineSanitized) {
+		t.Fatalf("expected sanitized correlated outbound line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, "\x1b[") {
+		t.Fatalf("expected ANSI sequences to be stripped, got: %q", body)
 	}
 }
 

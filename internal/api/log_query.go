@@ -16,6 +16,7 @@ var (
 	logConnectionIDRe   = regexp.MustCompile(`\[(\d+)(?:\s+[^\]]*)?\]`)
 	logUserTermRe       = regexp.MustCompile(`^\[[^\[\]]+\]$`)
 	logUserLineRe       = regexp.MustCompile(`:\s*(\[[^\[\]]+\])\s+inbound connection\b`)
+	logANSIEscapeRe     = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
 
 type logQueryTerm struct {
@@ -111,6 +112,17 @@ func compileLogQueryTerm(raw string) logQueryTerm {
 		term.userTerm = strings.ToLower(trimmed)
 	}
 	return term
+}
+
+func sanitizeLogLine(line string) string {
+	line = strings.TrimRight(line, "\r")
+	return logANSIEscapeRe.ReplaceAllString(line, "")
+}
+
+func sanitizeLogLines(lines []string) {
+	for i, line := range lines {
+		lines[i] = sanitizeLogLine(line)
+	}
 }
 
 func filterLogLines(lines []string, query compiledLogQuery) []string {
