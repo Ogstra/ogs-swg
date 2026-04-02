@@ -13,6 +13,7 @@ import (
 
 type cachedSub struct {
 	Body       []byte
+	HeaderName string
 	HeaderUp   int64
 	HeaderDown int64
 	HeaderTot  int64
@@ -29,7 +30,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	cacheKey := "sub:" + token
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
-			sendSubResponse(w, c.Body, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExp)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExp)
 			return
 		}
 	}
@@ -164,6 +165,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	// Save to cache (TTL: 2 minutes to protect against flood, but fast enough for normal use)
 	c := cachedSub{
 		Body:       encoded,
+		HeaderName: sub.Name,
 		HeaderUp:   totalUp,
 		HeaderDown: totalDown,
 		HeaderTot:  totalLimit,
@@ -171,10 +173,10 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
-	sendSubResponse(w, c.Body, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExp)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExp)
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, up, down, tot, exp int64) {
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot, exp int64) {
 	// Subscription-Userinfo: upload=93568; download=2960655; total=10737418240; expire=1708848000
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
@@ -184,6 +186,9 @@ func sendSubResponse(w http.ResponseWriter, body []byte, up, down, tot, exp int6
 		parts = append(parts, fmt.Sprintf("expire=%d", exp))
 	}
 
+	if title := strings.TrimSpace(profileTitle); title != "" {
+		w.Header().Set("Profile-Title", title)
+	}
 	w.Header().Set("Subscription-Userinfo", strings.Join(parts, "; "))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")

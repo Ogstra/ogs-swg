@@ -21,6 +21,11 @@ const parseGBInput = (value: string): number => {
     return isNaN(n) ? 0 : Math.round(n * 1024 ** 3)
 }
 
+const toBase64Url = (value: string): string => btoa(value)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -152,6 +157,15 @@ export default function Subscriptions() {
     }
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
+    const buildShadowrocketLink = (token: string, name: string) => (
+        `shadowrocket://add/sub://${toBase64Url(subLink(token))}?remark=${encodeURIComponent(name)}`
+    )
+    const buildV2RayTunLink = (token: string) => `v2raytun://import/${encodeURIComponent(subLink(token))}`
+    const getSubscriptionLinkVariants = (sub: Subscription) => [
+        { id: 'direct', label: 'Direct', link: subLink(sub.token) },
+        { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
+        { id: 'v2raytun', label: 'V2RayTun', link: buildV2RayTunLink(sub.token) },
+    ]
 
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
@@ -295,6 +309,7 @@ export default function Subscriptions() {
                 onClose={() => setModalState({ type: null })}
                 title={`${modalState.data?.name || ''}`}
                 link={modalState.data ? subLink(modalState.data.token) : ''}
+                linkVariants={modalState.data ? getSubscriptionLinkVariants(modalState.data) : undefined}
             />
 
             <ConfirmModal
