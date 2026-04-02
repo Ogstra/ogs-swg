@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/core/store"
@@ -119,5 +121,48 @@ func TestHandlePublicSubscription_SetsProfileTitleAndKeepsItOnCachedResponses(t 
 	}
 	if got := second.Header().Get("Profile-Title"); got != "Alpha Bundle" {
 		t.Fatalf("second Profile-Title=%q want %q", got, "Alpha Bundle")
+	}
+}
+
+func TestHandlePublicSubscription_SetsQuotaResetExpireForZeroUsage(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.now = func() time.Time {
+		return time.Date(2026, time.April, 2, 10, 30, 0, 0, time.UTC)
+	}
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "quota-token",
+		Name:        "Quota Bundle",
+		QuotaLimit:  10 * 1024 * 1024 * 1024,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/quota-token", nil)
+	req.SetPathValue("token", "quota-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	userinfo := rec.Header().Get("Subscription-Userinfo")
+	if !strings.Contains(userinfo, "upload=0; download=0; total=10737418240") {
+		t.Fatalf("Subscription-Userinfo=%q", userinfo)
+	}
+
+	wantExpire := strconv.FormatInt(nextQuotaResetUnix(server.now(), "monthly", 1), 10)
+	if !strings.Contains(userinfo, "expire="+wantExpire) {
+		t.Fatalf("Subscription-Userinfo=%q want expire=%s", userinfo, wantExpire)
 	}
 }
