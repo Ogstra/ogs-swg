@@ -15,7 +15,7 @@ var (
 	logQueryOrSplitter  = regexp.MustCompile(`(?i)\s+\bOR\b\s+`)
 	logConnectionIDRe   = regexp.MustCompile(`\[(\d+)(?:\s+[^\]]*)?\]`)
 	logUserTermRe       = regexp.MustCompile(`^\[[^\[\]]+\]$`)
-	logUserLineRe       = regexp.MustCompile(`:\s*(\[[^\[\]]+\])\s+inbound connection\b`)
+	logUserLineRe       = regexp.MustCompile(`:\s*(\[[^\[\]]+\])\s+inbound(?: packet)? connection\b`)
 	logANSIEscapeRe     = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 )
 
