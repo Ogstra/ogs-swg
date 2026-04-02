@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -17,7 +19,18 @@ type logsExecutorStub struct {
 	journalLines []string
 }
 
-func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, _ int) ([]string, error) {
+func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, limit int) ([]string, error) {
+	if limit <= 0 || limit >= len(s.journalLines) {
+		out := make([]string, len(s.journalLines))
+		copy(out, s.journalLines)
+		return out, nil
+	}
+	out := make([]string, limit)
+	copy(out, s.journalLines[len(s.journalLines)-limit:])
+	return out, nil
+}
+
+func (s *logsExecutorStub) ReadAllJournal(_ context.Context, _ string) ([]string, error) {
 	out := make([]string, len(s.journalLines))
 	copy(out, s.journalLines)
 	return out, nil
@@ -77,12 +90,42 @@ func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	stub := &logsExecutorStub{journalLines: lines}
-	cfg := &core.Config{
-		EnableSingbox: true,
-		LogSource:     "journal",
+	stub := &logsExecutorStub{
+		singboxConfigExecutorStub: singboxConfigExecutorStub{data: []byte(`{
+			"inbounds": [
+				{
+					"type": "vless",
+					"tag": "in-reality",
+					"users": [
+						{"name":"ALPHA","uuid":"11111111-1111-1111-1111-111111111111"},
+						{"name":"BETA","uuid":"22222222-2222-2222-2222-222222222222"}
+					]
+				}
+			]
+		}`)},
+		journalLines: lines,
 	}
+	cfg := &core.Config{
+		EnableSingbox:     true,
+		LogSource:         "journal",
+		SingboxConfigPath: "/test/config.json",
+		ManagedInbounds:   []string{"in-reality"},
+		StatsInbounds:     []string{"in-reality"},
+	}
+	cfg.SetExecutor(stub)
 	return NewServer(store, cfg, stub), stub
+}
+
+func newLogsTestServerWithFileSource(t *testing.T, journalLines, fileLines []string) (*Server, *logsExecutorStub) {
+	t.Helper()
+	srv, stub := newLogsTestServer(t, journalLines)
+	accessLogPath := filepath.Join(t.TempDir(), "access.log")
+	if err := os.WriteFile(accessLogPath, []byte(joinLines(fileLines)), 0644); err != nil {
+		t.Fatalf("WriteFile(access.log): %v", err)
+	}
+	srv.config.LogSource = "file"
+	srv.config.AccessLogPath = accessLogPath
+	return srv, stub
 }
 
 func requestWithPerms(r *http.Request, perms *core.PanelUserPermissions) *http.Request {
@@ -158,6 +201,19 @@ func TestEnsureGrantablePermissions_CanReadLogsCensored(t *testing.T) {
 
 const rawLogLine = "2024/01/01 12:00:00 accepted from 1.2.3.4:5678 to example.com:443"
 const censoredLogLine = "2024/01/01 12:00:00 accepted from ***:*** to ***:***"
+const userTaggedLogLine = "2024/01/01 12:00:01 INFO [3814834843 76ms] inbound/vless[in-reality]: [ALPHA] inbound connection to example.com"
+const userOutboundLogLine = "2024/01/01 12:00:02 INFO [3814834843 76ms] outbound/direct[direct]: outbound connection to example.com:443"
+const otherUserTaggedLogLine = "2024/01/01 12:00:03 INFO [99887766 18ms] inbound/vless[in-reality]: [BETA] inbound connection to example.net"
+const textAndLogLine = "2024/01/01 12:00:04 ERROR timeout while dialing upstream"
+const hysteriaUserTaggedLogLine = "-0300 2026-04-01 23:05:23 INFO [2254766407 0ms] inbound/hysteria2[hysteria2]: [ALPHA-H2] inbound connection to service.example:443"
+const hysteriaOutboundLogLine = "-0300 2026-04-01 23:05:23 INFO [2254766407 1ms] outbound/direct[direct]: outbound connection to service.example:443"
+const ansiUserTaggedLogLineRaw = "-0300 2026-04-01 23:24:36 \x1b[36mINFO\x1b[0m [\x1b[38;5;155m625305227\x1b[0m 35ms] inbound/vless[in-reality]: [ALPHA] inbound connection to service.example:5228"
+const ansiUserTaggedLogLineSanitized = "-0300 2026-04-01 23:24:36 INFO [625305227 35ms] inbound/vless[in-reality]: [ALPHA] inbound connection to service.example:5228"
+const ansiUserOutboundLogLineRaw = "-0300 2026-04-01 23:24:36 \x1b[36mINFO\x1b[0m [\x1b[38;5;155m625305227\x1b[0m 35ms] outbound/direct[direct]: outbound connection to service.example:5228"
+const ansiUserOutboundLogLineSanitized = "-0300 2026-04-01 23:24:36 INFO [625305227 35ms] outbound/direct[direct]: outbound connection to service.example:5228"
+const packetUserTaggedLogLine = "-0300 2026-04-01 07:29:29 INFO [3007084205 118ms] inbound/vless[in-reality]: [ALPHA] inbound packet connection to 1.1.1.1:53"
+const packetDNSLogLine = "-0300 2026-04-01 07:29:29 INFO [3007084205 118ms] dns: cached A resolver.example. 48827 IN A 8.8.8.8"
+const otherPacketUserTaggedLogLine = "-0300 2026-04-01 07:29:29 INFO [98312978 118ms] inbound/vless[in-reality]: [ALPHA] inbound packet connection to 1.1.1.1:53"
 
 func TestHandleGetLogs(t *testing.T) {
 	tests := []struct {
@@ -306,8 +362,7 @@ func TestHandleSearchLogs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := newLogsTestServer(t, []string{rawLogLine})
 
-			url := "/api/logs/search?q=" + tc.query
-			req := httptest.NewRequest(http.MethodGet, url, nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q="+url.QueryEscape(tc.query), nil)
 			req = requestWithPerms(req, tc.perms)
 			rr := httptest.NewRecorder()
 
@@ -348,6 +403,319 @@ func TestHandleSearchLogs(t *testing.T) {
 				t.Fatalf("expected %q NOT in response body, but it was present: %v", tc.wantNotInBody, logs)
 			}
 		})
+	}
+}
+
+func TestHandleGetLogs_UserQueryFollowsConnectionID(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, userTaggedLogLine) {
+		t.Fatalf("expected tagged user line in response, got: %v", resp.Logs)
+	}
+	if !containsInsensitive(body, userOutboundLogLine) {
+		t.Fatalf("expected correlated outbound line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, otherUserTaggedLogLine) {
+		t.Fatalf("did not expect other user's line in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleGetLogs_PlainTermDoesNotTriggerUserCorrelation(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=ALPHA", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, userTaggedLogLine) {
+		t.Fatalf("expected tagged user line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, userOutboundLogLine) {
+		t.Fatalf("plain text query must not pull correlated outbound lines, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleGetLogs_UserQueryUsesFullHistoryNotJustTailWindow(t *testing.T) {
+	lines := []string{userTaggedLogLine}
+	for i := 0; i < 20; i++ {
+		lines = append(lines, textAndLogLine)
+	}
+	lines = append(lines, userOutboundLogLine, otherUserTaggedLogLine)
+
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D&limit=20", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, userOutboundLogLine) {
+		t.Fatalf("expected correlated outbound line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, otherUserTaggedLogLine) {
+		t.Fatalf("did not expect other user's line in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleGetLogs_UserQueryMatchesDirectTaggedLineWithoutCorrelation(t *testing.T) {
+	lines := []string{
+		"2024/01/01 12:00:01 INFO inbound/vless[in-reality]: [ALPHA] inbound connection to example.com",
+		textAndLogLine,
+	}
+
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, "[ALPHA] inbound connection") {
+		t.Fatalf("expected direct tagged line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, textAndLogLine) {
+		t.Fatalf("did not expect unrelated line in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleGetLogs_UserQueryStripsANSIAndFollowsConnectionID(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		ansiUserTaggedLogLineRaw,
+		ansiUserOutboundLogLineRaw,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, ansiUserTaggedLogLineSanitized) {
+		t.Fatalf("expected sanitized tagged user line in response, got: %v", resp.Logs)
+	}
+	if !containsInsensitive(body, ansiUserOutboundLogLineSanitized) {
+		t.Fatalf("expected sanitized correlated outbound line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, "\x1b[") {
+		t.Fatalf("expected ANSI sequences to be stripped, got: %q", body)
+	}
+}
+
+func TestHandleGetLogs_UserPacketQueryFollowsConnectionIDToDNSLines(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		otherPacketUserTaggedLogLine,
+		packetUserTaggedLogLine,
+		packetDNSLogLine,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, packetUserTaggedLogLine) {
+		t.Fatalf("expected packet user line in response, got: %v", resp.Logs)
+	}
+	if !containsInsensitive(body, packetDNSLogLine) {
+		t.Fatalf("expected dns line correlated by connection id in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, otherUserTaggedLogLine) {
+		t.Fatalf("did not expect unrelated user line in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleSearchLogs_UserQuerySupportsBracketedUserAndAndOperator(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		otherUserTaggedLogLine,
+		textAndLogLine,
+	})
+
+	tests := []struct {
+		name       string
+		query      string
+		wantInBody string
+		wantNotIn  string
+	}{
+		{
+			name:       "bracketed user query follows connection id",
+			query:      "[ALPHA]",
+			wantInBody: userOutboundLogLine,
+			wantNotIn:  otherUserTaggedLogLine,
+		},
+		{
+			name:       "user and term narrows to correlated line",
+			query:      "[ALPHA] AND outbound/direct",
+			wantInBody: userOutboundLogLine,
+			wantNotIn:  userTaggedLogLine,
+		},
+		{
+			name:       "or returns either text or user-correlated matches",
+			query:      "[BETA] OR timeout",
+			wantInBody: otherUserTaggedLogLine,
+			wantNotIn:  userOutboundLogLine,
+		},
+		{
+			name:       "plain text and works without user detection",
+			query:      "error AND timeout",
+			wantInBody: textAndLogLine,
+			wantNotIn:  userTaggedLogLine,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q="+url.QueryEscape(tc.query), nil)
+			req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+			rr := httptest.NewRecorder()
+
+			srv.handleSearchLogs(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+			}
+
+			var resp struct {
+				Logs []string `json:"logs"`
+			}
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			body := joinLines(resp.Logs)
+			if !containsInsensitive(body, tc.wantInBody) {
+				t.Fatalf("expected %q in response body, got: %v", tc.wantInBody, resp.Logs)
+			}
+			if tc.wantNotIn != "" && containsInsensitive(body, tc.wantNotIn) {
+				t.Fatalf("expected %q not to appear in response body, got: %v", tc.wantNotIn, resp.Logs)
+			}
+		})
+	}
+}
+
+func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T) {
+	srv, _ := newLogsTestServerWithFileSource(t,
+		[]string{hysteriaUserTaggedLogLine, hysteriaOutboundLogLine},
+		[]string{textAndLogLine},
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA-H2%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, hysteriaUserTaggedLogLine) {
+		t.Fatalf("expected journal fallback to include hysteria user line, got: %v", resp.Logs)
+	}
+	if !containsInsensitive(body, hysteriaOutboundLogLine) {
+		t.Fatalf("expected journal fallback to include correlated outbound line, got: %v", resp.Logs)
 	}
 }
 
