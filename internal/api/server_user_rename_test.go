@@ -148,6 +148,9 @@ func TestHandleGetUsers_RenameUsesCombinedHistory(t *testing.T) {
 		}
 	}`)
 
+	fixedNow := time.Date(2026, time.April, 15, 12, 0, 0, 0, time.UTC)
+	server.now = func() time.Time { return fixedNow }
+
 	if err := store.SaveUserMetadata(core.UserMetadata{
 		Email:       "alice",
 		QuotaLimit:  0,
@@ -159,7 +162,7 @@ func TestHandleGetUsers_RenameUsesCombinedHistory(t *testing.T) {
 		t.Fatalf("SaveUserMetadata: %v", err)
 	}
 
-	now := time.Now().Unix()
+	now := fixedNow.Unix()
 	oldRawTs := now - 72*3600
 	recentRawTs := now - 1800
 	if err := store.BulkInsert([]core.Sample{

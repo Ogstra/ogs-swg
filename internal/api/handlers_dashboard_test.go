@@ -36,6 +36,9 @@ func (s *dashboardExecutorStub) GetSysctl(context.Context, string) (string, erro
 func (s *dashboardExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
 	return nil, nil
 }
+func (s *dashboardExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 func (s *dashboardExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
 	return nil, nil
 }

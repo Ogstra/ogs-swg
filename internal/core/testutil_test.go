@@ -42,6 +42,9 @@ func (s *stubExecutor) GetSysctl(_ context.Context, _ string) (string, error) { 
 func (s *stubExecutor) ReadJournal(_ context.Context, _ string, _ int) ([]string, error) {
 	return nil, nil
 }
+func (s *stubExecutor) ReadAllJournal(_ context.Context, _ string) ([]string, error) {
+	return nil, nil
+}
 func (s *stubExecutor) SearchJournal(_ context.Context, _, _ string, _ int) ([]string, error) {
 	return nil, nil
 }
