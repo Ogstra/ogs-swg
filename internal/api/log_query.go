@@ -136,6 +136,12 @@ func logLineMatchesQuery(line string, query compiledLogQuery, userConnIDs map[st
 		groupMatches := true
 		for _, term := range group.terms {
 			if term.userTerm != "" {
+				// A bracketed user query should always match the direct user-tagged line
+				// itself, even if connection-id correlation fails for some runtime-specific
+				// journal format variation.
+				if strings.Contains(lineLower, term.userTerm) {
+					continue
+				}
 				if connID == "" {
 					connID = extractLogConnectionID(line)
 				}
