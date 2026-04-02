@@ -52,11 +52,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	// Use subscription-level quota if set; otherwise fall back to summing individual user quotas.
 	var totalLimit int64
+	var earliestExp int64
 	hasSubQuota := sub.QuotaLimit.Int64 > 0
 	if hasSubQuota {
 		totalLimit = sub.QuotaLimit.Int64
+		earliestExp = nextQuotaResetUnix(s.now(), sub.QuotaPeriod.String, int(sub.ResetDay.Int64))
 	}
-	var earliestExp int64
 
 	host := s.resolvePublicHost(r)
 
@@ -80,9 +81,13 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			// Only accumulate individual quota when there is no subscription-level quota set.
 			if !hasSubQuota && userMeta.QuotaLimit > 0 {
 				totalLimit += userMeta.QuotaLimit
+				userExp := nextQuotaResetUnix(s.now(), userMeta.QuotaPeriod, userMeta.ResetDay)
+				if earliestExp == 0 || (userExp > 0 && userExp < earliestExp) {
+					earliestExp = userExp
+				}
 			}
 			// Add user traffic
-			now := time.Now()
+			now := s.now()
 			start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 			samples, err := s.store.GetCombinedReport(username, start.Unix(), now.Unix())
 			if err == nil {
@@ -194,6 +199,39 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)
+}
+
+func nextQuotaResetUnix(now time.Time, period string, resetDay int) int64 {
+	switch strings.ToLower(strings.TrimSpace(period)) {
+	case "", "none":
+		return 0
+	case "daily":
+		next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		return next.Unix()
+	case "monthly":
+		if resetDay <= 0 {
+			resetDay = 1
+		}
+		candidate := monthlyResetAt(now.Year(), now.Month(), resetDay, now.Location())
+		if !now.Before(candidate) {
+			nextMonth := now.AddDate(0, 1, 0)
+			candidate = monthlyResetAt(nextMonth.Year(), nextMonth.Month(), resetDay, now.Location())
+		}
+		return candidate.Unix()
+	default:
+		return 0
+	}
+}
+
+func monthlyResetAt(year int, month time.Month, resetDay int, loc *time.Location) time.Time {
+	if resetDay <= 0 {
+		resetDay = 1
+	}
+	lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, loc).Day()
+	if resetDay > lastDay {
+		resetDay = lastDay
+	}
+	return time.Date(year, month, resetDay, 0, 0, 0, 0, loc)
 }
 
 // InvalidateSubCache clears the cached links in memory when a user config changes.
