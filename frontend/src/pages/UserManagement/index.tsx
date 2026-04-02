@@ -375,6 +375,7 @@ export default function UserManagement() {
             .filter(Boolean) as UserType[]
         const uniqueTypes = Array.from(new Set(detectedTypes))
         const nextType = (uniqueTypes[0] as UserType) || getDefaultUserType()
+        const primaryInboundTag = inboundTags[0] || getFirstInboundTagForType(nextType)
         setUserType(nextType)
         setNewUser({
             name: user.name,
@@ -386,14 +387,12 @@ export default function UserManagement() {
             quota_period: user.quota_period,
             reset_day: 1,
             enabled: user.enabled,
-            inbound_tag: inboundTags[0] || ''
+            inbound_tag: primaryInboundTag
         })
         setOriginalInboundTags(inboundTags)
         setInboundRows(
             normalizeInboundRowsForType(
-                inboundTags.length > 0
-                    ? inboundTags.map(tag => ({ tag, flow: '' }))
-                    : [{ tag: getFirstInboundTagForType(nextType), flow: nextType === 'vless' ? DEFAULT_VLESS_FLOW : '' }],
+                [{ tag: primaryInboundTag, flow: nextType === 'vless' ? DEFAULT_VLESS_FLOW : '' }],
                 nextType
             )
         )
@@ -461,28 +460,34 @@ export default function UserManagement() {
             return
         }
         try {
-            const normalizedRows = inboundRows.map(row => ({
+            const normalizedRows = inboundRows.slice(0, 1).map(row => ({
                 tag: row.tag.trim(),
                 flow: canEditFlowForInbound(userType, row.tag.trim()) ? row.flow : ''
             }))
-            const emptyInbound = normalizedRows.some(row => !row.tag)
-            const inboundTags = normalizedRows.map(row => row.tag)
-            const hasDuplicateInbound = new Set(inboundTags).size !== inboundTags.length
+            const selectedInbound = normalizedRows[0]
+            const emptyInbound = !selectedInbound?.tag
 
-            if (normalizedRows.length === 0 || emptyInbound || hasDuplicateInbound) {
+            if (!selectedInbound || emptyInbound) {
                 toastError('Please fix inbound entries before saving')
                 return
             }
 
+            const inboundTag = selectedInbound.tag
+            const selectedFlow = userType === 'vless' ? selectedInbound.flow : ''
+
             if (isEditing) {
                 const vmessSecurity = userType === 'vmess' ? newUser.vmess_security || '' : ''
                 const vmessAlterID = userType === 'vmess' ? (newUser.vmess_alter_id || 0) : 0
+                const originalTags = originalInboundTags.length > 0
+                    ? originalInboundTags
+                    : ((modalState.data?.inbound_tags || []) as string[])
+                const originalPrimaryTag = originalTags[0] || inboundTag
 
                 const payload = {
                     ...newUser,
                     original_name: originalName || newUser.name,
-                    inbound_tag: normalizedRows[0].tag,
-                    flow: userType === 'vless' ? normalizedRows[0].flow : '',
+                    inbound_tag: originalPrimaryTag,
+                    flow: userType === 'vless' && originalPrimaryTag === inboundTag ? selectedFlow : '',
                     vmess_security: vmessSecurity,
                     vmess_alter_id: vmessAlterID,
                     reset_day: 1,
@@ -492,36 +497,32 @@ export default function UserManagement() {
                 await api.updateUser(payload)
 
                 if (newUser.enabled !== false) {
-                    const originalTags = originalInboundTags.length > 0
-                        ? originalInboundTags
-                        : ((modalState.data?.inbound_tags || []) as string[])
                     const originalSet = new Set(originalTags)
-                    const desiredSet = new Set(inboundTags)
+
+                    if (originalSet.has(inboundTag)) {
+                        await api.updateUserInbound(newUser.name, inboundTag, {
+                            uuid: payload.uuid,
+                            flow: selectedFlow,
+                            vmess_security: vmessSecurity,
+                            vmess_alter_id: vmessAlterID,
+                        })
+                    }
 
                     for (const tag of originalTags) {
-                        if (!desiredSet.has(tag)) {
+                        if (tag !== inboundTag) {
                             await api.removeUserFromInbound(newUser.name, tag)
                         }
                     }
 
-                    for (const row of normalizedRows) {
-                        if (originalSet.has(row.tag)) {
-                            await api.updateUserInbound(newUser.name, row.tag, {
-                                uuid: payload.uuid,
-                                flow: userType === 'vless' ? row.flow : '',
-                                vmess_security: vmessSecurity,
-                                vmess_alter_id: vmessAlterID,
-                            })
-                        } else {
-                            await api.createUser({
-                                ...newUser,
-                                uuid: payload.uuid,
-                                inbound_tag: row.tag,
-                                flow: userType === 'vless' ? row.flow : '',
-                                vmess_security: vmessSecurity,
-                                vmess_alter_id: vmessAlterID,
-                            })
-                        }
+                    if (!originalSet.has(inboundTag)) {
+                        await api.createUser({
+                            ...newUser,
+                            uuid: payload.uuid,
+                            inbound_tag: inboundTag,
+                            flow: selectedFlow,
+                            vmess_security: vmessSecurity,
+                            vmess_alter_id: vmessAlterID,
+                        })
                     }
                 }
 
@@ -532,15 +533,11 @@ export default function UserManagement() {
                     vmess_security: userType === 'vmess' ? newUser.vmess_security || '' : '',
                     vmess_alter_id: userType === 'vmess' ? (newUser.vmess_alter_id || 0) : 0,
                     reset_day: 1,
+                    inbound_tag: inboundTag,
+                    flow: selectedFlow,
                 }
                 if (!payload.uuid) payload.uuid = generateRandomCredential(userType)
-                for (const row of normalizedRows) {
-                    await api.createUser({
-                        ...payload,
-                        inbound_tag: row.tag,
-                        flow: userType === 'vless' ? row.flow : '',
-                    })
-                }
+                await api.createUser(payload)
                 success(`User created successfully`)
             }
             setModalState({ type: null }) // Close modal
@@ -568,16 +565,15 @@ export default function UserManagement() {
         }
     }
 
-    const inboundTags = inboundRows.map(row => row.tag.trim()).filter(Boolean)
-    const hasEmptyInbound = inboundRows.some(row => !row.tag.trim())
-    const hasDuplicateInbound = new Set(inboundTags).size !== inboundTags.length
-    const inboundTypeMismatch = inboundRows.some(row => {
-        const type = getInboundType(row.tag)
+    const currentInboundRow = inboundRows[0] || { tag: '', flow: '' }
+    const hasEmptyInbound = !currentInboundRow.tag.trim()
+    const inboundTypeMismatch = (() => {
+        const type = getInboundType(currentInboundRow.tag)
         return type && type !== userType
-    })
+    })()
     const unsupportedUserType = !supportedUserTypes.includes(userType)
     const hasTypeInbounds = inbounds.some(inb => String(inb.type || '').toLowerCase() === userType)
-    const inboundValid = inboundRows.length > 0 && !hasEmptyInbound && !hasDuplicateInbound && !inboundTypeMismatch && !unsupportedUserType && hasTypeInbounds
+    const inboundValid = inboundRows.length === 1 && !hasEmptyInbound && !inboundTypeMismatch && !unsupportedUserType && hasTypeInbounds
     const credentialLabel = isPasswordUserType(userType) ? 'Password' : 'UUID'
     const credentialActionLabel = isPasswordUserType(userType) ? 'Generate Random Password' : 'Generate Random UUID'
     const bulkFlowVisible = canShowBulkFlow(bulkConfig.inbound_tag || '')
@@ -747,8 +743,8 @@ export default function UserManagement() {
                     <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[1100px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('status')}>
-                                    Last Seen {renderSortIcon('status')}
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('last_seen')}>
+                                    Last Seen {renderSortIcon('last_seen')}
                                 </th>
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
                                     Name/Alias {renderSortIcon('user')}
@@ -1158,84 +1154,51 @@ export default function UserManagement() {
                     )}
                     {/* Inbound List */}
                     <div className="space-y-3">
-                        <div className="space-y-2">
-                            {inboundRows.map((row, idx) => {
-                                const tagValue = row.tag
-                                const showFlow = canEditFlowForInbound(userType, row.tag)
-                                return (
-                                    <div key={`${tagValue}-${idx}`} className={`grid gap-3 items-end ${showFlow ? 'grid-cols-[1fr_1fr_auto]' : 'grid-cols-[1fr_auto]'}`}>
-                                        <div className="space-y-1">
-                                            <label className="block text-sm font-medium text-slate-400">Inbound</label>
-                                            <select
-                                                value={row.tag}
-                                                onChange={e => {
-                                                    const value = e.target.value
-                                                    setInboundRows(prev => prev.map((r, rIdx) => {
-                                                        if (rIdx !== idx) return r
-                                                        const nextFlow = canEditFlowForInbound(userType, value)
-                                                            ? (r.flow || DEFAULT_VLESS_FLOW)
-                                                            : ''
-                                                        return { ...r, tag: value, flow: nextFlow }
-                                                    }))
-                                                }}
-                                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
-                                            >
-                                                <option value="" disabled>Select an Inbound</option>
-                                                {inbounds
-                                                    .filter(inb => String(inb.type || '').toLowerCase() === userType)
-                                                    .map(inb => (
-                                                        <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
-                                                    ))}
-                                            </select>
-                                        </div>
-                                        {showFlow && (
-                                            <div className="space-y-1">
-                                                <label className="block text-sm font-medium text-slate-400">Flow</label>
-                                                <select
-                                                    value={row.flow}
-                                                    onChange={e => {
-                                                        const value = e.target.value
-                                                        setInboundRows(prev => prev.map((r, rIdx) => rIdx === idx ? { ...r, flow: value } : r))
-                                                    }}
-                                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
-                                                >
-                                                    <option value="xtls-rprx-vision">xtls-rprx-vision</option>
-                                                    <option value="">none</option>
-                                                </select>
-                                            </div>
-                                        )}
-                                        <div className="flex justify-end">
-                                            <button
-                                                type="button"
-                                                onClick={() => {
-                                                    if (inboundRows.length === 1) return
-                                                    setInboundRows(prev => prev.filter((_, rIdx) => rIdx !== idx))
-                                                }}
-                                                disabled={inboundRows.length === 1}
-                                                className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed text-sm"
-                                                title="Remove inbound"
-                                            >
-                                                Remove
-                                            </button>
-                                        </div>
-                                    </div>
-                                )
-                            })}
+                        <div className={`grid gap-3 items-end ${canEditFlowForInbound(userType, currentInboundRow.tag) ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                            <div className="space-y-1">
+                                <label className="block text-sm font-medium text-slate-400">Inbound</label>
+                                <select
+                                    value={currentInboundRow.tag}
+                                    onChange={e => {
+                                        const value = e.target.value
+                                        const nextFlow = canEditFlowForInbound(userType, value)
+                                            ? (currentInboundRow.flow || DEFAULT_VLESS_FLOW)
+                                            : ''
+                                        setInboundRows([{ tag: value, flow: nextFlow }])
+                                    }}
+                                    className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                >
+                                    <option value="" disabled>Select an Inbound</option>
+                                    {inbounds
+                                        .filter(inb => String(inb.type || '').toLowerCase() === userType)
+                                        .map(inb => (
+                                            <option key={inb.tag} value={inb.tag}>{inb.tag} ({inb.type})</option>
+                                        ))}
+                                </select>
+                            </div>
+                            {canEditFlowForInbound(userType, currentInboundRow.tag) && (
+                                <div className="space-y-1">
+                                    <label className="block text-sm font-medium text-slate-400">Flow</label>
+                                    <select
+                                        value={currentInboundRow.flow}
+                                        onChange={e => {
+                                            const value = e.target.value
+                                            setInboundRows([{ ...currentInboundRow, flow: value }])
+                                        }}
+                                        className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                    >
+                                        <option value="xtls-rprx-vision">xtls-rprx-vision</option>
+                                        <option value="">none</option>
+                                    </select>
+                                </div>
+                            )}
                         </div>
-                        <div className="flex justify-start">
-                            <button
-                                type="button"
-                                onClick={() => setInboundRows(prev => [...prev, { tag: '', flow: '' }])}
-                                className="px-3 py-2 rounded-lg bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700 hover:text-white text-sm"
-                            >
-                                Add Inbound
-                            </button>
-                        </div>
+                        <p className="text-xs text-slate-500">Each user can belong to only one inbound.</p>
+                        {isEditing && originalInboundTags.length > 1 && (
+                            <p className="text-xs text-amber-400">Legacy multi-inbound assignment detected. Saving will keep only the selected inbound.</p>
+                        )}
                         {hasEmptyInbound && (
                             <p className="text-xs text-amber-400">Each inbound row must have a selected inbound.</p>
-                        )}
-                        {hasDuplicateInbound && (
-                            <p className="text-xs text-amber-400">Duplicate inbounds are not allowed.</p>
                         )}
                         {inboundTypeMismatch && (
                             <p className="text-xs text-amber-400">All inbounds must match the selected user type.</p>
