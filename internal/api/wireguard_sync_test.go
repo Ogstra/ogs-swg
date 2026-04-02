@@ -51,6 +51,9 @@ func (s *wireGuardExecutorStub) GetSysctl(context.Context, string) (string, erro
 func (s *wireGuardExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
 	return nil, nil
 }
+func (s *wireGuardExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 func (s *wireGuardExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
 	return nil, nil
 }

@@ -76,6 +76,9 @@ func (s *multiIfaceExecutorStub) GetSysctl(context.Context, string) (string, err
 func (s *multiIfaceExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
 	return nil, nil
 }
+func (s *multiIfaceExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 func (s *multiIfaceExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
 	return nil, nil
 }

@@ -1377,14 +1377,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if filterUser != "" {
-		f := strings.ToLower(filterUser)
-		filtered := make([]string, 0, len(lines))
-		for _, ln := range lines {
-			if strings.Contains(strings.ToLower(ln), f) {
-				filtered = append(filtered, ln)
-			}
-		}
-		lines = filtered
+		lines = filterLogLines(lines, s.compileLogQuery(filterUser))
 	}
 	if len(lines) == 0 {
 		if s.config.LogSource == "journal" {
@@ -1442,40 +1435,20 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		p := getPermissions(r)
 		return p != nil && p.CanReadLogsCensored
 	}()
+	compiledQuery := s.compileLogQuery(q)
+	postFilterSearch := censoredSearch || compiledQuery.requiresPostFilter()
+	truncatedToEffectiveLimit := false
 
-	if censoredSearch {
-		// Fetch all lines without query filtering, then censor and filter manually.
-		if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-			if s.executor != nil {
-				lines, err = s.executor.ReadJournal(r.Context(), "sing-box", effectiveLimit)
-			} else {
-				lines, err = readJournalLines("sing-box", effectiveLimit)
-			}
-		} else {
-			lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, effectiveLimit)
-			if err != nil && s.config.LogSource == "file" {
-				if s.executor != nil {
-					if linesJ, jErr := s.executor.ReadJournal(r.Context(), "sing-box", effectiveLimit); jErr == nil {
-						lines = linesJ
-						err = nil
-					}
-				} else if linesJ, jErr := readJournalLines("sing-box", effectiveLimit); jErr == nil {
-					lines = linesJ
-					err = nil
-				}
+	if postFilterSearch {
+		lines, err = s.readAllSearchableLogLines(r.Context())
+		if err == nil && censoredSearch {
+			for i, ln := range lines {
+				lines[i] = core.CensorLine(ln)
 			}
 		}
 		if err == nil {
-			// Censor all lines, then filter against q.
-			qLower := strings.ToLower(q)
-			filtered := lines[:0]
-			for _, ln := range lines {
-				censored := core.CensorLine(ln)
-				if strings.Contains(strings.ToLower(censored), qLower) {
-					filtered = append(filtered, censored)
-				}
-			}
-			lines = filtered
+			lines = filterLogLines(lines, compiledQuery)
+			lines, truncatedToEffectiveLimit = truncateRecentLogMatches(lines, effectiveLimit)
 		}
 	} else {
 		if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
@@ -1517,7 +1490,10 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		end = len(lines)
 	}
 	paged := lines[start:end]
-	hasMore := len(lines) == effectiveLimit && end == len(lines)
+	hasMore := truncatedToEffectiveLimit && end == len(lines)
+	if !postFilterSearch {
+		hasMore = len(lines) == effectiveLimit && end == len(lines)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
