@@ -1343,8 +1343,12 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 
 	var lines []string
 	var err error
+	compiledQuery := s.compileLogQuery(filterUser)
+	postFilterTail := filterUser != "" && compiledQuery.requiresPostFilter()
 
-	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
+	if postFilterTail {
+		lines, err = s.readAllSearchableLogLines(r.Context())
+	} else if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
 		if s.executor != nil {
 			lines, err = s.executor.ReadJournal(r.Context(), "sing-box", limit)
 		} else {
@@ -1379,7 +1383,10 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if filterUser != "" {
-		lines = filterLogLines(lines, s.compileLogQuery(filterUser))
+		lines = filterLogLines(lines, compiledQuery)
+		if postFilterTail {
+			lines, _ = truncateRecentLogMatches(lines, limit)
+		}
 	}
 	if len(lines) == 0 {
 		if s.config.LogSource == "journal" {
