@@ -1348,6 +1348,10 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	var err error
 	compiledQuery := s.compileLogQuery(filterUser)
 	postFilterTail := filterUser != "" && compiledQuery.requiresPostFilter()
+	censoredTail := func() bool {
+		p := getPermissions(r)
+		return p != nil && p.CanReadLogsCensored
+	}()
 
 	if postFilterTail {
 		lines, err = s.readAllSearchableLogLines(r.Context())
@@ -1380,16 +1384,34 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if p := getPermissions(r); p != nil && p.CanReadLogsCensored {
-		for i, ln := range lines {
-			lines[i] = core.CensorLine(ln)
+	if !postFilterTail {
+		if censoredTail {
+			for i, ln := range lines {
+				lines[i] = core.CensorLine(ln)
+			}
 		}
-	}
-	if filterUser != "" {
+		if filterUser != "" {
+			lines = filterLogLines(lines, compiledQuery)
+		}
+	} else {
+		if censoredTail {
+			for i, ln := range lines {
+				lines[i] = core.CensorLine(ln)
+			}
+		}
 		lines = filterLogLines(lines, compiledQuery)
-		if postFilterTail {
-			lines, _ = truncateRecentLogMatches(lines, limit)
+		if len(lines) == 0 && s.config.LogSource == "file" {
+			if journalLines, jErr := s.readAllJournalLogLines(r.Context()); jErr == nil {
+				lines = journalLines
+				if censoredTail {
+					for i, ln := range lines {
+						lines[i] = core.CensorLine(ln)
+					}
+				}
+				lines = filterLogLines(lines, compiledQuery)
+			}
 		}
+		lines, _ = truncateRecentLogMatches(lines, limit)
 	}
 	if len(lines) == 0 {
 		if s.config.LogSource == "journal" {
@@ -1453,13 +1475,24 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 
 	if postFilterSearch {
 		lines, err = s.readAllSearchableLogLines(r.Context())
-		if err == nil && censoredSearch {
-			for i, ln := range lines {
-				lines[i] = core.CensorLine(ln)
-			}
-		}
 		if err == nil {
+			if censoredSearch {
+				for i, ln := range lines {
+					lines[i] = core.CensorLine(ln)
+				}
+			}
 			lines = filterLogLines(lines, compiledQuery)
+			if len(lines) == 0 && s.config.LogSource == "file" {
+				if journalLines, jErr := s.readAllJournalLogLines(r.Context()); jErr == nil {
+					lines = journalLines
+					if censoredSearch {
+						for i, ln := range lines {
+							lines[i] = core.CensorLine(ln)
+						}
+					}
+					lines = filterLogLines(lines, compiledQuery)
+				}
+			}
 			lines, truncatedToEffectiveLimit = truncateRecentLogMatches(lines, effectiveLimit)
 		}
 	} else {
