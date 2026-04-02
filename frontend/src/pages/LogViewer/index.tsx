@@ -228,7 +228,7 @@ export default function LogViewer() {
                                     setQuery(e.target.value)
                                     setAutoScroll(false)
                                 }}
-                                placeholder="Filter live logs..."
+                                placeholder="Filter logs, user or foo AND bar..."
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600"
                             />
                         </div>
@@ -255,7 +255,7 @@ export default function LogViewer() {
                                     setSearchQuery(e.target.value)
                                 }}
                                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                                placeholder="Search query..."
+                                placeholder="Search logs, user or foo AND bar..."
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600"
                             />
                         </div>
