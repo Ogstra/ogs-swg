@@ -1328,7 +1328,10 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
-	filterUser := strings.TrimSpace(r.URL.Query().Get("user"))
+	filterUser := strings.TrimSpace(r.URL.Query().Get("q"))
+	if filterUser == "" {
+		filterUser = strings.TrimSpace(r.URL.Query().Get("user"))
+	}
 	limit := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if v, err := strconv.Atoi(l); err == nil {

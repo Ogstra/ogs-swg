@@ -391,7 +391,7 @@ func TestHandleGetLogs_UserQueryFollowsConnectionID(t *testing.T) {
 		otherUserTaggedLogLine,
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/logs?user=OGS", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BOGS%5D", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
 	rr := httptest.NewRecorder()
 
@@ -420,6 +420,39 @@ func TestHandleGetLogs_UserQueryFollowsConnectionID(t *testing.T) {
 	}
 }
 
+func TestHandleGetLogs_PlainTermDoesNotTriggerUserCorrelation(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=OGS", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, userTaggedLogLine) {
+		t.Fatalf("expected tagged user line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, userOutboundLogLine) {
+		t.Fatalf("plain text query must not pull correlated outbound lines, got: %v", resp.Logs)
+	}
+}
+
 func TestHandleGetLogs_UserQueryUsesFullHistoryNotJustTailWindow(t *testing.T) {
 	lines := []string{userTaggedLogLine}
 	for i := 0; i < 20; i++ {
@@ -429,7 +462,7 @@ func TestHandleGetLogs_UserQueryUsesFullHistoryNotJustTailWindow(t *testing.T) {
 
 	srv, _ := newLogsTestServer(t, lines)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/logs?user=OGS&limit=20", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BOGS%5D&limit=20", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
 	rr := httptest.NewRecorder()
 
@@ -477,9 +510,15 @@ func TestHandleSearchLogs_UserQuerySupportsBracketedUserAndAndOperator(t *testin
 		},
 		{
 			name:       "user and term narrows to correlated line",
-			query:      "OGS AND outbound/direct",
+			query:      "[OGS] AND outbound/direct",
 			wantInBody: userOutboundLogLine,
 			wantNotIn:  userTaggedLogLine,
+		},
+		{
+			name:       "or returns either text or user-correlated matches",
+			query:      "[BOB] OR timeout",
+			wantInBody: otherUserTaggedLogLine,
+			wantNotIn:  userOutboundLogLine,
 		},
 		{
 			name:       "plain text and works without user detection",
