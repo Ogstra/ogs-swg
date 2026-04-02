@@ -94,6 +94,10 @@ func (s *serviceActionExecutorStub) ReadJournal(context.Context, string, int) ([
 	return nil, nil
 }
 
+func (s *serviceActionExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 func (s *serviceActionExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
 	return nil, nil
 }
