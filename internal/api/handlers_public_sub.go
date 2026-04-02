@@ -75,6 +75,9 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		if err != nil || len(userInbounds) == 0 {
 			continue
 		}
+		// Legacy data may still have the same user in multiple inbounds. Subscription
+		// generation now treats the first match as canonical to avoid broken bundles.
+		userInbounds = userInbounds[:1]
 
 		userMeta, _ := s.store.GetUserMetadata(username)
 		if userMeta != nil {

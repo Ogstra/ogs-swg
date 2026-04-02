@@ -598,20 +598,20 @@ type SubQuotaInfo struct {
 }
 
 type UserStatus struct {
-	Name              string       `json:"name"`
-	UUID              string       `json:"uuid"`
-	Flow              string       `json:"flow"`
-	VmessSecurity     string       `json:"vmess_security,omitempty"`
-	VmessAlterID      int          `json:"vmess_alter_id,omitempty"`
-	Uplink            int64        `json:"uplink"`
-	Downlink          int64        `json:"downlink"`
-	Total             int64        `json:"total"`
-	QuotaLimit        int64        `json:"quota_limit"`
-	QuotaPeriod       string       `json:"quota_period"`
-	ResetDay          int          `json:"reset_day"`
-	Enabled           bool         `json:"enabled"`
-	LastSeen          int64        `json:"last_seen"`
-	InboundTags       []string     `json:"inbound_tags"`
+	Name              string        `json:"name"`
+	UUID              string        `json:"uuid"`
+	Flow              string        `json:"flow"`
+	VmessSecurity     string        `json:"vmess_security,omitempty"`
+	VmessAlterID      int           `json:"vmess_alter_id,omitempty"`
+	Uplink            int64         `json:"uplink"`
+	Downlink          int64         `json:"downlink"`
+	Total             int64         `json:"total"`
+	QuotaLimit        int64         `json:"quota_limit"`
+	QuotaPeriod       string        `json:"quota_period"`
+	ResetDay          int           `json:"reset_day"`
+	Enabled           bool          `json:"enabled"`
+	LastSeen          int64         `json:"last_seen"`
+	InboundTags       []string      `json:"inbound_tags"`
 	SubscriptionQuota *SubQuotaInfo `json:"subscription_quota,omitempty"`
 }
 
@@ -838,6 +838,16 @@ type CreateUserRequest struct {
 	InboundTag    string `json:"inbound_tag,omitempty"`
 }
 
+func canonicalInboundTags(tags ...string) []string {
+	for _, tag := range tags {
+		trimmed := strings.TrimSpace(tag)
+		if trimmed != "" {
+			return []string{trimmed}
+		}
+	}
+	return []string{}
+}
+
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -867,7 +877,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 
 	if enabled {
 		if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
-			if errors.Is(err, os.ErrInvalid) {
+			if errors.Is(err, os.ErrInvalid) || errors.Is(err, core.ErrUserAssignedToAnotherInbound) {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
@@ -884,6 +894,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Enabled:       enabled,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
+		InboundTags:   canonicalInboundTags(req.InboundTag),
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
 		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
@@ -933,7 +944,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	// inboundTags tracks which inbound tags to persist in metadata.
 	var inboundTags []string
 	if existingMeta != nil {
-		inboundTags = existingMeta.InboundTags
+		inboundTags = canonicalInboundTags(existingMeta.InboundTags...)
+	}
+	if req.InboundTag != "" {
+		inboundTags = canonicalInboundTags(req.InboundTag)
 	}
 
 	if enabled {
@@ -956,7 +970,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			// Determine the list of inbounds to restore.
 			tagsToRestore := inboundTags
 			if len(tagsToRestore) == 0 && req.InboundTag != "" {
-				tagsToRestore = []string{req.InboundTag}
+				tagsToRestore = canonicalInboundTags(req.InboundTag)
 			}
 
 			if len(tagsToRestore) > 0 {
@@ -986,11 +1000,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Disable path: capture current inbound tags before removing the user.
 		if currentInbounds, err := s.config.GetUserInbounds(originalName); err == nil && len(currentInbounds) > 0 {
-			tags := make([]string, len(currentInbounds))
-			for i, ib := range currentInbounds {
-				tags[i] = ib.Tag
-			}
-			inboundTags = tags
+			inboundTags = canonicalInboundTags(currentInbounds[0].Tag)
 		}
 		// If GetUserInbounds failed or returned empty, preserve existing inboundTags from metadata.
 
@@ -1113,16 +1123,15 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if req.VmessSecurity != "" || req.VmessAlterID != 0 {
-		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
-			if req.VmessSecurity != "" {
-				meta.VmessSecurity = req.VmessSecurity
-			}
-			if req.VmessAlterID != 0 {
-				meta.VmessAlterID = req.VmessAlterID
-			}
-			_ = s.store.SaveUserMetadata(*meta)
+	if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+		if req.VmessSecurity != "" {
+			meta.VmessSecurity = req.VmessSecurity
 		}
+		if req.VmessAlterID != 0 {
+			meta.VmessAlterID = req.VmessAlterID
+		}
+		meta.InboundTags = canonicalInboundTags(tag)
+		_ = s.store.SaveUserMetadata(*meta)
 	}
 
 	s.InvalidateSubCache()

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,6 +155,23 @@ func TestAddUser_Duplicate(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already exists") {
 		t.Errorf("expected error to contain %q, got %q", "already exists", err.Error())
+	}
+}
+
+func TestAddUser_RejectsMultipleInboundsPerUser(t *testing.T) {
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	const uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	if err := cfg.AddUser("alice", uuid, "", "test-vless", "", 0); err != nil {
+		t.Fatalf("first AddUser: %v", err)
+	}
+
+	err := cfg.AddUser("alice", uuid, "", "test-vmess", "", 0)
+	if err == nil {
+		t.Fatal("expected error when assigning user to a second inbound, got nil")
+	}
+	if !errors.Is(err, ErrUserAssignedToAnotherInbound) {
+		t.Fatalf("expected ErrUserAssignedToAnotherInbound, got %v", err)
 	}
 }
 
