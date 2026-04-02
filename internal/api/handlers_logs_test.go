@@ -503,6 +503,40 @@ func TestHandleGetLogs_UserQueryUsesFullHistoryNotJustTailWindow(t *testing.T) {
 	}
 }
 
+func TestHandleGetLogs_UserQueryMatchesDirectTaggedLineWithoutCorrelation(t *testing.T) {
+	lines := []string{
+		"2024/01/01 12:00:01 INFO inbound/vless[in-reality]: [ALPHA] inbound connection to example.com",
+		textAndLogLine,
+	}
+
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, "[ALPHA] inbound connection") {
+		t.Fatalf("expected direct tagged line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, textAndLogLine) {
+		t.Fatalf("did not expect unrelated line in response, got: %v", resp.Logs)
+	}
+}
+
 func TestHandleSearchLogs_UserQuerySupportsBracketedUserAndAndOperator(t *testing.T) {
 	srv, _ := newLogsTestServer(t, []string{
 		userTaggedLogLine,
