@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -72,6 +73,8 @@ type UserAccount struct {
 	VmessAlterID  int      `json:"vmess_alter_id,omitempty"`
 	InboundTags   []string `json:"inbound_tags"`
 }
+
+var ErrUserAssignedToAnotherInbound = errors.New("user is already assigned to another inbound")
 
 func isUserInboundType(inbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(inbType)) {
@@ -294,48 +297,40 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 		}
 
 		for _, inbound := range inboundsResult.inbounds {
+			for _, existingName := range inbound.UserNames() {
+				if existingName != name {
+					continue
+				}
+				if inbound.Base().Tag == inboundTag {
+					return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
+				}
+				return fmt.Errorf("%w: user %s already exists in inbound %s; multiple inbounds per user are deprecated", ErrUserAssignedToAnotherInbound, name, inbound.Base().Tag)
+			}
+		}
+
+		for _, inbound := range inboundsResult.inbounds {
 			if inbound.Base().Tag != inboundTag {
 				continue
 			}
 			switch inb := inbound.(type) {
 			case *VlessInbound:
-				for _, u := range inb.Users {
-					if u.Name == name {
-						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
-					}
-				}
 				inb.Users = append(inb.Users, VlessUser{
 					Name: name,
 					UUID: uuid,
 					Flow: normalizeFlow(flow),
 				})
 			case *VmessInbound:
-				for _, u := range inb.Users {
-					if u.Name == name {
-						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
-					}
-				}
 				inb.Users = append(inb.Users, VmessUser{
 					Name:    name,
 					UUID:    uuid,
 					AlterID: vmessAlterID,
 				})
 			case *TrojanInbound:
-				for _, u := range inb.Users {
-					if u.Name == name {
-						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
-					}
-				}
 				inb.Users = append(inb.Users, TrojanUser{
 					Name:     name,
 					Password: uuid,
 				})
 			case *Hysteria2Inbound:
-				for _, u := range inb.Users {
-					if u.Name == name {
-						return fmt.Errorf("user %s already exists in inbound %s", name, inboundTag)
-					}
-				}
 				inb.Users = append(inb.Users, Hysteria2User{
 					Name:     name,
 					Password: uuid, // caller passes password in the uuid parameter by convention

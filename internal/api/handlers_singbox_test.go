@@ -89,6 +89,10 @@ func newSingboxHandlerTestServer(initialJSON string) (*Server, *singboxConfigExe
 }
 
 func newSingboxHandlerTestServerWithStore(t *testing.T, initialJSON string) (*Server, *singboxConfigExecutorStub, *core.Store) {
+	return newSingboxHandlerTestServerWithStoreAndManagedInbounds(t, initialJSON, []string{"test-vless"})
+}
+
+func newSingboxHandlerTestServerWithStoreAndManagedInbounds(t *testing.T, initialJSON string, managedInbounds []string) (*Server, *singboxConfigExecutorStub, *core.Store) {
 	t.Helper()
 
 	tmp := t.TempDir()
@@ -103,8 +107,8 @@ func newSingboxHandlerTestServerWithStore(t *testing.T, initialJSON string) (*Se
 	cfg := &core.Config{
 		EnableSingbox:     true,
 		SingboxConfigPath: "/test/config.json",
-		ManagedInbounds:   []string{"test-vless"},
-		StatsInbounds:     []string{"test-vless"},
+		ManagedInbounds:   managedInbounds,
+		StatsInbounds:     managedInbounds,
 	}
 	cfg.SetExecutor(stub)
 	return NewServer(store, cfg, stub), stub, store
@@ -229,6 +233,70 @@ func TestBuildVlessLink_RealityVisionIncludesALPNAndXUDP(t *testing.T) {
 	}
 	if got := u.Query().Get("udp"); got != "" {
 		t.Fatalf("udp = %q; want empty", got)
+	}
+}
+
+func TestHandleCreateUser_RejectsMultipleInboundAssignment(t *testing.T) {
+	server, stub, _ := newSingboxHandlerTestServerWithStoreAndManagedInbounds(t, `{
+		"inbounds": [
+			{
+				"type":"vless",
+				"tag":"test-vless",
+				"listen":"0.0.0.0",
+				"listen_port":443,
+				"users":[]
+			},
+			{
+				"type":"vmess",
+				"tag":"test-vmess",
+				"listen":"0.0.0.0",
+				"listen_port":8443,
+				"users":[]
+			}
+		],
+		"experimental":{
+			"v2ray_api":{"listen":"127.0.0.1:19001","stats":{"enabled":true,"inbounds":["test-vless","test-vmess"],"outbounds":["direct"],"users":[]}}
+		}
+	}`, []string{"test-vless", "test-vmess"})
+
+	makeReq := func(tag string) *httptest.ResponseRecorder {
+		body, err := json.Marshal(CreateUserRequest{
+			Name:       "alice",
+			UUID:       "11111111-1111-1111-1111-111111111111",
+			QuotaLimit: 0,
+			ResetDay:   1,
+			Enabled:    boolPtr(true),
+			InboundTag: tag,
+		})
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/users", bytes.NewReader(body))
+		rec := httptest.NewRecorder()
+		server.handleCreateUser(rec, req)
+		return rec
+	}
+
+	first := makeReq("test-vless")
+	if first.Code != http.StatusCreated {
+		t.Fatalf("first create status=%d body=%q", first.Code, first.Body.String())
+	}
+
+	second := makeReq("test-vmess")
+	if second.Code != http.StatusBadRequest {
+		t.Fatalf("second create status=%d body=%q", second.Code, second.Body.String())
+	}
+	if !strings.Contains(second.Body.String(), "multiple inbounds per user are deprecated") {
+		t.Fatalf("second create body=%q", second.Body.String())
+	}
+
+	namesVless := inboundUserNames(t, stub, "test-vless")
+	if len(namesVless) != 1 || namesVless[0] != "alice" {
+		t.Fatalf("test-vless users=%v want [alice]", namesVless)
+	}
+	namesVmess := inboundUserNames(t, stub, "test-vmess")
+	if len(namesVmess) != 0 {
+		t.Fatalf("test-vmess users=%v want []", namesVmess)
 	}
 }
 
