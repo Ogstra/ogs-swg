@@ -578,6 +578,9 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		params.Set("type", typeVal)
 		params.Set("sni", sni)
 		params.Set("sid", sid)
+		if alpn != "" {
+			params.Set("alpn", alpn)
+		}
 		if flowParam != "" {
 			params.Set("flow", flowParam)
 		}
@@ -606,7 +609,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	} else if sniFallback != "" {
 		params.Set("sni", sniFallback)
 	}
-	if alpn != "" && !strings.EqualFold(userInfo.Flow, "xtls-rprx-vision") {
+	if alpn != "" {
 		params.Set("alpn", alpn)
 	}
 	if shouldAllowInsecure(tls, meta) {
