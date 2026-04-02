@@ -1384,6 +1384,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	sanitizeLogLines(lines)
 	if !postFilterTail {
 		if censoredTail {
 			for i, ln := range lines {
@@ -1403,6 +1404,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		if len(lines) == 0 && s.config.LogSource == "file" {
 			if journalLines, jErr := s.readAllJournalLogLines(r.Context()); jErr == nil {
 				lines = journalLines
+				sanitizeLogLines(lines)
 				if censoredTail {
 					for i, ln := range lines {
 						lines[i] = core.CensorLine(ln)
@@ -1476,6 +1478,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	if postFilterSearch {
 		lines, err = s.readAllSearchableLogLines(r.Context())
 		if err == nil {
+			sanitizeLogLines(lines)
 			if censoredSearch {
 				for i, ln := range lines {
 					lines[i] = core.CensorLine(ln)
@@ -1485,6 +1488,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 			if len(lines) == 0 && s.config.LogSource == "file" {
 				if journalLines, jErr := s.readAllJournalLogLines(r.Context()); jErr == nil {
 					lines = journalLines
+					sanitizeLogLines(lines)
 					if censoredSearch {
 						for i, ln := range lines {
 							lines[i] = core.CensorLine(ln)
@@ -1526,6 +1530,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	sanitizeLogLines(lines)
 	start := (page - 1) * pageSize
 	end := start + pageSize
 	if start > len(lines) {
