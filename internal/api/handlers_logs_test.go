@@ -18,9 +18,14 @@ type logsExecutorStub struct {
 	journalLines []string
 }
 
-func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, _ int) ([]string, error) {
-	out := make([]string, len(s.journalLines))
-	copy(out, s.journalLines)
+func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, limit int) ([]string, error) {
+	if limit <= 0 || limit >= len(s.journalLines) {
+		out := make([]string, len(s.journalLines))
+		copy(out, s.journalLines)
+		return out, nil
+	}
+	out := make([]string, limit)
+	copy(out, s.journalLines[len(s.journalLines)-limit:])
 	return out, nil
 }
 
@@ -407,6 +412,41 @@ func TestHandleGetLogs_UserQueryFollowsConnectionID(t *testing.T) {
 	if !containsInsensitive(body, userTaggedLogLine) {
 		t.Fatalf("expected tagged user line in response, got: %v", resp.Logs)
 	}
+	if !containsInsensitive(body, userOutboundLogLine) {
+		t.Fatalf("expected correlated outbound line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, otherUserTaggedLogLine) {
+		t.Fatalf("did not expect other user's line in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleGetLogs_UserQueryUsesFullHistoryNotJustTailWindow(t *testing.T) {
+	lines := []string{userTaggedLogLine}
+	for i := 0; i < 20; i++ {
+		lines = append(lines, textAndLogLine)
+	}
+	lines = append(lines, userOutboundLogLine, otherUserTaggedLogLine)
+
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?user=OGS&limit=20", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
 	if !containsInsensitive(body, userOutboundLogLine) {
 		t.Fatalf("expected correlated outbound line in response, got: %v", resp.Logs)
 	}
