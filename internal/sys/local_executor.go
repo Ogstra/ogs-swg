@@ -167,6 +167,24 @@ func (e *LocalExecutor) ReadJournal(_ context.Context, unit string, limit int) (
 	return journalRead(unit, limit, "")
 }
 
+func (e *LocalExecutor) ReadAllJournal(_ context.Context, unit string) ([]string, error) {
+	unitFull := unit
+	if !strings.Contains(unitFull, ".") {
+		unitFull += ".service"
+	}
+
+	cmd := exec.Command("journalctl", "-u", unitFull, "--no-pager", "--merge", "-o", "cat")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			return nil, fmt.Errorf("journalctl failed: %v", err)
+		}
+		return nil, fmt.Errorf("journalctl failed: %v: %s", err, msg)
+	}
+	return parseJournalOutput(out), nil
+}
+
 func (e *LocalExecutor) SearchJournal(_ context.Context, unit, query string, limit int) ([]string, error) {
 	return journalRead(unit, limit, query)
 }

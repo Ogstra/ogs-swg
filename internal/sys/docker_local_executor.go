@@ -143,6 +143,14 @@ func (e *DockerLocalExecutor) ReadJournal(ctx context.Context, unit string, limi
 	return parseJournalOutput(out), nil
 }
 
+func (e *DockerLocalExecutor) ReadAllJournal(ctx context.Context, unit string) ([]string, error) {
+	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "--no-pager", "--merge", "-o", "cat")
+	if err != nil {
+		return nil, analyzeJournalError(out, err)
+	}
+	return parseJournalOutput(out), nil
+}
+
 func (e *DockerLocalExecutor) SearchJournal(ctx context.Context, unit, query string, limit int) ([]string, error) {
 	// NOTE: --merge includes all rotated journal segments (system@*.journal).
 	// Without it, journalctl only scans the active file, missing older entries.
