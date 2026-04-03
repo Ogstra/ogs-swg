@@ -21,10 +21,7 @@ const parseGBInput = (value: string): number => {
     return isNaN(n) ? 0 : Math.round(n * 1024 ** 3)
 }
 
-const toBase64Url = (value: string): string => btoa(value)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '')
+const toBase64 = (value: string): string => btoa(value)
 
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
@@ -157,13 +154,11 @@ export default function Subscriptions() {
     }
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
-    const buildShadowrocketLink = (token: string, name: string) => (
-        `shadowrocket://add/sub://${toBase64Url(subLink(token))}?remark=${encodeURIComponent(name)}`
-    )
-    const buildV2RayTunLink = (token: string) => `v2raytun://import/${encodeURIComponent(subLink(token))}`
+    const buildShadowrocketLink = (token: string) => `sub://${toBase64(subLink(token))}#Subscription`
+    const buildV2RayTunLink = (token: string) => `v2raytun://import/${subLink(token)}`
     const getSubscriptionLinkVariants = (sub: Subscription) => [
         { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-        { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
+        { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token) },
         { id: 'v2raytun', label: 'V2RayTun', link: buildV2RayTunLink(sub.token) },
     ]
 
