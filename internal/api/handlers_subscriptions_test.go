@@ -133,6 +133,37 @@ func TestSubscriptionUpdateRefreshPolicyPreservesExistingValuesWhenOmitted(t *te
 	}
 }
 
+func TestSubscriptionUpdateRefreshPolicyClearsIntervalWhenExplicitNull(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+
+	initialInterval := int64(8)
+	initialUpdateAlways := true
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:                       "Clearable Bundle",
+		QuotaLimit:                 0,
+		QuotaPeriod:                "monthly",
+		Users:                      []string{"alice"},
+		ProfileUpdateIntervalHours: &initialInterval,
+		UpdateAlways:               &initialUpdateAlways,
+	})
+
+	updateSubscriptionForTestBody(t, server, created.ID, map[string]any{
+		"name":                          "Clearable Bundle",
+		"quota_limit":                   int64(0),
+		"quota_period":                  "monthly",
+		"users":                         []string{"alice"},
+		"profile_update_interval_hours": nil,
+	})
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if got.ProfileUpdateIntervalHours != nil {
+		t.Fatalf("after explicit null profile_update_interval_hours=%v want nil", *got.ProfileUpdateIntervalHours)
+	}
+	if got.UpdateAlways != initialUpdateAlways {
+		t.Fatalf("after explicit null update_always=%v want %v", got.UpdateAlways, initialUpdateAlways)
+	}
+}
+
 func createSubscriptionForTest(t *testing.T, server *Server, body subscriptionMutationRequest) subscriptionCreateResponse {
 	t.Helper()
 
@@ -173,6 +204,11 @@ func getSubscriptionForTest(t *testing.T, server *Server, id int64) subscription
 }
 
 func updateSubscriptionForTest(t *testing.T, server *Server, id int64, body subscriptionMutationRequest) {
+	t.Helper()
+	updateSubscriptionForTestBody(t, server, id, body)
+}
+
+func updateSubscriptionForTestBody(t *testing.T, server *Server, id int64, body any) {
 	t.Helper()
 
 	rec := httptest.NewRecorder()
