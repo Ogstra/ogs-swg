@@ -71,12 +71,16 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
         >
             <div className="flex flex-col items-center space-y-4">
                 {variants.length > 1 && (
-                    <div className="grid w-full grid-cols-3 gap-2">
+                    <div
+                        className="grid w-full gap-2"
+                        style={{ gridTemplateColumns: `repeat(${variants.length}, minmax(0, 1fr))` }}
+                    >
                         {variants.map(variant => (
                             <Button
                                 key={variant.id}
                                 size="sm"
                                 variant={selectedVariant?.id === variant.id ? 'primary' : 'secondary'}
+                                className="w-full"
                                 onClick={() => setSelectedVariantId(variant.id)}
                             >
                                 {variant.label}
