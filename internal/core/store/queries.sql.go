@@ -194,20 +194,38 @@ func (q *Queries) CreatePanelUser(ctx context.Context, arg CreatePanelUserParams
 }
 
 const createSubscription = `-- name: CreateSubscription :one
-INSERT INTO subscriptions (token, name, quota_limit, quota_period, reset_day) VALUES (?, ?, ?, ?, ?) RETURNING id
+INSERT INTO subscriptions (
+	token,
+	name,
+	quota_limit,
+	quota_period,
+	reset_day,
+	profile_update_interval_hours,
+	update_always
+) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
 `
 
 type CreateSubscriptionParams struct {
-	Token       string `json:"token"`
-	Name        string `json:"name"`
-	QuotaLimit  int64  `json:"quota_limit"`
-	QuotaPeriod string `json:"quota_period"`
-	ResetDay    int64  `json:"reset_day"`
+	Token                      string         `json:"token"`
+	Name                       string         `json:"name"`
+	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
+	QuotaPeriod                sql.NullString `json:"quota_period"`
+	ResetDay                   sql.NullInt64  `json:"reset_day"`
+	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
+	UpdateAlways               int64          `json:"update_always"`
 }
 
 // Subscriptions Queries --
 func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, createSubscription, arg.Token, arg.Name, arg.QuotaLimit, arg.QuotaPeriod, arg.ResetDay)
+	row := q.db.QueryRowContext(ctx, createSubscription,
+		arg.Token,
+		arg.Name,
+		arg.QuotaLimit,
+		arg.QuotaPeriod,
+		arg.ResetDay,
+		arg.ProfileUpdateIntervalHours,
+		arg.UpdateAlways,
+	)
 	var id int64
 	err := row.Scan(&id)
 	return id, err
@@ -470,7 +488,19 @@ func (q *Queries) GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, 
 }
 
 const getAllSubscriptions = `-- name: GetAllSubscriptions :many
-SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions ORDER BY created_at DESC
+SELECT
+	id,
+	token,
+	name,
+	quota_limit,
+	quota_period,
+	reset_day,
+	profile_update_interval_hours,
+	update_always,
+	created_at,
+	updated_at
+FROM subscriptions
+ORDER BY created_at DESC
 `
 
 func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
@@ -489,6 +519,8 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 			&i.QuotaLimit,
 			&i.QuotaPeriod,
 			&i.ResetDay,
+			&i.ProfileUpdateIntervalHours,
+			&i.UpdateAlways,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -888,7 +920,19 @@ func (q *Queries) GetSamplesForUser(ctx context.Context, arg GetSamplesForUserPa
 }
 
 const getSubscriptionByID = `-- name: GetSubscriptionByID :one
-SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE id = ?
+SELECT
+	id,
+	token,
+	name,
+	quota_limit,
+	quota_period,
+	reset_day,
+	profile_update_interval_hours,
+	update_always,
+	created_at,
+	updated_at
+FROM subscriptions
+WHERE id = ?
 `
 
 func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error) {
@@ -901,6 +945,8 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 		&i.QuotaLimit,
 		&i.QuotaPeriod,
 		&i.ResetDay,
+		&i.ProfileUpdateIntervalHours,
+		&i.UpdateAlways,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -908,7 +954,19 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 }
 
 const getSubscriptionByToken = `-- name: GetSubscriptionByToken :one
-SELECT id, token, name, quota_limit, quota_period, reset_day, created_at, updated_at FROM subscriptions WHERE token = ?
+SELECT
+	id,
+	token,
+	name,
+	quota_limit,
+	quota_period,
+	reset_day,
+	profile_update_interval_hours,
+	update_always,
+	created_at,
+	updated_at
+FROM subscriptions
+WHERE token = ?
 `
 
 func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error) {
@@ -921,14 +979,46 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 		&i.QuotaLimit,
 		&i.QuotaPeriod,
 		&i.ResetDay,
+		&i.ProfileUpdateIntervalHours,
+		&i.UpdateAlways,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
+const getSubscriptionUsageInRange = `-- name: GetSubscriptionUsageInRange :one
+SELECT COALESCE(SUM(s.uplink + s.downlink), 0) as total
+FROM samples s
+INNER JOIN subscription_users su ON su.user_name = s.user
+WHERE su.sub_id = ? AND s.ts >= ? AND s.ts < ?
+`
+
+type GetSubscriptionUsageInRangeParams struct {
+	SubID int64 `json:"sub_id"`
+	Ts    int64 `json:"ts"`
+	Ts2   int64 `json:"ts_2"`
+}
+
+func (q *Queries) GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getSubscriptionUsageInRange, arg.SubID, arg.Ts, arg.Ts2)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const getSubscriptionsForUser = `-- name: GetSubscriptionsForUser :many
-SELECT s.id, s.token, s.name, s.quota_limit, s.quota_period, s.reset_day, s.created_at, s.updated_at
+SELECT
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	s.created_at,
+	s.updated_at
 FROM subscriptions s
 INNER JOIN subscription_users su ON su.sub_id = s.id
 WHERE su.user_name = ?
@@ -950,6 +1040,8 @@ func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) 
 			&i.QuotaLimit,
 			&i.QuotaPeriod,
 			&i.ResetDay,
+			&i.ProfileUpdateIntervalHours,
+			&i.UpdateAlways,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -964,26 +1056,6 @@ func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) 
 		return nil, err
 	}
 	return items, nil
-}
-
-const getSubscriptionUsageInRange = `-- name: GetSubscriptionUsageInRange :one
-SELECT COALESCE(SUM(s.uplink + s.downlink), 0) as total
-FROM samples s
-INNER JOIN subscription_users su ON su.user_name = s.user
-WHERE su.sub_id = ? AND s.ts >= ? AND s.ts < ?
-`
-
-type GetSubscriptionUsageInRangeParams struct {
-	SubID int64 `json:"sub_id"`
-	Ts    int64 `json:"ts"`
-	Ts2   int64 `json:"ts_2"`
-}
-
-func (q *Queries) GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getSubscriptionUsageInRange, arg.SubID, arg.Ts, arg.Ts2)
-	var total int64
-	err := row.Scan(&total)
-	return total, err
 }
 
 const getTrafficPerUser = `-- name: GetTrafficPerUser :many
@@ -1503,19 +1575,38 @@ func (q *Queries) UpdatePanelUsername(ctx context.Context, arg UpdatePanelUserna
 }
 
 const updateSubscription = `-- name: UpdateSubscription :exec
-UPDATE subscriptions SET name = ?, quota_limit = ?, quota_period = ?, reset_day = ?, updated_at = strftime('%s','now') WHERE id = ?
+UPDATE subscriptions
+SET
+	name = ?,
+	quota_limit = ?,
+	quota_period = ?,
+	reset_day = ?,
+	profile_update_interval_hours = ?,
+	update_always = ?,
+	updated_at = strftime('%s','now')
+WHERE id = ?
 `
 
 type UpdateSubscriptionParams struct {
-	Name        string `json:"name"`
-	QuotaLimit  int64  `json:"quota_limit"`
-	QuotaPeriod string `json:"quota_period"`
-	ResetDay    int64  `json:"reset_day"`
-	ID          int64  `json:"id"`
+	Name                       string         `json:"name"`
+	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
+	QuotaPeriod                sql.NullString `json:"quota_period"`
+	ResetDay                   sql.NullInt64  `json:"reset_day"`
+	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
+	UpdateAlways               int64          `json:"update_always"`
+	ID                         int64          `json:"id"`
 }
 
 func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error {
-	_, err := q.db.ExecContext(ctx, updateSubscription, arg.Name, arg.QuotaLimit, arg.QuotaPeriod, arg.ResetDay, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateSubscription,
+		arg.Name,
+		arg.QuotaLimit,
+		arg.QuotaPeriod,
+		arg.ResetDay,
+		arg.ProfileUpdateIntervalHours,
+		arg.UpdateAlways,
+		arg.ID,
+	)
 	return err
 }
 
