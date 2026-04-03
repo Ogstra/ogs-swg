@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
@@ -81,9 +82,9 @@ func TestHandlePublicSubscription_SetsProfileTitleAndKeepsItOnCachedResponses(t 
 	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
 		Token:       "sub-token",
 		Name:        "Alpha Bundle",
-		QuotaLimit:  0,
-		QuotaPeriod: "monthly",
-		ResetDay:    1,
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("CreateSubscription: %v", err)
@@ -178,9 +179,9 @@ func TestHandlePublicSubscription_UsesSingleCanonicalInboundForLegacyUsers(t *te
 	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
 		Token:       "legacy-sub-token",
 		Name:        "Legacy Bundle",
-		QuotaLimit:  0,
-		QuotaPeriod: "monthly",
-		ResetDay:    1,
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("CreateSubscription: %v", err)
@@ -223,9 +224,9 @@ func TestHandlePublicSubscription_SetsQuotaResetExpireForZeroUsage(t *testing.T)
 	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
 		Token:       "quota-token",
 		Name:        "Quota Bundle",
-		QuotaLimit:  10 * 1024 * 1024 * 1024,
-		QuotaPeriod: "monthly",
-		ResetDay:    1,
+		QuotaLimit:  sql.NullInt64{Int64: 10 * 1024 * 1024 * 1024, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
 	})
 	if err != nil {
 		t.Fatalf("CreateSubscription: %v", err)
