@@ -267,6 +267,7 @@ export default function Subscriptions() {
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
     const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
+    // Product rules currently support only Direct and Shadowrocket in this modal.
     const getSubscriptionLinkVariants = (sub: Subscription) => [
         { id: 'direct', label: 'Direct', link: subLink(sub.token) },
         { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
