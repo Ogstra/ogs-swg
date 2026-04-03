@@ -12,11 +12,13 @@ import (
 )
 
 type cachedSub struct {
-	Body       []byte
-	HeaderName string
-	HeaderUp   int64
-	HeaderDown int64
-	HeaderTot  int64
+	Body                  []byte
+	HeaderName            string
+	HeaderUp              int64
+	HeaderDown            int64
+	HeaderTot             int64
+	HeaderProfileInterval *int64
+	HeaderUpdateAlways    bool
 }
 
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +31,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	cacheKey := "sub:" + token
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
 			return
 		}
 	}
@@ -165,18 +167,20 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	// Save to cache (TTL: 2 minutes to protect against flood, but fast enough for normal use)
 	c := cachedSub{
-		Body:       encoded,
-		HeaderName: sub.Name,
-		HeaderUp:   totalUp,
-		HeaderDown: totalDown,
-		HeaderTot:  totalLimit,
+		Body:                  encoded,
+		HeaderName:            sub.Name,
+		HeaderUp:              totalUp,
+		HeaderDown:            totalDown,
+		HeaderTot:             totalLimit,
+		HeaderProfileInterval: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
+		HeaderUpdateAlways:    int64ToBool(sub.UpdateAlways),
 	}
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
-	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64) {
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool) {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
 	parts = append(parts, fmt.Sprintf("download=%d", down))
@@ -184,6 +188,12 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 
 	if title := strings.TrimSpace(profileTitle); title != "" {
 		w.Header().Set("Profile-Title", title)
+	}
+	if profileUpdateInterval != nil {
+		w.Header().Set("profile-update-interval", strconv.FormatInt(*profileUpdateInterval, 10))
+	}
+	if updateAlways {
+		w.Header().Set("update-always", "true")
 	}
 	w.Header().Set("Subscription-Userinfo", strings.Join(parts, "; "))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
