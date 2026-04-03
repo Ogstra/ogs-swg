@@ -152,6 +152,7 @@ export interface Subscription {
     quota_period: string;
     used_bytes: number;
     users: string[];
+    expires_at?: number | null;
     profile_update_interval_hours?: number | null;
     update_always?: boolean;
     created_at: number;
@@ -163,6 +164,7 @@ export interface SubscriptionMutationRequest {
     quota_limit: number;
     quota_period: string;
     users: string[];
+    expires_at: number | null;
     profile_update_interval_hours: number | null;
     update_always: boolean;
 }
