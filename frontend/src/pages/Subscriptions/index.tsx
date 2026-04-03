@@ -154,12 +154,10 @@ export default function Subscriptions() {
     }
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
-    const buildShadowrocketLink = (token: string) => `sub://${toBase64(subLink(token))}#Subscription`
-    const buildV2RayTunLink = (token: string) => `v2raytun://import/${subLink(token)}`
+    const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
     const getSubscriptionLinkVariants = (sub: Subscription) => [
         { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-        { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token) },
-        { id: 'v2raytun', label: 'V2RayTun', link: buildV2RayTunLink(sub.token) },
+        { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
     ]
 
     return (
