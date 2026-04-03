@@ -3,9 +3,11 @@ package api
 import (
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -248,5 +250,110 @@ func TestHandlePublicSubscription_OmitsExpireWithoutExplicitExpiration(t *testin
 	}
 	if strings.Contains(userinfo, "expire=") {
 		t.Fatalf("Subscription-Userinfo=%q should omit expire without explicit expiration", userinfo)
+	}
+}
+
+func TestHandlePublicSubscription_EmitsRefreshPolicyHeaders(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	interval := int64(24)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:                      "refresh-token",
+		Name:                       "Refresh Bundle",
+		QuotaLimit:                 sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod:                sql.NullString{String: "monthly", Valid: true},
+		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
+		ProfileUpdateIntervalHours: sql.NullInt64{Int64: interval, Valid: true},
+		UpdateAlways:               1,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/refresh-token", nil)
+	req.SetPathValue("token", "refresh-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if got := rec.Header().Get("profile-update-interval"); got != "24" {
+		t.Fatalf("profile-update-interval=%q want %q", got, "24")
+	}
+	if got := rec.Header().Get("update-always"); got != "true" {
+		t.Fatalf("update-always=%q want %q", got, "true")
+	}
+}
+
+func TestHandlePublicSubscription_InvalidatesCachedRefreshPolicyAfterSubscriptionUpdate(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	initialInterval := int64(24)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:                      "cached-refresh-token",
+		Name:                       "Cached Refresh Bundle",
+		QuotaLimit:                 sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod:                sql.NullString{String: "monthly", Valid: true},
+		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
+		ProfileUpdateIntervalHours: sql.NullInt64{Int64: initialInterval, Valid: true},
+		UpdateAlways:               0,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/s/cached-refresh-token", nil)
+	firstReq.SetPathValue("token", "cached-refresh-token")
+	firstRec := httptest.NewRecorder()
+	server.handlePublicSubscription(firstRec, firstReq)
+
+	if got := firstRec.Header().Get("profile-update-interval"); got != "24" {
+		t.Fatalf("first profile-update-interval=%q want %q", got, "24")
+	}
+	if got := firstRec.Header().Get("update-always"); got != "" {
+		t.Fatalf("first update-always=%q want empty", got)
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"name":                          "Cached Refresh Bundle",
+		"quota_limit":                   int64(0),
+		"quota_period":                  "monthly",
+		"users":                         []string{"alice"},
+		"profile_update_interval_hours": int64(12),
+		"update_always":                 true,
+	})
+	if err != nil {
+		t.Fatalf("marshal update body: %v", err)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/subscriptions/"+strconv.FormatInt(subID, 10), strings.NewReader(string(body)))
+	updateReq.SetPathValue("id", strconv.FormatInt(subID, 10))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	server.handleUpdateSubscription(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%q", updateRec.Code, updateRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/s/cached-refresh-token", nil)
+	secondReq.SetPathValue("token", "cached-refresh-token")
+	secondRec := httptest.NewRecorder()
+	server.handlePublicSubscription(secondRec, secondReq)
+
+	if got := secondRec.Header().Get("profile-update-interval"); got != "12" {
+		t.Fatalf("second profile-update-interval=%q want %q", got, "12")
+	}
+	if got := secondRec.Header().Get("update-always"); got != "true" {
+		t.Fatalf("second update-always=%q want %q", got, "true")
 	}
 }
