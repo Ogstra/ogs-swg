@@ -26,16 +26,37 @@ const SUBSCRIPTION_DEFAULTS_STORAGE_KEY = 'subscription_create_defaults'
 const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
 
 type RefreshPolicyDraft = {
+    expiresAtEnabled: boolean
+    expiresAt: string
     intervalEnabled: boolean
     intervalHours: string
     updateAlways: boolean
 }
 
 const defaultRefreshPolicyDraft = (): RefreshPolicyDraft => ({
+    expiresAtEnabled: false,
+    expiresAt: '',
     intervalEnabled: false,
     intervalHours: DEFAULT_REFRESH_INTERVAL_HOURS,
     updateAlways: false,
 })
+
+const formatDateTimeLocalValue = (unixSeconds: number): string => {
+    const date = new Date(unixSeconds * 1000)
+    if (Number.isNaN(date.getTime())) return ''
+
+    const pad = (value: number) => String(value).padStart(2, '0')
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+const parseDateTimeLocalToUnix = (value: string): number | null => {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    const ms = new Date(trimmed).getTime()
+    if (!Number.isFinite(ms)) return null
+    return Math.floor(ms / 1000)
+}
 
 const parseIntervalHours = (value: string): number | null => {
     const trimmed = value.trim()
@@ -53,10 +74,13 @@ const loadSubscriptionDefaults = (): RefreshPolicyDraft => {
         const raw = window.localStorage.getItem(SUBSCRIPTION_DEFAULTS_STORAGE_KEY)
         if (!raw) return defaultRefreshPolicyDraft()
 
-        const parsed = JSON.parse(raw) as { profile_update_interval_hours?: unknown; update_always?: unknown }
+        const parsed = JSON.parse(raw) as { expires_at?: unknown; profile_update_interval_hours?: unknown; update_always?: unknown }
+        const hasExpiresAt = typeof parsed.expires_at === 'number' && Number.isFinite(parsed.expires_at) && parsed.expires_at > 0
         const hasInterval = typeof parsed.profile_update_interval_hours === 'number' && parsed.profile_update_interval_hours > 0
 
         return {
+            expiresAtEnabled: hasExpiresAt,
+            expiresAt: hasExpiresAt ? formatDateTimeLocalValue(parsed.expires_at as number) : '',
             intervalEnabled: hasInterval,
             intervalHours: hasInterval ? String(Math.trunc(parsed.profile_update_interval_hours as number)) : DEFAULT_REFRESH_INTERVAL_HOURS,
             updateAlways: parsed.update_always === true,
@@ -79,10 +103,14 @@ export default function Subscriptions() {
     const [nameInput, setNameInput] = useState('')
     const [quotaGB, setQuotaGB] = useState('0')
     const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+    const [expiresAtEnabled, setExpiresAtEnabled] = useState(false)
+    const [expiresAtInput, setExpiresAtInput] = useState('')
     const [profileUpdateIntervalEnabled, setProfileUpdateIntervalEnabled] = useState(false)
     const [profileUpdateIntervalHours, setProfileUpdateIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [updateAlways, setUpdateAlways] = useState(false)
     const [subscriptionDefaults, setSubscriptionDefaults] = useState<RefreshPolicyDraft>(() => loadSubscriptionDefaults())
+    const [defaultExpiresAtEnabled, setDefaultExpiresAtEnabled] = useState(false)
+    const [defaultExpiresAtInput, setDefaultExpiresAtInput] = useState('')
     const [defaultIntervalEnabled, setDefaultIntervalEnabled] = useState(false)
     const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
@@ -96,6 +124,8 @@ export default function Subscriptions() {
     const subDomain = domainQuery.data || window.location.host
 
     const applyRefreshPolicyDraft = (draft: RefreshPolicyDraft) => {
+        setExpiresAtEnabled(draft.expiresAtEnabled)
+        setExpiresAtInput(draft.expiresAt)
         setProfileUpdateIntervalEnabled(draft.intervalEnabled)
         setProfileUpdateIntervalHours(draft.intervalHours)
         setUpdateAlways(draft.updateAlways)
@@ -113,6 +143,8 @@ export default function Subscriptions() {
         setNameInput(sub.name)
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
         setSelectedUsers(sub.users || [])
+        setExpiresAtEnabled(sub.expires_at != null)
+        setExpiresAtInput(sub.expires_at != null ? formatDateTimeLocalValue(sub.expires_at) : '')
         setProfileUpdateIntervalEnabled(sub.profile_update_interval_hours != null)
         setProfileUpdateIntervalHours(
             sub.profile_update_interval_hours != null
@@ -124,6 +156,8 @@ export default function Subscriptions() {
     }
 
     const openDefaults = () => {
+        setDefaultExpiresAtEnabled(subscriptionDefaults.expiresAtEnabled)
+        setDefaultExpiresAtInput(subscriptionDefaults.expiresAt)
         setDefaultIntervalEnabled(subscriptionDefaults.intervalEnabled)
         setDefaultIntervalHours(subscriptionDefaults.intervalHours)
         setDefaultUpdateAlways(subscriptionDefaults.updateAlways)
@@ -133,8 +167,12 @@ export default function Subscriptions() {
     const handleSave = async () => {
         if (!nameInput.trim()) return toastError('Name is required')
         const quotaLimit = parseGBInput(quotaGB)
+        const expiresAt = expiresAtEnabled ? parseDateTimeLocalToUnix(expiresAtInput) : null
         const intervalHours = profileUpdateIntervalEnabled ? parseIntervalHours(profileUpdateIntervalHours) : null
 
+        if (expiresAtEnabled && expiresAt == null) {
+            return toastError('Expire must be a valid date and time')
+        }
         if (profileUpdateIntervalEnabled && intervalHours == null) {
             return toastError('Refresh interval must be a whole number greater than zero')
         }
@@ -144,6 +182,7 @@ export default function Subscriptions() {
             quota_limit: quotaLimit,
             quota_period: 'monthly' as const,
             users: selectedUsers,
+            expires_at: expiresAt,
             profile_update_interval_hours: intervalHours,
             update_always: updateAlways,
         }
@@ -164,12 +203,18 @@ export default function Subscriptions() {
     }
 
     const handleSaveDefaults = () => {
+        const expiresAt = defaultExpiresAtEnabled ? parseDateTimeLocalToUnix(defaultExpiresAtInput) : null
         const intervalHours = defaultIntervalEnabled ? parseIntervalHours(defaultIntervalHours) : null
+        if (defaultExpiresAtEnabled && expiresAt == null) {
+            return toastError('Default expire must be a valid date and time')
+        }
         if (defaultIntervalEnabled && intervalHours == null) {
             return toastError('Default refresh interval must be a whole number greater than zero')
         }
 
         const nextDefaults: RefreshPolicyDraft = {
+            expiresAtEnabled: defaultExpiresAtEnabled,
+            expiresAt: defaultExpiresAtEnabled && expiresAt != null ? formatDateTimeLocalValue(expiresAt) : '',
             intervalEnabled: defaultIntervalEnabled,
             intervalHours: defaultIntervalEnabled ? String(intervalHours) : DEFAULT_REFRESH_INTERVAL_HOURS,
             updateAlways: defaultUpdateAlways,
@@ -178,6 +223,7 @@ export default function Subscriptions() {
         window.localStorage.setItem(
             SUBSCRIPTION_DEFAULTS_STORAGE_KEY,
             JSON.stringify({
+                expires_at: expiresAt,
                 profile_update_interval_hours: intervalHours,
                 update_always: defaultUpdateAlways,
             })
@@ -273,6 +319,44 @@ export default function Subscriptions() {
         { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
     ]
 
+    const renderExpirationFields = (
+        expirationEnabled: boolean,
+        setExpirationEnabled: (value: boolean) => void,
+        expirationValue: string,
+        setExpirationValue: (value: string) => void,
+        helperText?: string
+    ) => (
+        <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div>
+                <h3 className="text-sm font-semibold text-white">Expiration</h3>
+                {helperText && <p className="mt-1 text-xs text-slate-400">{helperText}</p>}
+            </div>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={expirationEnabled}
+                    onChange={e => setExpirationEnabled(e.target.checked)}
+                    className="mt-1 shrink-0"
+                />
+                <div className="space-y-1">
+                    <div className="text-sm font-medium text-slate-200">Set explicit expire</div>
+                </div>
+            </label>
+
+            <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Expire At</label>
+                <input
+                    type="datetime-local"
+                    value={expirationValue}
+                    onChange={e => setExpirationValue(e.target.value)}
+                    disabled={!expirationEnabled}
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+            </div>
+        </div>
+    )
+
     const renderRefreshPolicyFields = (
         intervalEnabled: boolean,
         setIntervalEnabled: (value: boolean) => void,
@@ -280,39 +364,40 @@ export default function Subscriptions() {
         setIntervalHours: (value: string) => void,
         updateAlwaysValue: boolean,
         setUpdateAlwaysValue: (value: boolean) => void,
-        helperText: string
+        helperText?: string
     ) => (
         <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
             <div>
                 <h3 className="text-sm font-semibold text-white">Refresh Policy</h3>
-                <p className="mt-1 text-xs text-slate-400">{helperText}</p>
+                {helperText && <p className="mt-1 text-xs text-slate-400">{helperText}</p>}
             </div>
 
-            <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                    type="checkbox"
-                    checked={intervalEnabled}
-                    onChange={e => setIntervalEnabled(e.target.checked)}
-                    className="mt-1 shrink-0"
-                />
-                <div className="space-y-1">
-                    <div className="text-sm font-medium text-slate-200">Emit profile-update-interval</div>
-                    <div className="text-xs text-slate-500">Tell clients how many hours to wait before refreshing.</div>
-                </div>
-            </label>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                <label className="flex items-start gap-3 cursor-pointer rounded border border-slate-800 bg-slate-950 px-3 py-2.5 min-h-[42px]">
+                    <input
+                        type="checkbox"
+                        checked={intervalEnabled}
+                        onChange={e => setIntervalEnabled(e.target.checked)}
+                        className="mt-1 shrink-0"
+                    />
+                    <div className="space-y-1">
+                        <div className="text-sm font-medium text-slate-200">Emit profile-update-interval</div>
+                    </div>
+                </label>
 
-            <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1">Refresh Interval (hours)</label>
-                <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={intervalHours}
-                    onChange={e => setIntervalHours(e.target.value)}
-                    disabled={!intervalEnabled}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                    placeholder="24"
-                />
+                <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Refresh Interval (hours)</label>
+                    <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={intervalHours}
+                        onChange={e => setIntervalHours(e.target.value)}
+                        disabled={!intervalEnabled}
+                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder="24"
+                    />
+                </div>
             </div>
 
             <label className="flex items-start gap-3 cursor-pointer">
@@ -323,8 +408,7 @@ export default function Subscriptions() {
                     className="mt-1 shrink-0"
                 />
                 <div className="space-y-1">
-                    <div className="text-sm font-medium text-slate-200">Emit update-always</div>
-                    <div className="text-xs text-slate-500">Force clients to refresh whenever the user opens the subscription.</div>
+                    <div className="text-sm font-medium text-slate-200">update-always</div>
                 </div>
             </label>
         </div>
@@ -337,6 +421,7 @@ export default function Subscriptions() {
                     <ActionIconButton
                         onClick={openDefaults}
                         title="Subscription Defaults"
+                        className="h-9 w-9"
                         disabled={!canWriteUsers}
                     >
                         <Settings2 size={16} />
@@ -441,32 +526,39 @@ export default function Subscriptions() {
                 }
             >
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
-                        <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="" />
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
+                            <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">
+                                Quota (GB)
+                            </label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="0.5"
+                                value={quotaGB}
+                                onChange={e => setQuotaGB(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                placeholder="0 = unlimited"
+                            />
+                        </div>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">
-                            Quota Limit (GB)
-                        </label>
-                        <input
-                            type="number"
-                            min="0"
-                            step="0.5"
-                            value={quotaGB}
-                            onChange={e => setQuotaGB(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                            placeholder="0 = unlimited"
-                        />
-                    </div>
+                    {renderExpirationFields(
+                        expiresAtEnabled,
+                        setExpiresAtEnabled,
+                        expiresAtInput,
+                        setExpiresAtInput
+                    )}
                     {renderRefreshPolicyFields(
                         profileUpdateIntervalEnabled,
                         setProfileUpdateIntervalEnabled,
                         profileUpdateIntervalHours,
                         setProfileUpdateIntervalHours,
                         updateAlways,
-                        setUpdateAlways,
-                        'These values are sent by the subscription endpoint for this specific subscription.'
+                        setUpdateAlways
                     )}
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
@@ -495,17 +587,19 @@ export default function Subscriptions() {
                 }
             >
                 <div className="space-y-4">
-                    <p className="text-sm text-slate-400">
-                        These defaults only prefill the create modal. You can still override them on each subscription before saving.
-                    </p>
+                    {renderExpirationFields(
+                        defaultExpiresAtEnabled,
+                        setDefaultExpiresAtEnabled,
+                        defaultExpiresAtInput,
+                        setDefaultExpiresAtInput
+                    )}
                     {renderRefreshPolicyFields(
                         defaultIntervalEnabled,
                         setDefaultIntervalEnabled,
                         defaultIntervalHours,
                         setDefaultIntervalHours,
                         defaultUpdateAlways,
-                        setDefaultUpdateAlways,
-                        'Applies only to newly created subscriptions opened from this browser.'
+                        setDefaultUpdateAlways
                     )}
                 </div>
             </Modal>
