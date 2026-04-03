@@ -200,10 +200,9 @@ INSERT INTO subscriptions (
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
 `
 
 type CreateSubscriptionParams struct {
@@ -212,7 +211,6 @@ type CreateSubscriptionParams struct {
 	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
 	QuotaPeriod                sql.NullString `json:"quota_period"`
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
-	ExpiresAt                  sql.NullInt64  `json:"expires_at"`
 	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
 	UpdateAlways               int64          `json:"update_always"`
 }
@@ -225,7 +223,6 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		arg.QuotaLimit,
 		arg.QuotaPeriod,
 		arg.ResetDay,
-		arg.ExpiresAt,
 		arg.ProfileUpdateIntervalHours,
 		arg.UpdateAlways,
 	)
@@ -498,7 +495,6 @@ SELECT
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always,
 	created_at,
@@ -523,7 +519,6 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 			&i.QuotaLimit,
 			&i.QuotaPeriod,
 			&i.ResetDay,
-			&i.ExpiresAt,
 			&i.ProfileUpdateIntervalHours,
 			&i.UpdateAlways,
 			&i.CreatedAt,
@@ -932,7 +927,6 @@ SELECT
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always,
 	created_at,
@@ -951,7 +945,6 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 		&i.QuotaLimit,
 		&i.QuotaPeriod,
 		&i.ResetDay,
-		&i.ExpiresAt,
 		&i.ProfileUpdateIntervalHours,
 		&i.UpdateAlways,
 		&i.CreatedAt,
@@ -968,7 +961,6 @@ SELECT
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always,
 	created_at,
@@ -987,7 +979,6 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 		&i.QuotaLimit,
 		&i.QuotaPeriod,
 		&i.ResetDay,
-		&i.ExpiresAt,
 		&i.ProfileUpdateIntervalHours,
 		&i.UpdateAlways,
 		&i.CreatedAt,
@@ -1024,7 +1015,6 @@ SELECT
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
-	s.expires_at,
 	s.profile_update_interval_hours,
 	s.update_always,
 	s.created_at,
@@ -1050,7 +1040,6 @@ func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) 
 			&i.QuotaLimit,
 			&i.QuotaPeriod,
 			&i.ResetDay,
-			&i.ExpiresAt,
 			&i.ProfileUpdateIntervalHours,
 			&i.UpdateAlways,
 			&i.CreatedAt,
@@ -1592,7 +1581,6 @@ SET
 	quota_limit = ?,
 	quota_period = ?,
 	reset_day = ?,
-	expires_at = ?,
 	profile_update_interval_hours = ?,
 	update_always = ?,
 	updated_at = strftime('%s','now')
@@ -1604,7 +1592,6 @@ type UpdateSubscriptionParams struct {
 	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
 	QuotaPeriod                sql.NullString `json:"quota_period"`
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
-	ExpiresAt                  sql.NullInt64  `json:"expires_at"`
 	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
 	UpdateAlways               int64          `json:"update_always"`
 	ID                         int64          `json:"id"`
@@ -1616,7 +1603,6 @@ func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscription
 		arg.QuotaLimit,
 		arg.QuotaPeriod,
 		arg.ResetDay,
-		arg.ExpiresAt,
 		arg.ProfileUpdateIntervalHours,
 		arg.UpdateAlways,
 		arg.ID,

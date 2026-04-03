@@ -17,7 +17,6 @@ type cachedSub struct {
 	HeaderUp   int64
 	HeaderDown int64
 	HeaderTot  int64
-	HeaderExp  int64
 }
 
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +29,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	cacheKey := "sub:" + token
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExp)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot)
 			return
 		}
 	}
@@ -171,22 +170,17 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		HeaderUp:   totalUp,
 		HeaderDown: totalDown,
 		HeaderTot:  totalLimit,
-		HeaderExp:  nullableInt64Value(sub.ExpiresAt),
 	}
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
-	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExp)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot)
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot, exp int64) {
-	// Subscription-Userinfo: upload=93568; download=2960655; total=10737418240; expire=1708848000
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64) {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
 	parts = append(parts, fmt.Sprintf("download=%d", down))
 	parts = append(parts, fmt.Sprintf("total=%d", tot))
-	if exp > 0 {
-		parts = append(parts, fmt.Sprintf("expire=%d", exp))
-	}
 
 	if title := strings.TrimSpace(profileTitle); title != "" {
 		w.Header().Set("Profile-Title", title)
