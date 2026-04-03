@@ -256,7 +256,7 @@ export default function LogViewer() {
                                     setQuery(e.target.value)
                                     setAutoScroll(false)
                                 }}
-                                placeholder="Live tail: text local, [user], AND, OR..."
+                                placeholder="text, [user], AND, OR..."
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600"
                             />
                         </div>
@@ -283,7 +283,7 @@ export default function LogViewer() {
                                     setSearchQuery(e.target.value)
                                 }}
                                 onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                                placeholder="History: text, [user], AND, OR..."
+                                placeholder="text, [user], AND, OR..."
                                 className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors placeholder:text-slate-600"
                             />
                         </div>

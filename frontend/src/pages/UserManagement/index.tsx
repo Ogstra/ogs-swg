@@ -1193,7 +1193,6 @@ export default function UserManagement() {
                                 </div>
                             )}
                         </div>
-                        <p className="text-xs text-slate-500">Each user can belong to only one inbound.</p>
                         {isEditing && originalInboundTags.length > 1 && (
                             <p className="text-xs text-amber-400">Legacy multi-inbound assignment detected. Saving will keep only the selected inbound.</p>
                         )}
