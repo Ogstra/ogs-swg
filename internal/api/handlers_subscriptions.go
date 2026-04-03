@@ -70,12 +70,12 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 }
 
 type CreateSubscriptionRequest struct {
-	Name                       string  `json:"name"`
-	QuotaLimit                 int64   `json:"quota_limit"`
-	QuotaPeriod                string  `json:"quota_period"`
-	Users                      []string `json:"users"`
-	ProfileUpdateIntervalHours *int64  `json:"profile_update_interval_hours"`
-	UpdateAlways               *bool   `json:"update_always"`
+	Name                       string             `json:"name"`
+	QuotaLimit                 int64              `json:"quota_limit"`
+	QuotaPeriod                string             `json:"quota_period"`
+	Users                      []string           `json:"users"`
+	ProfileUpdateIntervalHours optionalInt64Field `json:"profile_update_interval_hours"`
+	UpdateAlways               *bool              `json:"update_always"`
 }
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +91,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	if req.QuotaPeriod == "" {
 		req.QuotaPeriod = "monthly"
 	}
-	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours); err != nil {
+	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -103,7 +103,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		QuotaLimit:                 sql.NullInt64{Int64: req.QuotaLimit, Valid: true},
 		QuotaPeriod:                sql.NullString{String: req.QuotaPeriod, Valid: true},
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
-		ProfileUpdateIntervalHours: nullableInt64(req.ProfileUpdateIntervalHours),
+		ProfileUpdateIntervalHours: nullableInt64(req.ProfileUpdateIntervalHours.Value),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, false),
 	})
 	if err != nil {
@@ -183,7 +183,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	if req.QuotaPeriod == "" {
 		req.QuotaPeriod = "monthly"
 	}
-	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours); err != nil {
+	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -230,6 +230,27 @@ func validateSubscriptionRefreshPolicy(interval *int64) error {
 	return nil
 }
 
+type optionalInt64Field struct {
+	Set   bool
+	Value *int64
+}
+
+func (f *optionalInt64Field) UnmarshalJSON(data []byte) error {
+	f.Set = true
+	if string(data) == "null" {
+		f.Value = nil
+		return nil
+	}
+
+	var value int64
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+
+	f.Value = &value
+	return nil
+}
+
 func nullableInt64(value *int64) sql.NullInt64 {
 	if value == nil {
 		return sql.NullInt64{}
@@ -237,11 +258,11 @@ func nullableInt64(value *int64) sql.NullInt64 {
 	return sql.NullInt64{Int64: *value, Valid: true}
 }
 
-func mergeNullableInt64(current sql.NullInt64, next *int64) sql.NullInt64 {
-	if next == nil {
+func mergeNullableInt64(current sql.NullInt64, next optionalInt64Field) sql.NullInt64 {
+	if !next.Set {
 		return current
 	}
-	return nullableInt64(next)
+	return nullableInt64(next.Value)
 }
 
 func nullableInt64Ptr(value sql.NullInt64) *int64 {

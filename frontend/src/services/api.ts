@@ -152,8 +152,19 @@ export interface Subscription {
     quota_period: string;
     used_bytes: number;
     users: string[];
+    profile_update_interval_hours?: number | null;
+    update_always?: boolean;
     created_at: number;
     updated_at: number;
+}
+
+export interface SubscriptionMutationRequest {
+    name: string;
+    quota_limit: number;
+    quota_period: string;
+    users: string[];
+    profile_update_interval_hours: number | null;
+    update_always: boolean;
 }
 
 
@@ -866,7 +877,7 @@ export const api = {
         await handleResponse(res, 'Failed to fetch subscriptions');
         return res.json();
     },
-    createSubscription: async (data: { name: string; quota_limit: number; quota_period: string; users: string[] }): Promise<{ id: number; token: string }> => {
+    createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> => {
         const res = await fetch('/api/subscriptions', {
             method: 'POST',
             headers: buildHeaders('application/json'),
@@ -875,7 +886,7 @@ export const api = {
         await handleResponse(res, 'Failed to create subscription');
         return res.json();
     },
-    updateSubscription: async (id: number, data: { name: string; quota_limit: number; quota_period: string; users: string[] }): Promise<void> => {
+    updateSubscription: async (id: number, data: SubscriptionMutationRequest): Promise<void> => {
         const res = await fetch(`/api/subscriptions/${id}`, {
             method: 'PUT',
             headers: buildHeaders('application/json'),

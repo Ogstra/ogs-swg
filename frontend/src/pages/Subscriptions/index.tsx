@@ -7,7 +7,7 @@ import { Button } from '../../components/ui/Button'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon } from 'lucide-react'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2 } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 
 const formatBytes = (bytes: number): string => {
@@ -22,6 +22,49 @@ const parseGBInput = (value: string): number => {
 }
 
 const toBase64 = (value: string): string => btoa(value)
+const SUBSCRIPTION_DEFAULTS_STORAGE_KEY = 'subscription_create_defaults'
+const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
+
+type RefreshPolicyDraft = {
+    intervalEnabled: boolean
+    intervalHours: string
+    updateAlways: boolean
+}
+
+const defaultRefreshPolicyDraft = (): RefreshPolicyDraft => ({
+    intervalEnabled: false,
+    intervalHours: DEFAULT_REFRESH_INTERVAL_HOURS,
+    updateAlways: false,
+})
+
+const parseIntervalHours = (value: string): number | null => {
+    const trimmed = value.trim()
+    if (!trimmed) return null
+
+    const parsed = Number.parseInt(trimmed, 10)
+    if (!Number.isFinite(parsed) || parsed <= 0) return null
+    return parsed
+}
+
+const loadSubscriptionDefaults = (): RefreshPolicyDraft => {
+    if (typeof window === 'undefined') return defaultRefreshPolicyDraft()
+
+    try {
+        const raw = window.localStorage.getItem(SUBSCRIPTION_DEFAULTS_STORAGE_KEY)
+        if (!raw) return defaultRefreshPolicyDraft()
+
+        const parsed = JSON.parse(raw) as { profile_update_interval_hours?: unknown; update_always?: unknown }
+        const hasInterval = typeof parsed.profile_update_interval_hours === 'number' && parsed.profile_update_interval_hours > 0
+
+        return {
+            intervalEnabled: hasInterval,
+            intervalHours: hasInterval ? String(Math.trunc(parsed.profile_update_interval_hours as number)) : DEFAULT_REFRESH_INTERVAL_HOURS,
+            updateAlways: parsed.update_always === true,
+        }
+    } catch {
+        return defaultRefreshPolicyDraft()
+    }
+}
 
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
@@ -31,10 +74,18 @@ export default function Subscriptions() {
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
     const [confirmRegenerate, setConfirmRegenerate] = useState<Subscription | null>(null)
+    const [defaultsModalOpen, setDefaultsModalOpen] = useState(false)
 
     const [nameInput, setNameInput] = useState('')
     const [quotaGB, setQuotaGB] = useState('0')
     const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+    const [profileUpdateIntervalEnabled, setProfileUpdateIntervalEnabled] = useState(false)
+    const [profileUpdateIntervalHours, setProfileUpdateIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
+    const [updateAlways, setUpdateAlways] = useState(false)
+    const [subscriptionDefaults, setSubscriptionDefaults] = useState<RefreshPolicyDraft>(() => loadSubscriptionDefaults())
+    const [defaultIntervalEnabled, setDefaultIntervalEnabled] = useState(false)
+    const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
+    const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
@@ -44,10 +95,17 @@ export default function Subscriptions() {
     const usersInfo = usersQuery.data || []
     const subDomain = domainQuery.data || window.location.host
 
+    const applyRefreshPolicyDraft = (draft: RefreshPolicyDraft) => {
+        setProfileUpdateIntervalEnabled(draft.intervalEnabled)
+        setProfileUpdateIntervalHours(draft.intervalHours)
+        setUpdateAlways(draft.updateAlways)
+    }
+
     const openCreate = () => {
         setNameInput('')
         setQuotaGB('0')
         setSelectedUsers([])
+        applyRefreshPolicyDraft(subscriptionDefaults)
         setModalState({ type: 'create' })
     }
 
@@ -55,18 +113,47 @@ export default function Subscriptions() {
         setNameInput(sub.name)
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
         setSelectedUsers(sub.users || [])
+        setProfileUpdateIntervalEnabled(sub.profile_update_interval_hours != null)
+        setProfileUpdateIntervalHours(
+            sub.profile_update_interval_hours != null
+                ? String(sub.profile_update_interval_hours)
+                : subscriptionDefaults.intervalHours
+        )
+        setUpdateAlways(sub.update_always === true)
         setModalState({ type: 'edit', data: sub })
+    }
+
+    const openDefaults = () => {
+        setDefaultIntervalEnabled(subscriptionDefaults.intervalEnabled)
+        setDefaultIntervalHours(subscriptionDefaults.intervalHours)
+        setDefaultUpdateAlways(subscriptionDefaults.updateAlways)
+        setDefaultsModalOpen(true)
     }
 
     const handleSave = async () => {
         if (!nameInput.trim()) return toastError('Name is required')
         const quotaLimit = parseGBInput(quotaGB)
+        const intervalHours = profileUpdateIntervalEnabled ? parseIntervalHours(profileUpdateIntervalHours) : null
+
+        if (profileUpdateIntervalEnabled && intervalHours == null) {
+            return toastError('Refresh interval must be a whole number greater than zero')
+        }
+
+        const payload = {
+            name: nameInput.trim(),
+            quota_limit: quotaLimit,
+            quota_period: 'monthly' as const,
+            users: selectedUsers,
+            profile_update_interval_hours: intervalHours,
+            update_always: updateAlways,
+        }
+
         try {
             if (modalState.type === 'create') {
-                await api.createSubscription({ name: nameInput.trim(), quota_limit: quotaLimit, quota_period: 'monthly', users: selectedUsers })
+                await api.createSubscription(payload)
                 success('Subscription created')
             } else if (modalState.type === 'edit' && modalState.data) {
-                await api.updateSubscription(modalState.data.id, { name: nameInput.trim(), quota_limit: quotaLimit, quota_period: 'monthly', users: selectedUsers })
+                await api.updateSubscription(modalState.data.id, payload)
                 success('Subscription updated')
             }
             setModalState({ type: null })
@@ -74,6 +161,31 @@ export default function Subscriptions() {
         } catch (err) {
             toastError('Failed to save subscription: ' + err)
         }
+    }
+
+    const handleSaveDefaults = () => {
+        const intervalHours = defaultIntervalEnabled ? parseIntervalHours(defaultIntervalHours) : null
+        if (defaultIntervalEnabled && intervalHours == null) {
+            return toastError('Default refresh interval must be a whole number greater than zero')
+        }
+
+        const nextDefaults: RefreshPolicyDraft = {
+            intervalEnabled: defaultIntervalEnabled,
+            intervalHours: defaultIntervalEnabled ? String(intervalHours) : DEFAULT_REFRESH_INTERVAL_HOURS,
+            updateAlways: defaultUpdateAlways,
+        }
+
+        window.localStorage.setItem(
+            SUBSCRIPTION_DEFAULTS_STORAGE_KEY,
+            JSON.stringify({
+                profile_update_interval_hours: intervalHours,
+                update_always: defaultUpdateAlways,
+            })
+        )
+
+        setSubscriptionDefaults(nextDefaults)
+        setDefaultsModalOpen(false)
+        success('Subscription defaults updated')
     }
 
     const handleDelete = async () => {
@@ -160,13 +272,78 @@ export default function Subscriptions() {
         { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
     ]
 
+    const renderRefreshPolicyFields = (
+        intervalEnabled: boolean,
+        setIntervalEnabled: (value: boolean) => void,
+        intervalHours: string,
+        setIntervalHours: (value: string) => void,
+        updateAlwaysValue: boolean,
+        setUpdateAlwaysValue: (value: boolean) => void,
+        helperText: string
+    ) => (
+        <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+            <div>
+                <h3 className="text-sm font-semibold text-white">Refresh Policy</h3>
+                <p className="mt-1 text-xs text-slate-400">{helperText}</p>
+            </div>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={intervalEnabled}
+                    onChange={e => setIntervalEnabled(e.target.checked)}
+                    className="mt-1 shrink-0"
+                />
+                <div className="space-y-1">
+                    <div className="text-sm font-medium text-slate-200">Emit profile-update-interval</div>
+                    <div className="text-xs text-slate-500">Tell clients how many hours to wait before refreshing.</div>
+                </div>
+            </label>
+
+            <div>
+                <label className="block text-sm font-medium text-slate-300 mb-1">Refresh Interval (hours)</label>
+                <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={intervalHours}
+                    onChange={e => setIntervalHours(e.target.value)}
+                    disabled={!intervalEnabled}
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="24"
+                />
+            </div>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={updateAlwaysValue}
+                    onChange={e => setUpdateAlwaysValue(e.target.checked)}
+                    className="mt-1 shrink-0"
+                />
+                <div className="space-y-1">
+                    <div className="text-sm font-medium text-slate-200">Emit update-always</div>
+                    <div className="text-xs text-slate-500">Force clients to refresh whenever the user opens the subscription.</div>
+                </div>
+            </label>
+        </div>
+    )
+
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
-
+                <div className="flex items-center justify-end gap-2">
+                    <ActionIconButton
+                        onClick={openDefaults}
+                        title="Subscription Defaults"
+                        disabled={!canWriteUsers}
+                    >
+                        <Settings2 size={16} />
+                    </ActionIconButton>
                 <Button onClick={openCreate} icon={<Plus size={16} />} variant="primary" disabled={!canWriteUsers}>
                     Create Subscription
                 </Button>
+                </div>
             </div>
 
             {/* Desktop table */}
@@ -281,6 +458,15 @@ export default function Subscriptions() {
                             placeholder="0 = unlimited"
                         />
                     </div>
+                    {renderRefreshPolicyFields(
+                        profileUpdateIntervalEnabled,
+                        setProfileUpdateIntervalEnabled,
+                        profileUpdateIntervalHours,
+                        setProfileUpdateIntervalHours,
+                        updateAlways,
+                        setUpdateAlways,
+                        'These values are sent by the subscription endpoint for this specific subscription.'
+                    )}
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
                         <div className="border border-slate-800 rounded bg-slate-950 max-h-[300px] overflow-y-auto">
@@ -293,6 +479,33 @@ export default function Subscriptions() {
                             {usersInfo.length === 0 && <div className="p-4 text-center text-slate-500 text-sm">No users available</div>}
                         </div>
                     </div>
+                </div>
+            </Modal>
+
+            <Modal
+                title="Subscription Defaults"
+                isOpen={defaultsModalOpen}
+                onClose={() => setDefaultsModalOpen(false)}
+                footer={
+                    <div className="flex gap-3 justify-end w-full">
+                        <Button variant="secondary" onClick={() => setDefaultsModalOpen(false)}>Cancel</Button>
+                        <Button variant="primary" onClick={handleSaveDefaults}>Save Defaults</Button>
+                    </div>
+                }
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-slate-400">
+                        These defaults only prefill the create modal. You can still override them on each subscription before saving.
+                    </p>
+                    {renderRefreshPolicyFields(
+                        defaultIntervalEnabled,
+                        setDefaultIntervalEnabled,
+                        defaultIntervalHours,
+                        setDefaultIntervalHours,
+                        defaultUpdateAlways,
+                        setDefaultUpdateAlways,
+                        'Applies only to newly created subscriptions opened from this browser.'
+                    )}
                 </div>
             </Modal>
 
