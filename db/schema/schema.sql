@@ -103,7 +103,6 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 	quota_limit INTEGER DEFAULT 0,
 	quota_period TEXT DEFAULT 'monthly',
 	reset_day INTEGER DEFAULT 1,
-	expires_at INTEGER DEFAULT NULL,
 	profile_update_interval_hours INTEGER DEFAULT NULL,
 	update_always INTEGER NOT NULL DEFAULT 0,
 	created_at INTEGER DEFAULT (strftime('%s','now')),

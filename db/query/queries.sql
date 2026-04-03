@@ -299,10 +299,9 @@ INSERT INTO subscriptions (
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id;
+) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id;
 
 -- name: GetSubscriptionByToken :one
 SELECT
@@ -312,7 +311,6 @@ SELECT
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always,
 	created_at,
@@ -328,7 +326,6 @@ SELECT
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always,
 	created_at,
@@ -344,7 +341,6 @@ SELECT
 	quota_limit,
 	quota_period,
 	reset_day,
-	expires_at,
 	profile_update_interval_hours,
 	update_always,
 	created_at,
@@ -359,7 +355,6 @@ SET
 	quota_limit = ?,
 	quota_period = ?,
 	reset_day = ?,
-	expires_at = ?,
 	profile_update_interval_hours = ?,
 	update_always = ?,
 	updated_at = strftime('%s','now')
@@ -385,7 +380,6 @@ SELECT
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
-	s.expires_at,
 	s.profile_update_interval_hours,
 	s.update_always,
 	s.created_at,
