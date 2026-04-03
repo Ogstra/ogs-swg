@@ -79,6 +79,7 @@ type Subscription struct {
 	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
 	QuotaPeriod                sql.NullString `json:"quota_period"`
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
+	ExpiresAt                  sql.NullInt64  `json:"expires_at"`
 	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
 	UpdateAlways               int64          `json:"update_always"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`

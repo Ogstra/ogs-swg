@@ -14,6 +14,7 @@ type subscriptionMutationRequest struct {
 	QuotaLimit                 int64    `json:"quota_limit"`
 	QuotaPeriod                string   `json:"quota_period"`
 	Users                      []string `json:"users"`
+	ExpiresAt                  *int64   `json:"expires_at,omitempty"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours,omitempty"`
 	UpdateAlways               *bool    `json:"update_always,omitempty"`
 }
@@ -31,6 +32,7 @@ type subscriptionDetailResponse struct {
 	QuotaPeriod                string   `json:"quota_period"`
 	UsedBytes                  int64    `json:"used_bytes"`
 	Users                      []string `json:"users"`
+	ExpiresAt                  *int64   `json:"expires_at"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
 	UpdateAlways               bool     `json:"update_always"`
 	CreatedAt                  int64    `json:"created_at"`
@@ -41,8 +43,10 @@ func TestSubscriptionCreateAndGetRefreshPolicyRoundTrip(t *testing.T) {
 	server, _ := newPublicSubscriptionTestServer(t)
 
 	interval := int64(6)
+	expiresAt := int64(1798790400)
 	updateAlways := true
 	createReq := subscriptionMutationRequest{
+		ExpiresAt:                  &expiresAt,
 		Name:                       "Alpha Bundle",
 		QuotaLimit:                 0,
 		QuotaPeriod:                "monthly",
@@ -56,6 +60,9 @@ func TestSubscriptionCreateAndGetRefreshPolicyRoundTrip(t *testing.T) {
 
 	if got.ProfileUpdateIntervalHours == nil {
 		t.Fatalf("profile_update_interval_hours=nil want %d", interval)
+	}
+	if got.ExpiresAt == nil || *got.ExpiresAt != expiresAt {
+		t.Fatalf("expires_at=%v want %d", got.ExpiresAt, expiresAt)
 	}
 	if *got.ProfileUpdateIntervalHours != interval {
 		t.Fatalf("profile_update_interval_hours=%d want %d", *got.ProfileUpdateIntervalHours, interval)
@@ -76,6 +83,9 @@ func TestSubscriptionCreateDefaultsRefreshPolicyWhenOmitted(t *testing.T) {
 	})
 	got := getSubscriptionForTest(t, server, created.ID)
 
+	if got.ExpiresAt != nil {
+		t.Fatalf("expires_at=%v want nil", *got.ExpiresAt)
+	}
 	if got.ProfileUpdateIntervalHours != nil {
 		t.Fatalf("profile_update_interval_hours=%v want nil", *got.ProfileUpdateIntervalHours)
 	}
@@ -88,8 +98,10 @@ func TestSubscriptionUpdateRefreshPolicyPreservesExistingValuesWhenOmitted(t *te
 	server, _ := newPublicSubscriptionTestServer(t)
 
 	initialInterval := int64(6)
+	initialExpiresAt := int64(1798790400)
 	initialUpdateAlways := true
 	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		ExpiresAt:                  &initialExpiresAt,
 		Name:                       "Mutable Bundle",
 		QuotaLimit:                 0,
 		QuotaPeriod:                "monthly",
@@ -98,9 +110,11 @@ func TestSubscriptionUpdateRefreshPolicyPreservesExistingValuesWhenOmitted(t *te
 		UpdateAlways:               &initialUpdateAlways,
 	})
 
+	updatedExpiresAt := int64(1801382400)
 	updatedInterval := int64(12)
 	updatedUpdateAlways := false
 	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		ExpiresAt:                  &updatedExpiresAt,
 		Name:                       "Mutable Bundle",
 		QuotaLimit:                 1024,
 		QuotaPeriod:                "monthly",
@@ -110,6 +124,9 @@ func TestSubscriptionUpdateRefreshPolicyPreservesExistingValuesWhenOmitted(t *te
 	})
 
 	got := getSubscriptionForTest(t, server, created.ID)
+	if got.ExpiresAt == nil || *got.ExpiresAt != updatedExpiresAt {
+		t.Fatalf("after explicit update expires_at=%v want %d", got.ExpiresAt, updatedExpiresAt)
+	}
 	if got.ProfileUpdateIntervalHours == nil || *got.ProfileUpdateIntervalHours != updatedInterval {
 		t.Fatalf("after explicit update profile_update_interval_hours=%v want %d", got.ProfileUpdateIntervalHours, updatedInterval)
 	}
@@ -125,6 +142,9 @@ func TestSubscriptionUpdateRefreshPolicyPreservesExistingValuesWhenOmitted(t *te
 	})
 
 	got = getSubscriptionForTest(t, server, created.ID)
+	if got.ExpiresAt == nil || *got.ExpiresAt != updatedExpiresAt {
+		t.Fatalf("after omitted update expires_at=%v want %d", got.ExpiresAt, updatedExpiresAt)
+	}
 	if got.ProfileUpdateIntervalHours == nil || *got.ProfileUpdateIntervalHours != updatedInterval {
 		t.Fatalf("after omitted update profile_update_interval_hours=%v want %d", got.ProfileUpdateIntervalHours, updatedInterval)
 	}
@@ -137,8 +157,10 @@ func TestSubscriptionUpdateRefreshPolicyClearsIntervalWhenExplicitNull(t *testin
 	server, _ := newPublicSubscriptionTestServer(t)
 
 	initialInterval := int64(8)
+	initialExpiresAt := int64(1798790400)
 	initialUpdateAlways := true
 	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		ExpiresAt:                  &initialExpiresAt,
 		Name:                       "Clearable Bundle",
 		QuotaLimit:                 0,
 		QuotaPeriod:                "monthly",
@@ -152,10 +174,14 @@ func TestSubscriptionUpdateRefreshPolicyClearsIntervalWhenExplicitNull(t *testin
 		"quota_limit":                   int64(0),
 		"quota_period":                  "monthly",
 		"users":                         []string{"alice"},
+		"expires_at":                    nil,
 		"profile_update_interval_hours": nil,
 	})
 
 	got := getSubscriptionForTest(t, server, created.ID)
+	if got.ExpiresAt != nil {
+		t.Fatalf("after explicit null expires_at=%v want nil", *got.ExpiresAt)
+	}
 	if got.ProfileUpdateIntervalHours != nil {
 		t.Fatalf("after explicit null profile_update_interval_hours=%v want nil", *got.ProfileUpdateIntervalHours)
 	}
