@@ -217,6 +217,7 @@ func (s *Store) initSchema() error {
 		quota_limit INTEGER DEFAULT 0,
 		quota_period TEXT DEFAULT 'monthly',
 		reset_day INTEGER DEFAULT 1,
+		expires_at INTEGER DEFAULT NULL,
 		profile_update_interval_hours INTEGER DEFAULT NULL,
 		update_always INTEGER NOT NULL DEFAULT 0,
 		created_at INTEGER DEFAULT (strftime('%s','now')),
@@ -257,6 +258,7 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_limit INTEGER DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_period TEXT DEFAULT 'monthly';")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN reset_day INTEGER DEFAULT 1;")
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN expires_at INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN profile_update_interval_hours INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN update_always INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("UPDATE subscriptions SET update_always = 0 WHERE update_always IS NULL;")

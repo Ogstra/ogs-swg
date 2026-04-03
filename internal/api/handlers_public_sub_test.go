@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -215,11 +214,8 @@ func TestHandlePublicSubscription_UsesSingleCanonicalInboundForLegacyUsers(t *te
 	}
 }
 
-func TestHandlePublicSubscription_SetsQuotaResetExpireForZeroUsage(t *testing.T) {
+func TestHandlePublicSubscription_OmitsExpireWithoutExplicitExpiration(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
-	server.now = func() time.Time {
-		return time.Date(2026, time.April, 2, 10, 30, 0, 0, time.UTC)
-	}
 
 	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
 		Token:       "quota-token",
@@ -251,9 +247,44 @@ func TestHandlePublicSubscription_SetsQuotaResetExpireForZeroUsage(t *testing.T)
 	if !strings.Contains(userinfo, "upload=0; download=0; total=10737418240") {
 		t.Fatalf("Subscription-Userinfo=%q", userinfo)
 	}
+	if strings.Contains(userinfo, "expire=") {
+		t.Fatalf("Subscription-Userinfo=%q should omit expire without explicit expiration", userinfo)
+	}
+}
 
-	wantExpire := strconv.FormatInt(nextQuotaResetUnix(server.now(), "monthly", 1), 10)
-	if !strings.Contains(userinfo, "expire="+wantExpire) {
-		t.Fatalf("Subscription-Userinfo=%q want expire=%s", userinfo, wantExpire)
+func TestHandlePublicSubscription_EmitsExplicitSubscriptionExpiration(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	expiresAt := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC).Unix()
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "expiring-token",
+		Name:        "Expiring Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 10 * 1024 * 1024 * 1024, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+		ExpiresAt:   sql.NullInt64{Int64: expiresAt, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/expiring-token", nil)
+	req.SetPathValue("token", "expiring-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	userinfo := rec.Header().Get("Subscription-Userinfo")
+	if !strings.Contains(userinfo, "expire=1782907200") {
+		t.Fatalf("Subscription-Userinfo=%q want explicit expire", userinfo)
 	}
 }

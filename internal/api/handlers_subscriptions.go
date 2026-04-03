@@ -27,6 +27,7 @@ type SubscriptionResponse struct {
 	QuotaPeriod                string   `json:"quota_period"`
 	UsedBytes                  int64    `json:"used_bytes"`
 	Users                      []string `json:"users"`
+	ExpiresAt                  *int64   `json:"expires_at"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
 	UpdateAlways               bool     `json:"update_always"`
 	CreatedAt                  int64    `json:"created_at"`
@@ -59,6 +60,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			QuotaPeriod:                sub.QuotaPeriod.String,
 			UsedBytes:                  usedBytes,
 			Users:                      users,
+			ExpiresAt:                  nullableInt64Ptr(sub.ExpiresAt),
 			ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 			UpdateAlways:               int64ToBool(sub.UpdateAlways),
 			CreatedAt:                  sub.CreatedAt.Int64,
@@ -74,6 +76,7 @@ type CreateSubscriptionRequest struct {
 	QuotaLimit                 int64              `json:"quota_limit"`
 	QuotaPeriod                string             `json:"quota_period"`
 	Users                      []string           `json:"users"`
+	ExpiresAt                  optionalInt64Field `json:"expires_at"`
 	ProfileUpdateIntervalHours optionalInt64Field `json:"profile_update_interval_hours"`
 	UpdateAlways               *bool              `json:"update_always"`
 }
@@ -91,6 +94,10 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	if req.QuotaPeriod == "" {
 		req.QuotaPeriod = "monthly"
 	}
+	if err := validateSubscriptionExpiration(req.ExpiresAt.Value); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -103,6 +110,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		QuotaLimit:                 sql.NullInt64{Int64: req.QuotaLimit, Valid: true},
 		QuotaPeriod:                sql.NullString{String: req.QuotaPeriod, Valid: true},
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
+		ExpiresAt:                  nullableInt64(req.ExpiresAt.Value),
 		ProfileUpdateIntervalHours: nullableInt64(req.ProfileUpdateIntervalHours.Value),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, false),
 	})
@@ -156,6 +164,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		QuotaPeriod:                sub.QuotaPeriod.String,
 		UsedBytes:                  usedBytes,
 		Users:                      users,
+		ExpiresAt:                  nullableInt64Ptr(sub.ExpiresAt),
 		ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 		UpdateAlways:               int64ToBool(sub.UpdateAlways),
 		CreatedAt:                  sub.CreatedAt.Int64,
@@ -183,6 +192,10 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	if req.QuotaPeriod == "" {
 		req.QuotaPeriod = "monthly"
 	}
+	if err := validateSubscriptionExpiration(req.ExpiresAt.Value); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -199,6 +212,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		QuotaLimit:                 sql.NullInt64{Int64: req.QuotaLimit, Valid: true},
 		QuotaPeriod:                sql.NullString{String: req.QuotaPeriod, Valid: true},
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
+		ExpiresAt:                  mergeNullableInt64(current.ExpiresAt, req.ExpiresAt),
 		ProfileUpdateIntervalHours: mergeNullableInt64(current.ProfileUpdateIntervalHours, req.ProfileUpdateIntervalHours),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, int64ToBool(current.UpdateAlways)),
 		ID:                         id,
@@ -226,6 +240,13 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 func validateSubscriptionRefreshPolicy(interval *int64) error {
 	if interval != nil && *interval <= 0 {
 		return httpError("profile_update_interval_hours must be greater than zero")
+	}
+	return nil
+}
+
+func validateSubscriptionExpiration(expire *int64) error {
+	if expire != nil && *expire <= 0 {
+		return httpError("expires_at must be greater than zero")
 	}
 	return nil
 }
@@ -271,6 +292,13 @@ func nullableInt64Ptr(value sql.NullInt64) *int64 {
 	}
 	v := value.Int64
 	return &v
+}
+
+func nullableInt64Value(value sql.NullInt64) int64 {
+	if !value.Valid {
+		return 0
+	}
+	return value.Int64
 }
 
 func boolPtrToInt64(value *bool, fallback bool) int64 {
