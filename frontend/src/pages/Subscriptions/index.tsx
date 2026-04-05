@@ -9,6 +9,7 @@ import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2 } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
+import { formatTimeAgo } from '../../utils/traffic'
 
 const formatBytes = (bytes: number): string => {
     if (!bytes || bytes === 0) return '0'
@@ -89,7 +90,11 @@ export default function Subscriptions() {
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
-    const domainQuery = useQuery({ queryKey: ['settings-subscription-domain'], queryFn: () => api.getSubscriptionDomain() })
+    const domainQuery = useQuery({
+        queryKey: ['settings-subscription-domain'],
+        queryFn: () => api.getSubscriptionDomain(),
+        enabled: canWriteUsers,
+    })
 
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
@@ -235,7 +240,10 @@ export default function Subscriptions() {
         }
     }
 
-    const openQr = (sub: Subscription) => setModalState({ type: 'qr', data: sub })
+    const openQr = (sub: Subscription) => {
+        if (!canWriteUsers || !sub.token) return
+        setModalState({ type: 'qr', data: sub })
+    }
     const toggleUser = (userName: string) => {
         setSelectedUsers(prev => prev.includes(userName) ? prev.filter(u => u !== userName) : [...prev, userName])
     }
@@ -265,13 +273,38 @@ export default function Subscriptions() {
         )
     }
 
+    const getLastRequestMeta = (sub: Subscription) => {
+        const lastRequestAt = sub.last_request_at || 0
+        if (!lastRequestAt) {
+            return {
+                dotClass: 'bg-slate-700',
+                textClass: 'text-slate-500',
+                text: 'Never',
+                isRecent: false,
+            }
+        }
+
+        const diff = Math.floor(Date.now() / 1000) - lastRequestAt
+        const isRecent = diff < 300
+        return {
+            dotClass: isRecent ? 'bg-emerald-500' : 'bg-slate-700',
+            textClass: isRecent ? 'text-emerald-400' : 'text-slate-500',
+            text: formatTimeAgo(lastRequestAt),
+            isRecent,
+        }
+    }
+
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
     const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
     // Product rules currently support only Direct and Shadowrocket in this modal.
-    const getSubscriptionLinkVariants = (sub: Subscription) => [
-        { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-        { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
-    ]
+    const getSubscriptionLinkVariants = (sub: Subscription) => (
+        sub.token
+            ? [
+                { id: 'direct', label: 'Direct', link: subLink(sub.token) },
+                { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
+            ]
+            : []
+    )
 
     const renderRefreshPolicyFields = (
         intervalEnabled: boolean,
@@ -355,7 +388,7 @@ export default function Subscriptions() {
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
                                 <th className="p-4 font-semibold">Name</th>
-                                <th className="p-4 font-semibold">Token</th>
+                                <th className="p-4 font-semibold">Last Request</th>
                                 <th className="p-4 font-semibold">Users</th>
                                 <th className="p-4 font-semibold">Quota</th>
                                 <th className="p-4 font-semibold text-right">Actions</th>
@@ -372,15 +405,29 @@ export default function Subscriptions() {
                             ) : subs.map(sub => (
                                 <tr key={sub.id} className="border-b last:border-0 border-slate-800/50 hover:bg-slate-800/20 transition-colors">
                                     <td className="p-4 text-white font-medium">{sub.name}</td>
-                                    <td className="p-4 text-slate-400 font-mono text-sm max-w-[200px] truncate" title={sub.token}>{sub.token}</td>
+                                    <td className="p-4">
+                                        {(() => {
+                                            const lastRequest = getLastRequestMeta(sub)
+                                            return (
+                                                <div className="flex items-center gap-2">
+                                                    <div className={`w-2 h-2 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                                    <span className={`text-xs ${lastRequest.textClass}`}>{lastRequest.text}</span>
+                                                </div>
+                                            )
+                                        })()}
+                                    </td>
                                     <td className="p-4 text-slate-400">{sub.users?.length || 0} users</td>
                                     <td className="p-4">{getQuotaPill(sub)}</td>
                                     <td className="p-4">
                                         <div className="flex items-center justify-end gap-2">
-                                            <ActionIconButton onClick={() => openQr(sub)} title="Show QR Code" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"><QrCodeIcon size={16} /></ActionIconButton>
-                                            <ActionIconButton onClick={() => copyLink(sub.token)} title="Copy Link" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"><Copy size={16} /></ActionIconButton>
                                             {canWriteUsers && (
                                                 <>
+                                                    {sub.token && (
+                                                        <>
+                                                            <ActionIconButton onClick={() => openQr(sub)} title="Show QR Code" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"><QrCodeIcon size={16} /></ActionIconButton>
+                                                            <ActionIconButton onClick={() => copyLink(sub.token!)} title="Copy Link" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"><Copy size={16} /></ActionIconButton>
+                                                        </>
+                                                    )}
                                                     <ActionIconButton onClick={() => openEdit(sub)} title="Edit"><Edit size={16} /></ActionIconButton>
                                                     <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10"><RefreshCw size={16} /></ActionIconButton>
                                                     <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" className="text-red-400 hover:text-red-300 hover:bg-red-500/10"><Trash2 size={16} /></ActionIconButton>
@@ -403,28 +450,55 @@ export default function Subscriptions() {
                         <p>No subscriptions found.</p>
                     </div>
                 ) : subs.map(sub => (
-                    <div key={sub.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                        <div className="flex items-start justify-between gap-2">
-                            <div>
-                                <p className="text-white font-semibold">{sub.name}</p>
-                                <p className="text-slate-500 text-xs font-mono truncate max-w-[200px]">{sub.token}</p>
-                            </div>
-                            <span className="text-slate-400 text-xs shrink-0">{sub.users?.length || 0} users</span>
-                        </div>
+                    <div key={sub.id} className="bg-slate-900 border border-slate-800 rounded-xl">
+                        {(() => {
+                            const lastRequest = getLastRequestMeta(sub)
+                            return (
+                                <div className="p-4 space-y-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0 flex-1 space-y-1">
+                                            <p className="text-white font-semibold truncate">{sub.name}</p>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-2 h-2 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                                <span className={`text-xs ${lastRequest.textClass}`}>
+                                                    {lastRequest.text}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {canWriteUsers && (
+                                                <>
+                                                    {sub.token && (
+                                                        <ActionIconButton onClick={() => openQr(sub)} title="QR Code">
+                                                            <QrCodeIcon size={16} />
+                                                        </ActionIconButton>
+                                                    )}
+                                                    <ActionIconButton onClick={() => openEdit(sub)} title="Edit" tone="primary">
+                                                        <Edit size={16} />
+                                                    </ActionIconButton>
+                                                    <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10">
+                                                        <RefreshCw size={16} />
+                                                    </ActionIconButton>
+                                                    <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" tone="danger">
+                                                        <Trash2 size={16} />
+                                                    </ActionIconButton>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
 
-                        <div>{getQuotaPill(sub)}</div>
+                                    <div className="text-xs">
+                                        <div className="text-slate-400">
+                                            {sub.users?.length || 0} users
+                                        </div>
+                                    </div>
 
-                        <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
-                            <ActionIconButton onClick={() => openQr(sub)} title="QR Code" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"><QrCodeIcon size={16} /></ActionIconButton>
-                            <ActionIconButton onClick={() => copyLink(sub.token)} title="Copy Link" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"><Copy size={16} /></ActionIconButton>
-                            {canWriteUsers && (
-                                <>
-                                    <ActionIconButton onClick={() => openEdit(sub)} title="Edit"><Edit size={16} /></ActionIconButton>
-                                    <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10"><RefreshCw size={16} /></ActionIconButton>
-                                    <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" className="text-red-400 hover:text-red-300 hover:bg-red-500/10"><Trash2 size={16} /></ActionIconButton>
-                                </>
-                            )}
-                        </div>
+                                    <div className="bg-slate-950/50 rounded-lg p-3">
+                                        {getQuotaPill(sub)}
+                                    </div>
+                                </div>
+                            )
+                        })()}
                     </div>
                 ))}
             </div>
@@ -513,7 +587,7 @@ export default function Subscriptions() {
                 isOpen={modalState.type === 'qr'}
                 onClose={() => setModalState({ type: null })}
                 title={`${modalState.data?.name || ''}`}
-                link={modalState.data ? subLink(modalState.data.token) : ''}
+                link={modalState.data?.token ? subLink(modalState.data.token) : ''}
                 linkVariants={modalState.data ? getSubscriptionLinkVariants(modalState.data) : undefined}
             />
 
