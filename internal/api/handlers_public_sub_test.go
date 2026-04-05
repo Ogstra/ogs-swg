@@ -421,6 +421,55 @@ func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T)
 	}
 }
 
+func TestHandleSubscriptionRequestHistory_PrefersPublicForwardedIPFromTrustedProxy(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "history-proxy-token",
+		Name:        "History Proxy Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/history-proxy-token", nil)
+	req.SetPathValue("token", "history-proxy-token")
+	req.RemoteAddr = "172.18.0.3:8080"
+	req.Header.Set("X-Real-IP", "172.18.0.3")
+	req.Header.Set("X-Forwarded-For", "198.51.100.143, 172.18.0.3")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscription status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/subscription-requests/history?limit=5", nil)
+	historyReq = withSettingsPerms(historyReq, &core.PanelUserPermissions{CanReadSettings: true, CanReadLogs: true})
+	historyRec := httptest.NewRecorder()
+	server.handleSubscriptionRequestHistory(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%q", historyRec.Code, historyRec.Body.String())
+	}
+
+	var got []store.GetSubscriptionRequestHistoryRow
+	decodeJSONResponse(t, historyRec, &got)
+	if len(got) == 0 {
+		t.Fatalf("history empty")
+	}
+	if got[0].RequestIP != "198.51.100.143" {
+		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "198.51.100.143")
+	}
+}
+
 func TestHandleSubscriptionRequestHistory_CensorsSensitiveFieldsForRestrictedCallers(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
 

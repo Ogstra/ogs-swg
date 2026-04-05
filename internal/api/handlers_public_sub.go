@@ -200,6 +200,9 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 
 func resolveSubscriptionRequestIP(r *http.Request) string {
 	if isTrustedProxy(r.RemoteAddr) {
+		if ip := firstPublicForwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
+			return ip
+		}
 		if ip := firstHeaderToken(r.Header.Get("X-Real-IP")); ip != "" {
 			return stripPort(ip)
 		}
@@ -212,6 +215,23 @@ func resolveSubscriptionRequestIP(r *http.Request) string {
 		return host
 	}
 	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func firstPublicForwardedIP(value string) string {
+	for _, part := range strings.Split(value, ",") {
+		candidate := stripPort(strings.TrimSpace(part))
+		if candidate == "" {
+			continue
+		}
+		ip := net.ParseIP(candidate)
+		if ip == nil {
+			continue
+		}
+		if !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func servedFromCacheToInt64(v bool) int64 {
