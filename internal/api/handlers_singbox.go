@@ -419,8 +419,20 @@ func isTrustedProxy(remoteAddr string) bool {
 }
 
 func stripPort(host string) string {
-	if strings.Contains(host, ":") {
-		return strings.Split(host, ":")[0]
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if parsedHost, parsedPort, err := net.SplitHostPort(host); err == nil && parsedPort != "" {
+		return parsedHost
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	if strings.Count(host, ":") == 1 {
+		if rawHost, _, ok := strings.Cut(host, ":"); ok {
+			return rawHost
+		}
 	}
 	return host
 }
