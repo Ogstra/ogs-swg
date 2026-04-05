@@ -234,6 +234,8 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS subscription_requests (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		sub_id INTEGER NOT NULL,
+		user_name TEXT NOT NULL DEFAULT '',
+		request_ip TEXT NOT NULL DEFAULT '',
 		requested_at INTEGER NOT NULL,
 		served_from_cache INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
@@ -271,6 +273,8 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN profile_update_interval_hours INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN update_always INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("UPDATE subscriptions SET update_always = 0 WHERE update_always IS NULL;")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN user_name TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_ip TEXT NOT NULL DEFAULT '';")
 	return nil
 }
 
@@ -1032,7 +1036,8 @@ func (s *Store) CountSamples() (int64, error) {
 	c2, _ := s.Queries.CountWGSamples(context.Background())
 	c3, _ := s.Queries.CountDailyUsage(context.Background())
 	c4, _ := s.Queries.CountWGDailyUsage(context.Background())
-	return c1 + c2 + c3 + c4, nil
+	c5, _ := s.Queries.CountSubscriptionRequests(context.Background())
+	return c1 + c2 + c3 + c4 + c5, nil
 }
 
 type SamplerRun struct {

@@ -87,10 +87,12 @@ type Subscription struct {
 }
 
 type SubscriptionRequest struct {
-	ID              int64 `json:"id"`
-	SubID           int64 `json:"sub_id"`
-	RequestedAt     int64 `json:"requested_at"`
-	ServedFromCache int64 `json:"served_from_cache"`
+	ID              int64  `json:"id"`
+	SubID           int64  `json:"sub_id"`
+	UserName        string `json:"user_name"`
+	RequestIP       string `json:"request_ip"`
+	RequestedAt     int64  `json:"requested_at"`
+	ServedFromCache int64  `json:"served_from_cache"`
 }
 
 type SubscriptionUser struct {

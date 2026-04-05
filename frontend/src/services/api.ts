@@ -97,6 +97,24 @@ export interface DashboardConsumerChartData {
     chart_data: UnifiedChartPoint[];
 }
 
+export interface SamplerHistoryEntry {
+    ts: number;
+    duration_ms: number;
+    inserted: number;
+    error: string;
+    source: string;
+}
+
+export interface SubscriptionRequestHistoryEntry {
+    id: number;
+    sub_id: number;
+    name: string;
+    user_name: string;
+    request_ip: string;
+    requested_at: number;
+    served_from_cache: number;
+}
+
 export interface CreateWireGuardInterfaceRequest {
     name: string;
     subnet: string;
@@ -757,10 +775,16 @@ export const api = {
         });
         await handleResponse(res, 'Failed to run sampler');
     },
-    getSamplerHistory: async (limit?: number): Promise<any[]> => {
+    getSamplerHistory: async (limit?: number): Promise<SamplerHistoryEntry[]> => {
         const url = limit ? `/api/sampler/history?limit=${limit}` : '/api/sampler/history';
         const res = await fetch(url, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch sampler history');
+        return res.json();
+    },
+    getSubscriptionRequestHistory: async (limit?: number): Promise<SubscriptionRequestHistoryEntry[]> => {
+        const url = limit ? `/api/subscription-requests/history?limit=${limit}` : '/api/subscription-requests/history';
+        const res = await fetch(url, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription request history');
         return res.json();
     },
     pruneNow: async (): Promise<{ deleted: number; cutoff: number }> => {

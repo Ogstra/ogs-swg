@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -14,6 +15,10 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/core/store"
 )
+
+func withSettingsPerms(r *http.Request, perms *core.PanelUserPermissions) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), permissionsContextKey, perms))
+}
 
 func newPublicSubscriptionTestServer(t *testing.T) (*Server, *core.Store) {
 	t.Helper()
@@ -360,5 +365,108 @@ func TestHandlePublicSubscription_InvalidatesCachedRefreshPolicyAfterSubscriptio
 	}
 	if got := secondRec.Header().Get("update-always"); got != "true" {
 		t.Fatalf("second update-always=%q want %q", got, "true")
+	}
+}
+
+func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "history-token",
+		Name:        "History Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/history-token", nil)
+	req.SetPathValue("token", "history-token")
+	req.RemoteAddr = "198.51.100.5:12345"
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscription status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/subscription-requests/history?limit=5", nil)
+	historyReq = withSettingsPerms(historyReq, &core.PanelUserPermissions{CanReadSettings: true, CanReadLogs: true})
+	historyRec := httptest.NewRecorder()
+	server.handleSubscriptionRequestHistory(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%q", historyRec.Code, historyRec.Body.String())
+	}
+
+	var got []store.GetSubscriptionRequestHistoryRow
+	decodeJSONResponse(t, historyRec, &got)
+	if len(got) == 0 {
+		t.Fatalf("history empty")
+	}
+	if got[0].Name != "History Bundle" {
+		t.Fatalf("name=%q want %q", got[0].Name, "History Bundle")
+	}
+	if got[0].UserName != "alice" {
+		t.Fatalf("user_name=%q want %q", got[0].UserName, "alice")
+	}
+	if got[0].RequestIP != "198.51.100.5" {
+		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "198.51.100.5")
+	}
+}
+
+func TestHandleSubscriptionRequestHistory_CensorsSensitiveFieldsForRestrictedCallers(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "history-censored-token",
+		Name:        "History Censored Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/history-censored-token", nil)
+	req.SetPathValue("token", "history-censored-token")
+	req.RemoteAddr = "198.51.100.9:2222"
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscription status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/subscription-requests/history?limit=5", nil)
+	historyReq = withSettingsPerms(historyReq, &core.PanelUserPermissions{CanReadSettings: true, CanReadLogs: true, CanReadLogsCensored: true})
+	historyRec := httptest.NewRecorder()
+	server.handleSubscriptionRequestHistory(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%q", historyRec.Code, historyRec.Body.String())
+	}
+
+	var got []store.GetSubscriptionRequestHistoryRow
+	decodeJSONResponse(t, historyRec, &got)
+	if len(got) == 0 {
+		t.Fatalf("history empty")
+	}
+	if got[0].UserName != "Restricted" {
+		t.Fatalf("user_name=%q want %q", got[0].UserName, "Restricted")
+	}
+	if got[0].RequestIP != "***" {
+		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "***")
 	}
 }

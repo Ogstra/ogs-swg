@@ -17,6 +17,7 @@ type Querier interface {
 	CountAdmins(ctx context.Context) (int64, error)
 	CountDailyUsage(ctx context.Context) (int64, error)
 	CountPanelUsers(ctx context.Context) (int64, error)
+	CountSubscriptionRequests(ctx context.Context) (int64, error)
 	// Samples Queries --
 	CountSamples(ctx context.Context) (int64, error)
 	CountWGDailyUsage(ctx context.Context) (int64, error)
@@ -52,6 +53,7 @@ type Querier interface {
 	GetMaxTimestampForUser(ctx context.Context, user string) (interface{}, error)
 	GetPanelUser(ctx context.Context, username string) (PanelUser, error)
 	GetSamplerRuns(ctx context.Context, limit int64) ([]GetSamplerRunsRow, error)
+	GetSubscriptionRequestHistory(ctx context.Context, limit int64) ([]GetSubscriptionRequestHistoryRow, error)
 	GetSamplesForUser(ctx context.Context, arg GetSamplesForUserParams) ([]Sample, error)
 	GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error)
 	GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error)

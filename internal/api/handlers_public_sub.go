@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,7 +35,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		if c, ok := val.(cachedSub); ok {
 			sub, err := s.store.Queries.GetSubscriptionByToken(r.Context(), token)
 			if err == nil {
-				s.recordSubscriptionRequest(r, sub.ID, true)
+				users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
+				s.recordSubscriptionRequest(r, sub.ID, users, true)
 			}
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
 			return
@@ -182,16 +184,34 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
-	s.recordSubscriptionRequest(r, sub.ID, false)
+	s.recordSubscriptionRequest(r, sub.ID, users, false)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
 }
 
-func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, servedFromCache bool) {
+func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool) {
 	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
 		SubID:           subID,
+		UserName:        strings.Join(users, ", "),
+		RequestIP:       resolveSubscriptionRequestIP(r),
 		RequestedAt:     s.now().Unix(),
 		ServedFromCache: servedFromCacheToInt64(servedFromCache),
 	})
+}
+
+func resolveSubscriptionRequestIP(r *http.Request) string {
+	if isTrustedProxy(r.RemoteAddr) {
+		if ip := firstHeaderToken(r.Header.Get("X-Real-IP")); ip != "" {
+			return stripPort(ip)
+		}
+		if ip := firstHeaderToken(r.Header.Get("X-Forwarded-For")); ip != "" {
+			return stripPort(ip)
+		}
+	}
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
+	if err == nil && host != "" {
+		return host
+	}
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func servedFromCacheToInt64(v bool) int64 {
