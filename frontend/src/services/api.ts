@@ -98,7 +98,8 @@ export interface DashboardConsumerChartData {
 }
 
 export interface SamplerHistoryEntry {
-    ts: number;
+    ts?: number;
+    timestamp?: number;
     duration_ms: number;
     inserted: number;
     error: string;

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, FeatureFlags, SamplerHistoryEntry, SubscriptionRequestHistoryEntry } from '../../services/api'
@@ -359,7 +359,7 @@ export default function Settings() {
                     handleTogglePause={handleTogglePause}
                     samplerRunning={samplerRunning}
                     handleSaveFeatures={handleSaveFeatures}
-                    loadDbStats={loadDbStats}
+                    loadDatabasePanel={loadAll}
                     historyLimit={historyLimit}
                     setHistoryLimit={setHistoryLimit}
                     samplerHistory={samplerHistory}
@@ -1169,7 +1169,7 @@ function DatabaseTab({
     handleTogglePause,
     samplerRunning,
     handleSaveFeatures,
-    loadDbStats,
+    loadDatabasePanel,
     historyLimit,
     setHistoryLimit,
     samplerHistory,
@@ -1184,39 +1184,29 @@ function DatabaseTab({
     handleTogglePause: () => void
     samplerRunning: boolean
     handleSaveFeatures: () => void
-    loadDbStats: () => Promise<void>
+    loadDatabasePanel: () => Promise<void>
     historyLimit: number
     setHistoryLimit: Dispatch<SetStateAction<number>>
     samplerHistory: SamplerHistoryEntry[]
     subscriptionRequestHistory: SubscriptionRequestHistoryEntry[]
 }) {
-    const dbCardRef = useRef<HTMLDivElement | null>(null)
-    const [dbCardHeight, setDbCardHeight] = useState<number | null>(null)
-
-    useEffect(() => {
-        const target = dbCardRef.current
-        if (!target || typeof ResizeObserver === 'undefined') return
-
-        const updateHeight = () => setDbCardHeight(target.getBoundingClientRect().height)
-        updateHeight()
-        const observer = new ResizeObserver(updateHeight)
-        observer.observe(target)
-        return () => observer.disconnect()
-    }, [])
+    const formatHistoryTime = (value?: number | null) => {
+        if (!value || Number.isNaN(value)) return 'Unknown'
+        return new Date(value * 1000).toLocaleTimeString()
+    }
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-stretch pb-4 sm:pb-0">
-            <div ref={dbCardRef}>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start pb-4 sm:pb-0">
+            <div>
                 <Card
                     title="Database & Retention"
-                    className="h-full flex flex-col"
                     action={
                         <div className="flex gap-2">
                             <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} iconNoGap disabled={!canWriteSettings}>
                                 <span className="sm:hidden sr-only">Save Changes</span>
                                 <span className="hidden sm:inline">Save Changes</span>
                             </Button>
-                            <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
+                            <Button onClick={loadDatabasePanel} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
                         </div>
                     }
                 >
@@ -1335,13 +1325,10 @@ function DatabaseTab({
                 </Card>
             </div>
 
-            <div
-                className="flex flex-col gap-4 sm:gap-6 lg:grid lg:grid-rows-2 lg:h-[var(--db-card-height)]"
-                style={dbCardHeight ? { ['--db-card-height' as any]: `${dbCardHeight}px` } : undefined}
-            >
+            <div className="flex flex-col gap-4 sm:gap-6">
                 <Card
                     title="Subscriptions History"
-                    className="flex flex-col min-h-[260px] lg:min-h-0"
+                    className="flex flex-col min-h-[208px] lg:h-[208px]"
                     action={
                         <select
                             value={historyLimit}
@@ -1376,7 +1363,7 @@ function DatabaseTab({
                                         </div>
                                         <div className="shrink-0 text-right">
                                             <div className="font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
-                                            <div className="text-slate-500 text-[10px]">{new Date(run.requested_at * 1000).toLocaleTimeString()}</div>
+                                            <div className="text-slate-500 text-[10px]">{formatHistoryTime(run.requested_at)}</div>
                                         </div>
                                     </div>
                                 ))
@@ -1387,7 +1374,7 @@ function DatabaseTab({
 
                 <Card
                     title="Sampler History"
-                    className="flex flex-col min-h-[260px] lg:min-h-0"
+                    className="flex flex-col min-h-[208px] lg:h-[208px]"
                     action={
                         <select
                             value={historyLimit}
@@ -1411,7 +1398,7 @@ function DatabaseTab({
                                     <div key={idx} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2">
-                                                <div className="text-slate-300 text-xs">{new Date(run.ts * 1000).toLocaleTimeString()}</div>
+                                                <div className="text-slate-300 text-xs">{formatHistoryTime(run.timestamp ?? run.ts)}</div>
                                                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
                                                     {run.source === 'wireguard' ? 'WG' : 'Proxy'}
                                                 </span>
