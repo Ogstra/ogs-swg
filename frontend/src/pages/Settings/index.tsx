@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, FeatureFlags } from '../../services/api'
+import { api, FeatureFlags, SamplerHistoryEntry, SubscriptionRequestHistoryEntry } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
 import { Save, RefreshCw, UserCog, Shield, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
@@ -36,7 +36,8 @@ export default function Settings() {
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<{ rows: number; sizeMB: number }>({ rows: 0, sizeMB: 0 })
-    const [samplerHistory, setSamplerHistory] = useState<any[]>([])
+    const [samplerHistory, setSamplerHistory] = useState<SamplerHistoryEntry[]>([])
+    const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
     const [features, setFeatures] = useState<FeatureFlags>({
         enable_singbox: true,
         enable_wireguard: true,
@@ -75,6 +76,14 @@ export default function Settings() {
         queryKey: ['settings-sampler-history', historyLimit],
         queryFn: () => api.getSamplerHistory(historyLimit),
         placeholderData: previousData => previousData,
+        refetchInterval: Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000),
+    })
+
+    const subscriptionRequestHistoryQuery = useQuery({
+        queryKey: ['settings-subscription-request-history', historyLimit],
+        queryFn: () => api.getSubscriptionRequestHistory(historyLimit),
+        placeholderData: previousData => previousData,
+        refetchInterval: Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000),
     })
 
     const publicIPQuery = useQuery({
@@ -135,6 +144,12 @@ export default function Settings() {
     }, [samplerHistoryQuery.data])
 
     useEffect(() => {
+        const h = subscriptionRequestHistoryQuery.data
+        if (!h) return
+        setSubscriptionRequestHistory(Array.isArray(h) ? h : [])
+    }, [subscriptionRequestHistoryQuery.data])
+
+    useEffect(() => {
         if (typeof publicIPQuery.data !== 'string') return
         setPublicIP(publicIPQuery.data || '')
     }, [publicIPQuery.data])
@@ -153,7 +168,10 @@ export default function Settings() {
     }
 
     const loadSamplerHistory = async () => {
-        await samplerHistoryQuery.refetch()
+        await Promise.all([
+            samplerHistoryQuery.refetch(),
+            subscriptionRequestHistoryQuery.refetch(),
+        ])
     }
 
     const loadAll = async () => {
@@ -345,6 +363,7 @@ export default function Settings() {
                     historyLimit={historyLimit}
                     setHistoryLimit={setHistoryLimit}
                     samplerHistory={samplerHistory}
+                    subscriptionRequestHistory={subscriptionRequestHistory}
                 />
             )
         },
@@ -1154,6 +1173,7 @@ function DatabaseTab({
     historyLimit,
     setHistoryLimit,
     samplerHistory,
+    subscriptionRequestHistory,
 }: {
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
@@ -1167,7 +1187,8 @@ function DatabaseTab({
     loadDbStats: () => Promise<void>
     historyLimit: number
     setHistoryLimit: Dispatch<SetStateAction<number>>
-    samplerHistory: any[]
+    samplerHistory: SamplerHistoryEntry[]
+    subscriptionRequestHistory: SubscriptionRequestHistoryEntry[]
 }) {
     const dbCardRef = useRef<HTMLDivElement | null>(null)
     const [dbCardHeight, setDbCardHeight] = useState<number | null>(null)
@@ -1283,41 +1304,90 @@ function DatabaseTab({
                     </div>
 
                     <div className="space-y-3">
-                        <Button
-                            onClick={handlePruneNow}
-                            disabled={!canWriteSettings || !features.retention_enabled}
-                            variant="secondary"
-                            className="w-full"
-                        >
-                            Prune Database Now
-                        </Button>
                         <div className="flex gap-2">
-                            <Button
-                                onClick={handleTogglePause}
-                                disabled={!canWriteSettings}
-                                variant="secondary"
-                                className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
-                            >
-                                {features.sampler_paused ? 'Resume' : 'Pause'}
-                            </Button>
                             <Button
                                 onClick={handleRunSampler}
                                 disabled={!canWriteSettings || samplerRunning}
-                                className="flex-1"
+                                className="flex-[2]"
                                 isLoading={samplerRunning}
                                 variant="primary"
                             >
                                 Run Sampler
                             </Button>
+                            <Button
+                                onClick={handlePruneNow}
+                                disabled={!canWriteSettings || !features.retention_enabled}
+                                variant="secondary"
+                                className="flex-1"
+                            >
+                                Prune
+                            </Button>
                         </div>
+                        <Button
+                            onClick={handleTogglePause}
+                            disabled={!canWriteSettings}
+                            variant="secondary"
+                            className={`w-full ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
+                        >
+                            {features.sampler_paused ? 'Resume' : 'Pause'}
+                        </Button>
                     </div>
                 </Card>
             </div>
 
-            <div style={dbCardHeight ? { height: dbCardHeight } : undefined}>
+            <div
+                className="flex flex-col gap-4 sm:gap-6 lg:grid lg:grid-rows-2 lg:h-[var(--db-card-height)]"
+                style={dbCardHeight ? { ['--db-card-height' as any]: `${dbCardHeight}px` } : undefined}
+            >
+                <Card
+                    title="Subscriptions History"
+                    className="flex flex-col min-h-[260px] lg:min-h-0"
+                    action={
+                        <select
+                            value={historyLimit}
+                            onChange={e => setHistoryLimit(parseInt(e.target.value))}
+                            className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
+                        >
+                            <option value={10}>Last 10</option>
+                            <option value={20}>Last 20</option>
+                            <option value={30}>Last 30</option>
+                            <option value={40}>Last 40</option>
+                            <option value={50}>Last 50</option>
+                        </select>
+                    }
+                >
+                    <div className="flex-1 min-h-0">
+                        <div className="space-y-0 text-sm h-full overflow-y-auto pr-2">
+                            {subscriptionRequestHistory.length === 0 ? (
+                                <p className="text-slate-500 text-xs italic">No history available</p>
+                            ) : (
+                                subscriptionRequestHistory.map((run) => (
+                                    <div key={run.id} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <div className="truncate text-slate-200 text-xs font-medium" title={run.name}>{run.name}</div>
+                                                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${run.served_from_cache ? 'bg-amber-900/20 text-amber-400 border border-amber-900/30' : 'bg-emerald-900/20 text-emerald-400 border border-emerald-900/30'}`}>
+                                                    {run.served_from_cache ? 'Cache' : 'Fresh'}
+                                                </span>
+                                            </div>
+                                            <div className="truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
+                                                {run.user_name || 'No users'}
+                                            </div>
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <div className="font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
+                                            <div className="text-slate-500 text-[10px]">{new Date(run.requested_at * 1000).toLocaleTimeString()}</div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </Card>
+
                 <Card
                     title="Sampler History"
-                    className="h-full flex flex-col"
+                    className="flex flex-col min-h-[260px] lg:min-h-0"
                     action={
                         <select
                             value={historyLimit}
@@ -1338,17 +1408,17 @@ function DatabaseTab({
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
                                 samplerHistory.map((run, idx) => (
-                                    <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
-                                        <div>
+                                    <div key={idx} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
+                                        <div className="min-w-0">
                                             <div className="flex items-center gap-2">
-                                                <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
+                                                <div className="text-slate-300 text-xs">{new Date(run.ts * 1000).toLocaleTimeString()}</div>
                                                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
                                                     {run.source === 'wireguard' ? 'WG' : 'Proxy'}
                                                 </span>
                                             </div>
                                             {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
                                         </div>
-                                        <div className="text-right">
+                                        <div className="shrink-0 text-right">
                                             <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
                                             <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
                                         </div>

@@ -533,6 +533,38 @@ func (s *Server) handleSamplerHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(runs)
 }
 
+func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 5
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil {
+			limit = v
+		}
+	}
+	runs, err := s.store.Queries.GetSubscriptionRequestHistory(r.Context(), int64(limit))
+	if err != nil {
+		http.Error(w, "Failed to read subscription request history: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if shouldCensorSubscriptionRequestHistory(r) {
+		for i := range runs {
+			runs[i].UserName = "Restricted"
+			if runs[i].RequestIP != "" {
+				runs[i].RequestIP = "***"
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(runs)
+}
+
+func shouldCensorSubscriptionRequestHistory(r *http.Request) bool {
+	perms := getPermissions(r)
+	if perms == nil {
+		return false
+	}
+	return !perms.CanReadLogs || perms.CanReadLogsCensored
+}
+
 func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 	// Respect config values primarily, but prioritize retention settings
 	days := s.config.RetentionDays

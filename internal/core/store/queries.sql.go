@@ -89,6 +89,17 @@ func (q *Queries) CountPanelUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countSubscriptionRequests = `-- name: CountSubscriptionRequests :one
+SELECT COUNT(*) FROM subscription_requests
+`
+
+func (q *Queries) CountSubscriptionRequests(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countSubscriptionRequests)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countSamples = `-- name: CountSamples :one
 SELECT COUNT(*) FROM samples
 `
@@ -884,6 +895,62 @@ func (q *Queries) GetSamplerRuns(ctx context.Context, limit int64) ([]GetSampler
 	return items, nil
 }
 
+const getSubscriptionRequestHistory = `-- name: GetSubscriptionRequestHistory :many
+SELECT
+	sr.id,
+	sr.sub_id,
+	s.name,
+	COALESCE(sr.user_name, ''),
+	COALESCE(sr.request_ip, ''),
+	sr.requested_at,
+	sr.served_from_cache
+FROM subscription_requests sr
+JOIN subscriptions s ON s.id = sr.sub_id
+ORDER BY sr.requested_at DESC
+LIMIT ?
+`
+
+type GetSubscriptionRequestHistoryRow struct {
+	ID              int64  `json:"id"`
+	SubID           int64  `json:"sub_id"`
+	Name            string `json:"name"`
+	UserName        string `json:"user_name"`
+	RequestIP       string `json:"request_ip"`
+	RequestedAt     int64  `json:"requested_at"`
+	ServedFromCache int64  `json:"served_from_cache"`
+}
+
+func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, limit int64) ([]GetSubscriptionRequestHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSubscriptionRequestHistory, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetSubscriptionRequestHistoryRow
+	for rows.Next() {
+		var i GetSubscriptionRequestHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubID,
+			&i.Name,
+			&i.UserName,
+			&i.RequestIP,
+			&i.RequestedAt,
+			&i.ServedFromCache,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSamplesForUser = `-- name: GetSamplesForUser :many
 SELECT user, ts, uplink, downlink 
 FROM samples 
@@ -1369,17 +1436,19 @@ func (q *Queries) InsertSamplerRun(ctx context.Context, arg InsertSamplerRunPara
 }
 
 const insertSubscriptionRequest = `-- name: InsertSubscriptionRequest :exec
-INSERT INTO subscription_requests (sub_id, requested_at, served_from_cache) VALUES (?, ?, ?)
+INSERT INTO subscription_requests (sub_id, user_name, request_ip, requested_at, served_from_cache) VALUES (?, ?, ?, ?, ?)
 `
 
 type InsertSubscriptionRequestParams struct {
-	SubID           int64 `json:"sub_id"`
-	RequestedAt     int64 `json:"requested_at"`
-	ServedFromCache int64 `json:"served_from_cache"`
+	SubID           int64  `json:"sub_id"`
+	UserName        string `json:"user_name"`
+	RequestIP       string `json:"request_ip"`
+	RequestedAt     int64  `json:"requested_at"`
+	ServedFromCache int64  `json:"served_from_cache"`
 }
 
 func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubscriptionRequestParams) error {
-	_, err := q.db.ExecContext(ctx, insertSubscriptionRequest, arg.SubID, arg.RequestedAt, arg.ServedFromCache)
+	_, err := q.db.ExecContext(ctx, insertSubscriptionRequest, arg.SubID, arg.UserName, arg.RequestIP, arg.RequestedAt, arg.ServedFromCache)
 	return err
 }
 
