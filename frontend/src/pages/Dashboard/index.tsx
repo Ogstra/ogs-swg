@@ -400,7 +400,7 @@ export default function Dashboard() {
                         {status.active_users_singbox_list && status.active_users_singbox_list.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-2">
                                 {status.active_users_singbox_list.map((user: string, idx: number) => (
-                                    <span key={idx} className="text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20" title={user}>
                                         {user}
                                     </span>
                                 ))}
@@ -454,7 +454,7 @@ export default function Dashboard() {
                         {status.active_users_wireguard_list && status.active_users_wireguard_list.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-2">
                                 {status.active_users_wireguard_list.map((peer: string, idx: number) => (
-                                    <span key={idx} className="text-[10px] font-medium bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
+                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20" title={peer}>
                                         {peer}
                                     </span>
                                 ))}
@@ -627,10 +627,10 @@ export default function Dashboard() {
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
                                             {i + 1}
                                         </div>
-                                        <div className="min-w-0">
-                                            <div className="truncate font-medium text-sm text-slate-200">{u.name}</div>
+                                        <div className="min-w-0 max-w-[200px]">
+                                            <div className="truncate font-medium text-sm text-slate-200" title={u.name}>{u.name}</div>
                                             {chartMode === 'wireguard' && (
-                                                <div className="truncate text-[10px] text-slate-500">
+                                                <div className="truncate text-[10px] text-slate-500" title={u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}>
                                                     {u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}
                                                 </div>
                                             )}

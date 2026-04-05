@@ -746,7 +746,7 @@ export default function UserManagement() {
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('last_seen')}>
                                     Last Seen {renderSortIcon('last_seen')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
+                                <th className="w-[260px] p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
                                     Name/Alias {renderSortIcon('user')}
                                 </th>
                                 <th className="p-4 min-w-[140px] font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
@@ -821,8 +821,8 @@ export default function UserManagement() {
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="p-4">
-                                                <div className="font-semibold text-slate-200 truncate max-w-full">{user.name}</div>
+                                            <td className="w-[260px] p-4">
+                                                <div className="max-w-[260px] font-semibold text-slate-200 truncate" title={user.name}>{user.name}</div>
                                             </td>
                                             <td className="p-4 align-middle">
                                                 {user.quota_limit ? (
