@@ -129,6 +129,11 @@ func TestHandlePublicSubscription_SetsProfileTitleAndKeepsItOnCachedResponses(t 
 	if got := second.Header().Get("Profile-Title"); got != "Alpha Bundle" {
 		t.Fatalf("second Profile-Title=%q want %q", got, "Alpha Bundle")
 	}
+
+	detail := getSubscriptionForTest(t, server, subID)
+	if detail.LastRequestAt == nil || *detail.LastRequestAt <= 0 {
+		t.Fatalf("last_request_at=%v want non-nil positive timestamp", detail.LastRequestAt)
+	}
 }
 
 func TestHandlePublicSubscription_UsesSingleCanonicalInboundForLegacyUsers(t *testing.T) {

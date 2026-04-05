@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	"github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
 type cachedSub struct {
@@ -31,6 +32,10 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	cacheKey := "sub:" + token
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
+			sub, err := s.store.Queries.GetSubscriptionByToken(r.Context(), token)
+			if err == nil {
+				s.recordSubscriptionRequest(r, sub.ID, true)
+			}
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
 			return
 		}
@@ -177,7 +182,23 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
+	s.recordSubscriptionRequest(r, sub.ID, false)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
+}
+
+func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, servedFromCache bool) {
+	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
+		SubID:           subID,
+		RequestedAt:     s.now().Unix(),
+		ServedFromCache: servedFromCacheToInt64(servedFromCache),
+	})
+}
+
+func servedFromCacheToInt64(v bool) int64 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool) {

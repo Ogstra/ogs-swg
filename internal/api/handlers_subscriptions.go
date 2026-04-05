@@ -21,7 +21,7 @@ func generateToken() string {
 
 type SubscriptionResponse struct {
 	ID                         int64    `json:"id"`
-	Token                      string   `json:"token"`
+	Token                      *string  `json:"token,omitempty"`
 	Name                       string   `json:"name"`
 	QuotaLimit                 int64    `json:"quota_limit"`
 	QuotaPeriod                string   `json:"quota_period"`
@@ -29,6 +29,7 @@ type SubscriptionResponse struct {
 	Users                      []string `json:"users"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
 	UpdateAlways               bool     `json:"update_always"`
+	LastRequestAt              *int64   `json:"last_request_at"`
 	CreatedAt                  int64    `json:"created_at"`
 	UpdatedAt                  int64    `json:"updated_at"`
 }
@@ -44,6 +45,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 
 	res := make([]SubscriptionResponse, 0, len(subs))
+	includeSecrets := canManageSubscriptionSecrets(r)
 	for _, sub := range subs {
 		users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
 		usedBytes, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), store.GetSubscriptionUsageInRangeParams{
@@ -51,9 +53,13 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			Ts:    startOfMonth.Unix(),
 			Ts2:   now.Unix(),
 		})
+		var token *string
+		if includeSecrets {
+			token = &sub.Token
+		}
 		res = append(res, SubscriptionResponse{
 			ID:                         sub.ID,
-			Token:                      sub.Token,
+			Token:                      token,
 			Name:                       sub.Name,
 			QuotaLimit:                 sub.QuotaLimit.Int64,
 			QuotaPeriod:                sub.QuotaPeriod.String,
@@ -61,6 +67,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			Users:                      users,
 			ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 			UpdateAlways:               int64ToBool(sub.UpdateAlways),
+			LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
 			UpdatedAt:                  sub.UpdatedAt.Int64,
 		})
@@ -146,11 +153,15 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		Ts:    startOfMonth.Unix(),
 		Ts2:   now.Unix(),
 	})
+	var token *string
+	if canManageSubscriptionSecrets(r) {
+		token = &sub.Token
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(SubscriptionResponse{
 		ID:                         sub.ID,
-		Token:                      sub.Token,
+		Token:                      token,
 		Name:                       sub.Name,
 		QuotaLimit:                 sub.QuotaLimit.Int64,
 		QuotaPeriod:                sub.QuotaPeriod.String,
@@ -158,6 +169,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		Users:                      users,
 		ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 		UpdateAlways:               int64ToBool(sub.UpdateAlways),
+		LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,
 		UpdatedAt:                  sub.UpdatedAt.Int64,
 	})
@@ -288,6 +300,14 @@ func boolPtrToInt64(value *bool, fallback bool) int64 {
 
 func int64ToBool(value int64) bool {
 	return value != 0
+}
+
+func canManageSubscriptionSecrets(r *http.Request) bool {
+	perms := getPermissions(r)
+	if perms == nil {
+		return true
+	}
+	return perms.CanWriteUsers
 }
 
 type subscriptionValidationError string
