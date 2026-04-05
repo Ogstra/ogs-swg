@@ -146,7 +146,7 @@ export interface SingboxInboundUpdateResponse {
 
 export interface Subscription {
     id: number;
-    token: string;
+    token?: string;
     name: string;
     quota_limit: number;
     quota_period: string;
@@ -154,6 +154,7 @@ export interface Subscription {
     users: string[];
     profile_update_interval_hours?: number | null;
     update_always?: boolean;
+    last_request_at?: number | null;
     created_at: number;
     updated_at: number;
 }
