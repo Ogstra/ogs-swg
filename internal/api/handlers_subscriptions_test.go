@@ -2,11 +2,14 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
+
+	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
 type subscriptionMutationRequest struct {
@@ -25,7 +28,7 @@ type subscriptionCreateResponse struct {
 
 type subscriptionDetailResponse struct {
 	ID                         int64    `json:"id"`
-	Token                      string   `json:"token"`
+	Token                      *string  `json:"token"`
 	Name                       string   `json:"name"`
 	QuotaLimit                 int64    `json:"quota_limit"`
 	QuotaPeriod                string   `json:"quota_period"`
@@ -33,8 +36,13 @@ type subscriptionDetailResponse struct {
 	Users                      []string `json:"users"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
 	UpdateAlways               bool     `json:"update_always"`
+	LastRequestAt              *int64   `json:"last_request_at"`
 	CreatedAt                  int64    `json:"created_at"`
 	UpdatedAt                  int64    `json:"updated_at"`
+}
+
+func withSubscriptionPerms(r *http.Request, perms *core.PanelUserPermissions) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), permissionsContextKey, perms))
 }
 
 func TestSubscriptionCreateAndGetRefreshPolicyRoundTrip(t *testing.T) {
@@ -161,6 +169,58 @@ func TestSubscriptionUpdateRefreshPolicyClearsIntervalWhenExplicitNull(t *testin
 	}
 	if got.UpdateAlways != initialUpdateAlways {
 		t.Fatalf("after explicit null update_always=%v want %v", got.UpdateAlways, initialUpdateAlways)
+	}
+}
+
+func TestGetSubscription_HidesTokenForReadOnlyCallers(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Read Only Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice"},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions/"+strconv.FormatInt(created.ID, 10), nil)
+	req.SetPathValue("id", strconv.FormatInt(created.ID, 10))
+	req = withSubscriptionPerms(req, &core.PanelUserPermissions{CanReadUsers: true})
+	server.handleGetSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var got subscriptionDetailResponse
+	decodeJSONResponse(t, rec, &got)
+	if got.Token != nil {
+		t.Fatalf("token=%q want nil for read-only caller", *got.Token)
+	}
+}
+
+func TestGetSubscription_IncludesTokenForWriters(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Writable Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice"},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions/"+strconv.FormatInt(created.ID, 10), nil)
+	req.SetPathValue("id", strconv.FormatInt(created.ID, 10))
+	req = withSubscriptionPerms(req, &core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+	server.handleGetSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var got subscriptionDetailResponse
+	decodeJSONResponse(t, rec, &got)
+	if got.Token == nil || *got.Token == "" {
+		t.Fatalf("token=%v want non-empty for writer", got.Token)
 	}
 }
 

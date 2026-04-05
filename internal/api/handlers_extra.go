@@ -561,6 +561,12 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 		log.Printf("PruneNow: samples prune failed: %v", err)
 	}
 
+	if err := s.store.PruneSubscriptionRequestsOlderThan(cutoff); err == nil {
+		totalDeleted += 1
+	} else {
+		log.Printf("PruneNow: subscription requests prune failed: %v", err)
+	}
+
 	// Prune WG samples
 	if s.config.WGRetentionDays > 0 {
 		wgCutoff := time.Now().Add(-time.Duration(wgDays) * 24 * time.Hour).Unix()

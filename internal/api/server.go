@@ -445,6 +445,14 @@ func StartServer(cfg *core.Config) *Server {
 						log.Printf("Retention prune: removed samples older than %d", cutoff)
 						vacuumNeeded = true
 					}
+
+					err = store.PruneSubscriptionRequestsOlderThan(cutoff)
+					if err != nil {
+						log.Printf("Subscription retention prune error: %v", err)
+					} else {
+						log.Printf("Subscription retention prune: removed requests older than %d", cutoff)
+						vacuumNeeded = true
+					}
 				}
 
 				// WireGuard Stats Retention

@@ -230,6 +230,17 @@ func (s *Store) initSchema() error {
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
 		FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS subscription_requests (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		sub_id INTEGER NOT NULL,
+		requested_at INTEGER NOT NULL,
+		served_from_cache INTEGER NOT NULL DEFAULT 0,
+		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
+		ON subscription_requests(sub_id, requested_at DESC);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
@@ -1010,6 +1021,10 @@ func (s *Store) GetMaxTimestampForUser(user string) (int64, error) {
 
 func (s *Store) PruneOlderThan(ts int64) error {
 	return s.Queries.PruneSamplesOlderThan(context.Background(), ts)
+}
+
+func (s *Store) PruneSubscriptionRequestsOlderThan(ts int64) error {
+	return s.Queries.PruneSubscriptionRequestsOlderThan(context.Background(), ts)
 }
 
 func (s *Store) CountSamples() (int64, error) {

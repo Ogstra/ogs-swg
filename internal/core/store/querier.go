@@ -69,9 +69,11 @@ type Querier interface {
 	InsertSample(ctx context.Context, arg InsertSampleParams) error
 	// Sampler Runs --
 	InsertSamplerRun(ctx context.Context, arg InsertSamplerRunParams) error
+	InsertSubscriptionRequest(ctx context.Context, arg InsertSubscriptionRequestParams) error
 	InsertWGDailyUsage(ctx context.Context, arg InsertWGDailyUsageParams) error
 	InsertWGSample(ctx context.Context, arg InsertWGSampleParams) error
 	PruneSamplesOlderThan(ctx context.Context, ts int64) error
+	PruneSubscriptionRequestsOlderThan(ctx context.Context, requestedAt int64) error
 	PruneWGSamplesOlderThan(ctx context.Context, ts int64) error
 	RegenerateSubscriptionToken(ctx context.Context, arg RegenerateSubscriptionTokenParams) error
 	RemoveUserFromSubscription(ctx context.Context, arg RemoveUserFromSubscriptionParams) error

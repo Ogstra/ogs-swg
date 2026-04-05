@@ -497,6 +497,11 @@ SELECT
 	reset_day,
 	profile_update_interval_hours,
 	update_always,
+	(
+		SELECT MAX(sr.requested_at)
+		FROM subscription_requests sr
+		WHERE sr.sub_id = subscriptions.id
+	) AS last_request_at,
 	created_at,
 	updated_at
 FROM subscriptions
@@ -521,6 +526,7 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 			&i.ResetDay,
 			&i.ProfileUpdateIntervalHours,
 			&i.UpdateAlways,
+			&i.LastRequestAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -929,6 +935,11 @@ SELECT
 	reset_day,
 	profile_update_interval_hours,
 	update_always,
+	(
+		SELECT MAX(sr.requested_at)
+		FROM subscription_requests sr
+		WHERE sr.sub_id = subscriptions.id
+	) AS last_request_at,
 	created_at,
 	updated_at
 FROM subscriptions
@@ -947,6 +958,7 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 		&i.ResetDay,
 		&i.ProfileUpdateIntervalHours,
 		&i.UpdateAlways,
+		&i.LastRequestAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -963,6 +975,11 @@ SELECT
 	reset_day,
 	profile_update_interval_hours,
 	update_always,
+	(
+		SELECT MAX(sr.requested_at)
+		FROM subscription_requests sr
+		WHERE sr.sub_id = subscriptions.id
+	) AS last_request_at,
 	created_at,
 	updated_at
 FROM subscriptions
@@ -981,6 +998,7 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 		&i.ResetDay,
 		&i.ProfileUpdateIntervalHours,
 		&i.UpdateAlways,
+		&i.LastRequestAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1350,6 +1368,21 @@ func (q *Queries) InsertSamplerRun(ctx context.Context, arg InsertSamplerRunPara
 	return err
 }
 
+const insertSubscriptionRequest = `-- name: InsertSubscriptionRequest :exec
+INSERT INTO subscription_requests (sub_id, requested_at, served_from_cache) VALUES (?, ?, ?)
+`
+
+type InsertSubscriptionRequestParams struct {
+	SubID           int64 `json:"sub_id"`
+	RequestedAt     int64 `json:"requested_at"`
+	ServedFromCache int64 `json:"served_from_cache"`
+}
+
+func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubscriptionRequestParams) error {
+	_, err := q.db.ExecContext(ctx, insertSubscriptionRequest, arg.SubID, arg.RequestedAt, arg.ServedFromCache)
+	return err
+}
+
 const insertWGDailyUsage = `-- name: InsertWGDailyUsage :exec
 INSERT INTO daily_wg_usage (public_key, ts, rx, tx)
 VALUES (?, ?, ?, ?)
@@ -1404,6 +1437,15 @@ DELETE FROM samples WHERE ts < ?
 
 func (q *Queries) PruneSamplesOlderThan(ctx context.Context, ts int64) error {
 	_, err := q.db.ExecContext(ctx, pruneSamplesOlderThan, ts)
+	return err
+}
+
+const pruneSubscriptionRequestsOlderThan = `-- name: PruneSubscriptionRequestsOlderThan :exec
+DELETE FROM subscription_requests WHERE requested_at < ?
+`
+
+func (q *Queries) PruneSubscriptionRequestsOlderThan(ctx context.Context, requestedAt int64) error {
+	_, err := q.db.ExecContext(ctx, pruneSubscriptionRequestsOlderThan, requestedAt)
 	return err
 }
 
