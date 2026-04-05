@@ -255,19 +255,21 @@ export default function Subscriptions() {
             // No sub-level quota — show usage as informational
             return <span className="text-slate-400 text-xs">{formatBytes(used)} used</span>
         }
-        const pct = Math.min(100, Math.round((used / limit) * 100))
+        const rawRatio = used / limit
+        const pct = Math.min(100, Math.round(rawRatio * 100))
         const over = used >= limit
         const barColor = over ? 'bg-red-500' : pct > 80 ? 'bg-yellow-500' : 'bg-emerald-500'
         return (
             <div className="flex flex-col gap-1 min-w-[120px]">
-                <div className="flex justify-between text-xs gap-2">
+                <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
                     <span className={over ? 'text-red-400 font-semibold' : 'text-slate-300'}>
                         {formatBytes(used)}
                     </span>
-                    <span className="text-slate-500">/ {formatBytes(limit)}</span>
+                    <span className="text-center text-slate-300">{pct}%</span>
+                    <span className="text-right">{formatBytes(limit)}</span>
                 </div>
-                <div className="h-1.5 rounded-full bg-slate-800">
-                    <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+                <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${Math.min(rawRatio * 100, 100)}%` }} />
                 </div>
             </div>
         )
@@ -384,10 +386,10 @@ export default function Subscriptions() {
             {/* Desktop table */}
             <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
+                    <table className="w-full min-w-[980px] text-left border-collapse table-fixed">
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                                <th className="p-4 font-semibold">Name</th>
+                                <th className="w-[260px] p-4 font-semibold">Name</th>
                                 <th className="p-4 font-semibold">Last Request</th>
                                 <th className="p-4 font-semibold">Users</th>
                                 <th className="p-4 font-semibold">Quota</th>
@@ -404,7 +406,9 @@ export default function Subscriptions() {
                                 </tr>
                             ) : subs.map(sub => (
                                 <tr key={sub.id} className="border-b last:border-0 border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                                    <td className="p-4 text-white font-medium">{sub.name}</td>
+                                    <td className="w-[260px] p-4">
+                                        <div className="max-w-[260px] truncate text-white font-medium" title={sub.name}>{sub.name}</div>
+                                    </td>
                                     <td className="p-4">
                                         {(() => {
                                             const lastRequest = getLastRequestMeta(sub)
@@ -457,12 +461,14 @@ export default function Subscriptions() {
                                 <div className="p-4 space-y-4">
                                     <div className="flex items-start justify-between gap-3">
                                         <div className="min-w-0 flex-1 space-y-1">
-                                            <p className="text-white font-semibold truncate">{sub.name}</p>
-                                            <div className="flex items-center gap-2">
-                                                <div className={`w-2 h-2 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                                <span className={`text-xs ${lastRequest.textClass}`}>
-                                                    {lastRequest.text}
-                                                </span>
+                                            <div className="flex items-start gap-3">
+                                                <p className="min-w-0 flex-1 text-white font-semibold truncate">{sub.name}</p>
+                                                <div className="shrink-0 flex items-center gap-2">
+                                                    <div className={`w-2 h-2 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                                    <span className={`text-xs ${lastRequest.textClass}`}>
+                                                        {lastRequest.text}
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="flex gap-2">

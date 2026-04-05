@@ -153,10 +153,10 @@ export default function InboundList() {
                                     </div>
                                 </div>
                                 <div>
-                                    <div className="text-white font-semibold truncate" title={inbound.tag}>
+                                    <div className="max-w-[240px] text-white font-semibold truncate" title={inbound.tag}>
                                         {inbound.tag}
                                     </div>
-                                    <div className="text-slate-500 text-xs mt-1 font-mono">
+                                    <div className="max-w-[240px] text-slate-500 text-xs mt-1 font-mono truncate" title={`${inbound.listen || '::'}:${inbound.listen_port}`}>
                                         {inbound.listen || '::'}:{inbound.listen_port}
                                     </div>
                                 </div>

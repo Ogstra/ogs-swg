@@ -539,8 +539,10 @@ export default function WireGuard() {
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="p-4">
-                                            <div className="font-semibold text-slate-200 truncate max-w-full">{peer.alias || peer.name || '-'}</div>
+                                        <td className="w-48 p-4">
+                                            <div className="max-w-48 truncate font-semibold text-slate-200" title={peer.alias || peer.name || '-'}>
+                                                {peer.alias || peer.name || '-'}
+                                            </div>
                                         </td>
                                         <td className="p-4 font-mono text-slate-400 text-xs break-all whitespace-normal">
                                             {peer.allowed_ips}
