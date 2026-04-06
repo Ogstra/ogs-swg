@@ -508,6 +508,31 @@ func TestExtractSubscriptionRequestMetadata_FallsBackToParsedSamsungUserAgent(t 
 	}
 }
 
+func TestExtractSubscriptionRequestMetadata_FallsBackToParsedDesktopClientUserAgent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/s/history-token", nil)
+	req.Host = "swg.example.com"
+	req.Header.Set("User-Agent", "Proxor/PC/1.5.0 (Prefer ClashMeta Format)")
+	req.Header.Set("CF-IPCountry", "AR")
+
+	got := extractSubscriptionRequestMetadata(req)
+
+	if got.deviceModel != "PC" {
+		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "PC")
+	}
+	if got.deviceOS != "" {
+		t.Fatalf("deviceOS=%q want empty", got.deviceOS)
+	}
+	if got.deviceOSVersion != "" {
+		t.Fatalf("deviceOSVersion=%q want empty", got.deviceOSVersion)
+	}
+	if got.appVersion != "1.5.0" {
+		t.Fatalf("appVersion=%q want %q", got.appVersion, "1.5.0")
+	}
+	if got.country != "AR" {
+		t.Fatalf("country=%q want %q", got.country, "AR")
+	}
+}
+
 func TestResolveSubscriptionDeviceModel(t *testing.T) {
 	tests := []struct {
 		name  string
