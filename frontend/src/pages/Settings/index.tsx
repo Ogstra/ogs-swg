@@ -1230,7 +1230,7 @@ function DatabaseTab({
 
     const parseClientIdentity = (userAgent?: string) => {
         const ua = (userAgent || '').trim()
-        if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '', darwinVersion: '' }
+        if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '', darwinVersion: '', architecture: '' }
 
         const productMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z0-9._-]{1,64})/)
         const clientName = productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : ''
@@ -1242,6 +1242,7 @@ function DatabaseTab({
         const androidVersionMatch = ua.match(/Android\s+([0-9][0-9A-Za-z._-]*)/)
         const darwinVersionMatch = ua.match(/Darwin\/([0-9.]+)/)
         const windowsVersionMatch = ua.match(/Windows NT\s+([0-9.]+)/)
+        const architectureMatch = ua.match(/\b(arm64|aarch64|x86_64|amd64)\b/i)
 
         let deviceModel = appleModelMatch?.[1] || samsungModelMatch?.[1] || ''
         if (!deviceModel && androidModelMatch?.[1]) {
@@ -1268,6 +1269,7 @@ function DatabaseTab({
             deviceOS,
             deviceOSVersion: androidVersionMatch?.[1]?.trim() || windowsVersionMatch?.[1]?.trim() || '',
             darwinVersion: darwinVersionMatch?.[1]?.trim() || '',
+            architecture: architectureMatch?.[1]?.toLowerCase() || '',
         }
     }
 
@@ -1291,6 +1293,9 @@ function DatabaseTab({
         else if (osVersion) details.push(osVersion)
         if (parsed.darwinVersion && parsed.darwinVersion !== osVersion) {
             details.push(`Darwin ${parsed.darwinVersion}`)
+        }
+        if ((run.device_os || parsed.deviceOS) === 'macOS' && parsed.architecture) {
+            details.push(parsed.architecture)
         }
         return details.join(' • ')
     }
