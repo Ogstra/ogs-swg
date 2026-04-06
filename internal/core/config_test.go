@@ -403,10 +403,72 @@ func TestLoadConfig_PreservesExplicitWireGuardConfigDir(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_RealIPDefaults(t *testing.T) {
+	clearRealIPEnv(t)
+
+	cfgPath := writeConfigFixture(t, `{}`)
+	cfg := LoadConfig(cfgPath)
+
+	if cfg.RealIPCorrelationEnabled {
+		t.Fatal("RealIPCorrelationEnabled=true, want false")
+	}
+	if cfg.RealIPNginxStreamLogPath != "/var/log/nginx/stream.log" {
+		t.Fatalf("RealIPNginxStreamLogPath=%q, want %q", cfg.RealIPNginxStreamLogPath, "/var/log/nginx/stream.log")
+	}
+	if cfg.RealIPCacheTTLSec != 30 {
+		t.Fatalf("RealIPCacheTTLSec=%d, want 30", cfg.RealIPCacheTTLSec)
+	}
+	if cfg.RealIPCleanupIntervalSec != 60 {
+		t.Fatalf("RealIPCleanupIntervalSec=%d, want 60", cfg.RealIPCleanupIntervalSec)
+	}
+	if cfg.RealIPResolverMode != "loopback_only" {
+		t.Fatalf("RealIPResolverMode=%q, want %q", cfg.RealIPResolverMode, "loopback_only")
+	}
+}
+
+func TestLoadConfig_RealIPNormalization(t *testing.T) {
+	clearRealIPEnv(t)
+
+	cfgPath := writeConfigFixture(t, `{
+  "real_ip_correlation_enabled": true,
+  "real_ip_nginx_stream_log_path": "  /tmp/nginx-stream.log  ",
+  "real_ip_cache_ttl_sec": -5,
+  "real_ip_cleanup_interval_sec": 0,
+  "real_ip_resolver_mode": "direct_override"
+}`)
+
+	cfg := LoadConfig(cfgPath)
+
+	if !cfg.RealIPCorrelationEnabled {
+		t.Fatal("RealIPCorrelationEnabled=false, want true")
+	}
+	if cfg.RealIPNginxStreamLogPath != "/tmp/nginx-stream.log" {
+		t.Fatalf("RealIPNginxStreamLogPath=%q, want %q", cfg.RealIPNginxStreamLogPath, "/tmp/nginx-stream.log")
+	}
+	if cfg.RealIPCacheTTLSec != 30 {
+		t.Fatalf("RealIPCacheTTLSec=%d, want 30 fallback", cfg.RealIPCacheTTLSec)
+	}
+	if cfg.RealIPCleanupIntervalSec != 60 {
+		t.Fatalf("RealIPCleanupIntervalSec=%d, want 60 fallback", cfg.RealIPCleanupIntervalSec)
+	}
+	if cfg.RealIPResolverMode != "loopback_only" {
+		t.Fatalf("RealIPResolverMode=%q, want %q fallback", cfg.RealIPResolverMode, "loopback_only")
+	}
+}
+
 func clearWireGuardEnv(t *testing.T) {
 	t.Helper()
 	_ = os.Unsetenv("OGS_WIREGUARD_CONFIG_PATH")
 	_ = os.Unsetenv("OGS_WIREGUARD_CONFIG_DIR")
+}
+
+func clearRealIPEnv(t *testing.T) {
+	t.Helper()
+	_ = os.Unsetenv("OGS_REAL_IP_CORRELATION_ENABLED")
+	_ = os.Unsetenv("OGS_REAL_IP_NGINX_STREAM_LOG_PATH")
+	_ = os.Unsetenv("OGS_REAL_IP_CACHE_TTL_SEC")
+	_ = os.Unsetenv("OGS_REAL_IP_CLEANUP_INTERVAL_SEC")
+	_ = os.Unsetenv("OGS_REAL_IP_RESOLVER_MODE")
 }
 
 func writeConfigFixture(t *testing.T, content string) string {
