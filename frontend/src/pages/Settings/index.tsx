@@ -741,7 +741,7 @@ function AdvancedTab({
                         <div className="space-y-1">
                             <h3 className="text-sm font-semibold text-white">Enable real client IP attribution</h3>
                             <p className="text-sm text-slate-400">
-                                Disabled by default. This only applies to loopback/nginx proxy cases, preserves the original sing-box source when no correlation exists, and requires nginx stream logs with <code>$remote_port</code>.
+                                Disabled by default. Use this only when nginx proxies traffic locally and sing-box sees client remotes as <code>127.0.0.1:port</code>.
                             </p>
                         </div>
                         <label className="inline-flex items-center gap-2 text-sm text-slate-300">
@@ -753,6 +753,19 @@ function AdvancedTab({
                             />
                             Enabled
                         </label>
+                    </div>
+
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-slate-300">
+                        <div className="font-medium text-amber-200">Requirements</div>
+                        <div className="mt-3 space-y-2">
+                            <p>1. Nginx must write a <code>stream</code> access log, not an <code>http</code> access log.</p>
+                            <p>2. Every line must include both <code>$remote_addr</code> and <code>$remote_port</code>. Without <code>$remote_port</code>, correlation is impossible and loopback requests remain <code>127.0.0.1</code>.</p>
+                            <p>3. The path below must match the real nginx stream log file on disk and be readable by the panel process.</p>
+                            <p>4. This only rewrites loopback-proxied requests. Direct client IPs stay unchanged, and unresolved loopback requests keep the original sing-box source.</p>
+                        </div>
+                        <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-300">
+                            log_format stream 'client=$remote_addr remote_port=$remote_port upstream=$upstream_addr ...';
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -806,7 +819,7 @@ function AdvancedTab({
                     </div>
 
                     <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-400">
-                        Use this only when sing-box sees loopback remotes because nginx is proxying local traffic. Direct connections are left unchanged, unresolved loopback requests keep their original sing-box source, and correlation data stays in memory.
+                        Correlation data stays in memory only. Older installs do not need these keys pre-existing in <code>config.json</code>, but the feature still has to be enabled and saved here before runtime attribution begins.
                     </div>
 
                     <div className="flex justify-end">
