@@ -1223,6 +1223,11 @@ function DatabaseTab({
         return new Date(value * 1000).toLocaleTimeString()
     }
 
+    const formatHistoryDateTime = (value?: number | null) => {
+        if (!value || Number.isNaN(value)) return 'Unknown'
+        return new Date(value * 1000).toLocaleString()
+    }
+
     const parseClientIdentity = (userAgent?: string) => {
         const ua = (userAgent || '').trim()
         if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '' }
@@ -1235,6 +1240,7 @@ function DatabaseTab({
         const samsungModelMatch = ua.match(/\b(SM-[A-Z0-9]+)\b/)
         const androidModelMatch = ua.match(/Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build\/|[;)])/)
         const androidVersionMatch = ua.match(/Android\s+([0-9][0-9A-Za-z._-]*)/)
+        const darwinVersionMatch = ua.match(/Darwin\/([0-9.]+)/)
         const windowsVersionMatch = ua.match(/Windows NT\s+([0-9.]+)/)
 
         let deviceModel = appleModelMatch?.[1] || samsungModelMatch?.[1] || ''
@@ -1260,7 +1266,7 @@ function DatabaseTab({
             clientVersion,
             deviceModel,
             deviceOS,
-            deviceOSVersion: androidVersionMatch?.[1]?.trim() || windowsVersionMatch?.[1]?.trim() || '',
+            deviceOSVersion: androidVersionMatch?.[1]?.trim() || darwinVersionMatch?.[1]?.trim() || windowsVersionMatch?.[1]?.trim() || '',
         }
     }
 
@@ -1501,18 +1507,18 @@ function DatabaseTab({
                                                 </div>
                                                 <div className="shrink-0 font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
                                             </div>
-                                            <div className="truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
-                                                {run.user_name || 'No users'}
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
+                                                    {run.user_name || 'No users'}
+                                                </div>
+                                                <div className="shrink-0 text-slate-500 text-[10px]">{formatHistoryDateTime(run.requested_at)}</div>
                                             </div>
                                             <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
                                                 {formatClientLabel(run)}
                                             </div>
                                             {(formatDeviceDetails(run) || formatAppVersion(run) || run.country || run.hwid_prefix) && (
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
-                                                        {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
-                                                    </div>
-                                                    <div className="shrink-0 text-slate-500 text-[10px]">{formatHistoryTime(run.requested_at)}</div>
+                                                <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
+                                                    {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
                                                 </div>
                                             )}
                                         </div>

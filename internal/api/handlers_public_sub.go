@@ -56,6 +56,7 @@ var (
 	subscriptionUserAgentSamsungModelRE   = regexp.MustCompile(`\b(SM-[A-Z0-9]+)\b`)
 	subscriptionUserAgentAndroidModelRE   = regexp.MustCompile(`Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build/|[;)])`)
 	subscriptionUserAgentAndroidVersionRE = regexp.MustCompile(`Android\s+([0-9][0-9A-Za-z._-]*)`)
+	subscriptionUserAgentDarwinVersionRE  = regexp.MustCompile(`Darwin/([0-9.]+)`)
 	subscriptionUserAgentWindowsRE        = regexp.MustCompile(`Windows NT\s+([0-9.]+)`)
 )
 
@@ -340,6 +341,11 @@ func parseSubscriptionUserAgent(userAgent string) parsedSubscriptionUserAgent {
 
 	if matches := subscriptionUserAgentAndroidVersionRE.FindStringSubmatch(ua); len(matches) == 2 {
 		parsed.deviceOSVer = strings.TrimSpace(matches[1])
+	}
+	if parsed.deviceOSVer == "" {
+		if matches := subscriptionUserAgentDarwinVersionRE.FindStringSubmatch(ua); len(matches) == 2 {
+			parsed.deviceOSVer = strings.TrimSpace(matches[1])
+		}
 	}
 	if parsed.deviceOSVer == "" {
 		if matches := subscriptionUserAgentWindowsRE.FindStringSubmatch(ua); len(matches) == 2 {
