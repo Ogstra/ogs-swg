@@ -28,12 +28,13 @@ type ClientIPCorrelation struct {
 	resolverMode    string
 	logPath         string
 
-	mu       sync.RWMutex
-	entries  map[string]clientIPCorrelationEntry
-	now      func() time.Time
-	stopChan chan struct{}
-	stopOnce sync.Once
-	started  bool
+	mu          sync.RWMutex
+	entries     map[string]clientIPCorrelationEntry
+	now         func() time.Time
+	stopChan    chan struct{}
+	stopOnce    sync.Once
+	started     bool
+	initialSize int64
 }
 
 func NewClientIPCorrelation(ttlSeconds, cleanupIntervalSeconds int, resolverMode, logPath string) *ClientIPCorrelation {
@@ -60,6 +61,9 @@ func (c *ClientIPCorrelation) Start() {
 	if c.started || c.logPath == "" {
 		c.mu.Unlock()
 		return
+	}
+	if info, err := os.Stat(c.logPath); err == nil {
+		c.initialSize = info.Size()
 	}
 	c.started = true
 	c.mu.Unlock()
@@ -139,10 +143,9 @@ func (c *ClientIPCorrelation) pollLoop() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	var lastSize int64
-	if info, err := os.Stat(c.logPath); err == nil {
-		lastSize = info.Size()
-	}
+	c.mu.RLock()
+	lastSize := c.initialSize
+	c.mu.RUnlock()
 
 	for {
 		select {
