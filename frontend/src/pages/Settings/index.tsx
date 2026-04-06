@@ -1411,10 +1411,13 @@ function DatabaseTab({
                 </Card>
             </div>
 
-            <div style={databaseCardHeight ? { height: `${databaseCardHeight}px` } : undefined}>
+            <div
+                className="min-h-0"
+                style={databaseCardHeight ? { height: `${databaseCardHeight}px` } : undefined}
+            >
                 <Card
                     title="Subscriptions History"
-                    className="flex flex-col min-h-[208px] overflow-hidden"
+                    className="flex h-full min-h-[208px] min-h-0 flex-col overflow-hidden"
                     action={
                         <select
                             value={historyLimit}
@@ -1429,8 +1432,8 @@ function DatabaseTab({
                         </select>
                     }
                 >
-                    <div className="flex-1 min-h-0">
-                        <div className="space-y-0 text-sm h-full overflow-y-auto pr-2">
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        <div className="h-full min-h-0 space-y-0 overflow-y-auto pr-2 text-sm">
                             {subscriptionRequestHistory.length === 0 ? (
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
