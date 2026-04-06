@@ -545,6 +545,23 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 		http.Error(w, "Failed to read subscription request history: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if s != nil && s.store != nil {
+		currentUsers := make(map[int64]string, len(runs))
+		for i := range runs {
+			if names, ok := currentUsers[runs[i].SubID]; ok {
+				runs[i].UserName = names
+				continue
+			}
+			users, usersErr := s.store.Queries.GetUsersForSubscription(r.Context(), runs[i].SubID)
+			if usersErr != nil {
+				log.Printf("subscription request history: failed to resolve current users for sub_id=%d: %v", runs[i].SubID, usersErr)
+				continue
+			}
+			names := strings.Join(users, ", ")
+			currentUsers[runs[i].SubID] = names
+			runs[i].UserName = names
+		}
+	}
 	if shouldCensorSubscriptionRequestHistory(r) {
 		for i := range runs {
 			runs[i].UserName = "Restricted"
