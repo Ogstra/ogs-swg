@@ -1504,10 +1504,10 @@ function DatabaseTab({
                                             <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
                                                 {formatClientLabel(run)}
                                             </div>
-                                            {(formatDeviceDetails(run) || formatAppVersion(run) || run.country || run.request_host || run.hwid_prefix) && (
+                                            {(formatDeviceDetails(run) || formatAppVersion(run) || run.country || run.hwid_prefix) && (
                                                 <div className="flex items-start justify-between gap-3">
-                                                    <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
-                                                        {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
+                                                    <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
+                                                        {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
                                                     </div>
                                                     <div className="shrink-0 text-slate-500 text-[10px]">{formatHistoryTime(run.requested_at)}</div>
                                                 </div>
