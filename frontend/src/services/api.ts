@@ -57,6 +57,11 @@ export interface FeatureFlags {
     aggregation_days?: number;
     log_source?: 'journal' | 'file';
     access_log_path?: string;
+    real_ip_correlation_enabled?: boolean;
+    real_ip_nginx_stream_log_path?: string;
+    real_ip_cache_ttl_sec?: number;
+    real_ip_cleanup_interval_sec?: number;
+    real_ip_resolver_mode?: 'loopback_only';
     systemctl_available?: boolean;
     journalctl_available?: boolean;
 }

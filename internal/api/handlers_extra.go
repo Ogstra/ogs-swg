@@ -624,21 +624,26 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
-		"enable_singbox":          s.config.EnableSingbox,
-		"enable_wireguard":        s.config.EnableWireGuard,
-		"retention_enabled":       s.config.RetentionEnabled,
-		"retention_days":          s.config.RetentionDays,
-		"wg_retention_days":       s.config.WGRetentionDays,
-		"sampler_interval_sec":    s.config.SamplerIntervalSec,
-		"wg_sampler_interval_sec": s.config.WGSamplerIntervalSec,
-		"sampler_paused":          s.sampler != nil && s.sampler.IsPaused(),
-		"active_threshold_bytes":  s.config.ActiveThresholdBytes,
-		"aggregation_enabled":     s.config.AggregationEnabled,
-		"aggregation_days":        s.config.AggregationDays,
-		"log_source":              s.config.LogSource,
-		"access_log_path":         s.config.AccessLogPath,
-		"systemctl_available":     s.executor != nil,
-		"journalctl_available":    s.executor != nil,
+		"enable_singbox":                s.config.EnableSingbox,
+		"enable_wireguard":              s.config.EnableWireGuard,
+		"retention_enabled":             s.config.RetentionEnabled,
+		"retention_days":                s.config.RetentionDays,
+		"wg_retention_days":             s.config.WGRetentionDays,
+		"sampler_interval_sec":          s.config.SamplerIntervalSec,
+		"wg_sampler_interval_sec":       s.config.WGSamplerIntervalSec,
+		"sampler_paused":                s.sampler != nil && s.sampler.IsPaused(),
+		"active_threshold_bytes":        s.config.ActiveThresholdBytes,
+		"aggregation_enabled":           s.config.AggregationEnabled,
+		"aggregation_days":              s.config.AggregationDays,
+		"log_source":                    s.config.LogSource,
+		"access_log_path":               s.config.AccessLogPath,
+		"real_ip_correlation_enabled":   s.config.RealIPCorrelationEnabled,
+		"real_ip_nginx_stream_log_path": s.config.RealIPNginxStreamLogPath,
+		"real_ip_cache_ttl_sec":         s.config.RealIPCacheTTLSec,
+		"real_ip_cleanup_interval_sec":  s.config.RealIPCleanupIntervalSec,
+		"real_ip_resolver_mode":         s.config.RealIPResolverMode,
+		"systemctl_available":           s.executor != nil,
+		"journalctl_available":          s.executor != nil,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -731,12 +736,53 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.AggregationDays = 1
 		}
 	}
+	if val, ok := payload["real_ip_correlation_enabled"].(bool); ok {
+		s.config.RealIPCorrelationEnabled = val
+	}
+	if val, ok := payload["real_ip_nginx_stream_log_path"].(string); ok {
+		s.config.RealIPNginxStreamLogPath = strings.TrimSpace(val)
+		if s.config.RealIPNginxStreamLogPath == "" {
+			s.config.RealIPNginxStreamLogPath = "/var/log/nginx/stream.log"
+		}
+	}
+	if v, ok := payload["real_ip_cache_ttl_sec"]; ok {
+		s.config.RealIPCacheTTLSec = normalizeRealIPIntOption(v, map[int]struct{}{15: {}, 30: {}, 60: {}}, 30)
+	}
+	if v, ok := payload["real_ip_cleanup_interval_sec"]; ok {
+		s.config.RealIPCleanupIntervalSec = normalizeRealIPIntOption(v, map[int]struct{}{30: {}, 60: {}, 120: {}}, 60)
+	}
+	if val, ok := payload["real_ip_resolver_mode"].(string); ok {
+		mode := strings.TrimSpace(strings.ToLower(val))
+		if mode != "loopback_only" {
+			mode = "loopback_only"
+		}
+		s.config.RealIPResolverMode = mode
+	}
+	s.refreshRealIPResolver()
 
 	if err := s.config.SaveAppConfig(); err != nil {
 		log.Printf("Failed to persist config toggles: %v", err)
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func normalizeRealIPIntOption(raw interface{}, allowed map[int]struct{}, fallback int) int {
+	var value int
+	switch t := raw.(type) {
+	case float64:
+		value = int(t)
+	case int:
+		value = t
+	case int64:
+		value = int(t)
+	default:
+		return fallback
+	}
+	if _, ok := allowed[value]; !ok {
+		return fallback
+	}
+	return value
 }
 
 func (s *Server) handleGetPublicIP(w http.ResponseWriter, r *http.Request) {
