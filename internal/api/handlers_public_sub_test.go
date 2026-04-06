@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/core/store"
@@ -296,6 +297,106 @@ func TestHandlePublicSubscription_EmitsRefreshPolicyHeaders(t *testing.T) {
 	}
 	if got := rec.Header().Get("update-always"); got != "true" {
 		t.Fatalf("update-always=%q want %q", got, "true")
+	}
+}
+
+func TestResolveSubscriptionRequestIP_RealIP(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+	server.config.RealIPCorrelationEnabled = true
+	server.realIPResolver = core.NewClientIPCorrelation(30, 60, "loopback_only", "")
+	if !server.realIPResolver.ObserveNginxStreamLine(`client=198.51.100.44 remote_port=45678 upstream=127.0.0.1:443`) {
+		t.Fatal("ObserveNginxStreamLine=false, want true")
+	}
+
+	tests := []struct {
+		name       string
+		remoteAddr string
+		enabled    bool
+		want       string
+	}{
+		{name: "loopback hit", remoteAddr: "127.0.0.1:45678", enabled: true, want: "198.51.100.44"},
+		{name: "feature disabled", remoteAddr: "127.0.0.1:45678", enabled: false, want: "127.0.0.1"},
+		{name: "loopback miss", remoteAddr: "127.0.0.1:49999", enabled: true, want: "127.0.0.1"},
+		{name: "direct remote unchanged", remoteAddr: "198.51.100.9:44321", enabled: true, want: "198.51.100.9"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.enabled {
+				server.realIPResolver = core.NewClientIPCorrelation(30, 60, "loopback_only", "")
+				server.realIPResolver.ObserveNginxStreamLine(`client=198.51.100.44 remote_port=45678 upstream=127.0.0.1:443`)
+			} else {
+				server.realIPResolver = nil
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/s/token", nil)
+			req.RemoteAddr = tc.remoteAddr
+			if got := server.resolveSubscriptionRequestIP(req); got != tc.want {
+				t.Fatalf("resolveSubscriptionRequestIP=%q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHandleSubscriptionRequestHistory_RealIP(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "history-token",
+		Name:        "History Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+
+	server.realIPResolver = core.NewClientIPCorrelation(30, 60, "loopback_only", "")
+	if !server.realIPResolver.ObserveNginxStreamLine(`client=198.51.100.44 remote_port=45678 upstream=127.0.0.1:443`) {
+		t.Fatal("ObserveNginxStreamLine=false, want true")
+	}
+
+	tests := []struct {
+		name       string
+		remoteAddr string
+		enableReal bool
+		want       string
+	}{
+		{name: "loopback hit", remoteAddr: "127.0.0.1:45678", enableReal: true, want: "198.51.100.44"},
+		{name: "feature disabled", remoteAddr: "127.0.0.1:45678", enableReal: false, want: "127.0.0.1"},
+		{name: "loopback miss", remoteAddr: "127.0.0.1:49999", enableReal: true, want: "127.0.0.1"},
+		{name: "direct remote unchanged", remoteAddr: "198.51.100.9:44321", enableReal: true, want: "198.51.100.9"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.enableReal {
+				server.realIPResolver = core.NewClientIPCorrelation(30, 60, "loopback_only", "")
+				server.realIPResolver.ObserveNginxStreamLine(`client=198.51.100.44 remote_port=45678 upstream=127.0.0.1:443`)
+			} else {
+				server.realIPResolver = nil
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/s/history-token", nil)
+			req.RemoteAddr = tc.remoteAddr
+			server.recordSubscriptionRequest(req, subID, []string{"alice"}, false)
+
+			history, err := dataStore.Queries.GetSubscriptionRequestHistory(t.Context(), 10)
+			if err != nil {
+				t.Fatalf("GetSubscriptionRequestHistory: %v", err)
+			}
+			if len(history) == 0 {
+				t.Fatal("expected subscription request history entry")
+			}
+			got := history[0].RequestIP
+			if got != tc.want {
+				t.Fatalf("request_ip=%q want %q", got, tc.want)
+			}
+
+			if err := dataStore.Queries.PruneSubscriptionRequestsOlderThan(t.Context(), time.Now().Add(time.Hour).Unix()); err != nil {
+				t.Fatalf("PruneSubscriptionRequestsOlderThan: %v", err)
+			}
+		})
 	}
 }
 
