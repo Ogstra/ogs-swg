@@ -43,6 +43,7 @@ type Server struct {
 	wgSamplerPaused  bool
 	wgLast           map[string]core.WGSample
 	loginLimiter     *loginLimiter
+	realIPResolver   *core.ClientIPCorrelation
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -59,7 +60,7 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		log.Fatalf("Failed to initialize ristretto cache: %v", err)
 	}
 
-	return &Server{
+	server := &Server{
 		store:            store,
 		config:           config,
 		executor:         executor,
@@ -78,6 +79,15 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		wgSamplerPaused:  false,
 		loginLimiter:     newLoginLimiter(),
 	}
+	if config != nil && config.RealIPCorrelationEnabled {
+		server.realIPResolver = core.NewClientIPCorrelation(
+			config.RealIPCacheTTLSec,
+			config.RealIPCleanupIntervalSec,
+			config.RealIPResolverMode,
+			config.RealIPNginxStreamLogPath,
+		)
+	}
+	return server
 }
 
 type gzipResponseWriter struct {
@@ -346,6 +356,10 @@ func (s *Server) Stop() {
 		s.executor.Close()
 	}
 
+	if s.realIPResolver != nil {
+		s.realIPResolver.Stop()
+	}
+
 	if s.pool != nil {
 		s.pool.StopAndWait()
 	}
@@ -401,13 +415,16 @@ func StartServer(cfg *core.Config) *Server {
 	server := NewServer(store, cfg, executor)
 
 	if cfg.EnableSingbox && !cfg.DemoMode {
+		if server.realIPResolver != nil {
+			server.realIPResolver.Start()
+		}
 		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
 		if cfg.UseStatsSampler {
 			sampler := core.NewStatsSampler(sbClient, store, cfg)
 			sampler.Start()
 			server.sampler = sampler
 		} else {
-			watcher := core.NewWatcher(cfg.AccessLogPath)
+			watcher := core.NewWatcher(cfg.AccessLogPath, server.realIPResolver)
 			watcher.Start()
 			inboundTags := cfg.StatsInbounds
 			if len(inboundTags) == 0 {

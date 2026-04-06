@@ -50,6 +50,11 @@ export default function Settings() {
         wg_retention_days: 30,
         aggregation_enabled: false,
         aggregation_days: 7,
+        real_ip_correlation_enabled: false,
+        real_ip_nginx_stream_log_path: '/var/log/nginx/stream.log',
+        real_ip_cache_ttl_sec: 30,
+        real_ip_cleanup_interval_sec: 60,
+        real_ip_resolver_mode: 'loopback_only',
     })
     const [historyLimit, setHistoryLimit] = useState(10)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
@@ -372,6 +377,18 @@ export default function Settings() {
             label: <span className="flex items-center gap-2"><UserCog size={16} /> Admins</span>,
             content: <PanelUsers />,
         }] : []),
+        {
+            id: 'advanced',
+            label: <span className="flex items-center gap-2"><SettingsIcon size={16} /> Advanced</span>,
+            content: (
+                <AdvancedTab
+                    features={features}
+                    setFeatures={setFeatures}
+                    handleSaveFeatures={handleSaveFeatures}
+                    canWriteSettings={canWriteSettings}
+                />
+            ),
+        },
     ].filter(tab => {
         if (tab.id === 'singbox') return !!permissions?.can_read_config
         if (tab.id === 'wireguard-interfaces') return !!permissions?.can_read_wireguard
@@ -698,6 +715,104 @@ function GeneralTab({
                                 <div className="text-xs text-slate-400 mt-1">Compress old history</div>
                             </div>
                         </label>
+                    </div>
+                </div>
+            </Card>
+        </div>
+    )
+}
+
+function AdvancedTab({
+    features,
+    setFeatures,
+    handleSaveFeatures,
+    canWriteSettings,
+}: {
+    features: FeatureFlags
+    setFeatures: Dispatch<SetStateAction<FeatureFlags>>
+    handleSaveFeatures: () => void
+    canWriteSettings: boolean
+}) {
+    return (
+        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
+            <Card title="Real Client IP Attribution">
+                <div className="space-y-4">
+                    <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4">
+                        <div className="space-y-1">
+                            <h3 className="text-sm font-semibold text-white">Enable real client IP attribution</h3>
+                            <p className="text-sm text-slate-400">
+                                Disabled by default. This only applies to loopback/nginx proxy cases, preserves the original sing-box source when no correlation exists, and requires nginx stream logs with <code>$remote_port</code>.
+                            </p>
+                        </div>
+                        <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+                            <input
+                                type="checkbox"
+                                checked={!!features.real_ip_correlation_enabled}
+                                onChange={e => setFeatures(prev => ({ ...prev, real_ip_correlation_enabled: e.target.checked }))}
+                                disabled={!canWriteSettings}
+                            />
+                            Enabled
+                        </label>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1 md:col-span-2">
+                            <label className="text-xs font-medium text-slate-400">Nginx stream log path</label>
+                            <input
+                                type="text"
+                                value={features.real_ip_nginx_stream_log_path ?? '/var/log/nginx/stream.log'}
+                                onChange={e => setFeatures(prev => ({ ...prev, real_ip_nginx_stream_log_path: e.target.value }))}
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                disabled={!canWriteSettings}
+                            />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-400">Correlation TTL</label>
+                            <select
+                                value={String(features.real_ip_cache_ttl_sec ?? 30)}
+                                onChange={e => setFeatures(prev => ({ ...prev, real_ip_cache_ttl_sec: Number(e.target.value) }))}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                disabled={!canWriteSettings}
+                            >
+                                <option value="15">15</option>
+                                <option value="30">30</option>
+                                <option value="60">60</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-400">Cleanup interval</label>
+                            <select
+                                value={String(features.real_ip_cleanup_interval_sec ?? 60)}
+                                onChange={e => setFeatures(prev => ({ ...prev, real_ip_cleanup_interval_sec: Number(e.target.value) }))}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                disabled={!canWriteSettings}
+                            >
+                                <option value="30">30</option>
+                                <option value="60">60</option>
+                                <option value="120">120</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-medium text-slate-400">Resolver mode</label>
+                            <select
+                                value={features.real_ip_resolver_mode ?? 'loopback_only'}
+                                onChange={e => setFeatures(prev => ({ ...prev, real_ip_resolver_mode: e.target.value as 'loopback_only' }))}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                                disabled={!canWriteSettings}
+                            >
+                                <option value="loopback_only">loopback_only</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-4 text-sm text-slate-400">
+                        Use this only when sing-box sees loopback remotes because nginx is proxying local traffic. Direct connections are left unchanged, unresolved loopback requests keep their original sing-box source, and correlation data stays in memory.
+                    </div>
+
+                    <div className="flex justify-end">
+                        <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
+                            Save Advanced Settings
+                        </Button>
                     </div>
                 </div>
             </Card>
