@@ -112,6 +112,16 @@ export interface SubscriptionRequestHistoryEntry {
     name: string;
     user_name: string;
     request_ip: string;
+    request_host: string;
+    request_path: string;
+    user_agent: string;
+    device_model: string;
+    device_os: string;
+    device_os_version: string;
+    app_version: string;
+    country: string;
+    hwid_hash: string;
+    hwid_prefix: string;
     requested_at: number;
     served_from_cache: number;
 }

@@ -1195,6 +1195,18 @@ function DatabaseTab({
         return new Date(value * 1000).toLocaleTimeString()
     }
 
+    const formatClientLabel = (run: SubscriptionRequestHistoryEntry) => {
+        if (run.device_model && run.user_agent) return `${run.user_agent} on ${run.device_model}`
+        if (run.device_model) return run.device_model
+        if (run.user_agent) return run.user_agent
+        return 'Unknown client'
+    }
+
+    const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
+        const details = [run.device_os, run.device_os_version].filter(Boolean).join(' ')
+        return details || ''
+    }
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start pb-4 sm:pb-0">
             <div>
@@ -1360,6 +1372,14 @@ function DatabaseTab({
                                             <div className="truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
                                                 {run.user_name || 'No users'}
                                             </div>
+                                            <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
+                                                {formatClientLabel(run)}
+                                            </div>
+                                            {(formatDeviceDetails(run) || run.app_version || run.country || run.request_host || run.hwid_prefix) && (
+                                                <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), run.app_version ? `App ${run.app_version}` : '', run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
+                                                    {[formatDeviceDetails(run), run.app_version ? `App ${run.app_version}` : '', run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="shrink-0 text-right">
                                             <div className="font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>

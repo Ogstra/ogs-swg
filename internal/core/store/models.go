@@ -91,6 +91,16 @@ type SubscriptionRequest struct {
 	SubID           int64  `json:"sub_id"`
 	UserName        string `json:"user_name"`
 	RequestIP       string `json:"request_ip"`
+	RequestHost     string `json:"request_host"`
+	RequestPath     string `json:"request_path"`
+	UserAgent       string `json:"user_agent"`
+	DeviceModel     string `json:"device_model"`
+	DeviceOS        string `json:"device_os"`
+	DeviceOSVersion string `json:"device_os_version"`
+	AppVersion      string `json:"app_version"`
+	Country         string `json:"country"`
+	HwidHash        string `json:"hwid_hash"`
+	HwidPrefix      string `json:"hwid_prefix"`
 	RequestedAt     int64  `json:"requested_at"`
 	ServedFromCache int64  `json:"served_from_cache"`
 }

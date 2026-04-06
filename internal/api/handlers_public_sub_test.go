@@ -391,6 +391,14 @@ func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T)
 	req := httptest.NewRequest(http.MethodGet, "/s/history-token", nil)
 	req.SetPathValue("token", "history-token")
 	req.RemoteAddr = "198.51.100.5:12345"
+	req.Host = "swg.example.com"
+	req.Header.Set("User-Agent", "v2raytun/ios")
+	req.Header.Set("X-Device-Model", "iPhone 14 Pro Max")
+	req.Header.Set("X-Device-OS", "iOS")
+	req.Header.Set("X-Ver-Os", "26.4")
+	req.Header.Set("X-App-Version", "2.4.4")
+	req.Header.Set("CF-IPCountry", "AR")
+	req.Header.Set("X-Hwid", "1226BDD7-30DF-409A-9FE7-C9CBCABC2335")
 	rec := httptest.NewRecorder()
 	server.handlePublicSubscription(rec, req)
 	if rec.Code != http.StatusOK {
@@ -418,6 +426,36 @@ func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T)
 	}
 	if got[0].RequestIP != "198.51.100.5" {
 		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "198.51.100.5")
+	}
+	if got[0].RequestHost != "swg.example.com" {
+		t.Fatalf("request_host=%q want %q", got[0].RequestHost, "swg.example.com")
+	}
+	if got[0].RequestPath != "/s/[token]" {
+		t.Fatalf("request_path=%q want %q", got[0].RequestPath, "/s/[token]")
+	}
+	if got[0].UserAgent != "v2raytun/ios" {
+		t.Fatalf("user_agent=%q want %q", got[0].UserAgent, "v2raytun/ios")
+	}
+	if got[0].DeviceModel != "iPhone 14 Pro Max" {
+		t.Fatalf("device_model=%q want %q", got[0].DeviceModel, "iPhone 14 Pro Max")
+	}
+	if got[0].DeviceOS != "iOS" {
+		t.Fatalf("device_os=%q want %q", got[0].DeviceOS, "iOS")
+	}
+	if got[0].DeviceOSVersion != "26.4" {
+		t.Fatalf("device_os_version=%q want %q", got[0].DeviceOSVersion, "26.4")
+	}
+	if got[0].AppVersion != "2.4.4" {
+		t.Fatalf("app_version=%q want %q", got[0].AppVersion, "2.4.4")
+	}
+	if got[0].Country != "AR" {
+		t.Fatalf("country=%q want %q", got[0].Country, "AR")
+	}
+	if got[0].HwidPrefix != "1226BDD7" {
+		t.Fatalf("hwid_prefix=%q want %q", got[0].HwidPrefix, "1226BDD7")
+	}
+	if got[0].HwidHash != hashSubscriptionHWID("1226BDD7-30DF-409A-9FE7-C9CBCABC2335") {
+		t.Fatalf("hwid_hash=%q want hash of x-hwid", got[0].HwidHash)
 	}
 }
 
@@ -632,6 +670,14 @@ func TestHandleSubscriptionRequestHistory_CensorsSensitiveFieldsForRestrictedCal
 	req := httptest.NewRequest(http.MethodGet, "/s/history-censored-token", nil)
 	req.SetPathValue("token", "history-censored-token")
 	req.RemoteAddr = "198.51.100.9:2222"
+	req.Host = "swg.example.com"
+	req.Header.Set("User-Agent", "v2raytun/ios")
+	req.Header.Set("X-Device-Model", "iPhone 14 Pro Max")
+	req.Header.Set("X-Device-OS", "iOS")
+	req.Header.Set("X-Ver-Os", "26.4")
+	req.Header.Set("X-App-Version", "2.4.4")
+	req.Header.Set("CF-IPCountry", "AR")
+	req.Header.Set("X-Hwid", "1226BDD7-30DF-409A-9FE7-C9CBCABC2335")
 	rec := httptest.NewRecorder()
 	server.handlePublicSubscription(rec, req)
 	if rec.Code != http.StatusOK {
@@ -656,5 +702,8 @@ func TestHandleSubscriptionRequestHistory_CensorsSensitiveFieldsForRestrictedCal
 	}
 	if got[0].RequestIP != "***" {
 		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "***")
+	}
+	if got[0].RequestHost != "" || got[0].RequestPath != "" || got[0].UserAgent != "" || got[0].DeviceModel != "" || got[0].DeviceOS != "" || got[0].DeviceOSVersion != "" || got[0].AppVersion != "" || got[0].Country != "" || got[0].HwidHash != "" || got[0].HwidPrefix != "" {
+		t.Fatalf("expected sensitive request metadata to be censored, got %+v", got[0])
 	}
 }

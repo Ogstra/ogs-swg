@@ -1,7 +1,9 @@
 package api
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +23,19 @@ type cachedSub struct {
 	HeaderTot             int64
 	HeaderProfileInterval *int64
 	HeaderUpdateAlways    bool
+}
+
+type subscriptionRequestMetadata struct {
+	requestHost     string
+	requestPath     string
+	userAgent       string
+	deviceModel     string
+	deviceOS        string
+	deviceOSVersion string
+	appVersion      string
+	country         string
+	hwidHash        string
+	hwidPrefix      string
 }
 
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
@@ -189,13 +204,99 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool) {
+	meta := extractSubscriptionRequestMetadata(r)
 	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
 		SubID:           subID,
 		UserName:        strings.Join(users, ", "),
 		RequestIP:       resolveSubscriptionRequestIP(r),
+		RequestHost:     meta.requestHost,
+		RequestPath:     meta.requestPath,
+		UserAgent:       meta.userAgent,
+		DeviceModel:     meta.deviceModel,
+		DeviceOS:        meta.deviceOS,
+		DeviceOSVersion: meta.deviceOSVersion,
+		AppVersion:      meta.appVersion,
+		Country:         meta.country,
+		HwidHash:        meta.hwidHash,
+		HwidPrefix:      meta.hwidPrefix,
 		RequestedAt:     s.now().Unix(),
 		ServedFromCache: servedFromCacheToInt64(servedFromCache),
 	})
+}
+
+func extractSubscriptionRequestMetadata(r *http.Request) subscriptionRequestMetadata {
+	if r == nil {
+		return subscriptionRequestMetadata{}
+	}
+
+	rawHWID := normalizeSubscriptionHeader(r.Header.Get("X-Hwid"), 255)
+	return subscriptionRequestMetadata{
+		requestHost:     normalizeSubscriptionHeader(r.Host, 255),
+		requestPath:     sanitizeSubscriptionRequestPath(r.URL.Path),
+		userAgent:       normalizeSubscriptionHeader(r.UserAgent(), 255),
+		deviceModel:     normalizeSubscriptionHeader(r.Header.Get("X-Device-Model"), 255),
+		deviceOS:        normalizeSubscriptionHeader(r.Header.Get("X-Device-OS"), 64),
+		deviceOSVersion: normalizeSubscriptionHeader(r.Header.Get("X-Ver-Os"), 64),
+		appVersion:      normalizeSubscriptionHeader(r.Header.Get("X-App-Version"), 64),
+		country:         normalizeSubscriptionCountry(r.Header.Get("CF-IPCountry")),
+		hwidHash:        hashSubscriptionHWID(rawHWID),
+		hwidPrefix:      prefixSubscriptionHWID(rawHWID),
+	}
+}
+
+func normalizeSubscriptionHeader(value string, maxLen int) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return ""
+	}
+	if maxLen > 0 && len(trimmed) > maxLen {
+		return trimmed[:maxLen]
+	}
+	return trimmed
+}
+
+func sanitizeSubscriptionRequestPath(path string) string {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "/s/") {
+		return "/s/[token]"
+	}
+	if len(trimmed) > 255 {
+		return trimmed[:255]
+	}
+	return trimmed
+}
+
+func normalizeSubscriptionCountry(value string) string {
+	trimmed := strings.ToUpper(strings.TrimSpace(value))
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) > 8 {
+		return trimmed[:8]
+	}
+	return trimmed
+}
+
+func hashSubscriptionHWID(value string) string {
+	if value == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func prefixSubscriptionHWID(value string) string {
+	if value == "" {
+		return ""
+	}
+	trimmed := strings.ToUpper(strings.TrimSpace(value))
+	if len(trimmed) > 8 {
+		return trimmed[:8]
+	}
+	return trimmed
 }
 
 func resolveSubscriptionRequestIP(r *http.Request) string {

@@ -236,6 +236,16 @@ func (s *Store) initSchema() error {
 		sub_id INTEGER NOT NULL,
 		user_name TEXT NOT NULL DEFAULT '',
 		request_ip TEXT NOT NULL DEFAULT '',
+		request_host TEXT NOT NULL DEFAULT '',
+		request_path TEXT NOT NULL DEFAULT '',
+		user_agent TEXT NOT NULL DEFAULT '',
+		device_model TEXT NOT NULL DEFAULT '',
+		device_os TEXT NOT NULL DEFAULT '',
+		device_os_version TEXT NOT NULL DEFAULT '',
+		app_version TEXT NOT NULL DEFAULT '',
+		country TEXT NOT NULL DEFAULT '',
+		hwid_hash TEXT NOT NULL DEFAULT '',
+		hwid_prefix TEXT NOT NULL DEFAULT '',
 		requested_at INTEGER NOT NULL,
 		served_from_cache INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
@@ -275,6 +285,16 @@ func (s *Store) initSchema() error {
 	s.db.Exec("UPDATE subscriptions SET update_always = 0 WHERE update_always IS NULL;")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN user_name TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_ip TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_host TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_path TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN user_agent TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN device_model TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN device_os TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN device_os_version TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN app_version TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN country TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN hwid_hash TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN hwid_prefix TEXT NOT NULL DEFAULT '';")
 	return nil
 }
 
