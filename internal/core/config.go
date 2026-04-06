@@ -18,51 +18,37 @@ import (
 	"github.com/joho/godotenv"
 )
 
-const (
-	defaultRealIPNginxStreamLogPath = "/var/log/nginx/stream.log"
-	defaultRealIPCacheTTLSec        = 30
-	defaultRealIPCleanupIntervalSec = 60
-	defaultRealIPResolverMode       = "loopback_only"
-	maxRealIPCacheTTLSec            = 3600
-	maxRealIPCleanupIntervalSec     = 3600
-)
-
 type Config struct {
-	SingboxConfigPath        string   `json:"singbox_config_path" env:"OGS_SINGBOX_CONFIG_PATH" env-default:"/etc/sing-box/config.json"`
-	SingboxAPIAddr           string   `json:"singbox_api_addr" env:"OGS_SINGBOX_API_ADDR" env-default:"127.0.0.1:8080"`
-	ManagedInbounds          []string `json:"managed_inbounds" env:"OGS_MANAGED_INBOUNDS" env-default:"in-reality"`
-	StatsInbounds            []string `json:"stats_inbounds" env:"OGS_STATS_INBOUNDS" env-default:"in-reality"`
-	StatsOutbounds           []string `json:"stats_outbounds" env:"OGS_STATS_OUTBOUNDS" env-default:"direct"`
-	AccessLogPath            string   `json:"access_log_path" env:"OGS_ACCESS_LOG_PATH" env-default:"data/access.log"`
-	LogSource                string   `json:"log_source" env:"OGS_LOG_SOURCE" env-default:"journal"` // "journal" or "file"
-	DatabasePath             string   `json:"database_path" env:"OGS_DB_PATH" env-default:"data/stats.db"`
-	ListenAddr               string   `json:"listen_addr" env:"OGS_LISTEN_ADDR" env-default:":8080"`
-	WireGuardConfigPath      string   `json:"wireguard_config_path" env:"OGS_WIREGUARD_CONFIG_PATH" env-default:"/etc/wireguard/wg0.conf"`
-	WireGuardConfigDir       string   `json:"wireguard_config_dir" env:"OGS_WIREGUARD_CONFIG_DIR"`
-	EnableWireGuard          bool     `json:"enable_wireguard" env:"OGS_ENABLE_WIREGUARD" env-default:"true"`
-	EnableSingbox            bool     `json:"enable_singbox" env:"OGS_ENABLE_SINGBOX" env-default:"true"`
-	UseStatsSampler          bool     `json:"use_stats_sampler" env:"OGS_USE_STATS_SAMPLER" env-default:"true"`
-	SamplerIntervalSec       int      `json:"sampler_interval_sec" env:"OGS_SAMPLER_INTERVAL_SEC" env-default:"120"`
-	ActiveThresholdBytes     int64    `json:"active_threshold_bytes" env:"OGS_ACTIVE_THRESHOLD_BYTES" env-default:"1024"`
-	RetentionEnabled         bool     `json:"retention_enabled" env:"OGS_RETENTION_ENABLED" env-default:"false"`
-	RetentionDays            int      `json:"retention_days" env:"OGS_RETENTION_DAYS" env-default:"90"`
-	WGSamplerIntervalSec     int      `json:"wg_sampler_interval_sec" env:"OGS_WG_SAMPLER_INTERVAL_SEC" env-default:"60"`
-	WGRetentionDays          int      `json:"wg_retention_days" env:"OGS_WG_RETENTION_DAYS" env-default:"30"`
-	AggregationEnabled       bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
-	AggregationDays          int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
-	PublicIP                 string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
-	SubscriptionDomain       string   `json:"subscription_domain" env:"OGS_SUBSCRIPTION_DOMAIN"`
-	SingboxPendingChanges    bool     `json:"-"` // Not persisted, runtime flag
-	ConfigPath               string   `json:"-"`
-	APIKey                   string   `json:"api_key" env:"OGS_API_KEY"`
-	APIKeyReadOnly           bool     `json:"api_key_read_only" env:"OGS_API_KEY_READ_ONLY" env-default:"false"`
-	DemoMode                 bool     `json:"demo_mode" env:"OGS_DEMO_MODE" env-default:"false"`
-	DisablePasswordLogin     bool     `json:"disable_password_login" env:"OGS_DISABLE_PASSWORD_LOGIN" env-default:"false"`
-	RealIPCorrelationEnabled bool     `json:"real_ip_correlation_enabled" env:"OGS_REAL_IP_CORRELATION_ENABLED" env-default:"false"`
-	RealIPNginxStreamLogPath string   `json:"real_ip_nginx_stream_log_path" env:"OGS_REAL_IP_NGINX_STREAM_LOG_PATH" env-default:"/var/log/nginx/stream.log"`
-	RealIPCacheTTLSec        int      `json:"real_ip_cache_ttl_sec" env:"OGS_REAL_IP_CACHE_TTL_SEC" env-default:"30"`
-	RealIPCleanupIntervalSec int      `json:"real_ip_cleanup_interval_sec" env:"OGS_REAL_IP_CLEANUP_INTERVAL_SEC" env-default:"60"`
-	RealIPResolverMode       string   `json:"real_ip_resolver_mode" env:"OGS_REAL_IP_RESOLVER_MODE" env-default:"loopback_only"`
+	SingboxConfigPath     string   `json:"singbox_config_path" env:"OGS_SINGBOX_CONFIG_PATH" env-default:"/etc/sing-box/config.json"`
+	SingboxAPIAddr        string   `json:"singbox_api_addr" env:"OGS_SINGBOX_API_ADDR" env-default:"127.0.0.1:8080"`
+	ManagedInbounds       []string `json:"managed_inbounds" env:"OGS_MANAGED_INBOUNDS" env-default:"in-reality"`
+	StatsInbounds         []string `json:"stats_inbounds" env:"OGS_STATS_INBOUNDS" env-default:"in-reality"`
+	StatsOutbounds        []string `json:"stats_outbounds" env:"OGS_STATS_OUTBOUNDS" env-default:"direct"`
+	AccessLogPath         string   `json:"access_log_path" env:"OGS_ACCESS_LOG_PATH" env-default:"data/access.log"`
+	LogSource             string   `json:"log_source" env:"OGS_LOG_SOURCE" env-default:"journal"` // "journal" or "file"
+	DatabasePath          string   `json:"database_path" env:"OGS_DB_PATH" env-default:"data/stats.db"`
+	ListenAddr            string   `json:"listen_addr" env:"OGS_LISTEN_ADDR" env-default:":8080"`
+	WireGuardConfigPath   string   `json:"wireguard_config_path" env:"OGS_WIREGUARD_CONFIG_PATH" env-default:"/etc/wireguard/wg0.conf"`
+	WireGuardConfigDir    string   `json:"wireguard_config_dir" env:"OGS_WIREGUARD_CONFIG_DIR"`
+	EnableWireGuard       bool     `json:"enable_wireguard" env:"OGS_ENABLE_WIREGUARD" env-default:"true"`
+	EnableSingbox         bool     `json:"enable_singbox" env:"OGS_ENABLE_SINGBOX" env-default:"true"`
+	UseStatsSampler       bool     `json:"use_stats_sampler" env:"OGS_USE_STATS_SAMPLER" env-default:"true"`
+	SamplerIntervalSec    int      `json:"sampler_interval_sec" env:"OGS_SAMPLER_INTERVAL_SEC" env-default:"120"`
+	ActiveThresholdBytes  int64    `json:"active_threshold_bytes" env:"OGS_ACTIVE_THRESHOLD_BYTES" env-default:"1024"`
+	RetentionEnabled      bool     `json:"retention_enabled" env:"OGS_RETENTION_ENABLED" env-default:"false"`
+	RetentionDays         int      `json:"retention_days" env:"OGS_RETENTION_DAYS" env-default:"90"`
+	WGSamplerIntervalSec  int      `json:"wg_sampler_interval_sec" env:"OGS_WG_SAMPLER_INTERVAL_SEC" env-default:"60"`
+	WGRetentionDays       int      `json:"wg_retention_days" env:"OGS_WG_RETENTION_DAYS" env-default:"30"`
+	AggregationEnabled    bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
+	AggregationDays       int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
+	PublicIP              string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
+	SubscriptionDomain    string   `json:"subscription_domain" env:"OGS_SUBSCRIPTION_DOMAIN"`
+	SingboxPendingChanges bool     `json:"-"` // Not persisted, runtime flag
+	ConfigPath            string   `json:"-"`
+	APIKey                string   `json:"api_key" env:"OGS_API_KEY"`
+	APIKeyReadOnly        bool     `json:"api_key_read_only" env:"OGS_API_KEY_READ_ONLY" env-default:"false"`
+	DemoMode              bool     `json:"demo_mode" env:"OGS_DEMO_MODE" env-default:"false"`
+	DisablePasswordLogin  bool     `json:"disable_password_login" env:"OGS_DISABLE_PASSWORD_LOGIN" env-default:"false"`
 
 	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host).
 	ExecutionMode string `json:"execution_mode" env:"OGS_EXECUTION_MODE"`
@@ -182,20 +168,6 @@ func LoadConfig(path ...string) *Config {
 		cfg.WireGuardConfigDir = filepath.Dir(derivePath)
 	}
 	cfg.WireGuardConfigDir = filepath.Clean(cfg.WireGuardConfigDir)
-	cfg.RealIPNginxStreamLogPath = strings.TrimSpace(cfg.RealIPNginxStreamLogPath)
-	if cfg.RealIPNginxStreamLogPath == "" {
-		cfg.RealIPNginxStreamLogPath = defaultRealIPNginxStreamLogPath
-	}
-	if cfg.RealIPCacheTTLSec <= 0 || cfg.RealIPCacheTTLSec > maxRealIPCacheTTLSec {
-		cfg.RealIPCacheTTLSec = defaultRealIPCacheTTLSec
-	}
-	if cfg.RealIPCleanupIntervalSec <= 0 || cfg.RealIPCleanupIntervalSec > maxRealIPCleanupIntervalSec {
-		cfg.RealIPCleanupIntervalSec = defaultRealIPCleanupIntervalSec
-	}
-	cfg.RealIPResolverMode = strings.ToLower(strings.TrimSpace(cfg.RealIPResolverMode))
-	if cfg.RealIPResolverMode != defaultRealIPResolverMode {
-		cfg.RealIPResolverMode = defaultRealIPResolverMode
-	}
 
 	return cfg
 }
