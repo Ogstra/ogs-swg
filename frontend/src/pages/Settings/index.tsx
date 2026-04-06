@@ -1285,16 +1285,22 @@ function DatabaseTab({
 
     const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
         const parsed = parseClientIdentity(run.user_agent)
-        const osName = run.device_os || parsed.deviceOS
-        const osVersion = run.device_os_version || parsed.deviceOSVersion
+        const rawOS = (run.device_os || '').trim()
+        const verboseOSMatch = rawOS.match(/^(macOS|iOS|iPadOS)\s+Version\s+([0-9.]+)(?:\s+\(Build\s+([^)]+)\))?$/i)
+        const normalizedOSName = verboseOSMatch?.[1] || rawOS || parsed.deviceOS
+        const normalizedOSVersion = run.device_os_version || verboseOSMatch?.[2] || parsed.deviceOSVersion
+        const normalizedOSBuild = verboseOSMatch?.[3] || ''
         const details: string[] = []
-        if (osName && osVersion) details.push(`${osName} ${osVersion}`)
-        else if (osName) details.push(osName)
-        else if (osVersion) details.push(osVersion)
-        if (parsed.darwinVersion && parsed.darwinVersion !== osVersion) {
+        if (normalizedOSName && normalizedOSVersion) details.push(`${normalizedOSName} ${normalizedOSVersion}`)
+        else if (normalizedOSName) details.push(normalizedOSName)
+        else if (normalizedOSVersion) details.push(normalizedOSVersion)
+        if (normalizedOSBuild) {
+            details.push(`Build ${normalizedOSBuild}`)
+        }
+        if (parsed.darwinVersion && parsed.darwinVersion !== normalizedOSVersion) {
             details.push(`Darwin ${parsed.darwinVersion}`)
         }
-        if ((run.device_os || parsed.deviceOS) === 'macOS' && parsed.architecture) {
+        if (normalizedOSName === 'macOS' && parsed.architecture) {
             details.push(parsed.architecture)
         }
         return details.join(' • ')
