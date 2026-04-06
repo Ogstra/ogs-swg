@@ -1273,10 +1273,44 @@ function DatabaseTab({
         }
     }
 
-    const formatClientLabel = (run: SubscriptionRequestHistoryEntry) => {
+    const normalizeVerboseAppleOS = (primary?: string, secondary?: string) => {
+        const first = (primary || '').trim()
+        const second = (secondary || '').trim()
+        const parseVerbose = (value: string) => value.match(/^(macOS|iOS|iPadOS)\s+Version\s+([0-9.]+)(?:\s+\(Build\s+([^)]+)\))?$/i)
+        const firstMatch = parseVerbose(first)
+        const secondMatch = parseVerbose(second)
+        const match = firstMatch || secondMatch
+        return {
+            osName: match?.[1] || first || '',
+            osVersion: match?.[2] || second || '',
+            osBuild: match?.[3] || '',
+        }
+    }
+
+    const resolveDisplayedDevice = (run: SubscriptionRequestHistoryEntry) => {
         const parsed = parseClientIdentity(run.user_agent)
+        const verboseOS = normalizeVerboseAppleOS(run.device_os, run.device_os_version)
+        const osName = verboseOS.osName || parsed.deviceOS
+        let deviceModel = (run.device_model || '').trim() || parsed.deviceModel
+
+        if (osName === 'macOS') {
+            if (!deviceModel || /^(iphone|ipad|ipod)$/i.test(deviceModel)) {
+                deviceModel = parsed.deviceModel || 'Mac'
+            }
+        }
+
+        return {
+            parsed,
+            deviceModel,
+            osName,
+            osVersion: verboseOS.osVersion || parsed.deviceOSVersion,
+            osBuild: verboseOS.osBuild,
+        }
+    }
+
+    const formatClientLabel = (run: SubscriptionRequestHistoryEntry) => {
+        const { parsed, deviceModel } = resolveDisplayedDevice(run)
         const clientName = parsed.clientName || run.user_agent
-        const deviceModel = run.device_model || parsed.deviceModel
         if (deviceModel && clientName) return `${clientName} on ${deviceModel}`
         if (deviceModel) return deviceModel
         if (clientName) return clientName
@@ -1284,19 +1318,15 @@ function DatabaseTab({
     }
 
     const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
-        const parsed = parseClientIdentity(run.user_agent)
-        const rawOS = (run.device_os || '').trim()
-        const verboseOSMatch = rawOS.match(/^(macOS|iOS|iPadOS)\s+Version\s+([0-9.]+)(?:\s+\(Build\s+([^)]+)\))?$/i)
-        const normalizedOSName = verboseOSMatch?.[1] || rawOS || parsed.deviceOS
-        const normalizedOSVersion = run.device_os_version || verboseOSMatch?.[2] || parsed.deviceOSVersion
+        const { parsed, osName, osVersion } = resolveDisplayedDevice(run)
         const details: string[] = []
-        if (normalizedOSName && normalizedOSVersion) details.push(`${normalizedOSName} ${normalizedOSVersion}`)
-        else if (normalizedOSName) details.push(normalizedOSName)
-        else if (normalizedOSVersion) details.push(normalizedOSVersion)
-        if (parsed.darwinVersion && parsed.darwinVersion !== normalizedOSVersion) {
+        if (osName && osVersion) details.push(`${osName} ${osVersion}`)
+        else if (osName) details.push(osName)
+        else if (osVersion) details.push(osVersion)
+        if (parsed.darwinVersion && parsed.darwinVersion !== osVersion) {
             details.push(`Darwin ${parsed.darwinVersion}`)
         }
-        if (normalizedOSName === 'macOS' && parsed.architecture) {
+        if (osName === 'macOS' && parsed.architecture) {
             details.push(parsed.architecture)
         }
         return details.join(' • ')
