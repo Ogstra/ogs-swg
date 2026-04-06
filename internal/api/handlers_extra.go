@@ -548,6 +548,7 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 	if s != nil && s.store != nil {
 		currentUsers := make(map[int64]string, len(runs))
 		for i := range runs {
+			runs[i].DeviceModel = resolveSubscriptionDeviceModel(runs[i].DeviceModel)
 			if names, ok := currentUsers[runs[i].SubID]; ok {
 				runs[i].UserName = names
 				continue

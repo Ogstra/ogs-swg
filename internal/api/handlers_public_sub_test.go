@@ -470,8 +470,8 @@ func TestExtractSubscriptionRequestMetadata_FallsBackToParsedAppleUserAgent(t *t
 	if got.userAgent != "Shadowrocket/3082 CFNetwork/3860.500.112 Darwin/25.4.0 iPhone15,3" {
 		t.Fatalf("userAgent=%q", got.userAgent)
 	}
-	if got.deviceModel != "iPhone15,3" {
-		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "iPhone15,3")
+	if got.deviceModel != "iPhone 14 Pro Max" {
+		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "iPhone 14 Pro Max")
 	}
 	if got.deviceOS != "iOS" {
 		t.Fatalf("deviceOS=%q want %q", got.deviceOS, "iOS")
@@ -491,8 +491,8 @@ func TestExtractSubscriptionRequestMetadata_FallsBackToParsedSamsungUserAgent(t 
 
 	got := extractSubscriptionRequestMetadata(req)
 
-	if got.deviceModel != "SM-S918B" {
-		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "SM-S918B")
+	if got.deviceModel != "Samsung SM-S918B" {
+		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "Samsung SM-S918B")
 	}
 	if got.deviceOS != "Android" {
 		t.Fatalf("deviceOS=%q want %q", got.deviceOS, "Android")
@@ -502,6 +502,28 @@ func TestExtractSubscriptionRequestMetadata_FallsBackToParsedSamsungUserAgent(t 
 	}
 	if got.appVersion != "2.11.5" {
 		t.Fatalf("appVersion=%q want %q", got.appVersion, "2.11.5")
+	}
+}
+
+func TestResolveSubscriptionDeviceModel(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "apple iphone identifier", input: "iPhone15,3", want: "iPhone 14 Pro Max"},
+		{name: "apple ipad identifier", input: "iPad13,18", want: "iPad (10th generation)"},
+		{name: "apple mac identifier", input: "Mac15,12", want: "MacBook Air (13-inch, M3, 2024)"},
+		{name: "samsung code", input: "SM-S918B", want: "Samsung SM-S918B"},
+		{name: "unknown passthrough", input: "Pixel 9 Pro", want: "Pixel 9 Pro"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveSubscriptionDeviceModel(tt.input); got != tt.want {
+				t.Fatalf("resolveSubscriptionDeviceModel(%q)=%q want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 
