@@ -257,6 +257,7 @@ func extractSubscriptionRequestMetadata(r *http.Request) subscriptionRequestMeta
 	if deviceModel == "" {
 		deviceModel = normalizeSubscriptionHeader(parsedUA.deviceModel, 255)
 	}
+	deviceModel = normalizeSubscriptionHeader(resolveSubscriptionDeviceModel(deviceModel), 255)
 	deviceOS := normalizeSubscriptionHeader(r.Header.Get("X-Device-OS"), 64)
 	if deviceOS == "" {
 		deviceOS = normalizeSubscriptionHeader(parsedUA.deviceOS, 64)
