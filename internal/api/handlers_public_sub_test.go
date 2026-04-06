@@ -476,8 +476,8 @@ func TestExtractSubscriptionRequestMetadata_FallsBackToParsedAppleUserAgent(t *t
 	if got.deviceOS != "iOS" {
 		t.Fatalf("deviceOS=%q want %q", got.deviceOS, "iOS")
 	}
-	if got.deviceOSVersion != "25.4.0" {
-		t.Fatalf("deviceOSVersion=%q want %q", got.deviceOSVersion, "25.4.0")
+	if got.deviceOSVersion != "" {
+		t.Fatalf("deviceOSVersion=%q want empty", got.deviceOSVersion)
 	}
 	if got.appVersion != "3082" {
 		t.Fatalf("appVersion=%q want %q", got.appVersion, "3082")

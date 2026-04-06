@@ -1230,7 +1230,7 @@ function DatabaseTab({
 
     const parseClientIdentity = (userAgent?: string) => {
         const ua = (userAgent || '').trim()
-        if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '' }
+        if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '', darwinVersion: '' }
 
         const productMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z0-9._-]{1,64})/)
         const clientName = productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : ''
@@ -1266,7 +1266,8 @@ function DatabaseTab({
             clientVersion,
             deviceModel,
             deviceOS,
-            deviceOSVersion: androidVersionMatch?.[1]?.trim() || darwinVersionMatch?.[1]?.trim() || windowsVersionMatch?.[1]?.trim() || '',
+            deviceOSVersion: androidVersionMatch?.[1]?.trim() || windowsVersionMatch?.[1]?.trim() || '',
+            darwinVersion: darwinVersionMatch?.[1]?.trim() || '',
         }
     }
 
@@ -1282,8 +1283,16 @@ function DatabaseTab({
 
     const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
         const parsed = parseClientIdentity(run.user_agent)
-        const details = [run.device_os || parsed.deviceOS, run.device_os_version || parsed.deviceOSVersion].filter(Boolean).join(' ')
-        return details || ''
+        const osName = run.device_os || parsed.deviceOS
+        const osVersion = run.device_os_version || parsed.deviceOSVersion
+        const details: string[] = []
+        if (osName && osVersion) details.push(`${osName} ${osVersion}`)
+        else if (osName) details.push(osName)
+        else if (osVersion) details.push(osVersion)
+        if (parsed.darwinVersion && parsed.darwinVersion !== osVersion) {
+            details.push(`Darwin ${parsed.darwinVersion}`)
+        }
+        return details.join(' • ')
     }
 
     const formatAppVersion = (run: SubscriptionRequestHistoryEntry) => {
@@ -1450,22 +1459,22 @@ function DatabaseTab({
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
                                 subscriptionRequestHistory.map((run) => (
-                                    <div key={run.id} className="flex justify-between gap-3 py-2 border-b border-slate-800/50 last:border-0">
-                                        <div className="min-w-0">
+                                    <div key={run.id} className="py-2 border-b border-slate-800/50 last:border-0">
+                                        <div className="min-w-0 flex-1">
                                             <div className="flex items-start justify-between gap-3">
-                                                <div className="flex min-w-0 items-center gap-2">
+                                                <div className="flex min-w-0 flex-1 items-center gap-2">
                                                     <div className="truncate text-slate-200 text-xs font-medium" title={run.name}>{run.name}</div>
                                                     <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${run.served_from_cache ? 'bg-amber-900/20 text-amber-400 border border-amber-900/30' : 'bg-emerald-900/20 text-emerald-400 border border-emerald-900/30'}`}>
                                                         {run.served_from_cache ? 'Cache' : 'Fresh'}
                                                     </span>
                                                 </div>
-                                                <div className="shrink-0 font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
+                                                <div className="shrink-0 text-right font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
                                             </div>
                                             <div className="flex items-start justify-between gap-3">
-                                                <div className="truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
+                                                <div className="min-w-0 flex-1 truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
                                                     {run.user_name || 'No users'}
                                                 </div>
-                                                <div className="shrink-0 text-slate-500 text-[10px]">{formatHistoryDateTime(run.requested_at)}</div>
+                                                <div className="shrink-0 text-right text-slate-500 text-[10px]">{formatHistoryDateTime(run.requested_at)}</div>
                                             </div>
                                             <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
                                                 {formatClientLabel(run)}
