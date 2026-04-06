@@ -687,6 +687,34 @@ func TestHandleSearchLogs_UserQuerySupportsBracketedUserAndAndOperator(t *testin
 	}
 }
 
+func TestHandleSearchLogs_BracketLiteralWithoutMatchesDoesNotCrash(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		textAndLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BOGS%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if containsInsensitive(joinLines(resp.Logs), "panic") {
+		t.Fatalf("unexpected panic output in response: %v", resp.Logs)
+	}
+}
+
 func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T) {
 	srv, _ := newLogsTestServerWithFileSource(t,
 		[]string{hysteriaUserTaggedLogLine, hysteriaOutboundLogLine},

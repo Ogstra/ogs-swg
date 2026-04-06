@@ -280,6 +280,7 @@ func TestHandleGetFeatures_RealIP(t *testing.T) {
 func TestHandleUpdateFeatures_RealIP(t *testing.T) {
 	cfg := &core.Config{
 		ConfigPath:               "",
+		EnableSingbox:            true,
 		RealIPNginxStreamLogPath: "/var/log/nginx/stream.log",
 		RealIPCacheTTLSec:        30,
 		RealIPCleanupIntervalSec: 60,
@@ -315,5 +316,15 @@ func TestHandleUpdateFeatures_RealIP(t *testing.T) {
 	}
 	if got := server.config.RealIPResolverMode; got != "loopback_only" {
 		t.Fatalf("RealIPResolverMode=%q want %q", got, "loopback_only")
+	}
+	if server.realIPResolver == nil {
+		t.Fatal("realIPResolver=nil want initialized after enabling feature")
+	}
+
+	server.realIPResolver.ObserveNginxStreamLine(`client=198.51.100.44 remote_port=45678 upstream=127.0.0.1:443`)
+	reqIP := httptest.NewRequest(http.MethodGet, "/s/test", nil)
+	reqIP.RemoteAddr = "127.0.0.1:45678"
+	if got := server.resolveSubscriptionRequestIP(reqIP); got != "198.51.100.44" {
+		t.Fatalf("resolveSubscriptionRequestIP=%q want %q", got, "198.51.100.44")
 	}
 }

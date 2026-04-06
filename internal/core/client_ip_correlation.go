@@ -13,6 +13,7 @@ import (
 
 var (
 	clientIPPortPattern    = regexp.MustCompile(`(?i)^\s*(?:client=|remote_addr=)?((?:\d{1,3}\.){3}\d{1,3}|[0-9a-f:]+):(\d{1,5})(?:$|[\s,])`)
+	clientIPSpacePattern   = regexp.MustCompile(`(?i)^\s*((?:\d{1,3}\.){3}\d{1,3}|[0-9a-f:]+)\s+(\d{1,5})(?:$|[\s,])`)
 	clientIPFieldPattern   = regexp.MustCompile(`(?i)(?:^|[\s,])(?:client|remote_addr|real_ip|realip_remote_addr)=([0-9a-f\.:]+)(?:$|[\s,])`)
 	remotePortFieldPattern = regexp.MustCompile(`(?i)(?:^|[\s,])(?:remote_port|src_port|client_port)=(\d{1,5})(?:$|[\s,])`)
 )
@@ -204,6 +205,14 @@ func parseNginxStreamCorrelation(line string) (string, string, bool) {
 	}
 
 	if matches := clientIPPortPattern.FindStringSubmatch(trimmed); len(matches) == 3 {
+		ip := normalizeObservedIP(matches[1])
+		port := normalizeObservedPort(matches[2])
+		if ip != "" && port != "" {
+			return ip, port, true
+		}
+	}
+
+	if matches := clientIPSpacePattern.FindStringSubmatch(trimmed); len(matches) == 3 {
 		ip := normalizeObservedIP(matches[1])
 		port := normalizeObservedPort(matches[2])
 		if ip != "" && port != "" {

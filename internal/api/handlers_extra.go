@@ -758,6 +758,7 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 		s.config.RealIPResolverMode = mode
 	}
+	s.refreshRealIPResolver()
 
 	if err := s.config.SaveAppConfig(); err != nil {
 		log.Printf("Failed to persist config toggles: %v", err)
