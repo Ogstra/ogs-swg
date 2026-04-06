@@ -421,6 +421,96 @@ func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T)
 	}
 }
 
+func TestHandleSubscriptionRequestHistory_ShowsCurrentSubscriptionUsers(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServerWithConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"tls": {
+					"enabled": true,
+					"server_name": "edge.example.com"
+				},
+				"users": [
+					{
+						"name": "alice",
+						"uuid": "11111111-1111-1111-1111-111111111111"
+					},
+					{
+						"name": "bob",
+						"uuid": "22222222-2222-2222-2222-222222222222"
+					}
+				]
+			}
+		],
+		"experimental": {
+			"v2ray_api": {
+				"listen": "127.0.0.1:19001",
+				"stats": {
+					"enabled": true,
+					"inbounds": ["test-vless"],
+					"outbounds": ["direct"],
+					"users": ["alice", "bob"]
+				}
+			}
+		}
+	}`, []string{"test-vless"})
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "history-current-users-token",
+		Name:        "History Current Users Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	for _, user := range []string{"alice", "bob"} {
+		if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+			SubID:    subID,
+			UserName: user,
+		}); err != nil {
+			t.Fatalf("AddUserToSubscription(%s): %v", user, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/history-current-users-token", nil)
+	req.SetPathValue("token", "history-current-users-token")
+	req.RemoteAddr = "198.51.100.5:12345"
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscription status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	if err := dataStore.Queries.RemoveUserFromSubscription(t.Context(), store.RemoveUserFromSubscriptionParams{
+		SubID:    subID,
+		UserName: "bob",
+	}); err != nil {
+		t.Fatalf("RemoveUserFromSubscription(bob): %v", err)
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/subscription-requests/history?limit=5", nil)
+	historyReq = withSettingsPerms(historyReq, &core.PanelUserPermissions{CanReadSettings: true, CanReadLogs: true})
+	historyRec := httptest.NewRecorder()
+	server.handleSubscriptionRequestHistory(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%q", historyRec.Code, historyRec.Body.String())
+	}
+
+	var got []store.GetSubscriptionRequestHistoryRow
+	decodeJSONResponse(t, historyRec, &got)
+	if len(got) == 0 {
+		t.Fatalf("history empty")
+	}
+	if got[0].UserName != "alice" {
+		t.Fatalf("user_name=%q want %q", got[0].UserName, "alice")
+	}
+}
+
 func TestHandleSubscriptionRequestHistory_PrefersPublicForwardedIPFromTrustedProxy(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
 
