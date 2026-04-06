@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"log"
 	"time"
 )
@@ -15,22 +14,15 @@ type Calculator struct {
 	lastUplink   int64
 	lastDownlink int64
 	initialized  bool
-	now          func() time.Time
-	getTraffic   func([]string) (int64, int64, error)
 }
 
 func NewCalculator(w *Watcher, sb *SingboxClient, s *Store, inboundTags []string) *Calculator {
-	calc := &Calculator{
+	return &Calculator{
 		watcher:     w,
 		sbClient:    sb,
 		store:       s,
 		inboundTags: inboundTags,
-		now:         time.Now,
 	}
-	if sb != nil {
-		calc.getTraffic = sb.GetTrafficMulti
-	}
-	return calc
 }
 
 func (c *Calculator) Start() {
@@ -47,12 +39,7 @@ func (c *Calculator) loop() {
 }
 
 func (c *Calculator) process() {
-	if c.getTraffic == nil {
-		log.Printf("Error getting sing-box stats: %v", fmt.Errorf("traffic getter not configured"))
-		return
-	}
-
-	up, down, err := c.getTraffic(c.inboundTags)
+	up, down, err := c.sbClient.GetTrafficMulti(c.inboundTags)
 	if err != nil {
 		log.Printf("Error getting sing-box stats: %v", err)
 		return
@@ -84,20 +71,7 @@ func (c *Calculator) process() {
 
 	Stats.AddPoint(deltaUp, deltaDown)
 
-	activeConnections := c.watcher.GetActiveConnections(60)
-	if len(activeConnections) == 0 {
-		activeUsers := c.watcher.GetActiveUsers(60)
-		if len(activeUsers) == 0 {
-			log.Printf("Traffic detected but no active users found in logs. Dropping %d/%d bytes.", deltaUp, deltaDown)
-			return
-		}
-		activeConnections = make([]ActiveConnection, 0, len(activeUsers))
-		for _, user := range activeUsers {
-			activeConnections = append(activeConnections, ActiveConnection{User: user})
-		}
-	}
-
-	activeUsers := uniqueConnectionUsers(activeConnections)
+	activeUsers := c.watcher.GetActiveUsers(60)
 	if len(activeUsers) == 0 {
 		log.Printf("Traffic detected but no active users found in logs. Dropping %d/%d bytes.", deltaUp, deltaDown)
 		return
@@ -107,7 +81,7 @@ func (c *Calculator) process() {
 	shareUp := deltaUp / count
 	shareDown := deltaDown / count
 
-	now := c.now().Unix()
+	now := time.Now().Unix()
 
 	for _, user := range activeUsers {
 		s := Sample{
@@ -122,20 +96,4 @@ func (c *Calculator) process() {
 	}
 
 	log.Printf("Distributed %d up / %d down among %d users", deltaUp, deltaDown, count)
-}
-
-func uniqueConnectionUsers(connections []ActiveConnection) []string {
-	users := make([]string, 0, len(connections))
-	seen := make(map[string]struct{}, len(connections))
-	for _, conn := range connections {
-		if conn.User == "" {
-			continue
-		}
-		if _, ok := seen[conn.User]; ok {
-			continue
-		}
-		seen[conn.User] = struct{}{}
-		users = append(users, conn.User)
-	}
-	return users
 }

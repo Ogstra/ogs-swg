@@ -192,13 +192,13 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
 		SubID:           subID,
 		UserName:        strings.Join(users, ", "),
-		RequestIP:       s.resolveSubscriptionRequestIP(r),
+		RequestIP:       resolveSubscriptionRequestIP(r),
 		RequestedAt:     s.now().Unix(),
 		ServedFromCache: servedFromCacheToInt64(servedFromCache),
 	})
 }
 
-func (s *Server) resolveSubscriptionRequestIP(r *http.Request) string {
+func resolveSubscriptionRequestIP(r *http.Request) string {
 	if isTrustedProxy(r.RemoteAddr) {
 		if ip := firstPublicForwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
 			return ip
@@ -210,18 +210,11 @@ func (s *Server) resolveSubscriptionRequestIP(r *http.Request) string {
 			return stripPort(ip)
 		}
 	}
-
-	remoteAddr := strings.TrimSpace(r.RemoteAddr)
-	host, _, err := net.SplitHostPort(remoteAddr)
+	host, _, err := net.SplitHostPort(strings.TrimSpace(r.RemoteAddr))
 	if err == nil && host != "" {
-		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() && s != nil && s.realIPResolver != nil {
-			if resolved := s.realIPResolver.ResolveLoopbackRemote(remoteAddr); resolved != "" && resolved != remoteAddr {
-				return resolved
-			}
-		}
 		return host
 	}
-	return remoteAddr
+	return strings.TrimSpace(r.RemoteAddr)
 }
 
 func firstPublicForwardedIP(value string) string {

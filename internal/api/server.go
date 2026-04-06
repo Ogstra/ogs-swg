@@ -43,7 +43,6 @@ type Server struct {
 	wgSamplerPaused  bool
 	wgLast           map[string]core.WGSample
 	loginLimiter     *loginLimiter
-	realIPResolver   *core.ClientIPCorrelation
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -60,7 +59,7 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		log.Fatalf("Failed to initialize ristretto cache: %v", err)
 	}
 
-	server := &Server{
+	return &Server{
 		store:            store,
 		config:           config,
 		executor:         executor,
@@ -78,31 +77,6 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		wgLast:           make(map[string]core.WGSample),
 		wgSamplerPaused:  false,
 		loginLimiter:     newLoginLimiter(),
-	}
-	server.refreshRealIPResolver()
-	return server
-}
-
-func (s *Server) refreshRealIPResolver() {
-	if s == nil {
-		return
-	}
-	if s.realIPResolver != nil {
-		s.realIPResolver.Stop()
-		s.realIPResolver = nil
-	}
-	if s.config == nil || !s.config.RealIPCorrelationEnabled {
-		return
-	}
-
-	s.realIPResolver = core.NewClientIPCorrelation(
-		s.config.RealIPCacheTTLSec,
-		s.config.RealIPCleanupIntervalSec,
-		s.config.RealIPResolverMode,
-		s.config.RealIPNginxStreamLogPath,
-	)
-	if s.config.EnableSingbox && !s.config.DemoMode {
-		s.realIPResolver.Start()
 	}
 }
 
@@ -372,10 +346,6 @@ func (s *Server) Stop() {
 		s.executor.Close()
 	}
 
-	if s.realIPResolver != nil {
-		s.realIPResolver.Stop()
-	}
-
 	if s.pool != nil {
 		s.pool.StopAndWait()
 	}
@@ -431,16 +401,13 @@ func StartServer(cfg *core.Config) *Server {
 	server := NewServer(store, cfg, executor)
 
 	if cfg.EnableSingbox && !cfg.DemoMode {
-		if server.realIPResolver != nil {
-			server.realIPResolver.Start()
-		}
 		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
 		if cfg.UseStatsSampler {
 			sampler := core.NewStatsSampler(sbClient, store, cfg)
 			sampler.Start()
 			server.sampler = sampler
 		} else {
-			watcher := core.NewWatcher(cfg.AccessLogPath, server.realIPResolver)
+			watcher := core.NewWatcher(cfg.AccessLogPath)
 			watcher.Start()
 			inboundTags := cfg.StatsInbounds
 			if len(inboundTags) == 0 {

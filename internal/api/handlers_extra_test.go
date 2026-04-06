@@ -3,7 +3,6 @@ package api
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -232,99 +231,5 @@ func TestHandleRestartService_WireGuardRemainsSynchronousAndClearsPending(t *tes
 	}
 	if server.wgPendingRestart {
 		t.Fatal("wgPendingRestart was not cleared after wireguard restart")
-	}
-}
-
-func TestHandleGetFeatures_RealIP(t *testing.T) {
-	cfg := &core.Config{
-		EnableSingbox:            true,
-		EnableWireGuard:          true,
-		RealIPCorrelationEnabled: true,
-		RealIPNginxStreamLogPath: "/var/log/nginx/stream.log",
-		RealIPCacheTTLSec:        30,
-		RealIPCleanupIntervalSec: 60,
-		RealIPResolverMode:       "loopback_only",
-	}
-	server := NewServer(nil, cfg, newServiceActionExecutorStub())
-
-	req := httptest.NewRequest(http.MethodGet, "/api/settings/features", nil)
-	rec := httptest.NewRecorder()
-	server.handleGetFeatures(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("json.Unmarshal: %v", err)
-	}
-
-	if got := payload["real_ip_correlation_enabled"]; got != true {
-		t.Fatalf("real_ip_correlation_enabled=%v want true", got)
-	}
-	if got := payload["real_ip_nginx_stream_log_path"]; got != "/var/log/nginx/stream.log" {
-		t.Fatalf("real_ip_nginx_stream_log_path=%v want %q", got, "/var/log/nginx/stream.log")
-	}
-	if got := payload["real_ip_cache_ttl_sec"]; got != float64(30) {
-		t.Fatalf("real_ip_cache_ttl_sec=%v want 30", got)
-	}
-	if got := payload["real_ip_cleanup_interval_sec"]; got != float64(60) {
-		t.Fatalf("real_ip_cleanup_interval_sec=%v want 60", got)
-	}
-	if got := payload["real_ip_resolver_mode"]; got != "loopback_only" {
-		t.Fatalf("real_ip_resolver_mode=%v want %q", got, "loopback_only")
-	}
-}
-
-func TestHandleUpdateFeatures_RealIP(t *testing.T) {
-	cfg := &core.Config{
-		ConfigPath:               "",
-		EnableSingbox:            true,
-		RealIPNginxStreamLogPath: "/var/log/nginx/stream.log",
-		RealIPCacheTTLSec:        30,
-		RealIPCleanupIntervalSec: 60,
-		RealIPResolverMode:       "loopback_only",
-	}
-	server := NewServer(nil, cfg, newServiceActionExecutorStub())
-
-	body := bytes.NewBufferString(`{
-		"real_ip_correlation_enabled": true,
-		"real_ip_nginx_stream_log_path": " /tmp/nginx-stream.log ",
-		"real_ip_cache_ttl_sec": 15,
-		"real_ip_cleanup_interval_sec": 120,
-		"real_ip_resolver_mode": "direct_override"
-	}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings/features", body)
-	rec := httptest.NewRecorder()
-	server.handleUpdateFeatures(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
-	}
-	if !server.config.RealIPCorrelationEnabled {
-		t.Fatal("RealIPCorrelationEnabled=false want true")
-	}
-	if got := server.config.RealIPNginxStreamLogPath; got != "/tmp/nginx-stream.log" {
-		t.Fatalf("RealIPNginxStreamLogPath=%q want %q", got, "/tmp/nginx-stream.log")
-	}
-	if got := server.config.RealIPCacheTTLSec; got != 15 {
-		t.Fatalf("RealIPCacheTTLSec=%d want 15", got)
-	}
-	if got := server.config.RealIPCleanupIntervalSec; got != 120 {
-		t.Fatalf("RealIPCleanupIntervalSec=%d want 120", got)
-	}
-	if got := server.config.RealIPResolverMode; got != "loopback_only" {
-		t.Fatalf("RealIPResolverMode=%q want %q", got, "loopback_only")
-	}
-	if server.realIPResolver == nil {
-		t.Fatal("realIPResolver=nil want initialized after enabling feature")
-	}
-
-	server.realIPResolver.ObserveNginxStreamLine(`client=198.51.100.44 remote_port=45678 upstream=127.0.0.1:443`)
-	reqIP := httptest.NewRequest(http.MethodGet, "/s/test", nil)
-	reqIP.RemoteAddr = "127.0.0.1:45678"
-	if got := server.resolveSubscriptionRequestIP(reqIP); got != "198.51.100.44" {
-		t.Fatalf("resolveSubscriptionRequestIP=%q want %q", got, "198.51.100.44")
 	}
 }
