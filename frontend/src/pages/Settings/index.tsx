@@ -1490,7 +1490,7 @@ function DatabaseTab({
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
                                 subscriptionRequestHistory.map((run) => (
-                                    <div key={run.id} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
+                                    <div key={run.id} className="flex justify-between gap-3 py-2 border-b border-slate-800/50 last:border-0">
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <div className="truncate text-slate-200 text-xs font-medium" title={run.name}>{run.name}</div>
@@ -1505,14 +1505,16 @@ function DatabaseTab({
                                                 {formatClientLabel(run)}
                                             </div>
                                             {(formatDeviceDetails(run) || formatAppVersion(run) || run.country || run.request_host || run.hwid_prefix) && (
-                                                <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
-                                                    {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
+                                                        {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
+                                                    </div>
+                                                    <div className="shrink-0 text-slate-500 text-[10px]">{formatHistoryTime(run.requested_at)}</div>
                                                 </div>
                                             )}
                                         </div>
                                         <div className="shrink-0 text-right">
                                             <div className="font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
-                                            <div className="text-slate-500 text-[10px]">{formatHistoryTime(run.requested_at)}</div>
                                         </div>
                                     </div>
                                 ))
