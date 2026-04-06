@@ -1232,9 +1232,12 @@ function DatabaseTab({
         const ua = (userAgent || '').trim()
         if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '', darwinVersion: '', architecture: '' }
 
+        const desktopClientMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z][A-Za-z0-9 _.-]{0,31})\/([A-Za-z0-9._-]{1,64})/)
         const productMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z0-9._-]{1,64})/)
-        const clientName = productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : ''
-        const clientVersion = clientName && productMatch ? productMatch[2].trim() : ''
+        const desktopClientName = desktopClientMatch && !['mozilla', 'dalvik'].includes(desktopClientMatch[1].toLowerCase()) ? desktopClientMatch[1].trim() : ''
+        const clientName = desktopClientName || (productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : '')
+        const clientVersion = desktopClientName && desktopClientMatch ? desktopClientMatch[3].trim() : (clientName && productMatch ? productMatch[2].trim() : '')
+        const clientPlatform = desktopClientName && desktopClientMatch ? desktopClientMatch[2].trim() : ''
 
         const appleModelMatch = ua.match(/\b(iPhone\d{1,2},\d+|iPad\d{1,2},\d+|iPod\d{1,2},\d+|MacBook(?:Air|Pro)?\d{1,2},\d+|Mac\d{1,2},\d+)\b/)
         const samsungModelMatch = ua.match(/\b(SM-[A-Z0-9]+)\b/)
@@ -1251,6 +1254,13 @@ function DatabaseTab({
                 deviceModel = model
             }
         }
+        if (!deviceModel && clientPlatform) {
+            if (/^(pc|desktop)$/i.test(clientPlatform)) deviceModel = 'PC'
+            else if (/^(mac|macos)$/i.test(clientPlatform)) deviceModel = 'Mac'
+            else if (/^windows$/i.test(clientPlatform)) deviceModel = 'PC'
+            else if (/^linux$/i.test(clientPlatform)) deviceModel = 'PC'
+            else deviceModel = clientPlatform
+        }
         if (!deviceModel && ua.includes('Macintosh')) {
             deviceModel = 'Mac'
         }
@@ -1261,6 +1271,12 @@ function DatabaseTab({
         else if (deviceModel.startsWith('Mac') || ua.includes('Macintosh')) deviceOS = 'macOS'
         else if (ua.includes('Android')) deviceOS = 'Android'
         else if (ua.includes('Windows NT')) deviceOS = 'Windows'
+        else if (/^mac(os)?$/i.test(clientPlatform)) deviceOS = 'macOS'
+        else if (/^windows$/i.test(clientPlatform)) deviceOS = 'Windows'
+        else if (/^linux$/i.test(clientPlatform)) deviceOS = 'Linux'
+        else if (/^android$/i.test(clientPlatform)) deviceOS = 'Android'
+        else if (/^ios$/i.test(clientPlatform)) deviceOS = 'iOS'
+        else if (/^ipados$/i.test(clientPlatform)) deviceOS = 'iPadOS'
 
         return {
             clientName,

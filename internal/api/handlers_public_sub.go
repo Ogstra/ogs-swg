@@ -48,15 +48,16 @@ type parsedSubscriptionUserAgent struct {
 }
 
 var (
-	subscriptionUserAgentProductRE        = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z0-9._-]{1,64})`)
-	subscriptionUserAgentiPhoneModelRE    = regexp.MustCompile(`\b(iPhone\d{1,2},\d+)\b`)
-	subscriptionUserAgentiPadModelRE      = regexp.MustCompile(`\b(iPad\d{1,2},\d+)\b`)
-	subscriptionUserAgentiPodModelRE      = regexp.MustCompile(`\b(iPod\d{1,2},\d+)\b`)
-	subscriptionUserAgentMacModelRE       = regexp.MustCompile(`\b(MacBook(?:Air|Pro)?\d{1,2},\d+|Mac\d{1,2},\d+)\b`)
-	subscriptionUserAgentSamsungModelRE   = regexp.MustCompile(`\b(SM-[A-Z0-9]+)\b`)
-	subscriptionUserAgentAndroidModelRE   = regexp.MustCompile(`Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build/|[;)])`)
-	subscriptionUserAgentAndroidVersionRE = regexp.MustCompile(`Android\s+([0-9][0-9A-Za-z._-]*)`)
-	subscriptionUserAgentWindowsRE        = regexp.MustCompile(`Windows NT\s+([0-9.]+)`)
+	subscriptionUserAgentClientPlatformVersionRE = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z][A-Za-z0-9 _.-]{0,31})/([A-Za-z0-9._-]{1,64})`)
+	subscriptionUserAgentProductRE               = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z0-9._-]{1,64})`)
+	subscriptionUserAgentiPhoneModelRE           = regexp.MustCompile(`\b(iPhone\d{1,2},\d+)\b`)
+	subscriptionUserAgentiPadModelRE             = regexp.MustCompile(`\b(iPad\d{1,2},\d+)\b`)
+	subscriptionUserAgentiPodModelRE             = regexp.MustCompile(`\b(iPod\d{1,2},\d+)\b`)
+	subscriptionUserAgentMacModelRE              = regexp.MustCompile(`\b(MacBook(?:Air|Pro)?\d{1,2},\d+|Mac\d{1,2},\d+)\b`)
+	subscriptionUserAgentSamsungModelRE          = regexp.MustCompile(`\b(SM-[A-Z0-9]+)\b`)
+	subscriptionUserAgentAndroidModelRE          = regexp.MustCompile(`Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build/|[;)])`)
+	subscriptionUserAgentAndroidVersionRE        = regexp.MustCompile(`Android\s+([0-9][0-9A-Za-z._-]*)`)
+	subscriptionUserAgentWindowsRE               = regexp.MustCompile(`Windows NT\s+([0-9.]+)`)
 )
 
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
@@ -291,7 +292,36 @@ func parseSubscriptionUserAgent(userAgent string) parsedSubscriptionUserAgent {
 	}
 
 	parsed := parsedSubscriptionUserAgent{}
-	if matches := subscriptionUserAgentProductRE.FindStringSubmatch(ua); len(matches) == 3 {
+	if matches := subscriptionUserAgentClientPlatformVersionRE.FindStringSubmatch(ua); len(matches) == 4 {
+		name := strings.TrimSpace(matches[1])
+		platform := strings.TrimSpace(matches[2])
+		version := strings.TrimSpace(matches[3])
+		if !strings.EqualFold(name, "Mozilla") && !strings.EqualFold(name, "Dalvik") {
+			parsed.clientName = name
+			parsed.clientVersion = version
+			switch {
+			case strings.EqualFold(platform, "PC"), strings.EqualFold(platform, "Desktop"):
+				parsed.deviceModel = "PC"
+			case strings.EqualFold(platform, "Mac"), strings.EqualFold(platform, "macOS"):
+				parsed.deviceModel = "Mac"
+				parsed.deviceOS = "macOS"
+			case strings.EqualFold(platform, "Windows"):
+				parsed.deviceModel = "PC"
+				parsed.deviceOS = "Windows"
+			case strings.EqualFold(platform, "Linux"):
+				parsed.deviceModel = "PC"
+				parsed.deviceOS = "Linux"
+			case strings.EqualFold(platform, "Android"):
+				parsed.deviceOS = "Android"
+			case strings.EqualFold(platform, "iOS"):
+				parsed.deviceOS = "iOS"
+			case strings.EqualFold(platform, "iPadOS"):
+				parsed.deviceOS = "iPadOS"
+			default:
+				parsed.deviceModel = platform
+			}
+		}
+	} else if matches := subscriptionUserAgentProductRE.FindStringSubmatch(ua); len(matches) == 3 {
 		name := strings.TrimSpace(matches[1])
 		if !strings.EqualFold(name, "Mozilla") && !strings.EqualFold(name, "Dalvik") {
 			parsed.clientName = name
