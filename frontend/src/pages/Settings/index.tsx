@@ -1209,8 +1209,7 @@ function DatabaseTab({
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start pb-4 sm:pb-0">
-            <div>
-                <Card
+            <Card
                     title="Database & Retention"
                     action={
                         <div className="flex gap-2">
@@ -1334,13 +1333,11 @@ function DatabaseTab({
                             {features.sampler_paused ? 'Resume' : 'Pause'}
                         </Button>
                     </div>
-                </Card>
-            </div>
+            </Card>
 
-            <div className="flex flex-col gap-4 sm:gap-6">
-                <Card
+            <Card
                     title="Subscriptions History"
-                    className="flex flex-col min-h-[208px] lg:h-[208px]"
+                    className="flex flex-col min-h-[208px] lg:h-full lg:self-stretch"
                     action={
                         <select
                             value={historyLimit}
@@ -1390,11 +1387,11 @@ function DatabaseTab({
                             )}
                         </div>
                     </div>
-                </Card>
+            </Card>
 
-                <Card
+            <Card
                     title="Sampler History"
-                    className="flex flex-col min-h-[208px] lg:h-[208px]"
+                    className="flex flex-col min-h-[208px] lg:h-[416px] lg:col-start-1"
                     action={
                         <select
                             value={historyLimit}
@@ -1434,8 +1431,7 @@ function DatabaseTab({
                             )}
                         </div>
                     </div>
-                </Card>
-            </div>
+            </Card>
         </div>
     )
 }
