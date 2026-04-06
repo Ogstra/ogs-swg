@@ -568,6 +568,16 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 			if runs[i].RequestIP != "" {
 				runs[i].RequestIP = "***"
 			}
+			runs[i].RequestHost = ""
+			runs[i].RequestPath = ""
+			runs[i].UserAgent = ""
+			runs[i].DeviceModel = ""
+			runs[i].DeviceOS = ""
+			runs[i].DeviceOSVersion = ""
+			runs[i].AppVersion = ""
+			runs[i].Country = ""
+			runs[i].HwidHash = ""
+			runs[i].HwidPrefix = ""
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")

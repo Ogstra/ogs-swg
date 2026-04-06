@@ -902,6 +902,16 @@ SELECT
 	s.name,
 	COALESCE(sr.user_name, ''),
 	COALESCE(sr.request_ip, ''),
+	COALESCE(sr.request_host, ''),
+	COALESCE(sr.request_path, ''),
+	COALESCE(sr.user_agent, ''),
+	COALESCE(sr.device_model, ''),
+	COALESCE(sr.device_os, ''),
+	COALESCE(sr.device_os_version, ''),
+	COALESCE(sr.app_version, ''),
+	COALESCE(sr.country, ''),
+	COALESCE(sr.hwid_hash, ''),
+	COALESCE(sr.hwid_prefix, ''),
 	sr.requested_at,
 	sr.served_from_cache
 FROM subscription_requests sr
@@ -916,6 +926,16 @@ type GetSubscriptionRequestHistoryRow struct {
 	Name            string `json:"name"`
 	UserName        string `json:"user_name"`
 	RequestIP       string `json:"request_ip"`
+	RequestHost     string `json:"request_host"`
+	RequestPath     string `json:"request_path"`
+	UserAgent       string `json:"user_agent"`
+	DeviceModel     string `json:"device_model"`
+	DeviceOS        string `json:"device_os"`
+	DeviceOSVersion string `json:"device_os_version"`
+	AppVersion      string `json:"app_version"`
+	Country         string `json:"country"`
+	HwidHash        string `json:"hwid_hash"`
+	HwidPrefix      string `json:"hwid_prefix"`
 	RequestedAt     int64  `json:"requested_at"`
 	ServedFromCache int64  `json:"served_from_cache"`
 }
@@ -935,6 +955,16 @@ func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, limit int64
 			&i.Name,
 			&i.UserName,
 			&i.RequestIP,
+			&i.RequestHost,
+			&i.RequestPath,
+			&i.UserAgent,
+			&i.DeviceModel,
+			&i.DeviceOS,
+			&i.DeviceOSVersion,
+			&i.AppVersion,
+			&i.Country,
+			&i.HwidHash,
+			&i.HwidPrefix,
 			&i.RequestedAt,
 			&i.ServedFromCache,
 		); err != nil {
@@ -1436,19 +1466,61 @@ func (q *Queries) InsertSamplerRun(ctx context.Context, arg InsertSamplerRunPara
 }
 
 const insertSubscriptionRequest = `-- name: InsertSubscriptionRequest :exec
-INSERT INTO subscription_requests (sub_id, user_name, request_ip, requested_at, served_from_cache) VALUES (?, ?, ?, ?, ?)
+INSERT INTO subscription_requests (
+	sub_id,
+	user_name,
+	request_ip,
+	request_host,
+	request_path,
+	user_agent,
+	device_model,
+	device_os,
+	device_os_version,
+	app_version,
+	country,
+	hwid_hash,
+	hwid_prefix,
+	requested_at,
+	served_from_cache
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSubscriptionRequestParams struct {
 	SubID           int64  `json:"sub_id"`
 	UserName        string `json:"user_name"`
 	RequestIP       string `json:"request_ip"`
+	RequestHost     string `json:"request_host"`
+	RequestPath     string `json:"request_path"`
+	UserAgent       string `json:"user_agent"`
+	DeviceModel     string `json:"device_model"`
+	DeviceOS        string `json:"device_os"`
+	DeviceOSVersion string `json:"device_os_version"`
+	AppVersion      string `json:"app_version"`
+	Country         string `json:"country"`
+	HwidHash        string `json:"hwid_hash"`
+	HwidPrefix      string `json:"hwid_prefix"`
 	RequestedAt     int64  `json:"requested_at"`
 	ServedFromCache int64  `json:"served_from_cache"`
 }
 
 func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubscriptionRequestParams) error {
-	_, err := q.db.ExecContext(ctx, insertSubscriptionRequest, arg.SubID, arg.UserName, arg.RequestIP, arg.RequestedAt, arg.ServedFromCache)
+	_, err := q.db.ExecContext(ctx, insertSubscriptionRequest,
+		arg.SubID,
+		arg.UserName,
+		arg.RequestIP,
+		arg.RequestHost,
+		arg.RequestPath,
+		arg.UserAgent,
+		arg.DeviceModel,
+		arg.DeviceOS,
+		arg.DeviceOSVersion,
+		arg.AppVersion,
+		arg.Country,
+		arg.HwidHash,
+		arg.HwidPrefix,
+		arg.RequestedAt,
+		arg.ServedFromCache,
+	)
 	return err
 }
 

@@ -116,3 +116,26 @@ CREATE TABLE IF NOT EXISTS subscription_users (
 	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
 	FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS subscription_requests (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	sub_id INTEGER NOT NULL,
+	user_name TEXT NOT NULL DEFAULT '',
+	request_ip TEXT NOT NULL DEFAULT '',
+	request_host TEXT NOT NULL DEFAULT '',
+	request_path TEXT NOT NULL DEFAULT '',
+	user_agent TEXT NOT NULL DEFAULT '',
+	device_model TEXT NOT NULL DEFAULT '',
+	device_os TEXT NOT NULL DEFAULT '',
+	device_os_version TEXT NOT NULL DEFAULT '',
+	app_version TEXT NOT NULL DEFAULT '',
+	country TEXT NOT NULL DEFAULT '',
+	hwid_hash TEXT NOT NULL DEFAULT '',
+	hwid_prefix TEXT NOT NULL DEFAULT '',
+	requested_at INTEGER NOT NULL,
+	served_from_cache INTEGER NOT NULL DEFAULT 0,
+	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
+	ON subscription_requests(sub_id, requested_at DESC);
