@@ -557,6 +557,18 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 				log.Printf("subscription request history: failed to resolve current users for sub_id=%d: %v", runs[i].SubID, usersErr)
 				continue
 			}
+			if s.config != nil {
+				filtered := users[:0]
+				for _, user := range users {
+					if strings.TrimSpace(user) == "" {
+						continue
+					}
+					if inbounds, cfgErr := s.config.GetUserInbounds(user); cfgErr == nil && len(inbounds) > 0 {
+						filtered = append(filtered, user)
+					}
+				}
+				users = filtered
+			}
 			names := strings.Join(users, ", ")
 			currentUsers[runs[i].SubID] = names
 			runs[i].UserName = names

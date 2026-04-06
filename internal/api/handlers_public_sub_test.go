@@ -549,6 +549,70 @@ func TestHandleSubscriptionRequestHistory_ShowsCurrentSubscriptionUsers(t *testi
 	}
 }
 
+func TestHandleSubscriptionRequestHistory_FiltersUsersMissingFromCurrentConfig(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServerWithConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{
+						"name": "alice",
+						"uuid": "11111111-1111-1111-1111-111111111111"
+					}
+				]
+			}
+		]
+	}`, []string{"test-vless"})
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "history-filter-missing-token",
+		Name:        "History Filter Missing Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	for _, user := range []string{"alice", "bob"} {
+		if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+			SubID:    subID,
+			UserName: user,
+		}); err != nil {
+			t.Fatalf("AddUserToSubscription(%s): %v", user, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/history-filter-missing-token", nil)
+	req.SetPathValue("token", "history-filter-missing-token")
+	req.RemoteAddr = "198.51.100.5:12345"
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscription status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/subscription-requests/history?limit=5", nil)
+	historyReq = withSettingsPerms(historyReq, &core.PanelUserPermissions{CanReadSettings: true, CanReadLogs: true})
+	historyRec := httptest.NewRecorder()
+	server.handleSubscriptionRequestHistory(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%q", historyRec.Code, historyRec.Body.String())
+	}
+
+	var got []store.GetSubscriptionRequestHistoryRow
+	decodeJSONResponse(t, historyRec, &got)
+	if len(got) == 0 {
+		t.Fatalf("history empty")
+	}
+	if got[0].UserName != "alice" {
+		t.Fatalf("user_name=%q want %q", got[0].UserName, "alice")
+	}
+}
+
 func TestHandleSubscriptionRequestHistory_PrefersPublicForwardedIPFromTrustedProxy(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
 

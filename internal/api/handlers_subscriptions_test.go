@@ -281,6 +281,42 @@ func updateSubscriptionForTestBody(t *testing.T, server *Server, id int64, body 
 	}
 }
 
+func TestUpdateSubscription_ReplacesAssignedUsers(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServerWithConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name": "alice", "uuid": "11111111-1111-1111-1111-111111111111"},
+					{"name": "bob", "uuid": "22222222-2222-2222-2222-222222222222"}
+				]
+			}
+		]
+	}`, []string{"test-vless"})
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Replace Users Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice", "bob"},
+	})
+
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:        "Replace Users Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice"},
+	})
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Users) != 1 || got.Users[0] != "alice" {
+		t.Fatalf("users=%v want [alice]", got.Users)
+	}
+}
+
 func newJSONRequest(t *testing.T, method, target string, body any) *http.Request {
 	t.Helper()
 
