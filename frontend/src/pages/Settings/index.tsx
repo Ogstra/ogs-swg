@@ -1223,16 +1223,68 @@ function DatabaseTab({
         return new Date(value * 1000).toLocaleTimeString()
     }
 
+    const parseClientIdentity = (userAgent?: string) => {
+        const ua = (userAgent || '').trim()
+        if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '' }
+
+        const productMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z0-9._-]{1,64})/)
+        const clientName = productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : ''
+        const clientVersion = clientName && productMatch ? productMatch[2].trim() : ''
+
+        const appleModelMatch = ua.match(/\b(iPhone\d{1,2},\d+|iPad\d{1,2},\d+|iPod\d{1,2},\d+|MacBook(?:Air|Pro)?\d{1,2},\d+|Mac\d{1,2},\d+)\b/)
+        const samsungModelMatch = ua.match(/\b(SM-[A-Z0-9]+)\b/)
+        const androidModelMatch = ua.match(/Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build\/|[;)])/)
+        const androidVersionMatch = ua.match(/Android\s+([0-9][0-9A-Za-z._-]*)/)
+        const windowsVersionMatch = ua.match(/Windows NT\s+([0-9.]+)/)
+
+        let deviceModel = appleModelMatch?.[1] || samsungModelMatch?.[1] || ''
+        if (!deviceModel && androidModelMatch?.[1]) {
+            const model = androidModelMatch[1].trim()
+            if (!['wv', 'mobile'].includes(model.toLowerCase())) {
+                deviceModel = model
+            }
+        }
+        if (!deviceModel && ua.includes('Macintosh')) {
+            deviceModel = 'Mac'
+        }
+
+        let deviceOS = ''
+        if (deviceModel.startsWith('iPhone') || deviceModel.startsWith('iPod')) deviceOS = 'iOS'
+        else if (deviceModel.startsWith('iPad')) deviceOS = 'iPadOS'
+        else if (deviceModel.startsWith('Mac') || ua.includes('Macintosh')) deviceOS = 'macOS'
+        else if (ua.includes('Android')) deviceOS = 'Android'
+        else if (ua.includes('Windows NT')) deviceOS = 'Windows'
+
+        return {
+            clientName,
+            clientVersion,
+            deviceModel,
+            deviceOS,
+            deviceOSVersion: androidVersionMatch?.[1]?.trim() || windowsVersionMatch?.[1]?.trim() || '',
+        }
+    }
+
     const formatClientLabel = (run: SubscriptionRequestHistoryEntry) => {
-        if (run.device_model && run.user_agent) return `${run.user_agent} on ${run.device_model}`
-        if (run.device_model) return run.device_model
-        if (run.user_agent) return run.user_agent
+        const parsed = parseClientIdentity(run.user_agent)
+        const clientName = parsed.clientName || run.user_agent
+        const deviceModel = run.device_model || parsed.deviceModel
+        if (deviceModel && clientName) return `${clientName} on ${deviceModel}`
+        if (deviceModel) return deviceModel
+        if (clientName) return clientName
         return 'Unknown client'
     }
 
     const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
-        const details = [run.device_os, run.device_os_version].filter(Boolean).join(' ')
+        const parsed = parseClientIdentity(run.user_agent)
+        const details = [run.device_os || parsed.deviceOS, run.device_os_version || parsed.deviceOSVersion].filter(Boolean).join(' ')
         return details || ''
+    }
+
+    const formatAppVersion = (run: SubscriptionRequestHistoryEntry) => {
+        const parsed = parseClientIdentity(run.user_agent)
+        if (run.app_version) return `App ${run.app_version}`
+        if (parsed.clientVersion) return `Build ${parsed.clientVersion}`
+        return ''
     }
 
     return (
@@ -1452,9 +1504,9 @@ function DatabaseTab({
                                             <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
                                                 {formatClientLabel(run)}
                                             </div>
-                                            {(formatDeviceDetails(run) || run.app_version || run.country || run.request_host || run.hwid_prefix) && (
-                                                <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), run.app_version ? `App ${run.app_version}` : '', run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
-                                                    {[formatDeviceDetails(run), run.app_version ? `App ${run.app_version}` : '', run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
+                                            {(formatDeviceDetails(run) || formatAppVersion(run) || run.country || run.request_host || run.hwid_prefix) && (
+                                                <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
+                                                    {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.request_host, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
                                                 </div>
                                             )}
                                         </div>

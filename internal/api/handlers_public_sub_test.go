@@ -459,6 +459,52 @@ func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T)
 	}
 }
 
+func TestExtractSubscriptionRequestMetadata_FallsBackToParsedAppleUserAgent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/s/history-token", nil)
+	req.Host = "swg.example.com"
+	req.Header.Set("User-Agent", "Shadowrocket/3082 CFNetwork/3860.500.112 Darwin/25.4.0 iPhone15,3")
+	req.Header.Set("CF-IPCountry", "AR")
+
+	got := extractSubscriptionRequestMetadata(req)
+
+	if got.userAgent != "Shadowrocket/3082 CFNetwork/3860.500.112 Darwin/25.4.0 iPhone15,3" {
+		t.Fatalf("userAgent=%q", got.userAgent)
+	}
+	if got.deviceModel != "iPhone15,3" {
+		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "iPhone15,3")
+	}
+	if got.deviceOS != "iOS" {
+		t.Fatalf("deviceOS=%q want %q", got.deviceOS, "iOS")
+	}
+	if got.appVersion != "3082" {
+		t.Fatalf("appVersion=%q want %q", got.appVersion, "3082")
+	}
+	if got.country != "AR" {
+		t.Fatalf("country=%q want %q", got.country, "AR")
+	}
+}
+
+func TestExtractSubscriptionRequestMetadata_FallsBackToParsedSamsungUserAgent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/s/history-token", nil)
+	req.Host = "swg.example.com"
+	req.Header.Set("User-Agent", "ClashMetaForAndroid/2.11.5 Android 14; SM-S918B Build/UP1A.231005.007")
+
+	got := extractSubscriptionRequestMetadata(req)
+
+	if got.deviceModel != "SM-S918B" {
+		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "SM-S918B")
+	}
+	if got.deviceOS != "Android" {
+		t.Fatalf("deviceOS=%q want %q", got.deviceOS, "Android")
+	}
+	if got.deviceOSVersion != "14" {
+		t.Fatalf("deviceOSVersion=%q want %q", got.deviceOSVersion, "14")
+	}
+	if got.appVersion != "2.11.5" {
+		t.Fatalf("appVersion=%q want %q", got.appVersion, "2.11.5")
+	}
+}
+
 func TestHandleSubscriptionRequestHistory_ShowsCurrentSubscriptionUsers(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServerWithConfig(t, `{
 		"inbounds": [
