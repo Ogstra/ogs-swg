@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,26 @@ type subscriptionRequestMetadata struct {
 	hwidHash        string
 	hwidPrefix      string
 }
+
+type parsedSubscriptionUserAgent struct {
+	clientName    string
+	clientVersion string
+	deviceModel   string
+	deviceOS      string
+	deviceOSVer   string
+}
+
+var (
+	subscriptionUserAgentProductRE        = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z0-9._-]{1,64})`)
+	subscriptionUserAgentiPhoneModelRE    = regexp.MustCompile(`\b(iPhone\d{1,2},\d+)\b`)
+	subscriptionUserAgentiPadModelRE      = regexp.MustCompile(`\b(iPad\d{1,2},\d+)\b`)
+	subscriptionUserAgentiPodModelRE      = regexp.MustCompile(`\b(iPod\d{1,2},\d+)\b`)
+	subscriptionUserAgentMacModelRE       = regexp.MustCompile(`\b(MacBook(?:Air|Pro)?\d{1,2},\d+|Mac\d{1,2},\d+)\b`)
+	subscriptionUserAgentSamsungModelRE   = regexp.MustCompile(`\b(SM-[A-Z0-9]+)\b`)
+	subscriptionUserAgentAndroidModelRE   = regexp.MustCompile(`Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build/|[;)])`)
+	subscriptionUserAgentAndroidVersionRE = regexp.MustCompile(`Android\s+([0-9][0-9A-Za-z._-]*)`)
+	subscriptionUserAgentWindowsRE        = regexp.MustCompile(`Windows NT\s+([0-9.]+)`)
+)
 
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
@@ -229,19 +250,103 @@ func extractSubscriptionRequestMetadata(r *http.Request) subscriptionRequestMeta
 		return subscriptionRequestMetadata{}
 	}
 
+	ua := normalizeSubscriptionHeader(r.UserAgent(), 255)
+	parsedUA := parseSubscriptionUserAgent(ua)
 	rawHWID := normalizeSubscriptionHeader(r.Header.Get("X-Hwid"), 255)
+	deviceModel := normalizeSubscriptionHeader(r.Header.Get("X-Device-Model"), 255)
+	if deviceModel == "" {
+		deviceModel = normalizeSubscriptionHeader(parsedUA.deviceModel, 255)
+	}
+	deviceOS := normalizeSubscriptionHeader(r.Header.Get("X-Device-OS"), 64)
+	if deviceOS == "" {
+		deviceOS = normalizeSubscriptionHeader(parsedUA.deviceOS, 64)
+	}
+	deviceOSVersion := normalizeSubscriptionHeader(r.Header.Get("X-Ver-Os"), 64)
+	if deviceOSVersion == "" {
+		deviceOSVersion = normalizeSubscriptionHeader(parsedUA.deviceOSVer, 64)
+	}
+	appVersion := normalizeSubscriptionHeader(r.Header.Get("X-App-Version"), 64)
+	if appVersion == "" {
+		appVersion = normalizeSubscriptionHeader(parsedUA.clientVersion, 64)
+	}
 	return subscriptionRequestMetadata{
 		requestHost:     normalizeSubscriptionHeader(r.Host, 255),
 		requestPath:     sanitizeSubscriptionRequestPath(r.URL.Path),
-		userAgent:       normalizeSubscriptionHeader(r.UserAgent(), 255),
-		deviceModel:     normalizeSubscriptionHeader(r.Header.Get("X-Device-Model"), 255),
-		deviceOS:        normalizeSubscriptionHeader(r.Header.Get("X-Device-OS"), 64),
-		deviceOSVersion: normalizeSubscriptionHeader(r.Header.Get("X-Ver-Os"), 64),
-		appVersion:      normalizeSubscriptionHeader(r.Header.Get("X-App-Version"), 64),
+		userAgent:       ua,
+		deviceModel:     deviceModel,
+		deviceOS:        deviceOS,
+		deviceOSVersion: deviceOSVersion,
+		appVersion:      appVersion,
 		country:         normalizeSubscriptionCountry(r.Header.Get("CF-IPCountry")),
 		hwidHash:        hashSubscriptionHWID(rawHWID),
 		hwidPrefix:      prefixSubscriptionHWID(rawHWID),
 	}
+}
+
+func parseSubscriptionUserAgent(userAgent string) parsedSubscriptionUserAgent {
+	ua := strings.TrimSpace(userAgent)
+	if ua == "" {
+		return parsedSubscriptionUserAgent{}
+	}
+
+	parsed := parsedSubscriptionUserAgent{}
+	if matches := subscriptionUserAgentProductRE.FindStringSubmatch(ua); len(matches) == 3 {
+		name := strings.TrimSpace(matches[1])
+		if !strings.EqualFold(name, "Mozilla") && !strings.EqualFold(name, "Dalvik") {
+			parsed.clientName = name
+			parsed.clientVersion = strings.TrimSpace(matches[2])
+		}
+	}
+
+	switch {
+	case subscriptionUserAgentiPhoneModelRE.MatchString(ua):
+		parsed.deviceModel = subscriptionUserAgentiPhoneModelRE.FindString(ua)
+		parsed.deviceOS = "iOS"
+	case subscriptionUserAgentiPadModelRE.MatchString(ua):
+		parsed.deviceModel = subscriptionUserAgentiPadModelRE.FindString(ua)
+		parsed.deviceOS = "iPadOS"
+	case subscriptionUserAgentiPodModelRE.MatchString(ua):
+		parsed.deviceModel = subscriptionUserAgentiPodModelRE.FindString(ua)
+		parsed.deviceOS = "iOS"
+	case subscriptionUserAgentMacModelRE.MatchString(ua):
+		parsed.deviceModel = subscriptionUserAgentMacModelRE.FindString(ua)
+		parsed.deviceOS = "macOS"
+	case strings.Contains(ua, "Macintosh"):
+		parsed.deviceModel = "Mac"
+		parsed.deviceOS = "macOS"
+	}
+
+	if parsed.deviceModel == "" && subscriptionUserAgentSamsungModelRE.MatchString(ua) {
+		parsed.deviceModel = subscriptionUserAgentSamsungModelRE.FindString(ua)
+		parsed.deviceOS = "Android"
+	}
+
+	if parsed.deviceModel == "" {
+		if matches := subscriptionUserAgentAndroidModelRE.FindStringSubmatch(ua); len(matches) == 2 {
+			model := strings.TrimSpace(matches[1])
+			if model != "" && !strings.EqualFold(model, "wv") && !strings.EqualFold(model, "Mobile") {
+				parsed.deviceModel = model
+			}
+		}
+	}
+
+	if parsed.deviceOS == "" && strings.Contains(ua, "Android") {
+		parsed.deviceOS = "Android"
+	}
+	if parsed.deviceOS == "" && strings.Contains(ua, "Windows NT") {
+		parsed.deviceOS = "Windows"
+	}
+
+	if matches := subscriptionUserAgentAndroidVersionRE.FindStringSubmatch(ua); len(matches) == 2 {
+		parsed.deviceOSVer = strings.TrimSpace(matches[1])
+	}
+	if parsed.deviceOSVer == "" {
+		if matches := subscriptionUserAgentWindowsRE.FindStringSubmatch(ua); len(matches) == 2 {
+			parsed.deviceOSVer = strings.TrimSpace(matches[1])
+		}
+	}
+
+	return parsed
 }
 
 func normalizeSubscriptionHeader(value string, maxLen int) string {
