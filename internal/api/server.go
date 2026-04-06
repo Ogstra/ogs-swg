@@ -79,15 +79,31 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		wgSamplerPaused:  false,
 		loginLimiter:     newLoginLimiter(),
 	}
-	if config != nil && config.RealIPCorrelationEnabled {
-		server.realIPResolver = core.NewClientIPCorrelation(
-			config.RealIPCacheTTLSec,
-			config.RealIPCleanupIntervalSec,
-			config.RealIPResolverMode,
-			config.RealIPNginxStreamLogPath,
-		)
-	}
+	server.refreshRealIPResolver()
 	return server
+}
+
+func (s *Server) refreshRealIPResolver() {
+	if s == nil {
+		return
+	}
+	if s.realIPResolver != nil {
+		s.realIPResolver.Stop()
+		s.realIPResolver = nil
+	}
+	if s.config == nil || !s.config.RealIPCorrelationEnabled {
+		return
+	}
+
+	s.realIPResolver = core.NewClientIPCorrelation(
+		s.config.RealIPCacheTTLSec,
+		s.config.RealIPCleanupIntervalSec,
+		s.config.RealIPResolverMode,
+		s.config.RealIPNginxStreamLogPath,
+	)
+	if s.config.EnableSingbox && !s.config.DemoMode {
+		s.realIPResolver.Start()
+	}
 }
 
 type gzipResponseWriter struct {

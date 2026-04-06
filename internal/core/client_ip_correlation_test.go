@@ -28,6 +28,21 @@ func TestClientIPCorrelation_ObserveNginxStreamLine(t *testing.T) {
 	}
 }
 
+func TestClientIPCorrelation_ObserveNginxStreamLine_SpaceSeparatedRemoteAddrAndPort(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	c := NewClientIPCorrelation(defaultRealIPCacheTTLSec, defaultRealIPCleanupIntervalSec, defaultRealIPResolverMode, "")
+	c.now = func() time.Time { return now }
+
+	line := `198.51.100.24 43123 TCP 200 200 0 0 0.001 0.001 127.0.0.1:443`
+	if !c.ObserveNginxStreamLine(line) {
+		t.Fatal("ObserveNginxStreamLine=false, want true")
+	}
+
+	if got := c.ResolveLoopbackRemote("127.0.0.1:43123"); got != "198.51.100.24" {
+		t.Fatalf("ResolveLoopbackRemote=%q, want %q", got, "198.51.100.24")
+	}
+}
+
 func TestClientIPCorrelation_ResolveLoopbackHit(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	c := NewClientIPCorrelation(defaultRealIPCacheTTLSec, defaultRealIPCleanupIntervalSec, defaultRealIPResolverMode, "")
