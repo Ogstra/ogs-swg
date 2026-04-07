@@ -564,6 +564,8 @@ func TestResolveSubscriptionDeviceModel(t *testing.T) {
 		{name: "apple iphone identifier", input: "iPhone15,3", want: "iPhone 14 Pro Max"},
 		{name: "apple ipad identifier", input: "iPad13,18", want: "iPad (10th generation)"},
 		{name: "apple mac identifier", input: "Mac15,12", want: "MacBook Air (13-inch, M3, 2024)"},
+		{name: "samsung fold 5 code", input: "SM-F946B", want: "Samsung Galaxy Z Fold 5"},
+		{name: "samsung fold 6 code", input: "SM-F956B", want: "Samsung Galaxy Z Fold 6"},
 		{name: "samsung code", input: "SM-S918B", want: "Samsung SM-S918B"},
 		{name: "unknown passthrough", input: "Pixel 9 Pro", want: "Pixel 9 Pro"},
 	}
