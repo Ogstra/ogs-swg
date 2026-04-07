@@ -33,7 +33,6 @@ type SubscriptionResponse struct {
 	UsedBytes                  int64    `json:"used_bytes"`
 	Users                      []string `json:"users"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
-	Destinations               []string `json:"destinations"`
 	UpdateAlways               bool     `json:"update_always"`
 	LastRequestAt              *int64   `json:"last_request_at"`
 	CreatedAt                  int64    `json:"created_at"`
@@ -254,7 +253,6 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 	includeSecrets := canManageSubscriptionSecrets(r)
 	for _, sub := range subs {
 		users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
-		destinations, _ := s.store.GetSubscriptionDestinations(r.Context(), sub.ID)
 		usedBytes, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), store.GetSubscriptionUsageInRangeParams{
 			SubID: sub.ID,
 			Ts:    startOfMonth.Unix(),
@@ -273,7 +271,6 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			UsedBytes:                  usedBytes,
 			Users:                      users,
 			ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
-			Destinations:               destinations,
 			UpdateAlways:               int64ToBool(sub.UpdateAlways),
 			LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
@@ -290,7 +287,6 @@ type CreateSubscriptionRequest struct {
 	QuotaPeriod                string             `json:"quota_period"`
 	Users                      []string           `json:"users"`
 	ProfileUpdateIntervalHours optionalInt64Field `json:"profile_update_interval_hours"`
-	Destinations               []string           `json:"destinations"`
 	UpdateAlways               *bool              `json:"update_always"`
 }
 
@@ -311,14 +307,9 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	destinations, err := normalizeSubscriptionDefaultDestinations(req.Destinations)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
 
 	token := generateToken()
-	id, err := s.store.CreateSubscriptionWithDestinations(r.Context(), store.CreateSubscriptionParams{
+	id, err := s.store.Queries.CreateSubscription(r.Context(), store.CreateSubscriptionParams{
 		Token:                      token,
 		Name:                       req.Name,
 		QuotaLimit:                 sql.NullInt64{Int64: req.QuotaLimit, Valid: true},
@@ -326,7 +317,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
 		ProfileUpdateIntervalHours: nullableInt64(req.ProfileUpdateIntervalHours.Value),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, false),
-	}, destinations)
+	})
 	if err != nil {
 		http.Error(w, "Failed to create subscription: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -359,7 +350,6 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 
 	users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), id)
-	destinations, _ := s.store.GetSubscriptionDestinations(r.Context(), id)
 
 	now := time.Now()
 	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
@@ -383,7 +373,6 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		UsedBytes:                  usedBytes,
 		Users:                      users,
 		ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
-		Destinations:               destinations,
 		UpdateAlways:               int64ToBool(sub.UpdateAlways),
 		LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,
@@ -421,20 +410,8 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Subscription not found", http.StatusNotFound)
 		return
 	}
-	destinations, err := s.store.GetSubscriptionDestinations(r.Context(), id)
-	if err != nil {
-		http.Error(w, "Failed to load subscription destinations", http.StatusInternalServerError)
-		return
-	}
-	if req.Destinations != nil {
-		destinations, err = normalizeSubscriptionDefaultDestinations(req.Destinations)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-	}
 
-	err = s.store.UpdateSubscriptionWithDestinations(r.Context(), store.UpdateSubscriptionParams{
+	err = s.store.Queries.UpdateSubscription(r.Context(), store.UpdateSubscriptionParams{
 		Name:                       req.Name,
 		QuotaLimit:                 sql.NullInt64{Int64: req.QuotaLimit, Valid: true},
 		QuotaPeriod:                sql.NullString{String: req.QuotaPeriod, Valid: true},
@@ -442,7 +419,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		ProfileUpdateIntervalHours: mergeNullableInt64(current.ProfileUpdateIntervalHours, req.ProfileUpdateIntervalHours),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, int64ToBool(current.UpdateAlways)),
 		ID:                         id,
-	}, destinations)
+	})
 	if err != nil {
 		http.Error(w, "Failed to update subscription", http.StatusInternalServerError)
 		return

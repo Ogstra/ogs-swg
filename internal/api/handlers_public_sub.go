@@ -23,7 +23,6 @@ type cachedSub struct {
 	HeaderDown            int64
 	HeaderTot             int64
 	HeaderProfileInterval *int64
-	HeaderRouting         string
 	HeaderUpdateAlways    bool
 }
 
@@ -69,8 +68,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	clientVariant := detectSubscriptionClientVariant(r)
-	cacheKey := "sub:" + token + ":" + clientVariant.cacheKeySuffix()
+	cacheKey := "sub:" + token
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
 			sub, err := s.store.Queries.GetSubscriptionByToken(r.Context(), token)
@@ -78,7 +76,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 				users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
 				s.recordSubscriptionRequest(r, sub.ID, users, true)
 			}
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderRouting, c.HeaderUpdateAlways)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
 			return
 		}
 	}
@@ -92,11 +90,6 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	users, err := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
 	if err != nil || len(users) == 0 {
 		http.NotFound(w, r)
-		return
-	}
-	destinations, err := s.store.GetSubscriptionDestinations(r.Context(), sub.ID)
-	if err != nil {
-		http.Error(w, "Failed to load subscription destinations", http.StatusInternalServerError)
 		return
 	}
 
@@ -211,11 +204,6 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	joined := strings.Join(links, "\n")
 	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(joined)))
 	base64.StdEncoding.Encode(encoded, []byte(joined))
-	routingHeader, err := buildVariantRoutingHeader(clientVariant, sub.Name, destinations)
-	if err != nil {
-		http.Error(w, "Failed to build subscription variant headers", http.StatusInternalServerError)
-		return
-	}
 
 	// total=0 means "no limit" for most clients; only send if we have either sub or individual quotas.
 	if !hasSubQuota && totalLimit == 0 {
@@ -230,13 +218,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		HeaderDown:            totalDown,
 		HeaderTot:             totalLimit,
 		HeaderProfileInterval: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
-		HeaderRouting:         routingHeader,
 		HeaderUpdateAlways:    int64ToBool(sub.UpdateAlways),
 	}
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
 	s.recordSubscriptionRequest(r, sub.ID, users, false)
-	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderRouting, c.HeaderUpdateAlways)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
 }
 
 func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool) {
@@ -537,7 +524,7 @@ func servedFromCacheToInt64(v bool) int64 {
 	return 0
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, routing string, updateAlways bool) {
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool) {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
 	parts = append(parts, fmt.Sprintf("download=%d", down))
@@ -548,9 +535,6 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 	}
 	if profileUpdateInterval != nil {
 		w.Header().Set("profile-update-interval", strconv.FormatInt(*profileUpdateInterval, 10))
-	}
-	if strings.TrimSpace(routing) != "" {
-		w.Header().Set("routing", routing)
 	}
 	if updateAlways {
 		w.Header().Set("update-always", "true")
