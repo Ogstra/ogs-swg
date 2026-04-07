@@ -53,20 +53,6 @@ const subscriptionDefaultsToRefreshPolicyDraft = (defaults: SubscriptionDefaults
     updateAlways: defaults.update_always === true,
 })
 
-const parseDestinationDraft = (value: string): string[] => {
-    const seen = new Set<string>()
-    return value
-        .split(/[\n,]+/)
-        .map(token => token.trim())
-        .filter(token => {
-            if (!token) return false
-            const key = token.toLowerCase()
-            if (seen.has(key)) return false
-            seen.add(key)
-            return true
-        })
-}
-
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -87,7 +73,6 @@ export default function Subscriptions() {
     const [defaultIntervalEnabled, setDefaultIntervalEnabled] = useState(false)
     const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
-    const [defaultDestinationsInput, setDefaultDestinationsInput] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
@@ -101,18 +86,11 @@ export default function Subscriptions() {
         queryFn: () => api.getSubscriptionDefaults(),
         enabled: canWriteUsers,
     })
-    const defaultDestinationsQuery = useQuery({
-        queryKey: ['subscription-default-destinations'],
-        queryFn: () => api.getSubscriptionDefaultDestinations(),
-        enabled: canWriteUsers,
-    })
 
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
-    const destinationSuggestions = defaultDestinationsQuery.data?.destinations || []
-    const editableDefaultDestinations = parseDestinationDraft(defaultDestinationsInput)
 
     const applyRefreshPolicyDraft = (draft: RefreshPolicyDraft) => {
         setProfileUpdateIntervalEnabled(draft.intervalEnabled)
@@ -151,7 +129,6 @@ export default function Subscriptions() {
         setDefaultIntervalEnabled(refreshDraft.intervalEnabled)
         setDefaultIntervalHours(refreshDraft.intervalHours)
         setDefaultUpdateAlways(refreshDraft.updateAlways)
-        setDefaultDestinationsInput(subscriptionDefaults.destinations.join('\n'))
         setDefaultsModalOpen(true)
     }
 
@@ -198,7 +175,7 @@ export default function Subscriptions() {
             await api.updateSubscriptionDefaults({
                 profile_update_interval_hours: intervalHours,
                 update_always: defaultUpdateAlways,
-                destinations: parseDestinationDraft(defaultDestinationsInput),
+                destinations: subscriptionDefaults.destinations,
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-defaults'] })
             setDefaultsModalOpen(false)
@@ -253,36 +230,6 @@ export default function Subscriptions() {
         } catch {
             toastError('Failed to copy link')
         }
-    }
-
-    const copyText = async (value: string, successMessage: string) => {
-        try {
-            if (navigator.clipboard?.writeText) {
-                await navigator.clipboard.writeText(value)
-            } else {
-                const textarea = document.createElement('textarea')
-                textarea.value = value
-                textarea.setAttribute('readonly', '')
-                textarea.style.position = 'absolute'
-                textarea.style.left = '-9999px'
-                document.body.appendChild(textarea)
-                textarea.select()
-                document.execCommand('copy')
-                document.body.removeChild(textarea)
-            }
-            success(successMessage)
-        } catch {
-            toastError('Failed to copy')
-        }
-    }
-
-    const toggleDefaultDestination = (destination: string) => {
-        const current = parseDestinationDraft(defaultDestinationsInput)
-        const exists = current.some(item => item.toLowerCase() === destination.toLowerCase())
-        const next = exists
-            ? current.filter(item => item.toLowerCase() !== destination.toLowerCase())
-            : [...current, destination]
-        setDefaultDestinationsInput(next.join('\n'))
     }
 
     const openQr = (sub: Subscription) => {
@@ -407,104 +354,6 @@ export default function Subscriptions() {
                     <div className="text-sm font-medium text-slate-200">update-always</div>
                 </div>
             </label>
-        </div>
-    )
-
-    const renderDestinationDefaultsSection = ({
-        editable,
-        savedDestinations,
-    }: {
-        editable: boolean
-        savedDestinations: string[]
-    }) => (
-        <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <h3 className="text-sm font-semibold text-white">Skip Proxy</h3>
-
-            {editable ? (
-                <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">Skip Proxy</label>
-                    <textarea
-                        value={defaultDestinationsInput}
-                        onChange={e => setDefaultDestinationsInput(e.target.value)}
-                        rows={4}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                        placeholder={'edge.example.com:443\nresolver.example.net:853'}
-                    />
-                    <p className="mt-2 text-xs text-slate-500">One host:port per line or comma-separated.</p>
-                </div>
-            ) : (
-                <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Your defaults</div>
-                    {savedDestinations.length > 0 ? (
-                        <div className="flex flex-wrap gap-2">
-                            {savedDestinations.map(destination => (
-                                <button
-                                    key={destination}
-                                    type="button"
-                                    onClick={() => copyText(destination, 'Destination copied')}
-                                    className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 hover:border-slate-600 hover:text-white"
-                                >
-                                    {destination}
-                                </button>
-                            ))}
-                        </div>
-                    ) : (
-                        <p className="text-sm text-slate-500">No destination defaults saved yet.</p>
-                    )}
-                </div>
-            )}
-
-            {editable && editableDefaultDestinations.length > 0 && (
-                <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Selected defaults</div>
-                    <div className="flex flex-wrap gap-2">
-                        {editableDefaultDestinations.map(destination => (
-                            <button
-                                key={destination}
-                                type="button"
-                                onClick={() => toggleDefaultDestination(destination)}
-                                className="rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-200 hover:border-blue-400"
-                            >
-                                {destination}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            <div className="space-y-2">
-                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Recent suggestions</div>
-                {defaultDestinationsQuery.isLoading ? (
-                    <p className="text-sm text-slate-500">Loading recent sing-box traffic suggestions...</p>
-                ) : destinationSuggestions.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                        {destinationSuggestions.map(destination => {
-                            const selected = editable && editableDefaultDestinations.some(item => item.toLowerCase() === destination.toLowerCase())
-                            return (
-                                <button
-                                    key={destination}
-                                    type="button"
-                                    onClick={() => editable ? toggleDefaultDestination(destination) : copyText(destination, 'Suggestion copied')}
-                                    className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                                        selected
-                                            ? 'border-blue-400 bg-blue-500/10 text-blue-200'
-                                            : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600 hover:text-white'
-                                    }`}
-                                >
-                                    {destination}
-                                </button>
-                            )
-                        })}
-                    </div>
-                ) : (
-                    <p className="text-sm text-slate-500">No recent sing-box traffic suggestions yet.</p>
-                )}
-                {!editable && canWriteUsers && (
-                    <div className="flex justify-end">
-                        <Button variant="secondary" onClick={openDefaults}>Manage Defaults</Button>
-                    </div>
-                )}
-            </div>
         </div>
     )
 
@@ -693,10 +542,6 @@ export default function Subscriptions() {
                         updateAlways,
                         setUpdateAlways
                     )}
-                    {renderDestinationDefaultsSection({
-                        editable: false,
-                        savedDestinations: subscriptionDefaults.destinations,
-                    })}
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
                         <div className="border border-slate-800 rounded bg-slate-950 max-h-[300px] overflow-y-auto">
@@ -736,10 +581,6 @@ export default function Subscriptions() {
                         setDefaultUpdateAlways,
                         'These are your defaults for the current panel account.'
                     )}
-                    {renderDestinationDefaultsSection({
-                        editable: true,
-                        savedDestinations: subscriptionDefaults.destinations,
-                    })}
                 </div>
             </Modal>
 
