@@ -1235,14 +1235,24 @@ function DatabaseTab({
         const desktopClientMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z][A-Za-z0-9 _.-]{0,31})\/([A-Za-z0-9._-]{1,64})/)
         const productMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z0-9._-]{1,64})/)
         const desktopClientName = desktopClientMatch && !['mozilla', 'dalvik'].includes(desktopClientMatch[1].toLowerCase()) ? desktopClientMatch[1].trim() : ''
-        const clientName = desktopClientName || (productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : '')
+        const browserMatch = (() => {
+            if (ua.includes('Edg/')) return { name: 'Edge', version: (ua.match(/Edg\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('OPR/')) return { name: 'Opera', version: (ua.match(/OPR\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('Chrome/')) return { name: 'Chrome', version: (ua.match(/Chrome\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('Firefox/')) return { name: 'Firefox', version: (ua.match(/Firefox\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('Safari/') && ua.includes('Version/')) return { name: 'Safari', version: (ua.match(/Version\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            return null
+        })()
+        const clientName = desktopClientName || (productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : '') || browserMatch?.name || ''
         const clientVersion = desktopClientName && desktopClientMatch ? desktopClientMatch[3].trim() : (clientName && productMatch ? productMatch[2].trim() : '')
+        const resolvedClientVersion = browserMatch?.name ? browserMatch.version : clientVersion
         const clientPlatform = desktopClientName && desktopClientMatch ? desktopClientMatch[2].trim() : ''
 
         const appleModelMatch = ua.match(/\b(iPhone\d{1,2},\d+|iPad\d{1,2},\d+|iPod\d{1,2},\d+|MacBook(?:Air|Pro)?\d{1,2},\d+|Mac\d{1,2},\d+)\b/)
         const samsungModelMatch = ua.match(/\b(SM-[A-Z0-9]+)\b/)
         const androidModelMatch = ua.match(/Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build\/|[;)])/)
         const androidVersionMatch = ua.match(/Android\s+([0-9][0-9A-Za-z._-]*)/)
+        const macOSVersionMatch = ua.match(/Mac OS X\s+([0-9_]+)/)
         const darwinVersionMatch = ua.match(/Darwin\/([0-9.]+)/)
         const windowsVersionMatch = ua.match(/Windows NT\s+([0-9.]+)/)
         const architectureMatch = ua.match(/\b(arm64|aarch64|x86_64|amd64)\b/i)
@@ -1280,10 +1290,10 @@ function DatabaseTab({
 
         return {
             clientName,
-            clientVersion,
+            clientVersion: resolvedClientVersion,
             deviceModel,
             deviceOS,
-            deviceOSVersion: androidVersionMatch?.[1]?.trim() || windowsVersionMatch?.[1]?.trim() || '',
+            deviceOSVersion: androidVersionMatch?.[1]?.trim() || (macOSVersionMatch?.[1] || '').replace(/_/g, '.') || windowsVersionMatch?.[1]?.trim() || '',
             darwinVersion: darwinVersionMatch?.[1]?.trim() || '',
             architecture: architectureMatch?.[1]?.toLowerCase() || '',
         }

@@ -57,6 +57,7 @@ var (
 	subscriptionUserAgentSamsungModelRE          = regexp.MustCompile(`\b(SM-[A-Z0-9]+)\b`)
 	subscriptionUserAgentAndroidModelRE          = regexp.MustCompile(`Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build/|[;)])`)
 	subscriptionUserAgentAndroidVersionRE        = regexp.MustCompile(`Android\s+([0-9][0-9A-Za-z._-]*)`)
+	subscriptionUserAgentMacOSVersionRE          = regexp.MustCompile(`Mac OS X\s+([0-9_]+)`)
 	subscriptionUserAgentWindowsRE               = regexp.MustCompile(`Windows NT\s+([0-9.]+)`)
 )
 
@@ -328,6 +329,25 @@ func parseSubscriptionUserAgent(userAgent string) parsedSubscriptionUserAgent {
 			parsed.clientVersion = strings.TrimSpace(matches[2])
 		}
 	}
+	if parsed.clientName == "" {
+		switch {
+		case strings.Contains(ua, "Edg/"):
+			parsed.clientName = "Edge"
+			parsed.clientVersion = extractSubscriptionUserAgentVersion(ua, "Edg/")
+		case strings.Contains(ua, "OPR/"):
+			parsed.clientName = "Opera"
+			parsed.clientVersion = extractSubscriptionUserAgentVersion(ua, "OPR/")
+		case strings.Contains(ua, "Chrome/"):
+			parsed.clientName = "Chrome"
+			parsed.clientVersion = extractSubscriptionUserAgentVersion(ua, "Chrome/")
+		case strings.Contains(ua, "Firefox/"):
+			parsed.clientName = "Firefox"
+			parsed.clientVersion = extractSubscriptionUserAgentVersion(ua, "Firefox/")
+		case strings.Contains(ua, "Safari/") && strings.Contains(ua, "Version/"):
+			parsed.clientName = "Safari"
+			parsed.clientVersion = extractSubscriptionUserAgentVersion(ua, "Version/")
+		}
+	}
 
 	switch {
 	case subscriptionUserAgentiPhoneModelRE.MatchString(ua):
@@ -372,12 +392,38 @@ func parseSubscriptionUserAgent(userAgent string) parsedSubscriptionUserAgent {
 		parsed.deviceOSVer = strings.TrimSpace(matches[1])
 	}
 	if parsed.deviceOSVer == "" {
+		if matches := subscriptionUserAgentMacOSVersionRE.FindStringSubmatch(ua); len(matches) == 2 {
+			parsed.deviceOSVer = strings.ReplaceAll(strings.TrimSpace(matches[1]), "_", ".")
+		}
+	}
+	if parsed.deviceOSVer == "" {
 		if matches := subscriptionUserAgentWindowsRE.FindStringSubmatch(ua); len(matches) == 2 {
 			parsed.deviceOSVer = strings.TrimSpace(matches[1])
 		}
 	}
 
 	return parsed
+}
+
+func extractSubscriptionUserAgentVersion(userAgent string, marker string) string {
+	idx := strings.Index(userAgent, marker)
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(marker)
+	end := start
+	for end < len(userAgent) {
+		c := userAgent[end]
+		if (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.' || c == '_' || c == '-' {
+			end++
+			continue
+		}
+		break
+	}
+	if end <= start {
+		return ""
+	}
+	return userAgent[start:end]
 }
 
 func normalizeSubscriptionHeader(value string, maxLen int) string {

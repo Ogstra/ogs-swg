@@ -533,6 +533,28 @@ func TestExtractSubscriptionRequestMetadata_FallsBackToParsedDesktopClientUserAg
 	}
 }
 
+func TestExtractSubscriptionRequestMetadata_FallsBackToParsedBrowserUserAgent(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/s/history-token", nil)
+	req.Host = "swg.example.com"
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
+	req.Header.Set("CF-IPCountry", "AR")
+
+	got := extractSubscriptionRequestMetadata(req)
+
+	if got.deviceModel != "Mac" {
+		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "Mac")
+	}
+	if got.deviceOS != "macOS" {
+		t.Fatalf("deviceOS=%q want %q", got.deviceOS, "macOS")
+	}
+	if got.deviceOSVersion != "10.15.7" {
+		t.Fatalf("deviceOSVersion=%q want %q", got.deviceOSVersion, "10.15.7")
+	}
+	if got.appVersion != "146.0.0.0" {
+		t.Fatalf("appVersion=%q want %q", got.appVersion, "146.0.0.0")
+	}
+}
+
 func TestResolveSubscriptionDeviceModel(t *testing.T) {
 	tests := []struct {
 		name  string
