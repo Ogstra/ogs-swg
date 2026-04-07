@@ -406,6 +406,29 @@ func TestHandleSearchLogs(t *testing.T) {
 	}
 }
 
+func TestParseSubscriptionDefaultDestinations(t *testing.T) {
+	lines := []string{
+		"2026/04/07 10:00:00 [OGS] inbound connection to alpha.example.com:443",
+		"2026/04/07 10:01:00 [OGS] inbound packet connection to resolver.example.net:53",
+		"2026/04/07 10:02:00 [OGS] inbound connection to ALPHA.EXAMPLE.COM:443",
+		"2026/04/07 10:03:00 [OGS] inbound connection to localhost:9090",
+		"2026/04/07 10:04:00 [OGS] inbound connection to [::1]:443",
+		"2026/04/07 10:05:00 [OGS] inbound connection to malformed",
+		"2026/04/07 10:06:00 unrelated line",
+	}
+
+	got := parseSubscriptionDefaultDestinations(lines, 10)
+	want := []string{"alpha.example.com:443", "resolver.example.net:53"}
+	if len(got) != len(want) {
+		t.Fatalf("destinations=%v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("destinations[%d]=%q want %q (full=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestHandleGetLogs_UserQueryFollowsConnectionID(t *testing.T) {
 	srv, _ := newLogsTestServer(t, []string{
 		userTaggedLogLine,
