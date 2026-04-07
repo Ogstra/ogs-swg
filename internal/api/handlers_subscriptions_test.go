@@ -47,6 +47,10 @@ type subscriptionDefaultsResponse struct {
 	Destinations               []string `json:"destinations"`
 }
 
+type subscriptionDefaultDestinationsResponse struct {
+	Destinations []string `json:"destinations"`
+}
+
 type loginTestResponse struct {
 	Token string `json:"token"`
 }
@@ -185,6 +189,57 @@ func TestHandleSubscriptionDefaults_RequirePanelUserToken(t *testing.T) {
 		})
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("status=%d body=%q want %d", rec.Code, rec.Body.String(), http.StatusUnauthorized)
+		}
+	})
+}
+
+func TestHandleGetSubscriptionDefaultDestinations(t *testing.T) {
+	t.Run("returns normalized deduplicated recent destinations", func(t *testing.T) {
+		server, _ := newLogsTestServer(t, []string{
+			"2026/04/07 10:00:00 [OGS] inbound connection to edge.example.com:443",
+			"2026/04/07 10:01:00 [OGS] inbound packet connection to resolver.example.net:53",
+			"2026/04/07 10:02:00 [OGS] inbound connection to EDGE.EXAMPLE.COM:443",
+			"2026/04/07 10:03:00 [OGS] inbound connection to 127.0.0.1:8080",
+			"2026/04/07 10:04:00 outbound/direct connection to ignored.example.org:443",
+			"2026/04/07 10:05:00 [OGS] inbound connection to bad-destination",
+		})
+		server.config.JWTSecret = "subscription-default-destinations-secret"
+		server.store.CreatePanelUser("alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+
+		rec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/default-destinations", nil, subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+
+		var got subscriptionDefaultDestinationsResponse
+		decodeJSONResponse(t, rec, &got)
+		want := []string{"edge.example.com:443", "resolver.example.net:53"}
+		if len(got.Destinations) != len(want) {
+			t.Fatalf("destinations=%v want %v", got.Destinations, want)
+		}
+		for i := range want {
+			if got.Destinations[i] != want[i] {
+				t.Fatalf("destinations[%d]=%q want %q (full=%v)", i, got.Destinations[i], want[i], got.Destinations)
+			}
+		}
+	})
+
+	t.Run("returns empty list when logs unavailable", func(t *testing.T) {
+		server, _ := newLogsTestServer(t, nil)
+		server.config.LogSource = "file"
+		server.config.AccessLogPath = "/nonexistent/subscription-defaults.log"
+		server.config.JWTSecret = "subscription-default-destinations-secret"
+		server.store.CreatePanelUser("alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+
+		rec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/default-destinations", nil, subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+
+		var got subscriptionDefaultDestinationsResponse
+		decodeJSONResponse(t, rec, &got)
+		if len(got.Destinations) != 0 {
+			t.Fatalf("destinations=%v want empty", got.Destinations)
 		}
 	})
 }

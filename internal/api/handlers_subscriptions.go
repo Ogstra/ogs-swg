@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +50,12 @@ type UpdateSubscriptionDefaultsRequest struct {
 	UpdateAlways               *bool              `json:"update_always"`
 	Destinations               []string           `json:"destinations"`
 }
+
+type SubscriptionDefaultDestinationsResponse struct {
+	Destinations []string `json:"destinations"`
+}
+
+var subscriptionDefaultDestinationLogPattern = regexp.MustCompile(`\[OGS\].*inbound(?: packet)? connection to (\S+)`)
 
 func defaultSubscriptionDefaults() SubscriptionDefaultsResponse {
 	return SubscriptionDefaultsResponse{
@@ -116,6 +123,43 @@ func normalizeDestinationToken(raw string) (string, error) {
 	return net.JoinHostPort(host, strconv.Itoa(portNum)), nil
 }
 
+func isLoopbackDestination(destination string) bool {
+	host, _, err := net.SplitHostPort(destination)
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func parseSubscriptionDefaultDestinations(lines []string, limit int) []string {
+	if limit <= 0 {
+		limit = 10
+	}
+
+	destinations := make([]string, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	for i := len(lines) - 1; i >= 0 && len(destinations) < limit; i-- {
+		match := subscriptionDefaultDestinationLogPattern.FindStringSubmatch(lines[i])
+		if len(match) != 2 {
+			continue
+		}
+		token, err := normalizeDestinationToken(match[1])
+		if err != nil || isLoopbackDestination(token) {
+			continue
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		destinations = append(destinations, token)
+	}
+	return destinations
+}
+
 func (s *Server) handleGetSubscriptionDefaults(w http.ResponseWriter, r *http.Request) {
 	username, err := ensureAuthenticatedPanelUser(r)
 	if err != nil {
@@ -176,6 +220,23 @@ func (s *Server) handleUpdateSubscriptionDefaults(w http.ResponseWriter, r *http
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(subscriptionDefaultsResponseFromStore(defaults))
+}
+
+func (s *Server) handleGetSubscriptionDefaultDestinations(w http.ResponseWriter, r *http.Request) {
+	if _, err := ensureAuthenticatedPanelUser(r); err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	lines, err := s.readAllSearchableLogLines(r.Context())
+	if err != nil {
+		lines = nil
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(SubscriptionDefaultDestinationsResponse{
+		Destinations: parseSubscriptionDefaultDestinations(lines, 10),
+	})
 }
 
 func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) {
