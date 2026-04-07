@@ -67,77 +67,6 @@ const parseDestinationDraft = (value: string): string[] => {
         })
 }
 
-const extractDestinationHost = (destination: string): string | null => {
-    const trimmed = destination.trim()
-    if (!trimmed) return null
-    if (trimmed.startsWith('[')) {
-        const end = trimmed.indexOf(']')
-        return end > 1 ? trimmed.slice(1, end) : null
-    }
-    const idx = trimmed.lastIndexOf(':')
-    if (idx <= 0) return null
-    return trimmed.slice(0, idx).trim() || null
-}
-
-const stableRouteId = (seed: string): string => {
-    let hash = 0
-    for (let i = 0; i < seed.length; i += 1) {
-        hash = ((hash << 5) - hash) + seed.charCodeAt(i)
-        hash |= 0
-    }
-    const hex = Math.abs(hash).toString(16).toUpperCase().padStart(32, '0').slice(0, 32)
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
-}
-
-const buildV2RayTunRouteImportLink = (sub: Subscription): string | null => {
-    const destinations = Array.isArray(sub.destinations) ? sub.destinations : []
-    if (destinations.length === 0) return null
-
-    const domains: string[] = []
-    const ips: string[] = []
-    const seenDomains = new Set<string>()
-    const seenIPs = new Set<string>()
-
-    for (const destination of destinations) {
-        const host = extractDestinationHost(destination)
-        if (!host) continue
-        if (/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(':')) {
-            if (!seenIPs.has(host)) {
-                seenIPs.add(host)
-                ips.push(host)
-            }
-            continue
-        }
-        const normalized = host.toLowerCase()
-        if (!seenDomains.has(normalized)) {
-            seenDomains.add(normalized)
-            domains.push(normalized)
-        }
-    }
-
-    if (domains.length === 0 && ips.length === 0) return null
-
-    const rule: Record<string, unknown> = {
-        id: stableRouteId(`${sub.id}:rule`),
-        type: 'field',
-        __name__: sub.name || 'Skip Proxy',
-        outboundTag: 'direct',
-    }
-    if (domains.length > 0) rule.domain = domains
-    if (ips.length > 0) rule.ip = ips
-
-    const payload = {
-        domainStrategy: 'AsIs',
-        id: stableRouteId(`${sub.id}:route`),
-        name: sub.name || 'Skip Proxy',
-        domainMatcher: 'hybrid',
-        balancers: [],
-        rules: [rule],
-    }
-
-    return `v2rayTun://import_route/${toBase64(JSON.stringify(payload))}`
-}
-
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -421,19 +350,15 @@ export default function Subscriptions() {
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
     const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
-    const getSubscriptionLinkVariants = (sub: Subscription) => {
-        if (!sub.token) return []
-
-        const variants = [
-            { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-            { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
-        ]
-        const v2RayTunLink = buildV2RayTunRouteImportLink(sub)
-        if (v2RayTunLink) {
-            variants.push({ id: 'v2raytun', label: 'v2rayTun', link: v2RayTunLink })
-        }
-        return variants
-    }
+    // Product rules currently support only Direct and Shadowrocket in this modal.
+    const getSubscriptionLinkVariants = (sub: Subscription) => (
+        sub.token
+            ? [
+                { id: 'direct', label: 'Direct', link: subLink(sub.token) },
+                { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
+            ]
+            : []
+    )
 
     const renderRefreshPolicyFields = (
         intervalEnabled: boolean,
@@ -514,12 +439,7 @@ export default function Subscriptions() {
         selectedLabel: string
     }) => (
         <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <div className="space-y-1">
-                <h3 className="text-sm font-semibold text-white">{title}</h3>
-                {title === 'Skip Proxy' && (
-                    <p className="text-xs text-slate-500">Only for v2raytun</p>
-                )}
-            </div>
+            <h3 className="text-sm font-semibold text-white">{title}</h3>
 
             {editable ? (
                 <div className="space-y-3">
