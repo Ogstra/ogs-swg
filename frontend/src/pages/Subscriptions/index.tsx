@@ -23,7 +23,6 @@ const parseGBInput = (value: string): number => {
 }
 
 const toBase64 = (value: string): string => btoa(value)
-const toBase64NoPadding = (value: string): string => toBase64(value).replace(/=+$/g, '')
 const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
 const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
     profile_update_interval_hours: null,
@@ -136,7 +135,7 @@ const buildV2RayTunRouteImportLink = (sub: Subscription): string | null => {
         rules: [rule],
     }
 
-    return `v2rayTun://import_route/${toBase64NoPadding(JSON.stringify(payload))}`
+    return `v2rayTun://import_route/${toBase64(JSON.stringify(payload))}`
 }
 
 export default function Subscriptions() {
