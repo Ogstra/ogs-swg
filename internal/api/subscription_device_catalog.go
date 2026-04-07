@@ -20,14 +20,6 @@ var (
 	subscriptionAppleCatalog      map[string]string
 )
 
-var subscriptionSamsungPrefixCatalog = []struct {
-	prefix string
-	name   string
-}{
-	{prefix: "SM-F946", name: "Samsung Galaxy Z Fold 5"},
-	{prefix: "SM-F956", name: "Samsung Galaxy Z Fold 6"},
-}
-
 func loadSubscriptionDeviceCatalog() {
 	subscriptionDeviceCatalogOnce.Do(func() {
 		subscriptionAppleCatalog = make(map[string]string)
@@ -66,11 +58,6 @@ func resolveSubscriptionDeviceModel(model string) string {
 	}
 
 	if strings.HasPrefix(trimmed, "SM-") {
-		for _, entry := range subscriptionSamsungPrefixCatalog {
-			if strings.HasPrefix(trimmed, entry.prefix) {
-				return entry.name
-			}
-		}
 		return "Samsung " + trimmed
 	}
 
