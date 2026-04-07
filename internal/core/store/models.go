@@ -56,6 +56,12 @@ type PanelUser struct {
 	UpdatedAt          sql.NullInt64 `json:"updated_at"`
 }
 
+type PanelUserSubscriptionDefault struct {
+	SubscriptionDefaultProfileUpdateIntervalHours sql.NullInt64 `json:"subscription_default_profile_update_interval_hours"`
+	SubscriptionDefaultUpdateAlways               int64         `json:"subscription_default_update_always"`
+	SubscriptionDefaultDestinationsJson           string        `json:"subscription_default_destinations_json"`
+}
+
 type Sample struct {
 	User     string `json:"user"`
 	Ts       int64  `json:"ts"`

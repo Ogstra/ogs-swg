@@ -47,6 +47,26 @@ func (q *Queries) CheckPanelUserExists(ctx context.Context, username string) (in
 	return count, err
 }
 
+const getPanelUserSubscriptionDefaults = `-- name: GetPanelUserSubscriptionDefaults :one
+SELECT
+	subscription_default_profile_update_interval_hours,
+	subscription_default_update_always,
+	subscription_default_destinations_json
+FROM panel_users
+WHERE username = ?
+`
+
+func (q *Queries) GetPanelUserSubscriptionDefaults(ctx context.Context, username string) (PanelUserSubscriptionDefault, error) {
+	row := q.db.QueryRowContext(ctx, getPanelUserSubscriptionDefaults, username)
+	var i PanelUserSubscriptionDefault
+	err := row.Scan(
+		&i.SubscriptionDefaultProfileUpdateIntervalHours,
+		&i.SubscriptionDefaultUpdateAlways,
+		&i.SubscriptionDefaultDestinationsJson,
+	)
+	return i, err
+}
+
 const clearSubscriptionUsers = `-- name: ClearSubscriptionUsers :exec
 DELETE FROM subscription_users WHERE sub_id = ?
 `
@@ -1689,6 +1709,35 @@ type UpdatePanelUserPasswordParams struct {
 
 func (q *Queries) UpdatePanelUserPassword(ctx context.Context, arg UpdatePanelUserPasswordParams) error {
 	_, err := q.db.ExecContext(ctx, updatePanelUserPassword, arg.PasswordHash, arg.Username)
+	return err
+}
+
+const updatePanelUserSubscriptionDefaults = `-- name: UpdatePanelUserSubscriptionDefaults :exec
+UPDATE panel_users
+SET
+	subscription_default_profile_update_interval_hours = ?,
+	subscription_default_update_always = ?,
+	subscription_default_destinations_json = ?,
+	updated_at = strftime('%s','now')
+WHERE username = ?
+`
+
+type UpdatePanelUserSubscriptionDefaultsParams struct {
+	SubscriptionDefaultProfileUpdateIntervalHours sql.NullInt64 `json:"subscription_default_profile_update_interval_hours"`
+	SubscriptionDefaultUpdateAlways               int64         `json:"subscription_default_update_always"`
+	SubscriptionDefaultDestinationsJson           string        `json:"subscription_default_destinations_json"`
+	Username                                      string        `json:"username"`
+}
+
+func (q *Queries) UpdatePanelUserSubscriptionDefaults(ctx context.Context, arg UpdatePanelUserSubscriptionDefaultsParams) error {
+	_, err := q.db.ExecContext(
+		ctx,
+		updatePanelUserSubscriptionDefaults,
+		arg.SubscriptionDefaultProfileUpdateIntervalHours,
+		arg.SubscriptionDefaultUpdateAlways,
+		arg.SubscriptionDefaultDestinationsJson,
+		arg.Username,
+	)
 	return err
 }
 
