@@ -1228,14 +1228,6 @@ function DatabaseTab({
         return new Date(value * 1000).toLocaleString()
     }
 
-    const resolveSamsungDeviceModel = (model?: string) => {
-        const trimmed = (model || '').trim()
-        if (!trimmed.startsWith('SM-')) return trimmed
-        if (trimmed.startsWith('SM-F946')) return 'Samsung Galaxy Z Fold 5'
-        if (trimmed.startsWith('SM-F956')) return 'Samsung Galaxy Z Fold 6'
-        return `Samsung ${trimmed}`
-    }
-
     const parseClientIdentity = (userAgent?: string) => {
         const ua = (userAgent || '').trim()
         if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '', darwinVersion: '', architecture: '' }
@@ -1265,7 +1257,7 @@ function DatabaseTab({
         const windowsVersionMatch = ua.match(/Windows NT\s+([0-9.]+)/)
         const architectureMatch = ua.match(/\b(arm64|aarch64|x86_64|amd64)\b/i)
 
-        let deviceModel = appleModelMatch?.[1] || resolveSamsungDeviceModel(samsungModelMatch?.[1]) || ''
+        let deviceModel = appleModelMatch?.[1] || samsungModelMatch?.[1] || ''
         if (!deviceModel && androidModelMatch?.[1]) {
             const model = androidModelMatch[1].trim()
             if (!['wv', 'mobile'].includes(model.toLowerCase())) {
@@ -1325,7 +1317,7 @@ function DatabaseTab({
         const parsed = parseClientIdentity(run.user_agent)
         const verboseOS = normalizeVerboseAppleOS(run.device_os, run.device_os_version)
         const osName = verboseOS.osName || parsed.deviceOS
-        let deviceModel = resolveSamsungDeviceModel(run.device_model) || parsed.deviceModel
+        let deviceModel = (run.device_model || '').trim() || parsed.deviceModel
 
         if (osName === 'macOS') {
             if (!deviceModel || /^(iphone|ipad|ipod)$/i.test(deviceModel)) {
