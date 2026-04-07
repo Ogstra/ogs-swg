@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { api, Subscription } from '../../services/api'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, Subscription, SubscriptionDefaults } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { Button } from '../../components/ui/Button'
@@ -23,20 +23,18 @@ const parseGBInput = (value: string): number => {
 }
 
 const toBase64 = (value: string): string => btoa(value)
-const SUBSCRIPTION_DEFAULTS_STORAGE_KEY = 'subscription_create_defaults'
 const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
+const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
+    profile_update_interval_hours: null,
+    update_always: false,
+    destinations: [],
+}
 
 type RefreshPolicyDraft = {
     intervalEnabled: boolean
     intervalHours: string
     updateAlways: boolean
 }
-
-const defaultRefreshPolicyDraft = (): RefreshPolicyDraft => ({
-    intervalEnabled: false,
-    intervalHours: DEFAULT_REFRESH_INTERVAL_HOURS,
-    updateAlways: false,
-})
 
 const parseIntervalHours = (value: string): number | null => {
     const trimmed = value.trim()
@@ -47,29 +45,18 @@ const parseIntervalHours = (value: string): number | null => {
     return parsed
 }
 
-const loadSubscriptionDefaults = (): RefreshPolicyDraft => {
-    if (typeof window === 'undefined') return defaultRefreshPolicyDraft()
-
-    try {
-        const raw = window.localStorage.getItem(SUBSCRIPTION_DEFAULTS_STORAGE_KEY)
-        if (!raw) return defaultRefreshPolicyDraft()
-
-        const parsed = JSON.parse(raw) as { profile_update_interval_hours?: unknown; update_always?: unknown }
-        const hasInterval = typeof parsed.profile_update_interval_hours === 'number' && parsed.profile_update_interval_hours > 0
-
-        return {
-            intervalEnabled: hasInterval,
-            intervalHours: hasInterval ? String(Math.trunc(parsed.profile_update_interval_hours as number)) : DEFAULT_REFRESH_INTERVAL_HOURS,
-            updateAlways: parsed.update_always === true,
-        }
-    } catch {
-        return defaultRefreshPolicyDraft()
-    }
-}
+const subscriptionDefaultsToRefreshPolicyDraft = (defaults: SubscriptionDefaults): RefreshPolicyDraft => ({
+    intervalEnabled: defaults.profile_update_interval_hours != null,
+    intervalHours: defaults.profile_update_interval_hours != null
+        ? String(defaults.profile_update_interval_hours)
+        : DEFAULT_REFRESH_INTERVAL_HOURS,
+    updateAlways: defaults.update_always === true,
+})
 
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
+    const queryClient = useQueryClient()
     const canWriteUsers = !!permissions?.can_write_users
 
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
@@ -83,7 +70,6 @@ export default function Subscriptions() {
     const [profileUpdateIntervalEnabled, setProfileUpdateIntervalEnabled] = useState(false)
     const [profileUpdateIntervalHours, setProfileUpdateIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [updateAlways, setUpdateAlways] = useState(false)
-    const [subscriptionDefaults, setSubscriptionDefaults] = useState<RefreshPolicyDraft>(() => loadSubscriptionDefaults())
     const [defaultIntervalEnabled, setDefaultIntervalEnabled] = useState(false)
     const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
@@ -95,10 +81,16 @@ export default function Subscriptions() {
         queryFn: () => api.getSubscriptionDomain(),
         enabled: canWriteUsers,
     })
+    const defaultsQuery = useQuery({
+        queryKey: ['subscription-defaults'],
+        queryFn: () => api.getSubscriptionDefaults(),
+        enabled: canWriteUsers,
+    })
 
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
     const subDomain = domainQuery.data || window.location.host
+    const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
 
     const applyRefreshPolicyDraft = (draft: RefreshPolicyDraft) => {
         setProfileUpdateIntervalEnabled(draft.intervalEnabled)
@@ -110,7 +102,7 @@ export default function Subscriptions() {
         setNameInput('')
         setQuotaGB('0')
         setSelectedUsers([])
-        applyRefreshPolicyDraft(subscriptionDefaults)
+        applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
         setModalState({ type: 'create' })
     }
 
@@ -122,16 +114,21 @@ export default function Subscriptions() {
         setProfileUpdateIntervalHours(
             sub.profile_update_interval_hours != null
                 ? String(sub.profile_update_interval_hours)
-                : subscriptionDefaults.intervalHours
+                : (
+                    subscriptionDefaults.profile_update_interval_hours != null
+                        ? String(subscriptionDefaults.profile_update_interval_hours)
+                        : DEFAULT_REFRESH_INTERVAL_HOURS
+                )
         )
         setUpdateAlways(sub.update_always === true)
         setModalState({ type: 'edit', data: sub })
     }
 
     const openDefaults = () => {
-        setDefaultIntervalEnabled(subscriptionDefaults.intervalEnabled)
-        setDefaultIntervalHours(subscriptionDefaults.intervalHours)
-        setDefaultUpdateAlways(subscriptionDefaults.updateAlways)
+        const refreshDraft = subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults)
+        setDefaultIntervalEnabled(refreshDraft.intervalEnabled)
+        setDefaultIntervalHours(refreshDraft.intervalHours)
+        setDefaultUpdateAlways(refreshDraft.updateAlways)
         setDefaultsModalOpen(true)
     }
 
@@ -168,29 +165,24 @@ export default function Subscriptions() {
         }
     }
 
-    const handleSaveDefaults = () => {
+    const handleSaveDefaults = async () => {
         const intervalHours = defaultIntervalEnabled ? parseIntervalHours(defaultIntervalHours) : null
         if (defaultIntervalEnabled && intervalHours == null) {
             return toastError('Default refresh interval must be a whole number greater than zero')
         }
 
-        const nextDefaults: RefreshPolicyDraft = {
-            intervalEnabled: defaultIntervalEnabled,
-            intervalHours: defaultIntervalEnabled ? String(intervalHours) : DEFAULT_REFRESH_INTERVAL_HOURS,
-            updateAlways: defaultUpdateAlways,
-        }
-
-        window.localStorage.setItem(
-            SUBSCRIPTION_DEFAULTS_STORAGE_KEY,
-            JSON.stringify({
+        try {
+            await api.updateSubscriptionDefaults({
                 profile_update_interval_hours: intervalHours,
                 update_always: defaultUpdateAlways,
+                destinations: subscriptionDefaults.destinations,
             })
-        )
-
-        setSubscriptionDefaults(nextDefaults)
-        setDefaultsModalOpen(false)
-        success('Subscription defaults updated')
+            await queryClient.invalidateQueries({ queryKey: ['subscription-defaults'] })
+            setDefaultsModalOpen(false)
+            success('Subscription defaults updated')
+        } catch (err) {
+            toastError('Failed to update subscription defaults: ' + err)
+        }
     }
 
     const handleDelete = async () => {
@@ -218,9 +210,9 @@ export default function Subscriptions() {
     }
 
     const copyLink = async (token: string) => {
-        const protocol = window.location.protocol
-        const link = `${protocol}//${subDomain}/s/${token}`
         try {
+            const protocol = window.location.protocol
+            const link = `${protocol}//${subDomain}/s/${token}`
             if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(link)
             } else {
@@ -577,6 +569,9 @@ export default function Subscriptions() {
                 }
             >
                 <div className="space-y-4">
+                    {defaultsQuery.isLoading && (
+                        <p className="text-sm text-slate-500">Loading your defaults for this panel account...</p>
+                    )}
                     {renderRefreshPolicyFields(
                         defaultIntervalEnabled,
                         setDefaultIntervalEnabled,

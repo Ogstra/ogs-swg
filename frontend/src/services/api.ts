@@ -197,6 +197,16 @@ export interface SubscriptionMutationRequest {
     update_always: boolean;
 }
 
+export interface SubscriptionDefaults {
+    profile_update_interval_hours: number | null;
+    update_always: boolean;
+    destinations: string[];
+}
+
+export interface SubscriptionDefaultDestinationsResponse {
+    destinations: string[];
+}
+
 
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
@@ -911,6 +921,25 @@ export const api = {
     getSubscriptions: async (): Promise<Subscription[]> => {
         const res = await fetch('/api/subscriptions', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch subscriptions');
+        return res.json();
+    },
+    getSubscriptionDefaults: async (): Promise<SubscriptionDefaults> => {
+        const res = await fetch('/api/subscriptions/defaults', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription defaults');
+        return res.json();
+    },
+    updateSubscriptionDefaults: async (data: SubscriptionDefaults): Promise<SubscriptionDefaults> => {
+        const res = await fetch('/api/subscriptions/defaults', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(data),
+        });
+        await handleResponse(res, 'Failed to update subscription defaults');
+        return res.json();
+    },
+    getSubscriptionDefaultDestinations: async (): Promise<SubscriptionDefaultDestinationsResponse> => {
+        const res = await fetch('/api/subscriptions/default-destinations', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription destination suggestions');
         return res.json();
     },
     createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> => {
