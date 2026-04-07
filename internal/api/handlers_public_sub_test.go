@@ -299,6 +299,46 @@ func TestHandlePublicSubscription_EmitsRefreshPolicyHeaders(t *testing.T) {
 	}
 }
 
+func TestHandlePublicSubscription_EmitsV2RayTunRoutingHeaderForMatchingClientsOnly(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.CreateSubscriptionWithDestinations(t.Context(), store.CreateSubscriptionParams{
+		Token:       "routing-token",
+		Name:        "Routing Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	}, []string{"edge.example.com:443", "198.51.100.10:443"})
+	if err != nil {
+		t.Fatalf("CreateSubscriptionWithDestinations: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	v2Req := httptest.NewRequest(http.MethodGet, "/s/routing-token", nil)
+	v2Req.SetPathValue("token", "routing-token")
+	v2Req.Header.Set("User-Agent", "v2raytun/ios")
+	v2Rec := httptest.NewRecorder()
+	server.handlePublicSubscription(v2Rec, v2Req)
+
+	if got := v2Rec.Header().Get("routing"); got == "" {
+		t.Fatal("routing header missing for v2raytun client")
+	}
+
+	genericReq := httptest.NewRequest(http.MethodGet, "/s/routing-token", nil)
+	genericReq.SetPathValue("token", "routing-token")
+	genericRec := httptest.NewRecorder()
+	server.handlePublicSubscription(genericRec, genericReq)
+
+	if got := genericRec.Header().Get("routing"); got != "" {
+		t.Fatalf("routing header=%q want empty for generic clients", got)
+	}
+}
+
 func TestHandlePublicSubscription_InvalidatesCachedRefreshPolicyAfterSubscriptionUpdate(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
 	initialInterval := int64(24)

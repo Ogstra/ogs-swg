@@ -18,6 +18,7 @@ type subscriptionMutationRequest struct {
 	QuotaPeriod                string   `json:"quota_period"`
 	Users                      []string `json:"users"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours,omitempty"`
+	Destinations               []string `json:"destinations,omitempty"`
 	UpdateAlways               *bool    `json:"update_always,omitempty"`
 }
 
@@ -35,6 +36,7 @@ type subscriptionDetailResponse struct {
 	UsedBytes                  int64    `json:"used_bytes"`
 	Users                      []string `json:"users"`
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
+	Destinations               []string `json:"destinations"`
 	UpdateAlways               bool     `json:"update_always"`
 	LastRequestAt              *int64   `json:"last_request_at"`
 	CreatedAt                  int64    `json:"created_at"`
@@ -269,6 +271,36 @@ func TestSubscriptionCreateAndGetRefreshPolicyRoundTrip(t *testing.T) {
 	}
 	if !got.UpdateAlways {
 		t.Fatalf("update_always=%v want true", got.UpdateAlways)
+	}
+}
+
+func TestSubscriptionCreateAndUpdateDestinationsRoundTrip(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:         "Routing Bundle",
+		QuotaLimit:   0,
+		QuotaPeriod:  "monthly",
+		Users:        []string{"alice"},
+		Destinations: []string{"edge.example.com:443", "resolver.example.net:53"},
+	})
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Destinations) != 2 || got.Destinations[0] != "edge.example.com:443" || got.Destinations[1] != "resolver.example.net:53" {
+		t.Fatalf("destinations=%v want persisted values", got.Destinations)
+	}
+
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:         "Routing Bundle",
+		QuotaLimit:   0,
+		QuotaPeriod:  "monthly",
+		Users:        []string{"alice"},
+		Destinations: []string{"g.whatsapp.net:5222"},
+	})
+
+	got = getSubscriptionForTest(t, server, created.ID)
+	if len(got.Destinations) != 1 || got.Destinations[0] != "g.whatsapp.net:5222" {
+		t.Fatalf("destinations=%v want updated value", got.Destinations)
 	}
 }
 
