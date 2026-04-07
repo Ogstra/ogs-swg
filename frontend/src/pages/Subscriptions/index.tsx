@@ -87,7 +87,6 @@ export default function Subscriptions() {
     const [defaultIntervalEnabled, setDefaultIntervalEnabled] = useState(false)
     const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
-    const [subscriptionDestinationsInput, setSubscriptionDestinationsInput] = useState('')
     const [defaultDestinationsInput, setDefaultDestinationsInput] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
@@ -114,7 +113,6 @@ export default function Subscriptions() {
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const destinationSuggestions = defaultDestinationsQuery.data?.destinations || []
     const editableDefaultDestinations = parseDestinationDraft(defaultDestinationsInput)
-    const editableSubscriptionDestinations = parseDestinationDraft(subscriptionDestinationsInput)
 
     const applyRefreshPolicyDraft = (draft: RefreshPolicyDraft) => {
         setProfileUpdateIntervalEnabled(draft.intervalEnabled)
@@ -127,7 +125,6 @@ export default function Subscriptions() {
         setQuotaGB('0')
         setSelectedUsers([])
         applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
-        setSubscriptionDestinationsInput(subscriptionDefaults.destinations.join('\n'))
         setModalState({ type: 'create' })
     }
 
@@ -146,7 +143,6 @@ export default function Subscriptions() {
                 )
         )
         setUpdateAlways(sub.update_always === true)
-        setSubscriptionDestinationsInput((sub.destinations || subscriptionDefaults.destinations).join('\n'))
         setModalState({ type: 'edit', data: sub })
     }
 
@@ -174,7 +170,6 @@ export default function Subscriptions() {
             quota_period: 'monthly' as const,
             users: selectedUsers,
             profile_update_interval_hours: intervalHours,
-            destinations: parseDestinationDraft(subscriptionDestinationsInput),
             update_always: updateAlways,
         }
 
@@ -288,15 +283,6 @@ export default function Subscriptions() {
             ? current.filter(item => item.toLowerCase() !== destination.toLowerCase())
             : [...current, destination]
         setDefaultDestinationsInput(next.join('\n'))
-    }
-
-    const toggleSubscriptionDestination = (destination: string) => {
-        const current = parseDestinationDraft(subscriptionDestinationsInput)
-        const exists = current.some(item => item.toLowerCase() === destination.toLowerCase())
-        const next = exists
-            ? current.filter(item => item.toLowerCase() !== destination.toLowerCase())
-            : [...current, destination]
-        setSubscriptionDestinationsInput(next.join('\n'))
     }
 
     const openQr = (sub: Subscription) => {
@@ -424,41 +410,27 @@ export default function Subscriptions() {
         </div>
     )
 
-    const renderDestinationSection = ({
+    const renderDestinationDefaultsSection = ({
         editable,
-        title,
         helperText,
         savedDestinations,
-        draftValue,
-        draftDestinations,
-        onDraftChange,
-        onToggleDestination,
-        emptyMessage,
-        selectedLabel,
     }: {
         editable: boolean
-        title: string
         helperText: string
         savedDestinations: string[]
-        draftValue: string
-        draftDestinations: string[]
-        onDraftChange: (value: string) => void
-        onToggleDestination: (destination: string) => void
-        emptyMessage: string
-        selectedLabel: string
     }) => (
         <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
             <div className="space-y-1">
-                <h3 className="text-sm font-semibold text-white">{title}</h3>
+                <h3 className="text-sm font-semibold text-white">Destination Defaults</h3>
                 <p className="text-xs text-slate-400">{helperText}</p>
             </div>
 
             {editable ? (
                 <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">Destinations</label>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Default destinations</label>
                     <textarea
-                        value={draftValue}
-                        onChange={e => onDraftChange(e.target.value)}
+                        value={defaultDestinationsInput}
+                        onChange={e => setDefaultDestinationsInput(e.target.value)}
                         rows={4}
                         className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                         placeholder={'edge.example.com:443\nresolver.example.net:853'}
@@ -482,20 +454,20 @@ export default function Subscriptions() {
                             ))}
                         </div>
                     ) : (
-                        <p className="text-sm text-slate-500">{emptyMessage}</p>
+                        <p className="text-sm text-slate-500">No destination defaults saved yet.</p>
                     )}
                 </div>
             )}
 
-            {editable && draftDestinations.length > 0 && (
+            {editable && editableDefaultDestinations.length > 0 && (
                 <div className="space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{selectedLabel}</div>
+                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Selected defaults</div>
                     <div className="flex flex-wrap gap-2">
-                        {draftDestinations.map(destination => (
+                        {editableDefaultDestinations.map(destination => (
                             <button
                                 key={destination}
                                 type="button"
-                                onClick={() => onToggleDestination(destination)}
+                                onClick={() => toggleDefaultDestination(destination)}
                                 className="rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs text-blue-200 hover:border-blue-400"
                             >
                                 {destination}
@@ -512,12 +484,12 @@ export default function Subscriptions() {
                 ) : destinationSuggestions.length > 0 ? (
                     <div className="flex flex-wrap gap-2">
                         {destinationSuggestions.map(destination => {
-                            const selected = editable && draftDestinations.some(item => item.toLowerCase() === destination.toLowerCase())
+                            const selected = editable && editableDefaultDestinations.some(item => item.toLowerCase() === destination.toLowerCase())
                             return (
                                 <button
                                     key={destination}
                                     type="button"
-                                    onClick={() => editable ? onToggleDestination(destination) : copyText(destination, 'Suggestion copied')}
+                                    onClick={() => editable ? toggleDefaultDestination(destination) : copyText(destination, 'Suggestion copied')}
                                     className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
                                         selected
                                             ? 'border-blue-400 bg-blue-500/10 text-blue-200'
@@ -726,17 +698,10 @@ export default function Subscriptions() {
                         updateAlways,
                         setUpdateAlways
                     )}
-                    {renderDestinationSection({
-                        editable: true,
-                        title: 'v2RayTun Routing Destinations',
-                        helperText: 'These destinations are stored on this subscription and emitted as the v2RayTun routing header when that client refreshes the normal Direct link.',
+                    {renderDestinationDefaultsSection({
+                        editable: false,
+                        helperText: 'Your defaults for the current panel account are shared here. Recent sing-box traffic suggestions may be absent.',
                         savedDestinations: subscriptionDefaults.destinations,
-                        draftValue: subscriptionDestinationsInput,
-                        draftDestinations: editableSubscriptionDestinations,
-                        onDraftChange: setSubscriptionDestinationsInput,
-                        onToggleDestination: toggleSubscriptionDestination,
-                        emptyMessage: 'No destination defaults saved yet.',
-                        selectedLabel: 'Selected destinations',
                     })}
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
@@ -777,17 +742,10 @@ export default function Subscriptions() {
                         setDefaultUpdateAlways,
                         'These are your defaults for the current panel account.'
                     )}
-                    {renderDestinationSection({
+                    {renderDestinationDefaultsSection({
                         editable: true,
-                        title: 'Destination Defaults',
                         helperText: 'These destinations are saved as your defaults. Suggestions come from recent sing-box traffic and may be absent.',
                         savedDestinations: subscriptionDefaults.destinations,
-                        draftValue: defaultDestinationsInput,
-                        draftDestinations: editableDefaultDestinations,
-                        onDraftChange: setDefaultDestinationsInput,
-                        onToggleDestination: toggleDefaultDestination,
-                        emptyMessage: 'No destination defaults saved yet.',
-                        selectedLabel: 'Selected defaults',
                     })}
                 </div>
             </Modal>

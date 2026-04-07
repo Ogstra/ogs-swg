@@ -182,7 +182,6 @@ export interface Subscription {
     used_bytes: number;
     users: string[];
     profile_update_interval_hours?: number | null;
-    destinations: string[];
     update_always?: boolean;
     last_request_at?: number | null;
     created_at: number;
@@ -195,7 +194,6 @@ export interface SubscriptionMutationRequest {
     quota_period: string;
     users: string[];
     profile_update_interval_hours: number | null;
-    destinations: string[];
     update_always: boolean;
 }
 
