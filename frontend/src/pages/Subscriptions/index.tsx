@@ -412,22 +412,17 @@ export default function Subscriptions() {
 
     const renderDestinationDefaultsSection = ({
         editable,
-        helperText,
         savedDestinations,
     }: {
         editable: boolean
-        helperText: string
         savedDestinations: string[]
     }) => (
         <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <div className="space-y-1">
-                <h3 className="text-sm font-semibold text-white">Destination Defaults</h3>
-                <p className="text-xs text-slate-400">{helperText}</p>
-            </div>
+            <h3 className="text-sm font-semibold text-white">Skip Proxy</h3>
 
             {editable ? (
                 <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">Default destinations</label>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Skip Proxy</label>
                     <textarea
                         value={defaultDestinationsInput}
                         onChange={e => setDefaultDestinationsInput(e.target.value)}
@@ -700,7 +695,6 @@ export default function Subscriptions() {
                     )}
                     {renderDestinationDefaultsSection({
                         editable: false,
-                        helperText: 'Your defaults for the current panel account are shared here. Recent sing-box traffic suggestions may be absent.',
                         savedDestinations: subscriptionDefaults.destinations,
                     })}
                     <div>
@@ -744,7 +738,6 @@ export default function Subscriptions() {
                     )}
                     {renderDestinationDefaultsSection({
                         editable: true,
-                        helperText: 'These destinations are saved as your defaults. Suggestions come from recent sing-box traffic and may be absent.',
                         savedDestinations: subscriptionDefaults.destinations,
                     })}
                 </div>
