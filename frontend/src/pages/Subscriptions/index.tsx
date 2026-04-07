@@ -102,10 +102,17 @@ export default function Subscriptions() {
         queryFn: () => api.getSubscriptionDefaults(),
         enabled: canWriteUsers,
     })
+    const defaultDestinationsQuery = useQuery({
+        queryKey: ['subscription-default-destinations'],
+        queryFn: () => api.getSubscriptionDefaultDestinations(),
+        enabled: canWriteUsers,
+    })
+
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
+    const destinationSuggestions = defaultDestinationsQuery.data?.destinations || []
     const editableDefaultDestinations = parseDestinationDraft(defaultDestinationsInput)
     const editableSubscriptionDestinations = parseDestinationDraft(subscriptionDestinationsInput)
 
@@ -420,6 +427,7 @@ export default function Subscriptions() {
     const renderDestinationSection = ({
         editable,
         title,
+        helperText,
         savedDestinations,
         draftValue,
         draftDestinations,
@@ -430,6 +438,7 @@ export default function Subscriptions() {
     }: {
         editable: boolean
         title: string
+        helperText: string
         savedDestinations: string[]
         draftValue: string
         draftDestinations: string[]
@@ -439,31 +448,14 @@ export default function Subscriptions() {
         selectedLabel: string
     }) => (
         <div className="space-y-4 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-            <h3 className="text-sm font-semibold text-white">{title}</h3>
+            <div className="space-y-1">
+                <h3 className="text-sm font-semibold text-white">{title}</h3>
+                <p className="text-xs text-slate-400">{helperText}</p>
+            </div>
 
             {editable ? (
-                <div className="space-y-3">
-                    {savedDestinations.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                            {savedDestinations.map(destination => {
-                                const selected = draftDestinations.some(item => item.toLowerCase() === destination.toLowerCase())
-                                return (
-                                    <button
-                                        key={destination}
-                                        type="button"
-                                        onClick={() => onToggleDestination(destination)}
-                                        className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
-                                            selected
-                                                ? 'border-blue-400 bg-blue-500/10 text-blue-200'
-                                                : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600 hover:text-white'
-                                        }`}
-                                    >
-                                        {destination}
-                                    </button>
-                                )
-                            })}
-                        </div>
-                    )}
+                <div>
+                    <label className="block text-sm font-medium text-slate-300 mb-1">Destinations</label>
                     <textarea
                         value={draftValue}
                         onChange={e => onDraftChange(e.target.value)}
@@ -512,6 +504,40 @@ export default function Subscriptions() {
                     </div>
                 </div>
             )}
+
+            <div className="space-y-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Recent suggestions</div>
+                {defaultDestinationsQuery.isLoading ? (
+                    <p className="text-sm text-slate-500">Loading recent sing-box traffic suggestions...</p>
+                ) : destinationSuggestions.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                        {destinationSuggestions.map(destination => {
+                            const selected = editable && draftDestinations.some(item => item.toLowerCase() === destination.toLowerCase())
+                            return (
+                                <button
+                                    key={destination}
+                                    type="button"
+                                    onClick={() => editable ? onToggleDestination(destination) : copyText(destination, 'Suggestion copied')}
+                                    className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                                        selected
+                                            ? 'border-blue-400 bg-blue-500/10 text-blue-200'
+                                            : 'border-slate-700 bg-slate-900 text-slate-200 hover:border-slate-600 hover:text-white'
+                                    }`}
+                                >
+                                    {destination}
+                                </button>
+                            )
+                        })}
+                    </div>
+                ) : (
+                    <p className="text-sm text-slate-500">No recent sing-box traffic suggestions yet.</p>
+                )}
+                {!editable && canWriteUsers && (
+                    <div className="flex justify-end">
+                        <Button variant="secondary" onClick={openDefaults}>Manage Defaults</Button>
+                    </div>
+                )}
+            </div>
         </div>
     )
 
@@ -702,7 +728,8 @@ export default function Subscriptions() {
                     )}
                     {renderDestinationSection({
                         editable: true,
-                        title: 'Skip Proxy',
+                        title: 'v2RayTun Routing Destinations',
+                        helperText: 'These destinations are stored on this subscription and emitted as the v2RayTun routing header when that client refreshes the normal Direct link.',
                         savedDestinations: subscriptionDefaults.destinations,
                         draftValue: subscriptionDestinationsInput,
                         draftDestinations: editableSubscriptionDestinations,
@@ -752,7 +779,8 @@ export default function Subscriptions() {
                     )}
                     {renderDestinationSection({
                         editable: true,
-                        title: 'Skip Proxy',
+                        title: 'Destination Defaults',
+                        helperText: 'These destinations are saved as your defaults. Suggestions come from recent sing-box traffic and may be absent.',
                         savedDestinations: subscriptionDefaults.destinations,
                         draftValue: defaultDestinationsInput,
                         draftDestinations: editableDefaultDestinations,
