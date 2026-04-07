@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS panel_users (
 	can_read_panel_users INTEGER NOT NULL DEFAULT 0,
 	can_write_panel_users INTEGER NOT NULL DEFAULT 0,
 	can_read_logs INTEGER NOT NULL DEFAULT 0,
+	subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL,
+	subscription_default_update_always INTEGER NOT NULL DEFAULT 0,
+	subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]',
 	created_at INTEGER DEFAULT (strftime('%s','now')),
 	updated_at INTEGER DEFAULT (strftime('%s','now'))
 );

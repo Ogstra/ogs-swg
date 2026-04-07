@@ -105,6 +105,23 @@ SELECT COUNT(*) FROM panel_users;
 -- name: CheckPanelUserExists :one
 SELECT COUNT(*) FROM panel_users WHERE username = ?;
 
+-- name: GetPanelUserSubscriptionDefaults :one
+SELECT
+	subscription_default_profile_update_interval_hours,
+	subscription_default_update_always,
+	subscription_default_destinations_json
+FROM panel_users
+WHERE username = ?;
+
+-- name: UpdatePanelUserSubscriptionDefaults :exec
+UPDATE panel_users
+SET
+	subscription_default_profile_update_interval_hours = ?,
+	subscription_default_update_always = ?,
+	subscription_default_destinations_json = ?,
+	updated_at = strftime('%s','now')
+WHERE username = ?;
+
 -- InboundMeta Queries --
 -- name: UpsertInboundMeta :exec
 INSERT INTO inbound_meta (tag, external_port) VALUES (?, ?) ON CONFLICT(tag) DO UPDATE SET external_port = excluded.external_port;

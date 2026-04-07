@@ -5,10 +5,14 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
@@ -32,6 +36,146 @@ type SubscriptionResponse struct {
 	LastRequestAt              *int64   `json:"last_request_at"`
 	CreatedAt                  int64    `json:"created_at"`
 	UpdatedAt                  int64    `json:"updated_at"`
+}
+
+type SubscriptionDefaultsResponse struct {
+	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
+	UpdateAlways               bool     `json:"update_always"`
+	Destinations               []string `json:"destinations"`
+}
+
+type UpdateSubscriptionDefaultsRequest struct {
+	ProfileUpdateIntervalHours optionalInt64Field `json:"profile_update_interval_hours"`
+	UpdateAlways               *bool              `json:"update_always"`
+	Destinations               []string           `json:"destinations"`
+}
+
+func defaultSubscriptionDefaults() SubscriptionDefaultsResponse {
+	return SubscriptionDefaultsResponse{
+		ProfileUpdateIntervalHours: nil,
+		UpdateAlways:               false,
+		Destinations:               []string{},
+	}
+}
+
+func subscriptionDefaultsResponseFromStore(defaults core.SubscriptionDefaults) SubscriptionDefaultsResponse {
+	return SubscriptionDefaultsResponse{
+		ProfileUpdateIntervalHours: defaults.ProfileUpdateIntervalHours,
+		UpdateAlways:               defaults.UpdateAlways,
+		Destinations:               defaults.Destinations,
+	}
+}
+
+func ensureAuthenticatedPanelUser(r *http.Request) (string, error) {
+	username, ok := currentPanelUsername(r)
+	if !ok {
+		return "", errors.New("panel user token required")
+	}
+	return username, nil
+}
+
+func normalizeSubscriptionDefaultDestinations(destinations []string) ([]string, error) {
+	if len(destinations) == 0 {
+		return []string{}, nil
+	}
+
+	normalized := make([]string, 0, len(destinations))
+	seen := make(map[string]struct{}, len(destinations))
+	for _, raw := range destinations {
+		token, err := normalizeDestinationToken(raw)
+		if err != nil {
+			return nil, httpError("destinations must contain valid host:port values")
+		}
+		if _, ok := seen[token]; ok {
+			continue
+		}
+		seen[token] = struct{}{}
+		normalized = append(normalized, token)
+	}
+	return normalized, nil
+}
+
+func normalizeDestinationToken(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", errors.New("empty destination")
+	}
+
+	host, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return "", err
+	}
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "" {
+		return "", errors.New("missing host")
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum <= 0 || portNum > 65535 {
+		return "", errors.New("invalid port")
+	}
+	return net.JoinHostPort(host, strconv.Itoa(portNum)), nil
+}
+
+func (s *Server) handleGetSubscriptionDefaults(w http.ResponseWriter, r *http.Request) {
+	username, err := ensureAuthenticatedPanelUser(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	defaults, err := s.store.GetPanelUserSubscriptionDefaults(r.Context(), username)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "Failed to get subscription defaults", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(subscriptionDefaultsResponseFromStore(defaults))
+}
+
+func (s *Server) handleUpdateSubscriptionDefaults(w http.ResponseWriter, r *http.Request) {
+	username, err := ensureAuthenticatedPanelUser(r)
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req UpdateSubscriptionDefaultsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	destinations, err := normalizeSubscriptionDefaultDestinations(req.Destinations)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	defaults := core.SubscriptionDefaults{
+		ProfileUpdateIntervalHours: req.ProfileUpdateIntervalHours.Value,
+		UpdateAlways:               req.UpdateAlways != nil && *req.UpdateAlways,
+		Destinations:               destinations,
+	}
+	if err := s.store.UpdatePanelUserSubscriptionDefaults(r.Context(), username, defaults); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "Failed to update subscription defaults", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(subscriptionDefaultsResponseFromStore(defaults))
 }
 
 func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) {

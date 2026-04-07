@@ -183,6 +183,9 @@ func (s *Store) initSchema() error {
 		can_read_panel_users INTEGER NOT NULL DEFAULT 0,
 		can_write_panel_users INTEGER NOT NULL DEFAULT 0,
 		can_read_logs INTEGER NOT NULL DEFAULT 0,
+		subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL,
+		subscription_default_update_always INTEGER NOT NULL DEFAULT 0,
+		subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]',
 		created_at INTEGER DEFAULT (strftime('%s','now')),
 		updated_at INTEGER DEFAULT (strftime('%s','now'))
 	);
@@ -272,6 +275,10 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add can_read_logs_censored to existing panel_users tables.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs_censored INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_update_always INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]';")
+	s.db.Exec("UPDATE panel_users SET subscription_default_destinations_json = '[]' WHERE COALESCE(subscription_default_destinations_json, '') = '';")
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -321,11 +328,32 @@ type PanelUserInfo struct {
 	CreatedAt   int64                `json:"created_at"`
 }
 
+type SubscriptionDefaults struct {
+	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
+	UpdateAlways               bool     `json:"update_always"`
+	Destinations               []string `json:"destinations"`
+}
+
 func boolToInt64(b bool) int64 {
 	if b {
 		return 1
 	}
 	return 0
+}
+
+func nullableInt64(value *int64) sql.NullInt64 {
+	if value == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *value, Valid: true}
+}
+
+func nullableInt64Ptr(value sql.NullInt64) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Int64
+	return &v
 }
 
 // Normalize keeps granular permissions coherent.
@@ -615,6 +643,41 @@ func (s *Store) UpdatePanelUserPermissions(username string, perms PanelUserPermi
 		username,
 	)
 	return err
+}
+
+func (s *Store) GetPanelUserSubscriptionDefaults(ctx context.Context, username string) (SubscriptionDefaults, error) {
+	row, err := s.Queries.GetPanelUserSubscriptionDefaults(ctx, username)
+	if err != nil {
+		return SubscriptionDefaults{}, err
+	}
+
+	defaults := SubscriptionDefaults{
+		ProfileUpdateIntervalHours: nullableInt64Ptr(row.SubscriptionDefaultProfileUpdateIntervalHours),
+		UpdateAlways:               row.SubscriptionDefaultUpdateAlways != 0,
+		Destinations:               []string{},
+	}
+
+	if raw := strings.TrimSpace(row.SubscriptionDefaultDestinationsJson); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &defaults.Destinations); err != nil {
+			return SubscriptionDefaults{}, err
+		}
+	}
+
+	return defaults, nil
+}
+
+func (s *Store) UpdatePanelUserSubscriptionDefaults(ctx context.Context, username string, defaults SubscriptionDefaults) error {
+	destinationsJSON, err := json.Marshal(defaults.Destinations)
+	if err != nil {
+		return err
+	}
+
+	return s.Queries.UpdatePanelUserSubscriptionDefaults(ctx, sqlcStore.UpdatePanelUserSubscriptionDefaultsParams{
+		SubscriptionDefaultProfileUpdateIntervalHours: nullableInt64(defaults.ProfileUpdateIntervalHours),
+		SubscriptionDefaultUpdateAlways:               boolToInt64(defaults.UpdateAlways),
+		SubscriptionDefaultDestinationsJson:           string(destinationsJSON),
+		Username:                                      username,
+	})
 }
 
 func (s *Store) UpdatePanelUsername(oldUsername, newUsername string) error {
