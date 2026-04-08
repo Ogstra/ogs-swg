@@ -43,7 +43,7 @@ export default function LogViewer() {
     const containerRef = useRef<HTMLDivElement>(null)
     const initialTailScrollPendingRef = useRef(true)
     const [autoScroll, setAutoScroll] = useState(true)
-    const [searchLimit, setSearchLimit] = useState(10000)
+    const [searchLimit, setSearchLimit] = useState(500)
     const [searching, setSearching] = useState(false)
     const [searchStatus, setSearchStatus] = useState<string>('')
     const [searchFrom, setSearchFrom] = useState<string>('')
@@ -251,6 +251,10 @@ export default function LogViewer() {
                                 className="select-field h-[38px] w-[100px] sm:hidden bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 aria-label="Search limit"
                             >
+                                <option value={100}>100 lines</option>
+                                <option value={500}>500 lines</option>
+                                <option value={1000}>1k lines</option>
+                                <option value={5000}>5k lines</option>
                                 <option value={10000}>10k lines</option>
                                 <option value={25000}>25k lines</option>
                                 <option value={50000}>50k lines</option>
@@ -262,6 +266,10 @@ export default function LogViewer() {
                                 className="select-field hidden sm:block h-[38px] w-[65px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 aria-label="Search limit"
                             >
+                                <option value={100}>100</option>
+                                <option value={500}>500</option>
+                                <option value={1000}>1k</option>
+                                <option value={5000}>5k</option>
                                 <option value={10000}>10k</option>
                                 <option value={25000}>25k</option>
                                 <option value={50000}>50k</option>
@@ -346,7 +354,7 @@ export default function LogViewer() {
                             type="datetime-local"
                             value={searchFrom}
                             onChange={e => setSearchFrom(e.target.value)}
-                            className="h-[38px] min-w-[190px] bg-slate-950 border border-slate-700 rounded-lg px-3 text-sm text-slate-200 outline-none focus:border-blue-500"
+                            className="hidden sm:block h-[38px] min-w-[190px] bg-slate-950 border border-slate-700 rounded-lg px-3 text-sm text-slate-200 outline-none focus:border-blue-500"
                             aria-label="Search from"
                         />
 
@@ -354,7 +362,7 @@ export default function LogViewer() {
                             type="datetime-local"
                             value={searchTo}
                             onChange={e => setSearchTo(e.target.value)}
-                            className="h-[38px] min-w-[190px] bg-slate-950 border border-slate-700 rounded-lg px-3 text-sm text-slate-200 outline-none focus:border-blue-500"
+                            className="hidden sm:block h-[38px] min-w-[190px] bg-slate-950 border border-slate-700 rounded-lg px-3 text-sm text-slate-200 outline-none focus:border-blue-500"
                             aria-label="Search to"
                         />
 
