@@ -2,6 +2,7 @@ package api
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -1380,7 +1381,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		if s.executor != nil {
 			lines, err = s.executor.ReadJournal(r.Context(), "sing-box", limit)
 		} else {
-			lines, err = readJournalLines("sing-box", limit)
+			lines, err = readJournalLines(r.Context(), "sing-box", limit)
 		}
 	} else {
 		lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, limit)
@@ -1391,11 +1392,14 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 					lines = linesJ
 					err = nil
 				}
-			} else if linesJ, jErr := readJournalLines("sing-box", limit); jErr == nil {
+			} else if linesJ, jErr := readJournalLines(r.Context(), "sing-box", limit); jErr == nil {
 				lines = linesJ
 				err = nil
 			}
 		}
+	}
+	if errors.Is(err, context.Canceled) {
+		return
 	}
 	if err != nil {
 		log.Printf("handleGetLogs: cannot read logs: %v", err)
@@ -1459,14 +1463,19 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "q is required", http.StatusBadRequest)
 		return
 	}
+	timeRange, err := parseLogTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
+	if err != nil {
+		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 	pageSize := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 5000 {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100000 {
 			pageSize = v
 		}
 	}
 	if ps := r.URL.Query().Get("page_size"); ps != "" {
-		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 5000 {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 100000 {
 			pageSize = v
 		}
 	}
@@ -1477,12 +1486,12 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	effectiveLimit := page * pageSize
-	if effectiveLimit > 5000 {
-		effectiveLimit = 5000
+	if effectiveLimit > 100000 {
+		effectiveLimit = 100000
 	}
 
 	var lines []string
-	var err error
+	err = nil
 
 	// For censored callers, we must match the query against the censored version of each
 	// line — otherwise a caller could search for a raw IP and find it. We achieve this by
@@ -1493,13 +1502,14 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		return p != nil && p.CanReadLogsCensored
 	}()
 	compiledQuery := s.compileLogQuery(q)
-	postFilterSearch := censoredSearch || compiledQuery.requiresPostFilter()
+	postFilterSearch := censoredSearch || compiledQuery.requiresPostFilter() || timeRange.from != nil || timeRange.to != nil
 	truncatedToEffectiveLimit := false
 
 	if postFilterSearch {
 		lines, err = s.readAllSearchableLogLines(r.Context())
 		if err == nil {
 			sanitizeLogLines(lines)
+			lines = filterLogLinesByTimeRange(lines, timeRange, s.now)
 			if censoredSearch {
 				for i, ln := range lines {
 					lines[i] = core.CensorLine(ln)
@@ -1510,6 +1520,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 				if journalLines, jErr := s.readAllJournalLogLines(r.Context()); jErr == nil {
 					lines = journalLines
 					sanitizeLogLines(lines)
+					lines = filterLogLinesByTimeRange(lines, timeRange, s.now)
 					if censoredSearch {
 						for i, ln := range lines {
 							lines[i] = core.CensorLine(ln)
@@ -1525,7 +1536,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 			if s.executor != nil {
 				lines, err = s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit)
 			} else {
-				lines, err = searchJournalLines("sing-box", q, effectiveLimit)
+				lines, err = searchJournalLines(r.Context(), "sing-box", q, effectiveLimit)
 			}
 		} else {
 			lines, err = searchFileLines(s.config.AccessLogPath, q, effectiveLimit)
@@ -1536,12 +1547,15 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 						lines = linesJ
 						err = nil
 					}
-				} else if linesJ, jErr := searchJournalLines("sing-box", q, effectiveLimit); jErr == nil {
+				} else if linesJ, jErr := searchJournalLines(r.Context(), "sing-box", q, effectiveLimit); jErr == nil {
 					lines = linesJ
 					err = nil
 				}
 			}
 		}
+	}
+	if errors.Is(err, context.Canceled) {
+		return
 	}
 	if err != nil {
 		log.Printf("handleSearchLogs: cannot search logs: %v", err)
@@ -1614,13 +1628,16 @@ func tailFileLines(path string, maxBytes int64, maxLines int) ([]string, error) 
 	return lines, nil
 }
 
-func readJournalLines(unit string, maxLines int) ([]string, error) {
+func readJournalLines(ctx context.Context, unit string, maxLines int) ([]string, error) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		log.Printf("journalctl not found: %v", err)
 		return []string{"(journalctl not available on this system)"}, nil
 	}
-	cmd := exec.Command("journalctl", "-u", unit, "-n", strconv.Itoa(maxLines), "--no-pager")
+	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(maxLines), "--no-pager")
 	out, err := cmd.CombinedOutput()
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {
@@ -1635,7 +1652,7 @@ func readJournalLines(unit string, maxLines int) ([]string, error) {
 	return strings.Split(data, "\n"), nil
 }
 
-func searchJournalLines(unit, query string, maxLines int) ([]string, error) {
+func searchJournalLines(ctx context.Context, unit, query string, maxLines int) ([]string, error) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		log.Printf("journalctl not found: %v", err)
 		return []string{"(journalctl not available on this system)"}, nil
@@ -1643,8 +1660,11 @@ func searchJournalLines(unit, query string, maxLines int) ([]string, error) {
 	// NOTE for search: --merge includes all rotated journal segments (system@*.journal).
 	// Without it, journalctl may only scan the active journal file, missing older entries.
 	// -o cat strips the syslog timestamp prefix so filters match message content only.
-	cmd := exec.Command("journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
+	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
 	out, err := cmd.CombinedOutput()
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {

@@ -3,6 +3,7 @@
 package sys
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -10,7 +11,7 @@ import (
 )
 
 // journalRead reads logs through journalctl when sdjournal support is not enabled.
-func journalRead(unit string, limit int, filter string) ([]string, error) {
+func journalRead(ctx context.Context, unit string, limit int, filter string) ([]string, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -26,13 +27,16 @@ func journalRead(unit string, limit int, filter string) ([]string, error) {
 		// Without it, journalctl may only scan the active journal file, missing older entries.
 		// We omit -n here to let Go-level filtering collect up to limit matches across
 		// the full history.
-		cmd = exec.Command("journalctl", "-u", unitFull, "--no-pager", "--merge", "-o", "cat")
+		cmd = exec.CommandContext(ctx, "journalctl", "-u", unitFull, "--no-pager", "--merge", "-o", "cat")
 	} else {
 		// Tail: only need recent lines, -n is safe and efficient here.
-		cmd = exec.Command("journalctl", "-u", unitFull, "-n", strconv.Itoa(limit), "--no-pager", "-o", "cat")
+		cmd = exec.CommandContext(ctx, "journalctl", "-u", unitFull, "-n", strconv.Itoa(limit), "--no-pager", "-o", "cat")
 	}
 
 	out, err := cmd.CombinedOutput()
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" {

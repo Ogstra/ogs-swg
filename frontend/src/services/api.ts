@@ -61,6 +61,15 @@ export interface FeatureFlags {
     journalctl_available?: boolean;
 }
 
+export interface LogSearchParams {
+    query: string;
+    limit?: number;
+    page?: number;
+    from?: string;
+    to?: string;
+    signal?: AbortSignal;
+}
+
 export interface UnifiedChartPoint {
     ts: number;
     up_sb: number;
@@ -381,20 +390,22 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update sing-box outbound domain_strategy values');
     },
-    getLogs: async (params?: { q?: string; limit?: number }): Promise<{ logs: string[] }> => {
+    getLogs: async (params?: { q?: string; limit?: number; signal?: AbortSignal }): Promise<{ logs: string[] }> => {
         const query = new URLSearchParams();
         if (params?.q) query.set('q', params.q);
         if (params?.limit) query.set('limit', String(params.limit));
         const url = query.toString() ? `/api/logs?${query.toString()}` : '/api/logs';
-        const res = await fetch(url, { headers: buildHeaders() });
+        const res = await fetch(url, { headers: buildHeaders(), signal: params?.signal });
         await handleResponse(res, 'Failed to fetch logs');
         return res.json();
     },
-    searchLogs: async (query: string, limit?: number, page?: number): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
+    searchLogs: async ({ query, limit, page, from, to, signal }: LogSearchParams): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
         const params = new URLSearchParams({ q: query });
         if (limit) params.set('limit', String(limit));
         if (page) params.set('page', String(page));
-        const res = await fetch(`/api/logs/search?${params.toString()}`, { headers: buildHeaders() });
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const res = await fetch(`/api/logs/search?${params.toString()}`, { headers: buildHeaders(), signal });
         await handleResponse(res, 'Failed to search logs');
         const text = await res.text();
         try {
