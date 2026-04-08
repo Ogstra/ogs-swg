@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useRef } from 'react'
+import { startTransition, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../../services/api'
 import { Terminal, RefreshCw, Search } from 'lucide-react'
 
@@ -139,20 +139,40 @@ export default function LogViewer() {
         const controller = new AbortController()
         searchAbortRef.current = controller
         setSearching(true)
-        setSearchStatus('')
+        setLines([])
+        setViewMode('search')
+        setSearchStatus('Searching logs...')
         try {
-            const res = await api.searchLogs({
+            await api.searchLogsStream({
                 query: q,
                 limit: searchLimit,
-                page: 1,
                 from: toOffsetDateTime(searchFrom),
                 to: toOffsetDateTime(searchTo),
                 signal: controller.signal,
+            }, event => {
+                if (searchAbortRef.current !== controller) return
+                if (event.type === 'status') {
+                    setSearchStatus(event.message || 'Searching logs...')
+                    return
+                }
+                if (event.type === 'chunk') {
+                    const nextLines = [...(event.logs || [])].reverse()
+                    startTransition(() => {
+                        setLines(prev => [...nextLines, ...prev])
+                    })
+                    setSearchStatus(`Found ${event.matched ?? 0} lines...`)
+                    return
+                }
+                if (event.type === 'done') {
+                    const suffix = event.truncated ? ' (limit reached)' : ''
+                    setSearchStatus(`Showing ${event.matched ?? 0} lines${suffix}`)
+                    return
+                }
+                if (event.type === 'error') {
+                    setLines([event.message || 'Search failed'])
+                    setSearchStatus('Search failed')
+                }
             })
-            if (searchAbortRef.current !== controller) return
-            setLines(res.logs || [])
-            setViewMode('search')
-            setSearchStatus(`Showing ${res.logs?.length ?? 0} lines`)
         } catch (err: any) {
             if (err?.name === 'AbortError') {
                 if (searchAbortRef.current === controller) {

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -16,7 +17,8 @@ import (
 // logsExecutorStub overrides ReadJournal and SearchJournal to return controlled lines.
 type logsExecutorStub struct {
 	singboxConfigExecutorStub
-	journalLines []string
+	journalLines    []string
+	walkJournalHits int
 }
 
 func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, limit int) ([]string, error) {
@@ -47,6 +49,24 @@ func (s *logsExecutorStub) SearchJournal(_ context.Context, _ string, query stri
 		}
 	}
 	return result, nil
+}
+
+func (s *logsExecutorStub) WalkJournal(_ context.Context, _ string, newestFirst bool, visit func(string) error) error {
+	s.walkJournalHits++
+	if newestFirst {
+		for i := len(s.journalLines) - 1; i >= 0; i-- {
+			if err := visit(s.journalLines[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, line := range s.journalLines {
+		if err := visit(line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func containsInsensitive(s, substr string) bool {
@@ -814,6 +834,89 @@ func TestHandleSearchLogs_InvalidTimeRangeReturnsBadRequest(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleSearchLogs_UsesIncrementalJournalWalker(t *testing.T) {
+	srv, stub := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if stub.walkJournalHits == 0 {
+		t.Fatalf("expected incremental journal walker to be used")
+	}
+}
+
+func TestHandleSearchLogsStream_EmitsChunksAndDone(t *testing.T) {
+	lines := []string{
+		"2026/04/08 12:00:00 INFO outbound/direct match-one",
+		"2026/04/08 12:00:01 INFO outbound/direct match-two",
+		"2026/04/08 12:00:02 INFO outbound/direct match-three",
+	}
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search/stream?q=match&limit=2", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogsStream(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var events []map[string]interface{}
+	for _, line := range strings.Split(strings.TrimSpace(rr.Body.String()), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode event %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+
+	if len(events) < 2 {
+		t.Fatalf("expected at least status/chunk/done events, got %v", events)
+	}
+
+	foundChunk := false
+	foundDone := false
+	for _, event := range events {
+		switch event["type"] {
+		case "chunk":
+			foundChunk = true
+			logs, ok := event["logs"].([]interface{})
+			if !ok || len(logs) == 0 {
+				t.Fatalf("expected chunk logs, got %#v", event["logs"])
+			}
+		case "done":
+			foundDone = true
+			if matched, ok := event["matched"].(float64); !ok || int(matched) != 2 {
+				t.Fatalf("expected matched=2 in done event, got %#v", event["matched"])
+			}
+			if truncated, ok := event["truncated"].(bool); !ok || !truncated {
+				t.Fatalf("expected truncated=true in done event, got %#v", event["truncated"])
+			}
+		}
+	}
+	if !foundChunk {
+		t.Fatalf("expected at least one chunk event, got %v", events)
+	}
+	if !foundDone {
+		t.Fatalf("expected done event, got %v", events)
 	}
 }
 

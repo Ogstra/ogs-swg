@@ -70,6 +70,14 @@ export interface LogSearchParams {
     signal?: AbortSignal;
 }
 
+export interface LogSearchStreamEvent {
+    type: 'status' | 'chunk' | 'done' | 'error';
+    message?: string;
+    logs?: string[];
+    matched?: number;
+    truncated?: boolean;
+}
+
 export interface UnifiedChartPoint {
     ts: number;
     up_sb: number;
@@ -412,6 +420,43 @@ export const api = {
             return JSON.parse(text);
         } catch {
             return { logs: [text || 'Search returned non-JSON response'] };
+        }
+    },
+    searchLogsStream: async (
+        { query, limit, from, to, signal }: LogSearchParams,
+        onEvent: (event: LogSearchStreamEvent) => void
+    ): Promise<void> => {
+        const params = new URLSearchParams({ q: query });
+        if (limit) params.set('limit', String(limit));
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const res = await fetch(`/api/logs/search/stream?${params.toString()}`, { headers: buildHeaders(), signal });
+        await handleResponse(res, 'Failed to search logs');
+        if (!res.body) {
+            throw new Error('Streaming response body missing')
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
+
+            for (const line of lines) {
+                const trimmed = line.trim()
+                if (!trimmed) continue
+                onEvent(JSON.parse(trimmed) as LogSearchStreamEvent)
+            }
+        }
+
+        const tail = buffer.trim()
+        if (tail) {
+            onEvent(JSON.parse(tail) as LogSearchStreamEvent)
         }
     },
 
