@@ -90,6 +90,15 @@ func (w gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
+func (w gzipResponseWriter) Flush() {
+	if flusher, ok := w.Writer.(interface{ Flush() error }); ok {
+		_ = flusher.Flush()
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func (s *Server) PondMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		done := make(chan struct{})
