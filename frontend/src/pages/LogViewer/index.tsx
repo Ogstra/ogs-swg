@@ -403,7 +403,7 @@ export default function LogViewer() {
                 </div>
 
                 <div
-                    className="flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm custom-scrollbar bg-black/20"
+                    className="logs-scrollbar flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm bg-black/20"
                     ref={containerRef}
                     onScroll={handleScroll}
                 >
