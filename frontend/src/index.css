@@ -100,6 +100,31 @@ select.select-field:focus {
     height: 0;
 }
 
+.logs-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #475569 #0f172a;
+    overscroll-behavior: contain;
+}
+
+.logs-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.logs-scrollbar::-webkit-scrollbar-track {
+    background: #0f172a;
+}
+
+.logs-scrollbar::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 9999px;
+    border: 2px solid #0f172a;
+}
+
+.logs-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+}
+
 .code-editor-scroll {
     height: 100%;
     min-height: 100%;
