@@ -18,6 +18,20 @@ function filterTailLinesLocally(lines: string[], query: string): string[] {
     return lines.filter(line => line.toLowerCase().includes(trimmed))
 }
 
+function toOffsetDateTime(value: string): string | undefined {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+    const date = new Date(trimmed)
+    if (Number.isNaN(date.getTime())) return undefined
+
+    const offsetMinutes = -date.getTimezoneOffset()
+    const sign = offsetMinutes >= 0 ? '+' : '-'
+    const absMinutes = Math.abs(offsetMinutes)
+    const hours = String(Math.floor(absMinutes / 60)).padStart(2, '0')
+    const minutes = String(absMinutes % 60).padStart(2, '0')
+    return `${trimmed}:00${sign}${hours}:${minutes}`
+}
+
 export default function LogViewer() {
     const [lines, setLines] = useState<string[]>([])
     const [tailRawLines, setTailRawLines] = useState<string[]>([])
@@ -131,8 +145,8 @@ export default function LogViewer() {
                 query: q,
                 limit: searchLimit,
                 page: 1,
-                from: searchFrom || undefined,
-                to: searchTo || undefined,
+                from: toOffsetDateTime(searchFrom),
+                to: toOffsetDateTime(searchTo),
                 signal: controller.signal,
             })
             if (searchAbortRef.current !== controller) return
