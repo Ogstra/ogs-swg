@@ -770,6 +770,53 @@ func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T
 	}
 }
 
+func TestHandleSearchLogs_TimeRangeFiltersEmbeddedTimestamp(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		"-0300 2026-04-08 12:12:29 INFO [1 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to alpha.example:443",
+		"-0300 2026-04-08 13:15:00 INFO [2 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to beta.example:443",
+		"-0300 2026-04-08 14:45:10 INFO [3 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to gamma.example:443",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T13:00&to=2026-04-08T14:00", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, "beta.example") {
+		t.Fatalf("expected middle line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, "alpha.example") || containsInsensitive(body, "gamma.example") {
+		t.Fatalf("unexpected lines outside range in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleSearchLogs_InvalidTimeRangeReturnsBadRequest(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{userTaggedLogLine})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T14:00&to=2026-04-08T13:00", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func joinLines(lines []string) string {
 	result := ""
 	for _, l := range lines {
