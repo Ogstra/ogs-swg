@@ -72,3 +72,74 @@ func journalRead(ctx context.Context, unit string, limit int, filter string) ([]
 	}
 	return lines, nil
 }
+
+func journalWalk(ctx context.Context, unit string, newestFirst bool, visit func(string) error) error {
+	j, err := sdjournal.NewJournal()
+	if err != nil {
+		return fmt.Errorf("failed to open journal: %v", err)
+	}
+	defer j.Close()
+
+	unitFull := unit
+	if !strings.Contains(unitFull, ".") {
+		unitFull += ".service"
+	}
+	if err := j.AddMatch(sdjournal.SD_JOURNAL_FIELD_SYSTEMD_UNIT + "=" + unitFull); err != nil {
+		return err
+	}
+	if newestFirst {
+		if err := j.SeekTail(); err != nil {
+			return err
+		}
+		for {
+			if ctx != nil && ctx.Err() != nil {
+				return ctx.Err()
+			}
+			n, err := j.Previous()
+			if err != nil {
+				return err
+			}
+			if n == 0 {
+				return nil
+			}
+			entry, err := j.GetEntry()
+			if err != nil {
+				continue
+			}
+			msg := strings.TrimSpace(entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE])
+			if msg == "" {
+				continue
+			}
+			if err := visit(msg); err != nil {
+				return err
+			}
+		}
+	}
+
+	if err := j.SeekHead(); err != nil {
+		return err
+	}
+	for {
+		if ctx != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
+		n, err := j.Next()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return nil
+		}
+		entry, err := j.GetEntry()
+		if err != nil {
+			continue
+		}
+		msg := strings.TrimSpace(entry.Fields[sdjournal.SD_JOURNAL_FIELD_MESSAGE])
+		if msg == "" {
+			continue
+		}
+		if err := visit(msg); err != nil {
+			return err
+		}
+	}
+}

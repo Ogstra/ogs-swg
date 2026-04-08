@@ -3,8 +3,10 @@
 package sys
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -66,4 +68,76 @@ func journalRead(ctx context.Context, unit string, limit int, filter string) ([]
 		lines = lines[len(lines)-limit:]
 	}
 	return lines, nil
+}
+
+func journalWalk(ctx context.Context, unit string, newestFirst bool, visit func(string) error) error {
+	unitFull := unit
+	if !strings.Contains(unitFull, ".") {
+		unitFull += ".service"
+	}
+
+	args := []string{"-u", unitFull, "--no-pager", "--merge", "-o", "cat"}
+	if newestFirst {
+		args = append(args, "--reverse")
+	}
+	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		b, readErr := io.ReadAll(stderr)
+		msg := strings.TrimSpace(string(b))
+		if readErr != nil {
+			errCh <- readErr
+			return
+		}
+		if msg != "" {
+			errCh <- fmt.Errorf("journalctl failed: %s", msg)
+			return
+		}
+		errCh <- nil
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		if ctx != nil && ctx.Err() != nil {
+			_ = cmd.Wait()
+			return ctx.Err()
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if err := visit(line); err != nil {
+			_ = cmd.Wait()
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		_ = cmd.Wait()
+		return err
+	}
+	waitErr := cmd.Wait()
+	stderrErr := <-errCh
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if waitErr != nil {
+		if stderrErr != nil {
+			return stderrErr
+		}
+		return waitErr
+	}
+	return nil
 }

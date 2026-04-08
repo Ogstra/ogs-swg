@@ -192,6 +192,10 @@ func (e *LocalExecutor) SearchJournal(ctx context.Context, unit, query string, l
 	return journalRead(ctx, unit, limit, query)
 }
 
+func (e *LocalExecutor) WalkJournal(ctx context.Context, unit string, newestFirst bool, visit func(string) error) error {
+	return journalWalk(ctx, unit, newestFirst, visit)
+}
+
 func (e *LocalExecutor) CheckConnectivity(_ context.Context) error {
 	return nil
 }

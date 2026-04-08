@@ -1,8 +1,10 @@
 package sys
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -174,6 +176,14 @@ func (e *DockerLocalExecutor) SearchJournal(ctx context.Context, unit, query str
 	return filtered, nil
 }
 
+func (e *DockerLocalExecutor) WalkJournal(ctx context.Context, unit string, newestFirst bool, visit func(string) error) error {
+	args := []string{"journalctl", "--system", "-u", unit, "--no-pager", "--merge", "-o", "cat"}
+	if newestFirst {
+		args = append(args, "--reverse")
+	}
+	return streamViaSystemdRun(ctx, args, visit)
+}
+
 // Connectivity: same host, always reachable.
 
 func (e *DockerLocalExecutor) CheckConnectivity(ctx context.Context) error {
@@ -233,6 +243,70 @@ func runViaSystemdRun(ctx context.Context, name string, args ...string) ([]byte,
 		return out, ctx.Err()
 	}
 	return out, err
+}
+
+func streamViaSystemdRun(ctx context.Context, args []string, visit func(string) error) error {
+	runnerArgs := append([]string{"--wait", "--pipe", "--collect", "--quiet"}, args...)
+	cmd := exec.CommandContext(ctx, "systemd-run", runnerArgs...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		b, readErr := io.ReadAll(stderr)
+		msg := strings.TrimSpace(string(b))
+		if readErr != nil {
+			errCh <- readErr
+			return
+		}
+		if msg != "" {
+			errCh <- fmt.Errorf("systemd-run failed: %s", msg)
+			return
+		}
+		errCh <- nil
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		if ctx != nil && ctx.Err() != nil {
+			_ = cmd.Wait()
+			return ctx.Err()
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if err := visit(line); err != nil {
+			_ = cmd.Wait()
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		_ = cmd.Wait()
+		return err
+	}
+	waitErr := cmd.Wait()
+	stderrErr := <-errCh
+	if ctx != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if waitErr != nil {
+		if stderrErr != nil {
+			return stderrErr
+		}
+		return waitErr
+	}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {
