@@ -777,7 +777,7 @@ func TestHandleSearchLogs_TimeRangeFiltersEmbeddedTimestamp(t *testing.T) {
 		"-0300 2026-04-08 14:45:10 INFO [3 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to gamma.example:443",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T13:00&to=2026-04-08T14:00", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T13:00:00-03:00&to=2026-04-08T14:00:00-03:00", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
 	rr := httptest.NewRecorder()
 
@@ -806,7 +806,7 @@ func TestHandleSearchLogs_TimeRangeFiltersEmbeddedTimestamp(t *testing.T) {
 func TestHandleSearchLogs_InvalidTimeRangeReturnsBadRequest(t *testing.T) {
 	srv, _ := newLogsTestServer(t, []string{userTaggedLogLine})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T14:00&to=2026-04-08T13:00", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T14:00:00-03:00&to=2026-04-08T13:00:00-03:00", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
 	rr := httptest.NewRecorder()
 
