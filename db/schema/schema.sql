@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS panel_users (
 	updated_at INTEGER DEFAULT (strftime('%s','now'))
 );
 
+CREATE TABLE IF NOT EXISTS dashboard_preferences (
+	principal TEXT PRIMARY KEY,
+	default_service TEXT NOT NULL DEFAULT 'singbox',
+	refresh_ms INTEGER NOT NULL DEFAULT 10000,
+	default_range TEXT NOT NULL DEFAULT '24h',
+	detail_chart_target_points INTEGER NOT NULL DEFAULT 200,
+	created_at INTEGER DEFAULT (strftime('%s','now')),
+	updated_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
 CREATE TABLE IF NOT EXISTS inbound_meta (
 	tag TEXT PRIMARY KEY,
 	external_port INTEGER DEFAULT 0,

@@ -154,13 +154,15 @@ func resolveDashboardWindow(rangeStr, startStr, endStr string) (int64, int64, in
 	return start, end, interval
 }
 
-func resolveDashboardConsumerWindow(rangeStr, startStr, endStr string) (int64, int64, int64) {
+func resolveDashboardConsumerWindow(rangeStr, startStr, endStr string, targetPoints int64) (int64, int64, int64) {
 	start, end, _ := resolveDashboardWindow(rangeStr, startStr, endStr)
 	if end <= start {
 		return start, end, 60
 	}
 
-	const targetPoints int64 = 200
+	if targetPoints < 2 {
+		targetPoints = 200
+	}
 	diff := end - start
 	interval := (diff + (targetPoints - 2)) / (targetPoints - 1)
 	if interval < 1 {
@@ -509,6 +511,12 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 	rangeStr := r.URL.Query().Get("range")
 	startStr := r.URL.Query().Get("start")
 	endStr := r.URL.Query().Get("end")
+	targetPoints := int64(200)
+	if raw := strings.TrimSpace(r.URL.Query().Get("target_points")); raw != "" {
+		if parsed, err := strconv.ParseInt(raw, 10, 64); err == nil {
+			targetPoints = parsed
+		}
+	}
 
 	key = resolveConsumerKey(key, mode, name, iface, s, r)
 	if key == "" || key == maskedValue {
@@ -520,7 +528,7 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 		return
 	}
 
-	start, end, interval := resolveDashboardConsumerWindow(rangeStr, startStr, endStr)
+	start, end, interval := resolveDashboardConsumerWindow(rangeStr, startStr, endStr, targetPoints)
 	if end <= start {
 		http.Error(w, "Invalid dashboard window", http.StatusBadRequest)
 		return

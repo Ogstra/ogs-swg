@@ -787,6 +787,49 @@ func (s *Server) handleGetPublicIP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"public_ip": s.config.PublicIP})
 }
 
+func (s *Server) dashboardPreferencesPrincipal(r *http.Request) (string, bool) {
+	if username, ok := currentPanelUsername(r); ok {
+		return username, true
+	}
+	if s.config.APIKey != "" && r.Header.Get("X-API-Key") == s.config.APIKey {
+		return "__api_key__", true
+	}
+	return "", false
+}
+
+func (s *Server) handleGetDashboardPreferences(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.dashboardPreferencesPrincipal(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	prefs, err := s.store.GetDashboardPreferences(r.Context(), principal)
+	if err != nil {
+		http.Error(w, "Failed to load dashboard preferences: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prefs)
+}
+
+func (s *Server) handleUpdateDashboardPreferences(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.dashboardPreferencesPrincipal(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var prefs core.DashboardPreferences
+	if err := json.NewDecoder(r.Body).Decode(&prefs); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.UpdateDashboardPreferences(r.Context(), principal, prefs); err != nil {
+		http.Error(w, "Failed to save dashboard preferences: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleUpdatePublicIP(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return

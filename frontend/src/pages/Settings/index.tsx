@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, FeatureFlags, SamplerHistoryEntry, SubscriptionRequestHistoryEntry } from '../../services/api'
+import { api, FeatureFlags, SamplerHistoryEntry, SubscriptionRequestHistoryEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
 import { Save, RefreshCw, UserCog, Shield, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
@@ -26,9 +26,19 @@ import {
 
 type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
 type DbInfo = { rows: number; sizeMB: number }
-type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string }
+type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; detailChartTargetPoints: number }
+
+const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
+    defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : 'singbox',
+    refreshMs: prefs?.refresh_ms && prefs.refresh_ms >= 1000 ? prefs.refresh_ms : 10000,
+    defaultRange: prefs?.default_range || '24h',
+    detailChartTargetPoints: [50, 100, 150, 200].includes(Number(prefs?.detail_chart_target_points))
+        ? Number(prefs?.detail_chart_target_points)
+        : 200,
+})
 
 export default function Settings() {
+    const queryClient = useQueryClient()
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
     const canWriteSettings = !!permissions?.can_write_settings
@@ -58,7 +68,13 @@ export default function Settings() {
     const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>({
         defaultService: 'singbox',
         refreshMs: 10000,
-        defaultRange: '24h'
+        defaultRange: '24h',
+        detailChartTargetPoints: 200,
+    })
+    const dashboardPrefsQuery = useQuery({
+        queryKey: ['dashboard-preferences'],
+        queryFn: () => api.getDashboardPreferences(),
+        placeholderData: previousData => previousData,
     })
     const featuresQuery = useQuery({
         queryKey: ['settings-features'],
@@ -99,20 +115,9 @@ export default function Settings() {
     })
 
     useEffect(() => {
-        const savedPrefs = localStorage.getItem('dashboard_prefs')
-        if (savedPrefs) {
-            try {
-                const parsed = JSON.parse(savedPrefs)
-                setDashboardPrefs({
-                    defaultService: parsed.defaultService === 'wireguard' ? 'wireguard' : 'singbox',
-                    refreshMs: parsed.refreshMs && parsed.refreshMs >= 1000 ? parsed.refreshMs : 10000,
-                    defaultRange: parsed.defaultRange || '24h'
-                })
-            } catch {
-                // ignore parse errors
-            }
-        }
-    }, [])
+        if (!dashboardPrefsQuery.data) return
+        setDashboardPrefs(normalizeDashboardPrefs(dashboardPrefsQuery.data))
+    }, [dashboardPrefsQuery.data])
 
     useEffect(() => {
         if (!featuresQuery.data) return
@@ -342,6 +347,8 @@ export default function Settings() {
                     dashboardPrefs={dashboardPrefs}
                     setDashboardPrefs={setDashboardPrefs}
                     success={success}
+                    toastError={toastError}
+                    queryClient={queryClient}
                 />
             )
         },
@@ -417,26 +424,43 @@ function DashboardTab({
     dashboardPrefs,
     setDashboardPrefs,
     success,
+    toastError,
+    queryClient,
 }: {
     dashboardPrefs: DashboardPrefs
     setDashboardPrefs: Dispatch<SetStateAction<DashboardPrefs>>
     success: (msg: string) => void
+    toastError: (msg: string) => void
+    queryClient: ReturnType<typeof useQueryClient>
 }) {
-    const handleSave = () => {
+    const handleSave = async () => {
         const normalized = {
             defaultService: dashboardPrefs.defaultService || 'singbox',
             refreshMs: Math.max(1000, Number(dashboardPrefs.refreshMs) || 10000),
-            defaultRange: dashboardPrefs.defaultRange || '24h'
+            defaultRange: dashboardPrefs.defaultRange || '24h',
+            detailChartTargetPoints: [50, 100, 150, 200].includes(Number(dashboardPrefs.detailChartTargetPoints))
+                ? Number(dashboardPrefs.detailChartTargetPoints)
+                : 200,
         }
-        setDashboardPrefs(normalized)
-        localStorage.setItem('dashboard_prefs', JSON.stringify(normalized))
-        success('Dashboard preferences saved')
+        try {
+            await api.updateDashboardPreferences({
+                default_service: normalized.defaultService,
+                refresh_ms: normalized.refreshMs,
+                default_range: normalized.defaultRange as StoredDashboardPreferences['default_range'],
+                detail_chart_target_points: normalized.detailChartTargetPoints,
+            })
+            setDashboardPrefs(normalized)
+            await queryClient.invalidateQueries({ queryKey: ['dashboard-preferences'] })
+            success('Dashboard preferences saved')
+        } catch (err) {
+            toastError('Failed to save dashboard preferences: ' + err)
+        }
     }
 
     return (
         <div className="space-y-4 sm:space-y-6">
             <Card title="Dashboard Preferences">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div className="space-y-1">
                         <label className="text-xs font-medium text-slate-400">Default Service</label>
                         <select
@@ -471,6 +495,19 @@ function DashboardTab({
                             <option value="24h">Last 24 Hours</option>
                             <option value="1w">Last Week</option>
                             <option value="1m">Last Month</option>
+                        </select>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-400">Selected User Chart Samples</label>
+                        <select
+                            value={dashboardPrefs.detailChartTargetPoints}
+                            onChange={e => setDashboardPrefs(prev => ({ ...prev, detailChartTargetPoints: Number(e.target.value) || 200 }))}
+                            className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                        >
+                            <option value={50}>50 samples</option>
+                            <option value={100}>100 samples</option>
+                            <option value={150}>150 samples</option>
+                            <option value={200}>200 samples (Current)</option>
                         </select>
                     </div>
                 </div>
