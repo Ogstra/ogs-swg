@@ -17,6 +17,12 @@ type DashboardPrefs = {
     defaultRange?: DashboardRange
 }
 
+type DensifiedChartCache = {
+    cacheKey: string
+    source: UnifiedChartPoint[]
+    dense: UnifiedChartPoint[]
+}
+
 type DashboardRequestWindow =
     | { range: 'custom'; start: number; end: number; startText: string; endText: string }
     | { range: Exclude<DashboardRange, 'custom'> }
@@ -34,6 +40,7 @@ const toUnixSeconds = (value: string) => {
 }
 
 const maskedConsumerKey = '********'
+const detailChartInterpolationFactor = 4
 
 const getConsumerSelectionId = (consumer: Consumer | null | undefined, mode: 'singbox' | 'wireguard') => {
     if (!consumer) return ''
@@ -48,6 +55,82 @@ const loadDashboardPrefs = (): DashboardPrefs => {
         return JSON.parse(raw)
     } catch {
         return {}
+    }
+}
+
+const chartPointsEqual = (left: UnifiedChartPoint, right: UnifiedChartPoint) => (
+    left.ts === right.ts &&
+    left.up_sb === right.up_sb &&
+    left.down_sb === right.down_sb &&
+    left.up_wg === right.up_wg &&
+    left.down_wg === right.down_wg
+)
+
+const interpolateChartPoint = (start: UnifiedChartPoint, end: UnifiedChartPoint, ratio: number): UnifiedChartPoint => ({
+    ts: start.ts + ((end.ts - start.ts) * ratio),
+    up_sb: Math.round(start.up_sb + ((end.up_sb - start.up_sb) * ratio)),
+    down_sb: Math.round(start.down_sb + ((end.down_sb - start.down_sb) * ratio)),
+    up_wg: Math.round(start.up_wg + ((end.up_wg - start.up_wg) * ratio)),
+    down_wg: Math.round(start.down_wg + ((end.down_wg - start.down_wg) * ratio)),
+})
+
+const densifyChartSeries = (points: UnifiedChartPoint[], factor: number): UnifiedChartPoint[] => {
+    if (factor <= 1 || points.length < 2) return points
+
+    const dense: UnifiedChartPoint[] = []
+    for (let i = 0; i < points.length - 1; i += 1) {
+        const current = points[i]
+        const next = points[i + 1]
+        dense.push(current)
+        for (let step = 1; step < factor; step += 1) {
+            dense.push(interpolateChartPoint(current, next, step / factor))
+        }
+    }
+    dense.push(points[points.length - 1])
+    return dense
+}
+
+const densifyChartSeriesIncremental = (
+    points: UnifiedChartPoint[],
+    factor: number,
+    cache: DensifiedChartCache | null,
+    cacheKey: string,
+): DensifiedChartCache => {
+    if (factor <= 1 || points.length < 2) {
+        return { cacheKey, source: points, dense: points }
+    }
+    if (!cache || cache.cacheKey !== cacheKey) {
+        return { cacheKey, source: points, dense: densifyChartSeries(points, factor) }
+    }
+
+    const previous = cache.source
+    const commonLength = Math.min(previous.length, points.length)
+    let firstDiffIndex = -1
+    for (let i = 0; i < commonLength; i += 1) {
+        if (!chartPointsEqual(previous[i], points[i])) {
+            firstDiffIndex = i
+            break
+        }
+    }
+
+    if (firstDiffIndex === -1) {
+        if (previous.length === points.length) {
+            return cache
+        }
+        firstDiffIndex = commonLength
+    }
+
+    if (firstDiffIndex <= 0) {
+        return { cacheKey, source: points, dense: densifyChartSeries(points, factor) }
+    }
+
+    const preservedDenseLength = ((firstDiffIndex - 1) * factor) + 1
+    const prefix = cache.dense.slice(0, preservedDenseLength)
+    const tail = densifyChartSeries(points.slice(firstDiffIndex - 1), factor)
+    return {
+        cacheKey,
+        source: points,
+        dense: prefix.concat(tail.slice(1)),
     }
 }
 
@@ -89,6 +172,7 @@ export default function Dashboard() {
     const [customEnd, setCustomEnd] = useState(formatDateTimeLocalValue(now))
     const chartContainerRef = useRef<HTMLDivElement | null>(null)
     const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
+    const detailChartCacheRef = useRef<DensifiedChartCache | null>(null)
 
     const computeRangeSeconds = (range: string) => {
         const nowSec = Math.floor(Date.now() / 1000)
@@ -238,7 +322,22 @@ export default function Dashboard() {
         refetchInterval: selectedConsumer ? refreshInterval : false,
     })
     const detailChartData = selectedConsumerQuery.data?.chart_data || []
-    const activeChartData = selectedConsumer ? detailChartData : chartData
+    const denseDetailChartData = useMemo(() => {
+        if (!selectedConsumer) return detailChartData
+        const rangeKey = requestWindow.range === 'custom'
+            ? `${requestWindow.range}:${requestWindow.startText}:${requestWindow.endText}`
+            : requestWindow.range
+        const cacheKey = `${chartMode}:${selectedConsumerSelectionId}:${rangeKey}:${detailChartInterpolationFactor}`
+        const nextCache = densifyChartSeriesIncremental(
+            detailChartData,
+            detailChartInterpolationFactor,
+            detailChartCacheRef.current,
+            cacheKey,
+        )
+        detailChartCacheRef.current = nextCache
+        return nextCache.dense
+    }, [chartMode, detailChartData, requestWindow, selectedConsumer, selectedConsumerSelectionId])
+    const activeChartData = selectedConsumer ? denseDetailChartData : chartData
 
     useEffect(() => {
         setSelectedConsumers(prev => {
