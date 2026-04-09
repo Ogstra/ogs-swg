@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../../services/api'
+import { api, UnifiedChartPoint, Consumer, TrafficStats, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { formatBytes } from '../../utils/traffic'
-
-const DASHBOARD_PREF_KEY = 'dashboard_prefs'
 
 type DashboardRange = '30m' | '1h' | '6h' | '24h' | '1w' | '1m' | 'custom'
 
@@ -15,6 +13,7 @@ type DashboardPrefs = {
     defaultService?: 'singbox' | 'wireguard'
     refreshMs?: number
     defaultRange?: DashboardRange
+    detailChartTargetPoints?: number
 }
 
 type DensifiedChartCache = {
@@ -41,6 +40,13 @@ const toUnixSeconds = (value: string) => {
 
 const maskedConsumerKey = '********'
 const detailChartInterpolationFactor = 4
+const defaultDetailChartTargetPoints = 200
+const defaultDashboardPrefs: DashboardPrefs = {
+    defaultService: 'singbox',
+    refreshMs: 10000,
+    defaultRange: '24h',
+    detailChartTargetPoints: defaultDetailChartTargetPoints,
+}
 
 const getConsumerSelectionId = (consumer: Consumer | null | undefined, mode: 'singbox' | 'wireguard') => {
     if (!consumer) return ''
@@ -48,15 +54,16 @@ const getConsumerSelectionId = (consumer: Consumer | null | undefined, mode: 'si
     return `${mode}:${consumer.name}:${consumer.interface_name || ''}:${consumer.flow || ''}`
 }
 
-const loadDashboardPrefs = (): DashboardPrefs => {
-    try {
-        const raw = localStorage.getItem(DASHBOARD_PREF_KEY)
-        if (!raw) return {}
-        return JSON.parse(raw)
-    } catch {
-        return {}
-    }
-}
+const dashboardPrefsFromApi = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
+    defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : defaultDashboardPrefs.defaultService,
+    refreshMs: prefs?.refresh_ms && prefs.refresh_ms >= 1000 ? prefs.refresh_ms : defaultDashboardPrefs.refreshMs,
+    defaultRange: (prefs?.default_range && ['30m', '1h', '6h', '24h', '1w', '1m'].includes(prefs.default_range))
+        ? prefs.default_range as DashboardRange
+        : defaultDashboardPrefs.defaultRange,
+    detailChartTargetPoints: [50, 100, 150, 200].includes(Number(prefs?.detail_chart_target_points))
+        ? Number(prefs?.detail_chart_target_points)
+        : defaultDashboardPrefs.detailChartTargetPoints,
+})
 
 const chartPointsEqual = (left: UnifiedChartPoint, right: UnifiedChartPoint) => (
     left.ts === right.ts &&
@@ -173,6 +180,8 @@ export default function Dashboard() {
     const chartContainerRef = useRef<HTMLDivElement | null>(null)
     const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
     const detailChartCacheRef = useRef<DensifiedChartCache | null>(null)
+    const [detailChartTargetPoints, setDetailChartTargetPoints] = useState<number>(defaultDetailChartTargetPoints)
+    const prefsInitializedRef = useRef(false)
 
     const computeRangeSeconds = (range: string) => {
         const nowSec = Math.floor(Date.now() / 1000)
@@ -188,13 +197,24 @@ export default function Dashboard() {
         }
     }
 
+    const dashboardPrefsQuery = useQuery({
+        queryKey: ['dashboard-preferences'],
+        queryFn: () => api.getDashboardPreferences(),
+        retry: false,
+    })
+
     useEffect(() => {
-        const prefs = loadDashboardPrefs()
+        if (prefsInitializedRef.current) return
+        if (dashboardPrefsQuery.isPending) return
+
+        const prefs = dashboardPrefsFromApi(dashboardPrefsQuery.data)
         if (prefs.defaultService === 'wireguard') setChartMode('wireguard')
         if (prefs.defaultRange) setTimeRange(prefs.defaultRange)
         if (prefs.refreshMs && prefs.refreshMs >= 1000) setRefreshInterval(prefs.refreshMs)
+        setDetailChartTargetPoints(prefs.detailChartTargetPoints ?? defaultDetailChartTargetPoints)
+        prefsInitializedRef.current = true
         setPrefsLoaded(true)
-    }, [])
+    }, [dashboardPrefsQuery.data, dashboardPrefsQuery.isPending])
 
     useEffect(() => {
         const el = chartContainerRef.current
@@ -313,11 +333,11 @@ export default function Dashboard() {
     const selectedConsumerSelectionId = getConsumerSelectionId(selectedConsumer, chartMode)
     const selectedConsumerQuery = useQuery({
         queryKey: requestWindow.range === 'custom'
-            ? ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, requestWindow.range, requestWindow.startText, requestWindow.endText]
-            : ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, requestWindow.range],
+            ? ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, detailChartTargetPoints, requestWindow.range, requestWindow.startText, requestWindow.endText]
+            : ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, detailChartTargetPoints, requestWindow.range],
         queryFn: () => requestWindow.range === 'custom'
-            ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range, requestWindow.startText, requestWindow.endText)
-            : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range),
+            ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range, requestWindow.startText, requestWindow.endText, detailChartTargetPoints)
+            : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range, undefined, undefined, detailChartTargetPoints),
         enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid) && !!selectedConsumerSelectionId,
         refetchInterval: selectedConsumer ? refreshInterval : false,
     })

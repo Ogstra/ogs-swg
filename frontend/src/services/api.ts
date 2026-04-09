@@ -114,6 +114,13 @@ export interface DashboardConsumerChartData {
     chart_data: UnifiedChartPoint[];
 }
 
+export interface DashboardPreferences {
+    default_service: 'singbox' | 'wireguard';
+    refresh_ms: number;
+    default_range: '30m' | '1h' | '6h' | '24h' | '1w' | '1m';
+    detail_chart_target_points: number;
+}
+
 export interface SamplerHistoryEntry {
     ts?: number;
     timestamp?: number;
@@ -712,6 +719,19 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update features');
     },
+    getDashboardPreferences: async (): Promise<DashboardPreferences> => {
+        const res = await fetch('/api/settings/dashboard-preferences', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch dashboard preferences');
+        return res.json();
+    },
+    updateDashboardPreferences: async (prefs: DashboardPreferences): Promise<void> => {
+        const res = await fetch('/api/settings/dashboard-preferences', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(prefs),
+        });
+        await handleResponse(res, 'Failed to update dashboard preferences');
+    },
     getPublicIP: async (): Promise<string> => {
         const res = await fetch('/api/settings/public-ip', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch public IP');
@@ -894,12 +914,14 @@ export const api = {
         range: string = '24h',
         start?: string,
         end?: string,
+        targetPoints?: number,
     ): Promise<DashboardConsumerChartData> => {
         const params = new URLSearchParams({ mode, key, range });
         if (name) params.append('name', name);
         if (interfaceName) params.append('interface_name', interfaceName);
         if (start) params.append('start', start);
         if (end) params.append('end', end);
+        if (targetPoints && targetPoints > 0) params.append('target_points', String(targetPoints));
         const res = await fetch(`/api/dashboard/consumer-chart?${params.toString()}`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch consumer chart');
         return res.json();

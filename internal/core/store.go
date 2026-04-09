@@ -190,6 +190,16 @@ func (s *Store) initSchema() error {
 		updated_at INTEGER DEFAULT (strftime('%s','now'))
 	);
 
+	CREATE TABLE IF NOT EXISTS dashboard_preferences (
+		principal TEXT PRIMARY KEY,
+		default_service TEXT NOT NULL DEFAULT 'singbox',
+		refresh_ms INTEGER NOT NULL DEFAULT 10000,
+		default_range TEXT NOT NULL DEFAULT '24h',
+		detail_chart_target_points INTEGER NOT NULL DEFAULT 200,
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
+
 	CREATE TABLE IF NOT EXISTS inbound_meta (
 		tag TEXT PRIMARY KEY,
 		external_port INTEGER DEFAULT 0,
@@ -279,6 +289,12 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_update_always INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]';")
 	s.db.Exec("UPDATE panel_users SET subscription_default_destinations_json = '[]' WHERE COALESCE(subscription_default_destinations_json, '') = '';")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN default_service TEXT NOT NULL DEFAULT 'singbox';")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN refresh_ms INTEGER NOT NULL DEFAULT 10000;")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN default_range TEXT NOT NULL DEFAULT '24h';")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN detail_chart_target_points INTEGER NOT NULL DEFAULT 200;")
+	s.db.Exec(`UPDATE dashboard_preferences SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
+	s.db.Exec(`UPDATE dashboard_preferences SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -332,6 +348,41 @@ type SubscriptionDefaults struct {
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
 	UpdateAlways               bool     `json:"update_always"`
 	Destinations               []string `json:"destinations"`
+}
+
+type DashboardPreferences struct {
+	DefaultService          string `json:"default_service"`
+	RefreshMs               int    `json:"refresh_ms"`
+	DefaultRange            string `json:"default_range"`
+	DetailChartTargetPoints int    `json:"detail_chart_target_points"`
+}
+
+func DefaultDashboardPreferences() DashboardPreferences {
+	return DashboardPreferences{
+		DefaultService:          "singbox",
+		RefreshMs:               10000,
+		DefaultRange:            "24h",
+		DetailChartTargetPoints: 200,
+	}
+}
+
+func normalizeDashboardPreferences(p DashboardPreferences) DashboardPreferences {
+	out := DefaultDashboardPreferences()
+	if p.DefaultService == "wireguard" {
+		out.DefaultService = "wireguard"
+	}
+	switch p.DefaultRange {
+	case "30m", "1h", "6h", "24h", "1w", "1m":
+		out.DefaultRange = p.DefaultRange
+	}
+	if p.RefreshMs >= 1000 {
+		out.RefreshMs = p.RefreshMs
+	}
+	switch p.DetailChartTargetPoints {
+	case 50, 100, 150, 200:
+		out.DetailChartTargetPoints = p.DetailChartTargetPoints
+	}
+	return out
 }
 
 func boolToInt64(b bool) int64 {
@@ -680,6 +731,40 @@ func (s *Store) UpdatePanelUserSubscriptionDefaults(ctx context.Context, usernam
 	})
 }
 
+func (s *Store) GetDashboardPreferences(ctx context.Context, principal string) (DashboardPreferences, error) {
+	defaults := DefaultDashboardPreferences()
+	row := s.db.QueryRowContext(ctx, `
+		SELECT default_service, refresh_ms, default_range, detail_chart_target_points
+		FROM dashboard_preferences
+		WHERE principal = ?
+	`, principal)
+
+	var prefs DashboardPreferences
+	if err := row.Scan(&prefs.DefaultService, &prefs.RefreshMs, &prefs.DefaultRange, &prefs.DetailChartTargetPoints); err != nil {
+		if err == sql.ErrNoRows {
+			return defaults, nil
+		}
+		return defaults, err
+	}
+	return normalizeDashboardPreferences(prefs), nil
+}
+
+func (s *Store) UpdateDashboardPreferences(ctx context.Context, principal string, prefs DashboardPreferences) error {
+	prefs = normalizeDashboardPreferences(prefs)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO dashboard_preferences (
+			principal, default_service, refresh_ms, default_range, detail_chart_target_points, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+		ON CONFLICT(principal) DO UPDATE SET
+			default_service = excluded.default_service,
+			refresh_ms = excluded.refresh_ms,
+			default_range = excluded.default_range,
+			detail_chart_target_points = excluded.detail_chart_target_points,
+			updated_at = strftime('%s','now')
+	`, principal, prefs.DefaultService, prefs.RefreshMs, prefs.DefaultRange, prefs.DetailChartTargetPoints)
+	return err
+}
+
 func (s *Store) UpdatePanelUsername(oldUsername, newUsername string) error {
 	count, err := s.Queries.CheckPanelUserExists(context.Background(), newUsername)
 	if err != nil {
@@ -688,13 +773,22 @@ func (s *Store) UpdatePanelUsername(oldUsername, newUsername string) error {
 	if count > 0 {
 		return fmt.Errorf("username %s already exists", newUsername)
 	}
-	return s.Queries.UpdatePanelUsername(context.Background(), sqlcStore.UpdatePanelUsernameParams{
+	if err := s.Queries.UpdatePanelUsername(context.Background(), sqlcStore.UpdatePanelUsernameParams{
 		Username:   newUsername,
 		Username_2: oldUsername,
-	})
+	}); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec("UPDATE dashboard_preferences SET principal = ?, updated_at = strftime('%s','now') WHERE principal = ?", newUsername, oldUsername); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) DeletePanelUser(username string) error {
+	if _, err := s.db.Exec("DELETE FROM dashboard_preferences WHERE principal = ?", username); err != nil {
+		return err
+	}
 	return s.Queries.DeletePanelUser(context.Background(), username)
 }
 

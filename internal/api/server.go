@@ -298,6 +298,8 @@ func (s *Server) Routes() *http.ServeMux {
 	// Settings
 	protected.HandleFunc("GET /api/settings/features", s.secure(s.requirePerm(canReadSettings, s.handleGetFeatures)))
 	protected.HandleFunc("PUT /api/settings/features", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateFeatures)))
+	protected.HandleFunc("GET /api/settings/dashboard-preferences", s.secure(s.requirePerm(canReadSettings, s.handleGetDashboardPreferences)))
+	protected.HandleFunc("PUT /api/settings/dashboard-preferences", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateDashboardPreferences)))
 	protected.HandleFunc("GET /api/settings/public-ip", s.secure(s.requirePerm(canReadSettings, s.handleGetPublicIP)))
 	protected.HandleFunc("PUT /api/settings/public-ip", s.secure(s.requirePerm(canWriteSettings, s.handleUpdatePublicIP)))
 	protected.HandleFunc("GET /api/settings/subscription-domain", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionDomain)))
