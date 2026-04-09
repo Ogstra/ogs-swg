@@ -507,7 +507,7 @@ function DashboardTab({
                             <option value={50}>50 samples</option>
                             <option value={100}>100 samples</option>
                             <option value={150}>150 samples</option>
-                            <option value={200}>200 samples (Current)</option>
+                            <option value={200}>200 samples</option>
                         </select>
                     </div>
                 </div>
