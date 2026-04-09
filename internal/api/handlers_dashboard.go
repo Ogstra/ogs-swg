@@ -154,6 +154,22 @@ func resolveDashboardWindow(rangeStr, startStr, endStr string) (int64, int64, in
 	return start, end, interval
 }
 
+func resolveDashboardConsumerWindow(rangeStr, startStr, endStr string) (int64, int64, int64) {
+	start, end, _ := resolveDashboardWindow(rangeStr, startStr, endStr)
+	if end <= start {
+		return start, end, 60
+	}
+
+	const targetPoints int64 = 200
+	diff := end - start
+	interval := (diff + (targetPoints - 2)) / (targetPoints - 1)
+	if interval < 1 {
+		interval = 1
+	}
+
+	return start, end, interval
+}
+
 func buildConsumerChartData(start, end, interval int64, buckets map[int64]TrafficStats, mode string) []UnifiedChartPoint {
 	var chartData []UnifiedChartPoint
 	var accUp, accDown int64
@@ -504,7 +520,7 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 		return
 	}
 
-	start, end, interval := resolveDashboardWindow(rangeStr, startStr, endStr)
+	start, end, interval := resolveDashboardConsumerWindow(rangeStr, startStr, endStr)
 	if end <= start {
 		http.Error(w, "Invalid dashboard window", http.StatusBadRequest)
 		return
