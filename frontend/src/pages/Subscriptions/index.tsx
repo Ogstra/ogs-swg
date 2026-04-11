@@ -4,6 +4,7 @@ import { api, Subscription, SubscriptionDefaults } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { Button } from '../../components/ui/Button'
+import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
@@ -89,6 +90,7 @@ export default function Subscriptions() {
 
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
+    const sortedUsersInfo = [...usersInfo].sort((a, b) => a.name.localeCompare(b.name))
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
 
@@ -545,13 +547,26 @@ export default function Subscriptions() {
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
                         <div className="border border-slate-800 rounded bg-slate-950 max-h-[300px] overflow-y-auto">
-                            {usersInfo.map(u => (
-                                <label key={u.name} className="flex items-center p-3 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0">
+                            {sortedUsersInfo.map(u => (
+                                <label key={u.name} className="flex items-start gap-3 p-3 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0">
                                     <input type="checkbox" checked={selectedUsers.includes(u.name)} onChange={() => toggleUser(u.name)} className="mr-3 shrink-0" />
-                                    <div className="flex-1 truncate text-sm text-slate-200">{u.name}</div>
+                                    <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
+                                        <div className="min-w-0 truncate text-sm text-slate-200">{u.name}</div>
+                                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                                            {(u.inbound_tags && u.inbound_tags.length > 0) ? (
+                                                u.inbound_tags.map(tag => (
+                                                    <Badge key={tag} variant="info" className="max-w-[120px] truncate">
+                                                        {tag}
+                                                    </Badge>
+                                                ))
+                                            ) : (
+                                                <Badge variant="neutral">All</Badge>
+                                            )}
+                                        </div>
+                                    </div>
                                 </label>
                             ))}
-                            {usersInfo.length === 0 && <div className="p-4 text-center text-slate-500 text-sm">No users available</div>}
+                            {sortedUsersInfo.length === 0 && <div className="p-4 text-center text-slate-500 text-sm">No users available</div>}
                         </div>
                     </div>
                 </div>
