@@ -199,7 +199,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                 disabled={!canWriteSettings}
                                 icon={<Shield size={16} />}
                             >
-                                Save Protection Settings
+                                Save
                             </Button>
                         </div>
                     </>

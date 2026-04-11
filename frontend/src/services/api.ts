@@ -148,6 +148,8 @@ export interface SubscriptionRequestHistoryEntry {
     hwid_prefix: string;
     requested_at: number;
     served_from_cache: number;
+    blocked: number;
+    block_reason: string;
 }
 
 export interface SubscriptionProtectionConfig {

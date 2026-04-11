@@ -1414,6 +1414,25 @@ function DatabaseTab({
         return ''
     }
 
+    const getSubscriptionHistoryBadge = (run: SubscriptionRequestHistoryEntry) => {
+        if (run.blocked) {
+            return {
+                label: 'Blocked',
+                className: 'bg-red-900/20 text-red-400 border border-red-900/30',
+            }
+        }
+        if (run.served_from_cache) {
+            return {
+                label: 'Delivered (Cached)',
+                className: 'bg-amber-900/20 text-amber-400 border border-amber-900/30',
+            }
+        }
+        return {
+            label: 'Delivered (Live)',
+            className: 'bg-emerald-900/20 text-emerald-400 border border-emerald-900/30',
+        }
+    }
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start pb-4 sm:pb-0">
             <div ref={databaseCardRef}>
@@ -1545,7 +1564,7 @@ function DatabaseTab({
             </div>
 
             <div
-                className="min-h-0 h-[320px] lg:h-auto"
+                className="min-h-0 h-[480px] lg:h-auto"
                 style={databaseCardHeight ? { height: `${databaseCardHeight}px` } : undefined}
             >
                 <Card
@@ -1570,14 +1589,16 @@ function DatabaseTab({
                             {subscriptionRequestHistory.length === 0 ? (
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
-                                subscriptionRequestHistory.map((run) => (
+                                subscriptionRequestHistory.map((run) => {
+                                    const badge = getSubscriptionHistoryBadge(run)
+                                    return (
                                     <div key={run.id} className="py-2 border-b border-slate-800/50 last:border-0">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex min-w-0 flex-1 items-center gap-2">
                                                     <div className="truncate text-slate-200 text-xs font-medium" title={run.name}>{run.name}</div>
-                                                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${run.served_from_cache ? 'bg-amber-900/20 text-amber-400 border border-amber-900/30' : 'bg-emerald-900/20 text-emerald-400 border border-emerald-900/30'}`}>
-                                                        {run.served_from_cache ? 'Cache' : 'Fresh'}
+                                                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${badge.className}`}>
+                                                        {badge.label}
                                                     </span>
                                                 </div>
                                                 <div className="shrink-0 text-right font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
@@ -1591,6 +1612,11 @@ function DatabaseTab({
                                             <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
                                                 {formatClientLabel(run)}
                                             </div>
+                                            {run.blocked && run.block_reason && (
+                                                <div className="truncate text-red-400 text-[10px]" title={run.block_reason}>
+                                                    Reason: {run.block_reason}
+                                                </div>
+                                            )}
                                             {(formatDeviceDetails(run) || formatAppVersion(run) || run.country || run.hwid_prefix) && (
                                                 <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
                                                     {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
@@ -1598,7 +1624,7 @@ function DatabaseTab({
                                             )}
                                         </div>
                                     </div>
-                                ))
+                                )})
                             )}
                         </div>
                     </div>
@@ -1607,7 +1633,7 @@ function DatabaseTab({
 
             <Card
                     title="Sampler History"
-                    className="flex h-[320px] flex-col min-h-[208px] lg:col-start-1 lg:h-[416px]"
+                    className="flex h-[480px] flex-col min-h-[312px] lg:col-start-1 lg:h-[416px]"
                     action={
                         <select
                             value={historyLimit}
