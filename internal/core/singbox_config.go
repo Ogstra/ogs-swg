@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"reflect"
@@ -1118,6 +1119,17 @@ func (c *Config) ReloadSingbox() error {
 		return nil
 	}
 
+	raw, err := c.readSingboxConfigLocked()
+	if err == nil {
+		var cfg SingboxConfig
+		if json.Unmarshal(raw, &cfg) == nil &&
+			cfg.Experimental != nil &&
+			cfg.Experimental.ClashAPI != nil &&
+			cfg.Experimental.ClashAPI.ExternalController != "" {
+			return c.reloadViaClashAPI(cfg.Experimental.ClashAPI)
+		}
+	}
+
 	if c.executor != nil {
 		return c.executor.RestartService(context.Background(), "sing-box")
 	}
@@ -1125,6 +1137,40 @@ func (c *Config) ReloadSingbox() error {
 	// Assuming systemd usage
 	cmd := exec.Command("systemctl", "restart", "sing-box")
 	return cmd.Run()
+}
+
+func (c *Config) reloadViaClashAPI(api *ClashAPI) error {
+	body, err := json.Marshal(map[string]string{"path": c.SingboxConfigPath})
+	if err != nil {
+		return fmt.Errorf("clash API reload: marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodPut,
+		fmt.Sprintf("http://%s/configs?force=false", api.ExternalController),
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("clash API reload: create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if api.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+api.Secret)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("clash API reload: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("clash API reload: unexpected status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // GetSingboxRouteRules reads the current route.rules array from the config.
