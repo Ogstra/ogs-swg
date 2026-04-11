@@ -27,23 +27,25 @@ import (
 )
 
 type Server struct {
-	store            *core.Store
-	config           *core.Config
-	executor         core.SystemExecutor
-	now              func() time.Time
-	sampler          *core.StatsSampler
-	pool             *pond.WorkerPool
-	validate         *validator.Validate
-	cache            *ristretto.Cache
-	wgPendingRestart bool
-	wgQRCache        map[string]qrEntry
-	wgQRCacheMutex   sync.RWMutex
-	wgMux            sync.RWMutex
-	wgSamplerTicker  *time.Ticker
-	wgSamplerStop    chan struct{}
-	wgSamplerPaused  bool
-	wgLast           map[string]core.WGSample
-	loginLimiter     *loginLimiter
+	store               *core.Store
+	config              *core.Config
+	executor            core.SystemExecutor
+	now                 func() time.Time
+	sampler             *core.StatsSampler
+	pool                *pond.WorkerPool
+	validate            *validator.Validate
+	cache               *ristretto.Cache
+	wgPendingRestart    bool
+	wgQRCache           map[string]qrEntry
+	wgQRCacheMutex      sync.RWMutex
+	wgMux               sync.RWMutex
+	wgSamplerTicker     *time.Ticker
+	wgSamplerStop       chan struct{}
+	wgSamplerPaused     bool
+	wgLast              map[string]core.WGSample
+	loginLimiter        *loginLimiter
+	subscriptionLimiter *subscriptionLimiter
+	protectionRules     *protectionRuleCache
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -60,25 +62,29 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		log.Fatalf("Failed to initialize ristretto cache: %v", err)
 	}
 
-	return &Server{
-		store:            store,
-		config:           config,
-		executor:         executor,
-		now:              time.Now,
-		sampler:          nil,
-		pool:             pond.New(100, 1000, pond.IdleTimeout(30*time.Second)),
-		validate:         validator.New(),
-		cache:            cache,
-		wgPendingRestart: false,
-		wgQRCache:        make(map[string]qrEntry),
-		wgQRCacheMutex:   sync.RWMutex{},
-		wgSamplerStop:    make(chan struct{}),
-		wgSamplerTicker:  time.NewTicker(interval),
-		wgMux:            sync.RWMutex{},
-		wgLast:           make(map[string]core.WGSample),
-		wgSamplerPaused:  false,
-		loginLimiter:     newLoginLimiter(),
+	srv := &Server{
+		store:               store,
+		config:              config,
+		executor:            executor,
+		now:                 time.Now,
+		sampler:             nil,
+		pool:                pond.New(100, 1000, pond.IdleTimeout(30*time.Second)),
+		validate:            validator.New(),
+		cache:               cache,
+		wgPendingRestart:    false,
+		wgQRCache:           make(map[string]qrEntry),
+		wgQRCacheMutex:      sync.RWMutex{},
+		wgSamplerStop:       make(chan struct{}),
+		wgSamplerTicker:     time.NewTicker(interval),
+		wgMux:               sync.RWMutex{},
+		wgLast:              make(map[string]core.WGSample),
+		wgSamplerPaused:     false,
+		loginLimiter:        newLoginLimiter(),
+		subscriptionLimiter: newSubscriptionLimiter(),
+		protectionRules:     newProtectionRuleCache(),
 	}
+	srv.reloadProtectionRules(context.Background())
+	return srv
 }
 
 type gzipResponseWriter struct {
@@ -211,6 +217,13 @@ func (s *Server) Routes() *http.ServeMux {
 	// Auth: any authenticated user can change their own password/username
 	protected.HandleFunc("PUT /api/auth/password", s.secure(s.handleUpdatePassword))
 	protected.HandleFunc("PUT /api/auth/username", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateUsername)))
+
+	protected.HandleFunc("GET /api/settings/subscription-protection", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionProtection)))
+	protected.HandleFunc("PUT /api/settings/subscription-protection", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateSubscriptionProtection)))
+	protected.HandleFunc("GET /api/settings/protection-rules", s.secure(s.requirePerm(canReadSettings, s.handleGetProtectionRules)))
+	protected.HandleFunc("POST /api/settings/protection-rules", s.secure(s.requirePerm(canWriteSettings, s.handleCreateProtectionRule)))
+	protected.HandleFunc("DELETE /api/settings/protection-rules/{id}", s.secure(s.requirePerm(canWriteSettings, s.handleDeleteProtectionRule)))
+	protected.HandleFunc("GET /api/settings/protection-rules/blocked-log", s.secure(s.requirePerm(canReadSettings, s.handleGetBlockedLog)))
 
 	// VPN Users
 	protected.HandleFunc("GET /api/users", s.secure(s.requirePerm(canReadUsers, s.handleGetUsers)))

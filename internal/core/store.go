@@ -261,11 +261,25 @@ func (s *Store) initSchema() error {
 		hwid_prefix TEXT NOT NULL DEFAULT '',
 		requested_at INTEGER NOT NULL,
 		served_from_cache INTEGER NOT NULL DEFAULT 0,
+		blocked INTEGER NOT NULL DEFAULT 0,
+		block_reason TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS subscription_protection_rules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		rule_type TEXT NOT NULL,
+		value TEXT NOT NULL,
+		note TEXT NOT NULL DEFAULT '',
+		created_at INTEGER DEFAULT (strftime('%s','now'))
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
 		ON subscription_requests(sub_id, requested_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked
+		ON subscription_requests(blocked, requested_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
+		ON subscription_protection_rules(rule_type, value);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
@@ -318,6 +332,9 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN country TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN hwid_hash TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN hwid_prefix TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN block_reason TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked ON subscription_requests(blocked, requested_at DESC);")
 	return nil
 }
 

@@ -61,8 +61,16 @@ type Config struct {
 
 	JWTSecret string `json:"jwt_secret" env:"OGS_JWT_SECRET"`
 
+	SubscriptionProtection SubscriptionProtectionConfig `json:"subscription_protection"`
+
 	executor SystemExecutor
 	mu       sync.Mutex
+}
+
+type SubscriptionProtectionConfig struct {
+	MaxRequests     int  `json:"max_requests"`
+	WindowSeconds   int  `json:"window_seconds"`
+	UAFilterEnabled bool `json:"ua_filter_enabled"`
 }
 
 type UserAccount struct {
@@ -168,8 +176,18 @@ func LoadConfig(path ...string) *Config {
 		cfg.WireGuardConfigDir = filepath.Dir(derivePath)
 	}
 	cfg.WireGuardConfigDir = filepath.Clean(cfg.WireGuardConfigDir)
+	cfg.normalizeSubscriptionProtection()
 
 	return cfg
+}
+
+func (c *Config) normalizeSubscriptionProtection() {
+	if c.SubscriptionProtection.MaxRequests <= 0 {
+		c.SubscriptionProtection.MaxRequests = 60
+	}
+	if c.SubscriptionProtection.WindowSeconds <= 0 {
+		c.SubscriptionProtection.WindowSeconds = 60
+	}
 }
 
 func (c *Config) GetActiveUsers() ([]UserAccount, error) {

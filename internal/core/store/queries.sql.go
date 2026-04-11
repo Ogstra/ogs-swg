@@ -1501,8 +1501,10 @@ INSERT INTO subscription_requests (
 	hwid_hash,
 	hwid_prefix,
 	requested_at,
-	served_from_cache
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	served_from_cache,
+	blocked,
+	block_reason
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSubscriptionRequestParams struct {
@@ -1521,6 +1523,8 @@ type InsertSubscriptionRequestParams struct {
 	HwidPrefix      string `json:"hwid_prefix"`
 	RequestedAt     int64  `json:"requested_at"`
 	ServedFromCache int64  `json:"served_from_cache"`
+	Blocked         int64  `json:"blocked"`
+	BlockReason     string `json:"block_reason"`
 }
 
 func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubscriptionRequestParams) error {
@@ -1540,8 +1544,106 @@ func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubsc
 		arg.HwidPrefix,
 		arg.RequestedAt,
 		arg.ServedFromCache,
+		arg.Blocked,
+		arg.BlockReason,
 	)
 	return err
+}
+
+const insertProtectionRule = `-- name: InsertProtectionRule :exec
+INSERT INTO subscription_protection_rules (rule_type, value, note, created_at)
+VALUES (?, ?, ?, ?)
+`
+
+type InsertProtectionRuleParams struct {
+	RuleType  string `json:"rule_type"`
+	Value     string `json:"value"`
+	Note      string `json:"note"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) InsertProtectionRule(ctx context.Context, arg InsertProtectionRuleParams) error {
+	_, err := q.db.ExecContext(ctx, insertProtectionRule, arg.RuleType, arg.Value, arg.Note, arg.CreatedAt)
+	return err
+}
+
+const getAllProtectionRules = `-- name: GetAllProtectionRules :many
+SELECT id, rule_type, value, note, created_at
+FROM subscription_protection_rules
+ORDER BY created_at DESC
+`
+
+type ProtectionRule struct {
+	ID        int64  `json:"id"`
+	RuleType  string `json:"rule_type"`
+	Value     string `json:"value"`
+	Note      string `json:"note"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+func (q *Queries) GetAllProtectionRules(ctx context.Context) ([]ProtectionRule, error) {
+	rows, err := q.db.QueryContext(ctx, getAllProtectionRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []ProtectionRule
+	for rows.Next() {
+		var item ProtectionRule
+		if err := rows.Scan(&item.ID, &item.RuleType, &item.Value, &item.Note, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+const deleteProtectionRule = `-- name: DeleteProtectionRule :exec
+DELETE FROM subscription_protection_rules WHERE id = ?
+`
+
+func (q *Queries) DeleteProtectionRule(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteProtectionRule, id)
+	return err
+}
+
+const getBlockedSubscriptionRequests = `-- name: GetBlockedSubscriptionRequests :many
+SELECT sr.id, sr.sub_id, COALESCE(s.name, '') as sub_name, sr.request_ip, sr.requested_at,
+       sr.block_reason, sr.user_agent
+FROM subscription_requests sr
+LEFT JOIN subscriptions s ON s.id = sr.sub_id
+WHERE sr.blocked = 1
+ORDER BY sr.requested_at DESC
+LIMIT ? OFFSET ?
+`
+
+type BlockedSubscriptionRequest struct {
+	ID          int64  `json:"id"`
+	SubID       int64  `json:"sub_id"`
+	SubName     string `json:"sub_name"`
+	RequestIP   string `json:"request_ip"`
+	RequestedAt int64  `json:"requested_at"`
+	BlockReason string `json:"block_reason"`
+	UserAgent   string `json:"user_agent"`
+}
+
+func (q *Queries) GetBlockedSubscriptionRequests(ctx context.Context, limit int64, offset int64) ([]BlockedSubscriptionRequest, error) {
+	rows, err := q.db.QueryContext(ctx, getBlockedSubscriptionRequests, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []BlockedSubscriptionRequest
+	for rows.Next() {
+		var item BlockedSubscriptionRequest
+		if err := rows.Scan(&item.ID, &item.SubID, &item.SubName, &item.RequestIP, &item.RequestedAt, &item.BlockReason, &item.UserAgent); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 const insertWGDailyUsage = `-- name: InsertWGDailyUsage :exec
