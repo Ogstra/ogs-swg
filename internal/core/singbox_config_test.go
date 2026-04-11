@@ -341,6 +341,53 @@ func TestReloadSingbox_UsesClashAPIWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestAddUser_ClearsPendingChangesWhenClashAPIReloadSucceeds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	fixtureJSON := `{
+		"inbounds": [
+			{"type":"vless","tag":"test-vless","listen":"0.0.0.0","listen_port":10001,"users":[]}
+		],
+		"experimental": {
+			"clash_api": {
+				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `"
+			}
+		}
+	}`
+
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	if err := cfg.AddUser("alice", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "", "test-vless", "", 0); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	if cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = true, want false after successful Clash API reload")
+	}
+}
+
+func TestAddUser_KeepsPendingChangesWhenClashAPIReloadFails(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{"type":"vless","tag":"test-vless","listen":"0.0.0.0","listen_port":10001,"users":[]}
+		],
+		"experimental": {
+			"clash_api": {
+				"external_controller": "127.0.0.1:1"
+			}
+		}
+	}`
+
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	if err := cfg.AddUser("alice", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "", "test-vless", "", 0); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	if !cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = false, want true after failed Clash API reload")
+	}
+}
+
 func TestReloadSingbox_IncludesSecretHeader(t *testing.T) {
 	authHeader := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

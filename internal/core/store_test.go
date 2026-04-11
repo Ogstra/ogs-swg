@@ -566,3 +566,119 @@ func TestEnforceSubscriptionQuotas_ReEnablesAndRestoresUserWhenUnderLimit(t *tes
 		t.Fatalf("active users = %#v; want restored trojan user", users)
 	}
 }
+
+func TestReconcileUserQuotaNow_DisablesExceededUserImmediately(t *testing.T) {
+	cfg, _ := newTestConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}]
+			}
+		]
+	}`)
+
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now().Unix()
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: now - 60, Uplink: 80, Downlink: 40},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  100,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     true,
+		Credential:  "11111111-1111-1111-1111-111111111111",
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	if err := store.ReconcileUserQuotaNow("alice", cfg); err != nil {
+		t.Fatalf("ReconcileUserQuotaNow: %v", err)
+	}
+
+	meta, err := store.GetUserMetadata("alice")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta == nil || meta.Enabled {
+		t.Fatalf("alice metadata = %#v; want disabled metadata", meta)
+	}
+	users, err := cfg.GetActiveUsers()
+	if err != nil {
+		t.Fatalf("GetActiveUsers: %v", err)
+	}
+	if len(users) != 0 {
+		t.Fatalf("active users = %#v; want alice removed from config", users)
+	}
+}
+
+func TestReconcileUserQuotaNow_ReEnablesUserImmediately(t *testing.T) {
+	cfg, _ := newTestConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": []
+			}
+		]
+	}`)
+
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now().Unix()
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: now - 60, Uplink: 20, Downlink: 30},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  100,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     false,
+		Credential:  "11111111-1111-1111-1111-111111111111",
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	if err := store.ReconcileUserQuotaNow("alice", cfg); err != nil {
+		t.Fatalf("ReconcileUserQuotaNow: %v", err)
+	}
+
+	meta, err := store.GetUserMetadata("alice")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta == nil || !meta.Enabled {
+		t.Fatalf("alice metadata = %#v; want enabled metadata", meta)
+	}
+	users, err := cfg.GetActiveUsers()
+	if err != nil {
+		t.Fatalf("GetActiveUsers: %v", err)
+	}
+	if len(users) != 1 || users[0].Name != "alice" {
+		t.Fatalf("active users = %#v; want restored alice", users)
+	}
+}
