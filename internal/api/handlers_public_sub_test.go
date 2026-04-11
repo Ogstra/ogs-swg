@@ -11,10 +11,31 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/core/store"
 )
+
+func addProtectionRuleForTest(t *testing.T, s *Server, ruleType string, value string) {
+	t.Helper()
+
+	if err := s.store.Queries.InsertProtectionRule(t.Context(), store.InsertProtectionRuleParams{
+		RuleType:  ruleType,
+		Value:     value,
+		Note:      "test",
+		CreatedAt: time.Now().Unix(),
+	}); err != nil {
+		t.Fatalf("InsertProtectionRule: %v", err)
+	}
+	s.reloadProtectionRules(t.Context())
+}
+
+func serveAuthedRequest(server *Server, req *http.Request) *httptest.ResponseRecorder {
+	rec := httptest.NewRecorder()
+	server.AuthMiddleware(server.Routes()).ServeHTTP(rec, req)
+	return rec
+}
 
 func withSettingsPerms(r *http.Request, perms *core.PanelUserPermissions) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), permissionsContextKey, perms))
@@ -260,6 +281,439 @@ func TestHandlePublicSubscription_OmitsExpireWithoutExplicitExpiration(t *testin
 	}
 	if strings.Contains(userinfo, "expire=") {
 		t.Fatalf("Subscription-Userinfo=%q should omit expire without explicit expiration", userinfo)
+	}
+}
+
+func TestHandlePublicSubscription_IPAllowlistBypass(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.config.SubscriptionProtection.MaxRequests = 1
+	server.config.SubscriptionProtection.WindowSeconds = 60
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "allow-token",
+		Name:        "Allow Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	addProtectionRuleForTest(t, server, "ip_allow", "198.51.100.5")
+	server.subscriptionLimiter.record("allow-token")
+
+	req := httptest.NewRequest(http.MethodGet, "/s/allow-token", nil)
+	req.SetPathValue("token", "allow-token")
+	req.RemoteAddr = "198.51.100.5:12345"
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlePublicSubscription_IPBlock(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "ip-block-token",
+		Name:        "IP Block Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	addProtectionRuleForTest(t, server, "ip_block", "198.51.100.5")
+
+	req := httptest.NewRequest(http.MethodGet, "/s/ip-block-token", nil)
+	req.SetPathValue("token", "ip-block-token")
+	req.RemoteAddr = "198.51.100.5:12345"
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlePublicSubscription_TokenBlock(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "token-block-token",
+		Name:        "Token Block Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	addProtectionRuleForTest(t, server, "token_block", "token-block-token")
+
+	req := httptest.NewRequest(http.MethodGet, "/s/token-block-token", nil)
+	req.SetPathValue("token", "token-block-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlePublicSubscription_RateLimit(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.config.SubscriptionProtection.MaxRequests = 1
+	server.config.SubscriptionProtection.WindowSeconds = 60
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "rate-limit-token",
+		Name:        "Rate Limit Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	firstReq := httptest.NewRequest(http.MethodGet, "/s/rate-limit-token", nil)
+	firstReq.SetPathValue("token", "rate-limit-token")
+	firstRec := httptest.NewRecorder()
+	server.handlePublicSubscription(firstRec, firstReq)
+	if firstRec.Code != http.StatusOK {
+		t.Fatalf("first status=%d body=%q", firstRec.Code, firstRec.Body.String())
+	}
+
+	secondReq := httptest.NewRequest(http.MethodGet, "/s/rate-limit-token", nil)
+	secondReq.SetPathValue("token", "rate-limit-token")
+	secondRec := httptest.NewRecorder()
+	server.handlePublicSubscription(secondRec, secondReq)
+
+	if secondRec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%q", secondRec.Code, secondRec.Body.String())
+	}
+	if secondRec.Header().Get("Retry-After") == "" {
+		t.Fatalf("expected Retry-After header")
+	}
+}
+
+func TestHandlePublicSubscription_UAFilter_Enabled(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.config.SubscriptionProtection.UAFilterEnabled = true
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "ua-filter-token",
+		Name:        "UA Filter Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/ua-filter-token", nil)
+	req.SetPathValue("token", "ua-filter-token")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlePublicSubscription_UAFilter_Disabled(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "ua-disabled-token",
+		Name:        "UA Disabled Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/ua-disabled-token", nil)
+	req.SetPathValue("token", "ua-disabled-token")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlePublicSubscription_BlockedRequestRecorded(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "blocked-record-token",
+		Name:        "Blocked Record Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	addProtectionRuleForTest(t, server, "token_block", "blocked-record-token")
+
+	req := httptest.NewRequest(http.MethodGet, "/s/blocked-record-token", nil)
+	req.SetPathValue("token", "blocked-record-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), 10, 0)
+	if err != nil {
+		t.Fatalf("GetBlockedSubscriptionRequests: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected blocked request rows")
+	}
+	if rows[0].BlockReason != "token_block" {
+		t.Fatalf("block_reason=%q want %q", rows[0].BlockReason, "token_block")
+	}
+	if rows[0].SubID != subID {
+		t.Fatalf("sub_id=%d want %d", rows[0].SubID, subID)
+	}
+}
+
+func TestSubscriptionProtectionSettingsRoutes(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+	server.config.APIKey = "settings-key"
+	server.config.ConfigPath = filepath.Join(t.TempDir(), "config.json")
+	server.config.SubscriptionProtection = core.SubscriptionProtectionConfig{
+		MaxRequests:   60,
+		WindowSeconds: 60,
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/settings/subscription-protection", nil)
+	getReq.Header.Set("X-API-Key", "settings-key")
+	getRec := serveAuthedRequest(server, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%q", getRec.Code, getRec.Body.String())
+	}
+
+	var current core.SubscriptionProtectionConfig
+	if err := json.NewDecoder(getRec.Body).Decode(&current); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
+	if current.MaxRequests != 60 || current.WindowSeconds != 60 || current.UAFilterEnabled {
+		t.Fatalf("unexpected initial config: %+v", current)
+	}
+
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/subscription-protection", strings.NewReader(`{"max_requests":7,"window_seconds":45,"ua_filter_enabled":true}`))
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-API-Key", "settings-key")
+	putRec := serveAuthedRequest(server, putReq)
+
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("put status=%d body=%q", putRec.Code, putRec.Body.String())
+	}
+
+	var updated core.SubscriptionProtectionConfig
+	if err := json.NewDecoder(putRec.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode put response: %v", err)
+	}
+	if updated.MaxRequests != 7 || updated.WindowSeconds != 45 || !updated.UAFilterEnabled {
+		t.Fatalf("unexpected updated config: %+v", updated)
+	}
+	if server.config.SubscriptionProtection != updated {
+		t.Fatalf("server config not updated: %+v", server.config.SubscriptionProtection)
+	}
+}
+
+func TestSubscriptionProtectionRuleRoutes(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.config.APIKey = "settings-key"
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "blocked-log-token",
+		Name:        "Blocked Log Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.InsertSubscriptionRequest(t.Context(), store.InsertSubscriptionRequestParams{
+		SubID:           subID,
+		UserName:        "alice",
+		RequestIP:       "198.51.100.77",
+		RequestHost:     "sub.example.com",
+		RequestPath:     "/s/[token]",
+		UserAgent:       "Clash/Meta/1.0",
+		DeviceModel:     "PC",
+		DeviceOS:        "Windows",
+		DeviceOSVersion: "11",
+		AppVersion:      "1.0",
+		Country:         "US",
+		HwidHash:        "",
+		HwidPrefix:      "",
+		RequestedAt:     time.Now().Unix(),
+		ServedFromCache: 0,
+		Blocked:         1,
+		BlockReason:     "ip_block",
+	}); err != nil {
+		t.Fatalf("InsertSubscriptionRequest: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/settings/protection-rules", strings.NewReader(`{"rule_type":"ip_block","value":"198.51.100.5","note":"test note"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-API-Key", "settings-key")
+	createRec := serveAuthedRequest(server, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%q", createRec.Code, createRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules", nil)
+	listReq.Header.Set("X-API-Key", "settings-key")
+	listRec := serveAuthedRequest(server, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%q", listRec.Code, listRec.Body.String())
+	}
+
+	var rules []store.ProtectionRule
+	if err := json.NewDecoder(listRec.Body).Decode(&rules); err != nil {
+		t.Fatalf("decode rules: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("rules=%d want 1", len(rules))
+	}
+	if rules[0].RuleType != "ip_block" || rules[0].Value != "198.51.100.5" || rules[0].Note != "test note" {
+		t.Fatalf("unexpected rule: %+v", rules[0])
+	}
+
+	blockedReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules/blocked-log?limit=10&offset=0", nil)
+	blockedReq.Header.Set("X-API-Key", "settings-key")
+	blockedRec := serveAuthedRequest(server, blockedReq)
+	if blockedRec.Code != http.StatusOK {
+		t.Fatalf("blocked-log status=%d body=%q", blockedRec.Code, blockedRec.Body.String())
+	}
+
+	var blocked []store.BlockedSubscriptionRequest
+	if err := json.NewDecoder(blockedRec.Body).Decode(&blocked); err != nil {
+		t.Fatalf("decode blocked-log: %v", err)
+	}
+	if len(blocked) != 1 {
+		t.Fatalf("blocked-log rows=%d want 1", len(blocked))
+	}
+	if blocked[0].SubID != subID || blocked[0].BlockReason != "ip_block" || blocked[0].RequestIP != "198.51.100.77" {
+		t.Fatalf("unexpected blocked row: %+v", blocked[0])
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/settings/protection-rules/"+strconv.FormatInt(rules[0].ID, 10), nil)
+	deleteReq.Header.Set("X-API-Key", "settings-key")
+	deleteRec := serveAuthedRequest(server, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%q", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	listAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules", nil)
+	listAfterDeleteReq.Header.Set("X-API-Key", "settings-key")
+	listAfterDeleteRec := serveAuthedRequest(server, listAfterDeleteReq)
+	if listAfterDeleteRec.Code != http.StatusOK {
+		t.Fatalf("list-after-delete status=%d body=%q", listAfterDeleteRec.Code, listAfterDeleteRec.Body.String())
+	}
+	rules = nil
+	if err := json.NewDecoder(listAfterDeleteRec.Body).Decode(&rules); err != nil {
+		t.Fatalf("decode rules after delete: %v", err)
+	}
+	if len(rules) != 0 {
+		t.Fatalf("rules after delete=%d want 0", len(rules))
+	}
+}
+
+func TestHandlePublicSubscription_UAFilter_AllowsKnownClientUA(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.config.SubscriptionProtection.UAFilterEnabled = true
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "client-ua-token",
+		Name:        "Client UA Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/client-ua-token", nil)
+	req.SetPathValue("token", "client-ua-token")
+	req.Header.Set("User-Agent", "Mozilla/5.0 Shadowrocket/2306 CFNetwork/1410.0 Darwin/22.0.0")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 }
 
