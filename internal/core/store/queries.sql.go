@@ -575,7 +575,7 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 }
 
 const getAllUsers = `-- name: GetAllUsers :many
-SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users
+SELECT email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id FROM users
 `
 
 func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
@@ -593,6 +593,8 @@ func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
 			&i.QuotaPeriod,
 			&i.ResetDay,
 			&i.Enabled,
+			&i.Credential,
+			&i.Flow,
 			&i.VmessSecurity,
 			&i.VmessAlterID,
 		); err != nil {
@@ -1241,7 +1243,7 @@ func (q *Queries) GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserPa
 }
 
 const getUser = `-- name: GetUser :one
-SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users WHERE email = ?
+SELECT email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
@@ -1253,6 +1255,8 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 		&i.QuotaPeriod,
 		&i.ResetDay,
 		&i.Enabled,
+		&i.Credential,
+		&i.Flow,
 		&i.VmessSecurity,
 		&i.VmessAlterID,
 	)
@@ -1982,13 +1986,15 @@ func (q *Queries) UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaPa
 }
 
 const upsertUser = `-- name: UpsertUser :exec
-INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id) 
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id) 
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(email) DO UPDATE SET
 	quota_limit = excluded.quota_limit,
 	quota_period = excluded.quota_period,
 	reset_day = excluded.reset_day,
 	enabled = excluded.enabled,
+	credential = excluded.credential,
+	flow = excluded.flow,
 	vmess_security = excluded.vmess_security,
 	vmess_alter_id = excluded.vmess_alter_id
 `
@@ -1999,6 +2005,8 @@ type UpsertUserParams struct {
 	QuotaPeriod   sql.NullString `json:"quota_period"`
 	ResetDay      sql.NullInt64  `json:"reset_day"`
 	Enabled       sql.NullInt64  `json:"enabled"`
+	Credential    sql.NullString `json:"credential"`
+	Flow          sql.NullString `json:"flow"`
 	VmessSecurity sql.NullString `json:"vmess_security"`
 	VmessAlterID  sql.NullInt64  `json:"vmess_alter_id"`
 }
@@ -2011,6 +2019,8 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
 		arg.QuotaPeriod,
 		arg.ResetDay,
 		arg.Enabled,
+		arg.Credential,
+		arg.Flow,
 		arg.VmessSecurity,
 		arg.VmessAlterID,
 	)

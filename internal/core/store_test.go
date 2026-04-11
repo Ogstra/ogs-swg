@@ -351,6 +351,7 @@ func TestEnforceUserQuotas_DisablesExceededUserAndRemovesFromConfig(t *testing.T
 		QuotaPeriod: "monthly",
 		ResetDay:    1,
 		Enabled:     true,
+		Credential:  "11111111-1111-1111-1111-111111111111",
 		InboundTags: []string{"test-vless"},
 	}); err != nil {
 		t.Fatalf("SaveUserMetadata: %v", err)
@@ -383,7 +384,17 @@ func TestEnforceUserQuotas_ReEnablesUserWhenUnderLimit(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
-	cfg, _ := newTestConfig(t, `{"inbounds":[]}`)
+	cfg, _ := newTestConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": []
+			}
+		]
+	}`)
 
 	now := time.Now().Unix()
 	if err := store.BulkInsert([]Sample{
@@ -397,6 +408,7 @@ func TestEnforceUserQuotas_ReEnablesUserWhenUnderLimit(t *testing.T) {
 		QuotaPeriod: "monthly",
 		ResetDay:    1,
 		Enabled:     false,
+		Credential:  "11111111-1111-1111-1111-111111111111",
 		InboundTags: []string{"test-vless"},
 	}); err != nil {
 		t.Fatalf("SaveUserMetadata: %v", err)
@@ -410,6 +422,14 @@ func TestEnforceUserQuotas_ReEnablesUserWhenUnderLimit(t *testing.T) {
 	}
 	if meta == nil || !meta.Enabled {
 		t.Fatalf("alice metadata = %#v; want re-enabled metadata", meta)
+	}
+
+	users, err := cfg.GetActiveUsers()
+	if err != nil {
+		t.Fatalf("GetActiveUsers: %v", err)
+	}
+	if len(users) != 1 || users[0].Name != "alice" || users[0].UUID != "11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("active users = %#v; want restored alice in config", users)
 	}
 }
 
@@ -445,6 +465,7 @@ func TestEnforceSubscriptionQuotas_DoesNotReenableUserStillOverOwnQuota(t *testi
 		QuotaPeriod: "monthly",
 		ResetDay:    1,
 		Enabled:     false,
+		Credential:  "11111111-1111-1111-1111-111111111111",
 		InboundTags: []string{"test-vless"},
 	}); err != nil {
 		t.Fatalf("SaveUserMetadata: %v", err)
@@ -475,5 +496,73 @@ func TestEnforceSubscriptionQuotas_DoesNotReenableUserStillOverOwnQuota(t *testi
 	}
 	if meta == nil || meta.Enabled {
 		t.Fatalf("alice metadata = %#v; want still disabled because own quota is exceeded", meta)
+	}
+}
+
+func TestEnforceSubscriptionQuotas_ReEnablesAndRestoresUserWhenUnderLimit(t *testing.T) {
+	cfg, _ := newTestConfig(t, `{
+		"inbounds": [
+			{
+				"type": "trojan",
+				"tag": "test-trojan",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": []
+			}
+		]
+	}`)
+
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     false,
+		Credential:  "restored-trojan-password",
+		InboundTags: []string{"test-trojan"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	subID, err := store.Queries.CreateSubscription(context.Background(), sqlcStore.CreateSubscriptionParams{
+		Token:       "sub-token",
+		Name:        "bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 1000, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := store.Queries.AddUserToSubscription(context.Background(), sqlcStore.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	store.EnforceSubscriptionQuotas(cfg)
+
+	meta, err := store.GetUserMetadata("alice")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta == nil || !meta.Enabled {
+		t.Fatalf("alice metadata = %#v; want enabled metadata", meta)
+	}
+
+	users, err := cfg.GetActiveUsers()
+	if err != nil {
+		t.Fatalf("GetActiveUsers: %v", err)
+	}
+	if len(users) != 1 || users[0].Name != "alice" || users[0].UUID != "restored-trojan-password" {
+		t.Fatalf("active users = %#v; want restored trojan user", users)
 	}
 }

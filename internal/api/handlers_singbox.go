@@ -195,6 +195,19 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get user inbounds: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if len(inbounds) == 0 && s.store != nil {
+		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil && len(meta.InboundTags) > 0 && strings.TrimSpace(meta.Credential) != "" {
+			for _, tag := range meta.InboundTags {
+				inbounds = append(inbounds, core.UserInboundInfo{
+					Tag:           tag,
+					UUID:          meta.Credential,
+					Flow:          meta.Flow,
+					VmessSecurity: meta.VmessSecurity,
+					VmessAlterID:  meta.VmessAlterID,
+				})
+			}
+		}
+	}
 
 	if len(inbounds) > 0 {
 		tagTypes := map[string]string{}

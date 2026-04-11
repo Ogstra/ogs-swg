@@ -122,6 +122,8 @@ type User struct {
 	QuotaPeriod   sql.NullString `json:"quota_period"`
 	ResetDay      sql.NullInt64  `json:"reset_day"`
 	Enabled       sql.NullInt64  `json:"enabled"`
+	Credential    sql.NullString `json:"credential"`
+	Flow          sql.NullString `json:"flow"`
 	VmessSecurity sql.NullString `json:"vmess_security"`
 	VmessAlterID  sql.NullInt64  `json:"vmess_alter_id"`
 }
