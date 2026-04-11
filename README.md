@@ -160,6 +160,50 @@ Production-ready **Blue/Green deployment** via GitHub Actions: dual-slot topolog
 
 **[Full setup guide → DEPLOY_GITHUB_ACTIONS.md](DEPLOY_GITHUB_ACTIONS.md)**
 
+## Sing-box Build Requirements
+
+OGS-SWG requires sing-box to be built with specific tags for full functionality.
+
+### Required Build Tags
+
+| Tag | Purpose |
+|-----|---------|
+| `with_clash_api` | Clash API for hot config reload (zero-downtime restarts) |
+| `with_v2ray_api` | V2Ray StatsService for per-user traffic stats |
+| `with_gvisor` | Network stack for tun mode |
+| `with_quic` | QUIC transport (required for Hysteria2) |
+| `with_utls` | uTLS fingerprinting for Reality |
+| `badlinkname` | Required for Go 1.24+ compatibility |
+
+### Building from Source
+
+```bash
+go build -v -tags "with_clash_api,with_v2ray_api,with_gvisor,with_quic,with_utls,badlinkname" \
+    ./cmd/sing-box
+```
+
+### Official Binaries
+
+The official sing-box pre-built binaries from [sing-box.sagernet.org](https://sing-box.sagernet.org/) include all required tags. Operators using official binaries do not need to build from source.
+
+### Clash API Configuration
+
+Add a `clash_api` block to your sing-box `config.json` under `experimental`:
+
+```json
+"experimental": {
+  "clash_api": {
+    "external_controller": "127.0.0.1:9090"
+  }
+}
+```
+
+When the panel detects `clash_api.external_controller` in the sing-box config, it uses the Clash API `PUT /configs` endpoint for zero-downtime reloads instead of restarting the service.
+
+If `secret` is set in the Clash API config, the panel includes the `Authorization: Bearer <secret>` header automatically.
+
+> **Docker Local mode:** When sing-box and the panel run in separate containers, `127.0.0.1` inside the panel container refers to the container's own loopback, not the host. Bind `external_controller` to the Docker bridge IP (typically `172.17.0.1:9090`) or `0.0.0.0:9090` so the panel can reach the Clash API.
+
 ## License
 
 MIT
