@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, FeatureFlags, SamplerHistoryEntry, SubscriptionRequestHistoryEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
-import { Save, RefreshCw, UserCog, Shield, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
+import { Save, RefreshCw, UserCog, Shield, ShieldAlert, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -15,6 +15,7 @@ import SingboxConfigEditor from '../../components/SingboxConfigEditor'
 import { Tabs } from '../../components/ui/Tabs'
 import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './components/PanelUsers'
+import SecurityTab from './components/SecurityTab'
 import { WireGuardRawConfigModal } from './components/WireGuardRawConfigModal'
 import {
     WG_INTERFACE_DEFAULTS,
@@ -373,6 +374,17 @@ export default function Settings() {
                     subscriptionRequestHistory={subscriptionRequestHistory}
                 />
             )
+        },
+        {
+            id: 'security',
+            label: <span className="flex items-center gap-2"><ShieldAlert size={16} /> Security</span>,
+            content: (
+                <SecurityTab
+                    canWriteSettings={canWriteSettings}
+                    success={success}
+                    toastError={toastError}
+                />
+            ),
         },
         ...(permissions?.can_read_panel_users ? [{
             id: 'panel-users',
