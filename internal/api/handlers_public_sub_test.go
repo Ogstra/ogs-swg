@@ -791,6 +791,55 @@ func TestHandlePublicSubscription_SocialFetchersFilter_Disabled(t *testing.T) {
 	}
 }
 
+func TestHandlePublicSubscription_SocialFetcherDoesNotConsumeRateLimitQuota(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	// Set a tight rate limit of 1 request per minute and enable social fetcher blocking.
+	server.config.SubscriptionProtection.MaxRequests = 1
+	server.config.SubscriptionProtection.WindowSeconds = 60
+	server.config.SubscriptionProtection.SocialFetchersBlockEnabled = true
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "sf-quota-token",
+		Name:        "SF Quota Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	// Send a social fetcher request (simulating WhatsApp preview bot).
+	// It must be blocked with 403, NOT consume a rate-limit slot.
+	for i := range 8 {
+		req := httptest.NewRequest(http.MethodGet, "/s/sf-quota-token", nil)
+		req.SetPathValue("token", "sf-quota-token")
+		req.Header.Set("User-Agent", "WhatsApp/2.23.20.0 A")
+		rec := httptest.NewRecorder()
+		server.handlePublicSubscription(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("social fetcher request %d: status=%d, want 403", i+1, rec.Code)
+		}
+	}
+
+	// After 8 social fetcher hits, a legitimate proxy client request must still succeed
+	// because the social fetcher requests must not have consumed any rate-limit quota.
+	legitReq := httptest.NewRequest(http.MethodGet, "/s/sf-quota-token", nil)
+	legitReq.SetPathValue("token", "sf-quota-token")
+	legitReq.Header.Set("User-Agent", "ClashMeta/1.18.0")
+	legitRec := httptest.NewRecorder()
+	server.handlePublicSubscription(legitRec, legitReq)
+	if legitRec.Code != http.StatusOK {
+		t.Fatalf("legitimate client after social fetcher hits: status=%d body=%q (social fetcher requests must not consume rate-limit quota)", legitRec.Code, legitRec.Body.String())
+	}
+}
+
 func TestHandlePublicSubscription_EmitsRefreshPolicyHeaders(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
 	interval := int64(24)
