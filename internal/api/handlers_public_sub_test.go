@@ -558,11 +558,11 @@ func TestSubscriptionProtectionSettingsRoutes(t *testing.T) {
 	if err := json.NewDecoder(getRec.Body).Decode(&current); err != nil {
 		t.Fatalf("decode get response: %v", err)
 	}
-	if current.MaxRequests != 60 || current.WindowSeconds != 60 || current.UAFilterEnabled {
+	if current.MaxRequests != 60 || current.WindowSeconds != 60 || current.UAFilterEnabled || current.SocialFetchersBlockEnabled {
 		t.Fatalf("unexpected initial config: %+v", current)
 	}
 
-	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/subscription-protection", strings.NewReader(`{"max_requests":7,"window_seconds":45,"ua_filter_enabled":true}`))
+	putReq := httptest.NewRequest(http.MethodPut, "/api/settings/subscription-protection", strings.NewReader(`{"max_requests":7,"window_seconds":45,"ua_filter_enabled":true,"social_fetchers_block_enabled":true}`))
 	putReq.Header.Set("Content-Type", "application/json")
 	putReq.Header.Set("X-API-Key", "settings-key")
 	putRec := serveAuthedRequest(server, putReq)
@@ -575,7 +575,7 @@ func TestSubscriptionProtectionSettingsRoutes(t *testing.T) {
 	if err := json.NewDecoder(putRec.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode put response: %v", err)
 	}
-	if updated.MaxRequests != 7 || updated.WindowSeconds != 45 || !updated.UAFilterEnabled {
+	if updated.MaxRequests != 7 || updated.WindowSeconds != 45 || !updated.UAFilterEnabled || !updated.SocialFetchersBlockEnabled {
 		t.Fatalf("unexpected updated config: %+v", updated)
 	}
 	if server.config.SubscriptionProtection != updated {
@@ -709,6 +709,80 @@ func TestHandlePublicSubscription_UAFilter_AllowsKnownClientUA(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/s/client-ua-token", nil)
 	req.SetPathValue("token", "client-ua-token")
 	req.Header.Set("User-Agent", "Mozilla/5.0 Shadowrocket/2306 CFNetwork/1410.0 Darwin/22.0.0")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlePublicSubscription_SocialFetchersFilter_Enabled(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.config.SubscriptionProtection.SocialFetchersBlockEnabled = true
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "social-fetcher-token",
+		Name:        "Social Fetcher Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/social-fetcher-token", nil)
+	req.SetPathValue("token", "social-fetcher-token")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), 10, 0)
+	if err != nil {
+		t.Fatalf("GetBlockedSubscriptionRequests: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatalf("expected blocked request rows")
+	}
+	if rows[0].BlockReason != "ua_social_fetcher" {
+		t.Fatalf("block_reason=%q want %q", rows[0].BlockReason, "ua_social_fetcher")
+	}
+}
+
+func TestHandlePublicSubscription_SocialFetchersFilter_Disabled(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "social-fetcher-disabled-token",
+		Name:        "Social Fetcher Disabled Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/social-fetcher-disabled-token", nil)
+	req.SetPathValue("token", "social-fetcher-disabled-token")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)")
 	rec := httptest.NewRecorder()
 	server.handlePublicSubscription(rec, req)
 

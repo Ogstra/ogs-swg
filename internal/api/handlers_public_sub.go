@@ -106,8 +106,13 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 		s.subscriptionLimiter.record(token)
 	}
+	if s.config.SubscriptionProtection.SocialFetchersBlockEnabled && isSocialFetcherUA(r.UserAgent()) {
+		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_social_fetcher")
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
 	if s.config.SubscriptionProtection.UAFilterEnabled && isBrowserUA(r.UserAgent()) {
-		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_filter")
+		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_browser")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
 	}
@@ -300,7 +305,7 @@ func (s *Server) recordBlockedSubscriptionRequest(r *http.Request, subID int64, 
 	})
 }
 
-func isBrowserUA(ua string) bool {
+func isSubscriptionClientUA(ua string) bool {
 	trimmed := strings.TrimSpace(ua)
 	if trimmed == "" {
 		return false
@@ -323,8 +328,56 @@ func isBrowserUA(ua string) bool {
 		"karing",
 	} {
 		if strings.Contains(lowered, knownClient) {
-			return false
+			return true
 		}
+	}
+	return false
+}
+
+func isSocialFetcherUA(ua string) bool {
+	trimmed := strings.TrimSpace(ua)
+	if trimmed == "" {
+		return false
+	}
+	if isSubscriptionClientUA(trimmed) {
+		return false
+	}
+
+	lowered := strings.ToLower(trimmed)
+	for _, marker := range []string{
+		"facebookexternalhit",
+		"facebookcatalog",
+		"meta-externalagent",
+		"meta-externalfetcher",
+		"twitterbot",
+		"slackbot-linkexpanding",
+		"slack-imgproxy",
+		"slackbot",
+		"linkedinbot",
+		"discordbot",
+		"telegrambot",
+		"skypeuripreview",
+		"microsoftpreview",
+		"whatsapp/",
+		"instagram",
+		"fban/",
+		"fbav/",
+		"messenger",
+	} {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func isBrowserUA(ua string) bool {
+	trimmed := strings.TrimSpace(ua)
+	if trimmed == "" {
+		return false
+	}
+	if isSubscriptionClientUA(trimmed) {
+		return false
 	}
 
 	parsed := parseSubscriptionUserAgent(trimmed)

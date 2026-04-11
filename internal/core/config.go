@@ -68,9 +68,10 @@ type Config struct {
 }
 
 type SubscriptionProtectionConfig struct {
-	MaxRequests     int  `json:"max_requests"`
-	WindowSeconds   int  `json:"window_seconds"`
-	UAFilterEnabled bool `json:"ua_filter_enabled"`
+	MaxRequests                int  `json:"max_requests"`
+	WindowSeconds              int  `json:"window_seconds"`
+	UAFilterEnabled            bool `json:"ua_filter_enabled"`
+	SocialFetchersBlockEnabled bool `json:"social_fetchers_block_enabled"`
 }
 
 type UserAccount struct {

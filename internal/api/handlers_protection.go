@@ -87,9 +87,10 @@ func (s *Server) handleGetSubscriptionProtection(w http.ResponseWriter, _ *http.
 
 func (s *Server) handleUpdateSubscriptionProtection(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		MaxRequests     int  `json:"max_requests"`
-		WindowSeconds   int  `json:"window_seconds"`
-		UAFilterEnabled bool `json:"ua_filter_enabled"`
+		MaxRequests                int  `json:"max_requests"`
+		WindowSeconds              int  `json:"window_seconds"`
+		UAFilterEnabled            bool `json:"ua_filter_enabled"`
+		SocialFetchersBlockEnabled bool `json:"social_fetchers_block_enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -99,6 +100,7 @@ func (s *Server) handleUpdateSubscriptionProtection(w http.ResponseWriter, r *ht
 	s.config.SubscriptionProtection.MaxRequests = req.MaxRequests
 	s.config.SubscriptionProtection.WindowSeconds = req.WindowSeconds
 	s.config.SubscriptionProtection.UAFilterEnabled = req.UAFilterEnabled
+	s.config.SubscriptionProtection.SocialFetchersBlockEnabled = req.SocialFetchersBlockEnabled
 	s.config.SubscriptionProtection.MaxRequests = max(s.config.SubscriptionProtection.MaxRequests, 1)
 	s.config.SubscriptionProtection.WindowSeconds = max(s.config.SubscriptionProtection.WindowSeconds, 1)
 
