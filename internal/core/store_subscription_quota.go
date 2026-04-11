@@ -9,10 +9,7 @@ import (
 // EnforceSubscriptionQuotas evaluates all subscriptions with quota_limit > 0 and
 // bidirectionally enforces them:
 //   - If total period usage >= quota_limit → disable all assigned users in sing-box.
-//   - If total period usage < quota_limit  → re-enable disabled users (e.g. after quota raised).
-//
-// Re-enabling only updates the metadata DB flag; the next API call or config reload
-// will restore the user in sing-box. This matches the behaviour of individual user quotas.
+//   - If total period usage < quota_limit  → re-enable disabled users and restore them in sing-box.
 func (s *Store) EnforceSubscriptionQuotas(cfg *Config) {
 	ctx := context.Background()
 
@@ -52,6 +49,7 @@ func (s *Store) EnforceSubscriptionQuotas(cfg *Config) {
 
 			if overQuota {
 				if meta.Enabled {
+					captureUserRestoreState(meta, cfg)
 					meta.Enabled = false
 					_ = cfg.RemoveUser(userName)
 					if saveErr := s.SaveUserMetadata(*meta); saveErr != nil {
@@ -61,10 +59,13 @@ func (s *Store) EnforceSubscriptionQuotas(cfg *Config) {
 					}
 				}
 			} else {
-				// Quota raised: re-enable user in metadata so next API call/config reload restores them.
 				// Keep users disabled if they are still over their own individual quota.
 				if !meta.Enabled {
 					if s.userStillOverOwnQuota(meta, now) {
+						continue
+					}
+					if err := s.restoreUserFromMetadata(meta, cfg); err != nil {
+						log.Printf("EnforceSubscriptionQuotas: restore %s: %v", userName, err)
 						continue
 					}
 					meta.Enabled = true

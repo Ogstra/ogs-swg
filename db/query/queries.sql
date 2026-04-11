@@ -213,21 +213,23 @@ SELECT COUNT(*) FROM (
 
 -- Users / Metadata --
 -- name: UpsertUser :exec
-INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id) 
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id) 
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(email) DO UPDATE SET
 	quota_limit = excluded.quota_limit,
 	quota_period = excluded.quota_period,
 	reset_day = excluded.reset_day,
 	enabled = excluded.enabled,
+	credential = excluded.credential,
+	flow = excluded.flow,
 	vmess_security = excluded.vmess_security,
 	vmess_alter_id = excluded.vmess_alter_id;
 
 -- name: GetUser :one
-SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users WHERE email = ?;
+SELECT email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id FROM users WHERE email = ?;
 
 -- name: GetAllUsers :many
-SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users;
+SELECT email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id FROM users;
 
 -- name: DeleteUser :exec
 DELETE FROM users WHERE email = ?;

@@ -745,6 +745,12 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			limit = meta.QuotaLimit
 			period = meta.QuotaPeriod
 			enabled = meta.Enabled
+			if uuid == "" && meta.Credential != "" {
+				uuid = meta.Credential
+			}
+			if flow == "" && meta.Flow != "" {
+				flow = meta.Flow
+			}
 			if vmessSecurity == "" && meta.VmessSecurity != "" {
 				vmessSecurity = meta.VmessSecurity
 			}
@@ -773,8 +779,32 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			enabled = true
 		}
 
-		// If strictly disabled in metadata, but active in config, we still show as enabled=false (logic in handleUpdateUser handles sync)
-		// But in UI we verify state.
+		// Live sing-box state wins over stale metadata for effective enabled status.
+		// This prevents users manually restored to an inbound from staying stuck as
+		// "Disabled" in the UI until the next sampler reconciliation.
+		if isActive {
+			enabled = true
+			if hasMeta && metadataNeedsActiveBackfill(meta, user) {
+				metaToSave := meta
+				metaToSave.Enabled = true
+				if metaToSave.Credential == "" {
+					metaToSave.Credential = user.UUID
+				}
+				if metaToSave.Flow == "" {
+					metaToSave.Flow = user.Flow
+				}
+				if len(metaToSave.InboundTags) == 0 {
+					metaToSave.InboundTags = canonicalInboundTags(user.InboundTags...)
+				}
+				if metaToSave.VmessSecurity == "" {
+					metaToSave.VmessSecurity = user.VmessSecurity
+				}
+				if metaToSave.VmessAlterID == 0 {
+					metaToSave.VmessAlterID = user.VmessAlterID
+				}
+				_ = s.store.SaveUserMetadata(metaToSave)
+			}
+		}
 
 		// Stats calculation for user table indicators:
 		// always show current calendar month usage.
@@ -889,6 +919,10 @@ func canonicalInboundTags(tags ...string) []string {
 	return []string{}
 }
 
+func metadataNeedsActiveBackfill(meta core.UserMetadata, user core.UserAccount) bool {
+	return len(meta.InboundTags) == 0 || (meta.Credential == "" && user.UUID != "") || (meta.Flow == "" && user.Flow != "") || (meta.VmessSecurity == "" && user.VmessSecurity != "") || (meta.VmessAlterID == 0 && user.VmessAlterID != 0)
+}
+
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -933,6 +967,8 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		QuotaPeriod:   req.QuotaPeriod,
 		ResetDay:      1,
 		Enabled:       enabled,
+		Credential:    req.UUID,
+		Flow:          req.Flow,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
 		InboundTags:   canonicalInboundTags(req.InboundTag),
@@ -979,7 +1015,11 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.UUID == "" {
-		req.UUID = uuid.NewString()
+		if existingMeta != nil && existingMeta.Credential != "" {
+			req.UUID = existingMeta.Credential
+		} else {
+			req.UUID = uuid.NewString()
+		}
 	}
 
 	// inboundTags tracks which inbound tags to persist in metadata.
@@ -1042,6 +1082,20 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		// Disable path: capture current inbound tags before removing the user.
 		if currentInbounds, err := s.config.GetUserInbounds(originalName); err == nil && len(currentInbounds) > 0 {
 			inboundTags = canonicalInboundTags(currentInbounds[0].Tag)
+			if currentInbounds[0].UUID != "" {
+				req.UUID = currentInbounds[0].UUID
+			} else if currentInbounds[0].Password != "" {
+				req.UUID = currentInbounds[0].Password
+			}
+			if currentInbounds[0].Flow != "" {
+				req.Flow = currentInbounds[0].Flow
+			}
+			if currentInbounds[0].VmessSecurity != "" {
+				req.VmessSecurity = currentInbounds[0].VmessSecurity
+			}
+			if currentInbounds[0].VmessAlterID != 0 {
+				req.VmessAlterID = currentInbounds[0].VmessAlterID
+			}
 		}
 		// If GetUserInbounds failed or returned empty, preserve existing inboundTags from metadata.
 
@@ -1057,6 +1111,8 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		QuotaPeriod:   req.QuotaPeriod,
 		ResetDay:      1,
 		Enabled:       enabled,
+		Credential:    req.UUID,
+		Flow:          req.Flow,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
 		InboundTags:   inboundTags,
@@ -1077,6 +1133,12 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if originalName != req.Name {
 		s.store.DeleteUserMetadata(originalName)
+	}
+	if enabled {
+		if err := s.store.EnforceUserQuotaNow(req.Name, s.config); err != nil {
+			http.Error(w, "Failed to enforce user quota: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	s.cache.Del("api:status")
@@ -1165,6 +1227,8 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 	}
 
 	if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+		meta.Credential = req.UUID
+		meta.Flow = req.Flow
 		if req.VmessSecurity != "" {
 			meta.VmessSecurity = req.VmessSecurity
 		}
@@ -1209,8 +1273,11 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 			QuotaPeriod:   req.QuotaPeriod,
 			ResetDay:      1,
 			Enabled:       enabled,
+			Credential:    req.UUID,
+			Flow:          req.Flow,
 			VmessSecurity: req.VmessSecurity,
 			VmessAlterID:  req.VmessAlterID,
+			InboundTags:   canonicalInboundTags(req.InboundTag),
 		}
 		s.store.SaveUserMetadata(meta)
 	}

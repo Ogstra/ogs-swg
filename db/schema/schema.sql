@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
 	quota_period TEXT DEFAULT 'monthly',
 	reset_day INTEGER DEFAULT 1,
 	enabled INTEGER DEFAULT 1,
+	credential TEXT DEFAULT '',
+	flow TEXT DEFAULT '',
 	vmess_security TEXT DEFAULT '',
 	vmess_alter_id INTEGER DEFAULT 0
 );

@@ -79,6 +79,8 @@ type UserMetadata struct {
 	QuotaPeriod   string   `json:"quota_period"`
 	ResetDay      int      `json:"reset_day"`
 	Enabled       bool     `json:"enabled"`
+	Credential    string   `json:"credential,omitempty"`
+	Flow          string   `json:"flow,omitempty"`
 	VmessSecurity string   `json:"vmess_security,omitempty"`
 	VmessAlterID  int      `json:"vmess_alter_id,omitempty"`
 	InboundTags   []string `json:"inbound_tags,omitempty"`
@@ -132,6 +134,8 @@ func (s *Store) initSchema() error {
 		quota_period TEXT DEFAULT 'monthly',
 		reset_day INTEGER DEFAULT 1,
 		enabled INTEGER DEFAULT 1,
+		credential TEXT DEFAULT '',
+		flow TEXT DEFAULT '',
 		vmess_security TEXT DEFAULT '',
 		vmess_alter_id INTEGER DEFAULT 0
 	);
@@ -292,6 +296,8 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add inbound_tags to existing users tables that predate this column.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';")
+	s.db.Exec("ALTER TABLE users ADD COLUMN credential TEXT DEFAULT '';")
+	s.db.Exec("ALTER TABLE users ADD COLUMN flow TEXT DEFAULT '';")
 	// Reset day is now fixed to 1 for all users.
 	s.db.Exec("UPDATE users SET reset_day = 1 WHERE COALESCE(reset_day, 1) != 1;")
 	// Upgrade path: add can_read_logs_censored to existing panel_users tables.
@@ -1304,6 +1310,14 @@ func (s *Store) SaveUserMetadata(meta UserMetadata) error {
 			Int64: enabled,
 			Valid: true,
 		},
+		Credential: sql.NullString{
+			String: meta.Credential,
+			Valid:  true,
+		},
+		Flow: sql.NullString{
+			String: meta.Flow,
+			Valid:  true,
+		},
 		VmessSecurity: sql.NullString{
 			String: meta.VmessSecurity,
 			Valid:  true,
@@ -1357,6 +1371,8 @@ func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
 		QuotaPeriod:   meta.QuotaPeriod.String,
 		ResetDay:      int(meta.ResetDay.Int64),
 		Enabled:       meta.Enabled.Int64 != 0,
+		Credential:    meta.Credential.String,
+		Flow:          meta.Flow.String,
 		VmessSecurity: meta.VmessSecurity.String,
 		VmessAlterID:  int(meta.VmessAlterID.Int64),
 		InboundTags:   inboundTags,
@@ -1462,6 +1478,8 @@ func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
 			QuotaPeriod:   meta.QuotaPeriod.String,
 			ResetDay:      int(meta.ResetDay.Int64),
 			Enabled:       meta.Enabled.Int64 != 0,
+			Credential:    meta.Credential.String,
+			Flow:          meta.Flow.String,
 			VmessSecurity: meta.VmessSecurity.String,
 			VmessAlterID:  int(meta.VmessAlterID.Int64),
 			InboundTags:   tags,
