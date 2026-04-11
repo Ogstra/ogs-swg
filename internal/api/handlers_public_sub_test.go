@@ -1466,3 +1466,53 @@ func TestHandleSubscriptionRequestHistory_CensorsSensitiveFieldsForRestrictedCal
 		t.Fatalf("expected sensitive request metadata to be censored, got %+v", got[0])
 	}
 }
+
+// TestBlockedSubscriptionRequest_DedupWithinWindow verifies that multiple blocked
+// requests from the same IP for the same subscription and block reason within the
+// dedup window are recorded only once. This guards against duplicate entries caused
+// by parallel link-preview fetchers (e.g. WhatsApp) or rapid browser retries.
+func TestBlockedSubscriptionRequest_DedupWithinWindow(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	server.config.SubscriptionProtection.SocialFetchersBlockEnabled = true
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "dedup-test-token",
+		Name:        "Dedup Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	// Simulate three parallel requests from the same IP (as WhatsApp link-preview does).
+	whatsappUA := "WhatsApp/2.23.1.79 A"
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/s/dedup-test-token", nil)
+		req.SetPathValue("token", "dedup-test-token")
+		req.Header.Set("User-Agent", whatsappUA)
+		rec := httptest.NewRecorder()
+		server.handlePublicSubscription(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("request %d: status=%d body=%q", i, rec.Code, rec.Body.String())
+		}
+	}
+
+	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), 10, 0)
+	if err != nil {
+		t.Fatalf("GetBlockedSubscriptionRequests: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected exactly 1 blocked record (dedup), got %d", len(rows))
+	}
+	if rows[0].BlockReason != "ua_social_fetcher" {
+		t.Fatalf("block_reason=%q want %q", rows[0].BlockReason, "ua_social_fetcher")
+	}
+}
