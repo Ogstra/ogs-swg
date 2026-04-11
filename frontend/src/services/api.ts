@@ -150,6 +150,38 @@ export interface SubscriptionRequestHistoryEntry {
     served_from_cache: number;
 }
 
+export interface SubscriptionProtectionConfig {
+    max_requests: number;
+    window_seconds: number;
+    ua_filter_enabled: boolean;
+}
+
+export type ProtectionRuleType = 'ip_block' | 'token_block' | 'ip_allow';
+
+export interface ProtectionRule {
+    id: number;
+    rule_type: ProtectionRuleType;
+    value: string;
+    note: string;
+    created_at: number;
+}
+
+export interface CreateProtectionRuleRequest {
+    rule_type: ProtectionRuleType;
+    value: string;
+    note: string;
+}
+
+export interface BlockedSubscriptionRequestEntry {
+    id: number;
+    sub_id: number;
+    sub_name: string;
+    request_ip: string;
+    requested_at: number;
+    block_reason: string;
+    user_agent: string;
+}
+
 export interface CreateWireGuardInterfaceRequest {
     name: string;
     subnet: string;
@@ -882,6 +914,48 @@ export const api = {
         const url = limit ? `/api/subscription-requests/history?limit=${limit}` : '/api/subscription-requests/history';
         const res = await fetch(url, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch subscription request history');
+        return res.json();
+    },
+    getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> => {
+        const res = await fetch('/api/settings/subscription-protection', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription protection settings');
+        return res.json();
+    },
+    updateSubscriptionProtection: async (payload: Partial<SubscriptionProtectionConfig>): Promise<void> => {
+        const res = await fetch('/api/settings/subscription-protection', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload),
+        });
+        await handleResponse(res, 'Failed to update subscription protection settings');
+    },
+    getProtectionRules: async (): Promise<ProtectionRule[]> => {
+        const res = await fetch('/api/settings/protection-rules', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch protection rules');
+        return res.json();
+    },
+    createProtectionRule: async (payload: CreateProtectionRuleRequest): Promise<void> => {
+        const res = await fetch('/api/settings/protection-rules', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload),
+        });
+        await handleResponse(res, 'Failed to create protection rule');
+    },
+    deleteProtectionRule: async (id: number): Promise<void> => {
+        const res = await fetch(`/api/settings/protection-rules/${id}`, {
+            method: 'DELETE',
+            headers: buildHeaders(),
+        });
+        await handleResponse(res, 'Failed to delete protection rule');
+    },
+    getBlockedSubscriptionRequestLog: async (limit: number, offset: number): Promise<BlockedSubscriptionRequestEntry[]> => {
+        const params = new URLSearchParams({
+            limit: String(limit),
+            offset: String(offset),
+        });
+        const res = await fetch(`/api/settings/protection-rules/blocked-log?${params.toString()}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch blocked request log');
         return res.json();
     },
     pruneNow: async (): Promise<{ deleted: number; cutoff: number }> => {
