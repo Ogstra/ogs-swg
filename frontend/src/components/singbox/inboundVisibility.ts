@@ -427,21 +427,6 @@ function parseHeaders(headers: unknown) {
     }
 }
 
-export function getPrimaryHysteria2Password(inbound: InboundLike | null | undefined): string {
-    return String(inbound?.users?.[0]?.password || '')
-}
-
-export function setPrimaryHysteria2Password(inbound: InboundLike, password: string) {
-    const next = normalizeInboundForEditor(inbound)
-    const currentTag = String(next.tag || 'default')
-    next.users = normalizeHysteria2Users(next.users, currentTag)
-    next.users[0].password = password
-    if (!next.users[0].name) {
-        next.users[0].name = currentTag
-    }
-    return next
-}
-
 export function canSelectInboundUserFlow(userType: string, inbound: InboundLike | null | undefined): boolean {
     return String(userType || '').toLowerCase() === 'vless' && getInboundTransportType(inbound) !== 'ws'
 }
@@ -513,13 +498,9 @@ export function buildInboundSubmission(formData: InboundLike) {
             return { error: 'Hysteria2 requires TLS and cannot be saved with TLS disabled.' }
         }
 
-        const password = getPrimaryHysteria2Password(submission).trim()
-        if (!password) {
-            return { error: 'Hysteria2 password is required.' }
-        }
-
         const userName = String(submission.users?.[0]?.name || submission.tag || 'default')
-        submission.users = [{ name: userName, password }]
+        const existingPassword = String(submission.users?.[0]?.password || '')
+        submission.users = [{ name: userName, password: existingPassword }]
 
         const upMbps = parseOptionalPositiveInteger(submission.up_mbps, 'Hysteria2 up_mbps')
         if (upMbps.error) return { error: upMbps.error }
