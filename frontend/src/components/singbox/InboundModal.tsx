@@ -8,9 +8,7 @@ import {
     buildInboundSubmission,
     computeInboundVisibility,
     getDefaultInbound,
-    getPrimaryHysteria2Password,
     normalizeInboundForEditor,
-    setPrimaryHysteria2Password,
 } from './inboundVisibility'
 
 interface InboundModalProps {
@@ -105,8 +103,6 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
         setValidationError('')
         await submitPayload(result.submission)
     }
-
-    const hysteria2Password = getPrimaryHysteria2Password(formData)
 
     return (
         <>
@@ -489,17 +485,6 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                     <div className="space-y-4">
                         <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">Hysteria2</h3>
                         <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
-                            <div className="space-y-1">
-                                <label className="text-xs font-medium text-slate-300">Password</label>
-                                <input
-                                    type="text"
-                                    value={hysteria2Password}
-                                    onChange={e => setFormData((prev: any) => setPrimaryHysteria2Password(prev, e.target.value))}
-                                    className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
-                                    placeholder="Enter Hysteria2 password"
-                                />
-                            </div>
-
                             {visibility.showHysteria2Bandwidth && (
                                 <div className="grid grid-cols-2 gap-4">
                                     <div className="space-y-1">
