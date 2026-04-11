@@ -116,6 +116,29 @@ func (s *Store) restoreUserFromMetadata(meta *UserMetadata, cfg *Config) error {
 	return nil
 }
 
+func (s *Store) userStillOverSubscriptionQuota(email string, now time.Time) bool {
+	subs, err := s.Queries.GetSubscriptionsForUser(context.Background(), email)
+	if err != nil {
+		log.Printf("userStillOverSubscriptionQuota: subscriptions for %s: %v", email, err)
+		return false
+	}
+	for _, sub := range subs {
+		limit := sub.QuotaLimit.Int64
+		if limit <= 0 {
+			continue
+		}
+		used, err := s.subscriptionUsage(sub.ID, sub.QuotaPeriod.String, now)
+		if err != nil {
+			log.Printf("userStillOverSubscriptionQuota: usage for %s sub %d: %v", email, sub.ID, err)
+			continue
+		}
+		if used >= limit {
+			return true
+		}
+	}
+	return false
+}
+
 // EnforceUserQuotas evaluates all users with individual quota metadata and
 // bidirectionally enforces them against the live sing-box config.
 func (s *Store) EnforceUserQuotas(cfg *Config) {
@@ -195,6 +218,54 @@ func (s *Store) EnforceUserQuotaNow(email string, cfg *Config) error {
 	}
 
 	log.Printf("EnforceUserQuotaNow: disabled %s immediately after edit (used=%d, limit=%d, period=%s)", meta.Email, used, meta.QuotaLimit, meta.QuotaPeriod)
+	return nil
+}
+
+func (s *Store) ReconcileUserQuotaNow(email string, cfg *Config) error {
+	meta, err := s.GetUserMetadata(email)
+	if err != nil || meta == nil {
+		return err
+	}
+
+	now := time.Now()
+	used, overOwnQuota, err := userQuotaUsage(meta, now, s)
+	if err != nil {
+		return err
+	}
+	overSubscriptionQuota := s.userStillOverSubscriptionQuota(email, now)
+	inbounds, err := cfg.GetUserInbounds(meta.Email)
+	if err != nil {
+		return err
+	}
+	isActive := len(inbounds) > 0
+
+	if overOwnQuota || overSubscriptionQuota {
+		if isActive {
+			captureUserRestoreState(meta, cfg)
+			_ = cfg.RemoveUser(meta.Email)
+		}
+		if meta.Enabled || isActive {
+			meta.Enabled = false
+			if err := s.SaveUserMetadata(*meta); err != nil {
+				return err
+			}
+			log.Printf("ReconcileUserQuotaNow: disabled %s immediately after edit (used=%d, limit=%d, period=%s)", meta.Email, used, meta.QuotaLimit, meta.QuotaPeriod)
+		}
+		return nil
+	}
+
+	if !isActive {
+		if err := s.restoreUserFromMetadata(meta, cfg); err != nil {
+			return err
+		}
+	}
+	if !meta.Enabled || !isActive {
+		meta.Enabled = true
+		if err := s.SaveUserMetadata(*meta); err != nil {
+			return err
+		}
+		log.Printf("ReconcileUserQuotaNow: enabled %s immediately after edit (used=%d, limit=%d, period=%s)", meta.Email, used, meta.QuotaLimit, meta.QuotaPeriod)
+	}
 	return nil
 }
 

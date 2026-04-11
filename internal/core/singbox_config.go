@@ -74,8 +74,7 @@ func (c *Config) writeValidatedSingboxConfigMapLocked(raw map[string]interface{}
 		return err
 	}
 
-	c.SingboxPendingChanges = true
-	return nil
+	return c.afterSingboxConfigWriteLocked(nil)
 }
 
 func decodeInboundRawList(raw json.RawMessage) ([]json.RawMessage, error) {
@@ -463,8 +462,7 @@ func (c *Config) modifySingboxConfig(modifier func(*SingboxConfig) error) error 
 		return err
 	}
 
-	c.SingboxPendingChanges = true
-	return nil
+	return c.afterSingboxConfigWriteLocked(&cfg)
 }
 
 func decodeSingboxInboundMeta(rawInbound json.RawMessage) (SingboxInboundMeta, error) {
@@ -788,8 +786,7 @@ func (c *Config) UpdateSingboxOutboundDomainStrategies(updates []SingboxOutbound
 		return err
 	}
 
-	c.SingboxPendingChanges = true
-	return nil
+	return c.afterSingboxConfigWriteLocked(&cfg)
 }
 
 type UserInboundInfo struct {
@@ -1022,8 +1019,7 @@ func (c *Config) saveAndReload(rawConfig *SingboxConfig) error {
 		}
 	}
 
-	c.MarkSingboxPending()
-	return nil
+	return c.afterSingboxConfigWriteLocked(rawConfig)
 }
 
 func (c *Config) ValidateConfig(content []byte) error {
@@ -1267,6 +1263,27 @@ func (c *Config) UpsertSingboxRouteRules(newRules []map[string]interface{}) erro
 	if err := c.writeSingboxConfigLocked(data); err != nil {
 		return err
 	}
+	return c.afterSingboxConfigWriteLocked(nil)
+}
+
+func (c *Config) afterSingboxConfigWriteLocked(cfg *SingboxConfig) error {
+	if cfg == nil {
+		raw, err := c.readSingboxConfigLocked()
+		if err == nil {
+			var parsed SingboxConfig
+			if json.Unmarshal(raw, &parsed) == nil {
+				cfg = &parsed
+			}
+		}
+	}
+
+	if cfg != nil && cfg.Experimental != nil && cfg.Experimental.ClashAPI != nil && cfg.Experimental.ClashAPI.ExternalController != "" {
+		if err := c.reloadViaClashAPI(cfg.Experimental.ClashAPI); err == nil {
+			c.SingboxPendingChanges = false
+			return nil
+		}
+	}
+
 	c.SingboxPendingChanges = true
 	return nil
 }

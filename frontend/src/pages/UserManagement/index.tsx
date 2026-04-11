@@ -196,7 +196,6 @@ export default function UserManagement() {
     }
 
     const refreshUsersData = async () => {
-        setSingboxPendingChanges(true)
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['users'] }),
             queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
@@ -498,15 +497,6 @@ export default function UserManagement() {
 
                 if (newUser.enabled !== false) {
                     const originalSet = new Set(originalTags)
-
-                    if (originalSet.has(inboundTag)) {
-                        await api.updateUserInbound(newUser.name, inboundTag, {
-                            uuid: payload.uuid,
-                            flow: selectedFlow,
-                            vmess_security: vmessSecurity,
-                            vmess_alter_id: vmessAlterID,
-                        })
-                    }
 
                     for (const tag of originalTags) {
                         if (tag !== inboundTag) {

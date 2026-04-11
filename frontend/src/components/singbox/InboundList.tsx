@@ -25,16 +25,6 @@ export default function InboundList() {
         loadInbounds()
     }, [])
 
-    const setSingboxPendingChanges = (pending: boolean) => {
-        queryClient.setQueryData(['dashboard-pending-changes'], (old: any) => ({
-            ...(old || {}),
-            singbox_pending_changes: pending,
-        }))
-        queryClient.setQueriesData({ queryKey: ['dashboard-data'] }, (old: any) =>
-            old ? { ...old, singbox_pending_changes: pending } : old
-        )
-    }
-
     const loadInbounds = async () => {
         setLoading(true)
         try {
@@ -57,7 +47,6 @@ export default function InboundList() {
             await api.deleteSingboxInbound(tag)
             success('Inbound deleted successfully')
             setConfirmDeleteTag(null)
-            setSingboxPendingChanges(true)
             await loadInbounds()
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
@@ -97,7 +86,6 @@ export default function InboundList() {
                 success('Inbound created successfully')
             }
             setIsModalOpen(false)
-            setSingboxPendingChanges(true)
             await loadInbounds()
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),

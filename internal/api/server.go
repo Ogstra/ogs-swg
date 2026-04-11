@@ -1134,9 +1134,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if originalName != req.Name {
 		s.store.DeleteUserMetadata(originalName)
 	}
-	if enabled {
-		if err := s.store.EnforceUserQuotaNow(req.Name, s.config); err != nil {
-			http.Error(w, "Failed to enforce user quota: "+err.Error(), http.StatusInternalServerError)
+	shouldReconcileQuota := existingMeta == nil ||
+		existingMeta.QuotaLimit != req.QuotaLimit ||
+		existingMeta.QuotaPeriod != req.QuotaPeriod ||
+		!existingMeta.Enabled
+	if shouldReconcileQuota {
+		if err := s.store.ReconcileUserQuotaNow(req.Name, s.config); err != nil {
+			http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -1239,6 +1243,11 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		_ = s.store.SaveUserMetadata(*meta)
 	}
 
+	if err := s.store.ReconcileUserQuotaNow(name, s.config); err != nil {
+		http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1280,6 +1289,7 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 			InboundTags:   canonicalInboundTags(req.InboundTag),
 		}
 		s.store.SaveUserMetadata(meta)
+		_ = s.store.ReconcileUserQuotaNow(req.Name, s.config)
 	}
 
 	s.cache.Del("api:status")
