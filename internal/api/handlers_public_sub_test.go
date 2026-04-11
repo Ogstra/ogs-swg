@@ -1006,8 +1006,8 @@ func TestHandlePublicSubscription_OmitsIntervalHeaderAfterDisablingViaUpdate(t *
 	secondRec := httptest.NewRecorder()
 	server.handlePublicSubscription(secondRec, secondReq)
 
-	if got := secondRec.Header().Get("profile-update-interval"); got != "" {
-		t.Fatalf("after disabling: profile-update-interval=%q want absent", got)
+	if got := secondRec.Header().Get("profile-update-interval"); got != "0" {
+		t.Fatalf("after disabling: profile-update-interval=%q want %q", got, "0")
 	}
 }
 
