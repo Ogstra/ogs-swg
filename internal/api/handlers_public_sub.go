@@ -709,9 +709,11 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 	if title := strings.TrimSpace(profileTitle); title != "" {
 		w.Header().Set("Profile-Title", title)
 	}
+	intervalVal := int64(0)
 	if profileUpdateInterval != nil {
-		w.Header().Set("profile-update-interval", strconv.FormatInt(*profileUpdateInterval, 10))
+		intervalVal = *profileUpdateInterval
 	}
+	w.Header().Set("profile-update-interval", strconv.FormatInt(intervalVal, 10))
 	if updateAlways {
 		w.Header().Set("update-always", "true")
 	}
