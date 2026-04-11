@@ -933,7 +933,9 @@ SELECT
 	COALESCE(sr.hwid_hash, ''),
 	COALESCE(sr.hwid_prefix, ''),
 	sr.requested_at,
-	sr.served_from_cache
+	sr.served_from_cache,
+	sr.blocked,
+	COALESCE(sr.block_reason, '')
 FROM subscription_requests sr
 JOIN subscriptions s ON s.id = sr.sub_id
 ORDER BY sr.requested_at DESC
@@ -958,6 +960,8 @@ type GetSubscriptionRequestHistoryRow struct {
 	HwidPrefix      string `json:"hwid_prefix"`
 	RequestedAt     int64  `json:"requested_at"`
 	ServedFromCache int64  `json:"served_from_cache"`
+	Blocked         int64  `json:"blocked"`
+	BlockReason     string `json:"block_reason"`
 }
 
 func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, limit int64) ([]GetSubscriptionRequestHistoryRow, error) {
@@ -987,6 +991,8 @@ func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, limit int64
 			&i.HwidPrefix,
 			&i.RequestedAt,
 			&i.ServedFromCache,
+			&i.Blocked,
+			&i.BlockReason,
 		); err != nil {
 			return nil, err
 		}
