@@ -68,19 +68,6 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	cacheKey := "sub:" + token
-	if val, found := s.cache.Get(cacheKey); found {
-		if c, ok := val.(cachedSub); ok {
-			sub, err := s.store.Queries.GetSubscriptionByToken(r.Context(), token)
-			if err == nil {
-				users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
-				s.recordSubscriptionRequest(r, sub.ID, users, true)
-			}
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
-			return
-		}
-	}
-
 	sub, err := s.store.Queries.GetSubscriptionByToken(r.Context(), token)
 	if err != nil {
 		http.NotFound(w, r)
@@ -91,6 +78,47 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	if err != nil || len(users) == 0 {
 		http.NotFound(w, r)
 		return
+	}
+
+	clientIP := resolveSubscriptionRequestIP(r)
+	allowlisted := s.protectionRules.isIPAllowed(clientIP)
+	if !allowlisted {
+		if s.protectionRules.isIPBlocked(clientIP) {
+			s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ip_block")
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		if s.protectionRules.isTokenBlocked(token) {
+			s.recordBlockedSubscriptionRequest(r, sub.ID, users, "token_block")
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		window := time.Duration(s.config.SubscriptionProtection.WindowSeconds) * time.Second
+		if blocked, retryAfter := s.subscriptionLimiter.check(token, s.config.SubscriptionProtection.MaxRequests, window); blocked {
+			s.recordBlockedSubscriptionRequest(r, sub.ID, users, "rate_limit")
+			retryAfterSeconds := int64(retryAfter.Seconds())
+			if retryAfterSeconds < 1 {
+				retryAfterSeconds = 1
+			}
+			w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
+			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+		s.subscriptionLimiter.record(token)
+	}
+	if s.config.SubscriptionProtection.UAFilterEnabled && isBrowserUA(r.UserAgent()) {
+		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_filter")
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	cacheKey := "sub:" + token
+	if val, found := s.cache.Get(cacheKey); found {
+		if c, ok := val.(cachedSub); ok {
+			s.recordSubscriptionRequest(r, sub.ID, users, true)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
+			return
+		}
 	}
 
 	var links []string
@@ -244,7 +272,75 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 		HwidPrefix:      meta.hwidPrefix,
 		RequestedAt:     s.now().Unix(),
 		ServedFromCache: servedFromCacheToInt64(servedFromCache),
+		Blocked:         0,
+		BlockReason:     "",
 	})
+}
+
+func (s *Server) recordBlockedSubscriptionRequest(r *http.Request, subID int64, users []string, blockReason string) {
+	meta := extractSubscriptionRequestMetadata(r)
+	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
+		SubID:           subID,
+		UserName:        strings.Join(users, ", "),
+		RequestIP:       resolveSubscriptionRequestIP(r),
+		RequestHost:     meta.requestHost,
+		RequestPath:     meta.requestPath,
+		UserAgent:       meta.userAgent,
+		DeviceModel:     meta.deviceModel,
+		DeviceOS:        meta.deviceOS,
+		DeviceOSVersion: meta.deviceOSVersion,
+		AppVersion:      meta.appVersion,
+		Country:         meta.country,
+		HwidHash:        meta.hwidHash,
+		HwidPrefix:      meta.hwidPrefix,
+		RequestedAt:     s.now().Unix(),
+		ServedFromCache: 0,
+		Blocked:         1,
+		BlockReason:     blockReason,
+	})
+}
+
+func isBrowserUA(ua string) bool {
+	trimmed := strings.TrimSpace(ua)
+	if trimmed == "" {
+		return false
+	}
+
+	lowered := strings.ToLower(trimmed)
+	for _, knownClient := range []string{
+		"v2rayn",
+		"shadowrocket",
+		"nekoray",
+		"clash",
+		"sing-box",
+		"hiddify",
+		"loon",
+		"stash",
+		"surge",
+		"quantumult",
+		"surfboard",
+		"kitsunebi",
+		"karing",
+	} {
+		if strings.Contains(lowered, knownClient) {
+			return false
+		}
+	}
+
+	parsed := parseSubscriptionUserAgent(trimmed)
+	switch parsed.clientName {
+	case "Chrome", "Firefox", "Safari", "Edge", "Opera":
+		return true
+	}
+	if strings.HasPrefix(trimmed, "Mozilla/") {
+		return true
+	}
+	for _, marker := range []string{"Chrome/", "Firefox/", "Safari/", "Edg/", "OPR/", "CriOS/", "FxiOS/"} {
+		if strings.Contains(trimmed, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func extractSubscriptionRequestMetadata(r *http.Request) subscriptionRequestMetadata {
