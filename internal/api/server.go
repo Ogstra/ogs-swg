@@ -27,27 +27,27 @@ import (
 )
 
 type Server struct {
-	store               *core.Store
-	config              *core.Config
-	executor            core.SystemExecutor
-	now                 func() time.Time
-	sampler             *core.StatsSampler
-	pool                *pond.WorkerPool
-	validate            *validator.Validate
-	cache               *ristretto.Cache
-	wgPendingRestart    bool
-	wgQRCache           map[string]qrEntry
-	wgQRCacheMutex      sync.RWMutex
-	wgMux               sync.RWMutex
-	wgSamplerTicker     *time.Ticker
-	wgSamplerStop       chan struct{}
-	wgSamplerPaused     bool
-	wgLast              map[string]core.WGSample
-	loginLimiter              *loginLimiter
-	subscriptionLimiter       *subscriptionLimiter
-	protectionRules           *protectionRuleCache
-	blockedRecordDedup        map[string]time.Time
-	blockedRecordDedupMu      sync.Mutex
+	store                *core.Store
+	config               *core.Config
+	executor             core.SystemExecutor
+	now                  func() time.Time
+	sampler              *core.StatsSampler
+	pool                 *pond.WorkerPool
+	validate             *validator.Validate
+	cache                *ristretto.Cache
+	wgPendingRestart     bool
+	wgQRCache            map[string]qrEntry
+	wgQRCacheMutex       sync.RWMutex
+	wgMux                sync.RWMutex
+	wgSamplerTicker      *time.Ticker
+	wgSamplerStop        chan struct{}
+	wgSamplerPaused      bool
+	wgLast               map[string]core.WGSample
+	loginLimiter         *loginLimiter
+	subscriptionLimiter  *subscriptionLimiter
+	protectionRules      *protectionRuleCache
+	blockedRecordDedup   map[string]time.Time
+	blockedRecordDedupMu sync.Mutex
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -81,10 +81,10 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		wgMux:               sync.RWMutex{},
 		wgLast:              make(map[string]core.WGSample),
 		wgSamplerPaused:     false,
-		loginLimiter:         newLoginLimiter(),
-		subscriptionLimiter:  newSubscriptionLimiter(),
-		protectionRules:      newProtectionRuleCache(),
-		blockedRecordDedup:   make(map[string]time.Time),
+		loginLimiter:        newLoginLimiter(),
+		subscriptionLimiter: newSubscriptionLimiter(),
+		protectionRules:     newProtectionRuleCache(),
+		blockedRecordDedup:  make(map[string]time.Time),
 	}
 	srv.reloadProtectionRules(context.Background())
 	return srv
@@ -942,6 +942,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	go s.store.EnforceUserQuotas(s.config)
 	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusCreated)
 }
@@ -1079,6 +1080,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		s.store.DeleteUserMetadata(originalName)
 	}
 
+	go s.store.EnforceUserQuotas(s.config)
 	s.cache.Del("api:status")
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
@@ -1215,6 +1217,7 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 		s.store.SaveUserMetadata(meta)
 	}
 
+	go s.store.EnforceUserQuotas(s.config)
 	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusCreated)
 }

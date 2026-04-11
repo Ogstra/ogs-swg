@@ -4,8 +4,6 @@ import (
 	"context"
 	"log"
 	"time"
-
-	sqlcStore "github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
 // EnforceSubscriptionQuotas evaluates all subscriptions with quota_limit > 0 and
@@ -25,7 +23,6 @@ func (s *Store) EnforceSubscriptionQuotas(cfg *Config) {
 	}
 
 	now := time.Now()
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 
 	for _, sub := range subs {
 		limit := sub.QuotaLimit.Int64
@@ -33,11 +30,7 @@ func (s *Store) EnforceSubscriptionQuotas(cfg *Config) {
 			continue // unlimited subscription
 		}
 
-		used, err := s.Queries.GetSubscriptionUsageInRange(ctx, sqlcStore.GetSubscriptionUsageInRangeParams{
-			SubID: sub.ID,
-			Ts:    startOfMonth.Unix(),
-			Ts2:   now.Unix(),
-		})
+		used, err := s.subscriptionUsage(sub.ID, sub.QuotaPeriod.String, now)
 		if err != nil {
 			log.Printf("EnforceSubscriptionQuotas: usage query for sub %d: %v", sub.ID, err)
 			continue
@@ -69,7 +62,11 @@ func (s *Store) EnforceSubscriptionQuotas(cfg *Config) {
 				}
 			} else {
 				// Quota raised: re-enable user in metadata so next API call/config reload restores them.
+				// Keep users disabled if they are still over their own individual quota.
 				if !meta.Enabled {
+					if s.userStillOverOwnQuota(meta, now) {
+						continue
+					}
 					meta.Enabled = true
 					if saveErr := s.SaveUserMetadata(*meta); saveErr != nil {
 						log.Printf("EnforceSubscriptionQuotas: re-enable %s metadata: %v", userName, saveErr)

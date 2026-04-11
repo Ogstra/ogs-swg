@@ -1,11 +1,13 @@
 package core
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
+	sqlcStore "github.com/Ogstra/ogs-swg/internal/core/store"
 	_ "modernc.org/sqlite"
 )
 
@@ -314,5 +316,164 @@ func TestNewStore_MigratesLegacySubscriptionRequestsBeforeCreatingBlockedIndex(t
 	var indexName string
 	if err := store.db.QueryRow("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_subscription_requests_blocked'").Scan(&indexName); err != nil {
 		t.Fatalf("blocked index missing after migration: %v", err)
+	}
+}
+
+func TestEnforceUserQuotas_DisablesExceededUserAndRemovesFromConfig(t *testing.T) {
+	cfg, _ := newTestConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}]
+			}
+		]
+	}`)
+
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now().Unix()
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: now - 60, Uplink: 80, Downlink: 40},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  100,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     true,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	store.EnforceUserQuotas(cfg)
+
+	meta, err := store.GetUserMetadata("alice")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta == nil || meta.Enabled {
+		t.Fatalf("alice metadata = %#v; want disabled metadata", meta)
+	}
+
+	users, err := cfg.GetActiveUsers()
+	if err != nil {
+		t.Fatalf("GetActiveUsers: %v", err)
+	}
+	if len(users) != 0 {
+		t.Fatalf("active users = %#v; want alice removed from config", users)
+	}
+}
+
+func TestEnforceUserQuotas_ReEnablesUserWhenUnderLimit(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	cfg, _ := newTestConfig(t, `{"inbounds":[]}`)
+
+	now := time.Now().Unix()
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: now - 60, Uplink: 20, Downlink: 30},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  100,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     false,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	store.EnforceUserQuotas(cfg)
+
+	meta, err := store.GetUserMetadata("alice")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta == nil || !meta.Enabled {
+		t.Fatalf("alice metadata = %#v; want re-enabled metadata", meta)
+	}
+}
+
+func TestEnforceSubscriptionQuotas_DoesNotReenableUserStillOverOwnQuota(t *testing.T) {
+	cfg, _ := newTestConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": []
+			}
+		]
+	}`)
+
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now().Unix()
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: now - 60, Uplink: 120, Downlink: 90},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  100,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     false,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	subID, err := store.Queries.CreateSubscription(context.Background(), sqlcStore.CreateSubscriptionParams{
+		Token:       "sub-token",
+		Name:        "bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 1000, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := store.Queries.AddUserToSubscription(context.Background(), sqlcStore.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	store.EnforceSubscriptionQuotas(cfg)
+
+	meta, err := store.GetUserMetadata("alice")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta == nil || meta.Enabled {
+		t.Fatalf("alice metadata = %#v; want still disabled because own quota is exceeded", meta)
 	}
 }
