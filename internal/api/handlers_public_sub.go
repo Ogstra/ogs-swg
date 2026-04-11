@@ -104,8 +104,9 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
-		s.subscriptionLimiter.record(token)
 	}
+	// UA checks run before recording the rate-limit token so that social-media
+	// crawlers and browser requests do not consume quota slots.
 	if s.config.SubscriptionProtection.SocialFetchersBlockEnabled && isSocialFetcherUA(r.UserAgent()) {
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_social_fetcher")
 		http.Error(w, "Forbidden", http.StatusForbidden)
@@ -115,6 +116,9 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_browser")
 		http.Error(w, "Forbidden", http.StatusForbidden)
 		return
+	}
+	if !allowlisted {
+		s.subscriptionLimiter.record(token)
 	}
 
 	cacheKey := "sub:" + token
