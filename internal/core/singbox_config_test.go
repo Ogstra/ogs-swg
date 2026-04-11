@@ -1,10 +1,25 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
+
+type reloadTrackingExecutor struct {
+	*stubExecutor
+	restartCalled bool
+}
+
+func (r *reloadTrackingExecutor) RestartService(_ context.Context, _ string) error {
+	r.restartCalled = true
+	return nil
+}
 
 func readInboundByTagFromStub(t *testing.T, stub *stubExecutor, tag string) map[string]interface{} {
 	t.Helper()
@@ -258,6 +273,213 @@ func TestRoundTrip_NonOwnedSectionsPreserved(t *testing.T) {
 		if !jsonSemanticallyEqual(origVal, resultVal) {
 			t.Errorf("section %q changed after AddUser:\n  original: %s\n  result:   %s", section, origVal, resultVal)
 		}
+	}
+}
+
+func TestReloadSingbox_UsesClashAPIWhenConfigured(t *testing.T) {
+	requestReceived := make(chan *http.Request, 1)
+	requestBody := make(chan []byte, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		requestReceived <- r
+		requestBody <- body
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `"
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	if err := cfg.ReloadSingbox(); err != nil {
+		t.Fatalf("ReloadSingbox: %v", err)
+	}
+
+	var req *http.Request
+	select {
+	case req = <-requestReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for Clash API request")
+	}
+
+	var body []byte
+	select {
+	case body = <-requestBody:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for Clash API body")
+	}
+
+	if req.Method != http.MethodPut {
+		t.Fatalf("method = %q, want %q", req.Method, http.MethodPut)
+	}
+	if req.URL.RequestURI() != "/configs?force=false" {
+		t.Fatalf("request uri = %q, want %q", req.URL.RequestURI(), "/configs?force=false")
+	}
+	if got := req.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", got)
+	}
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Fatalf("authorization = %q, want empty", got)
+	}
+	if string(body) != `{"path":"/test/config.json"}` {
+		t.Fatalf("body = %s, want %s", body, `{"path":"/test/config.json"}`)
+	}
+	if tracker.restartCalled {
+		t.Fatalf("RestartService called during Clash API reload")
+	}
+}
+
+func TestReloadSingbox_IncludesSecretHeader(t *testing.T) {
+	authHeader := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader <- r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `",
+				"secret": "test-secret"
+			}
+		}
+	}`
+
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+
+	if err := cfg.ReloadSingbox(); err != nil {
+		t.Fatalf("ReloadSingbox: %v", err)
+	}
+
+	var got string
+	select {
+	case got = <-authHeader:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for Clash API request")
+	}
+	if got != "Bearer test-secret" {
+		t.Fatalf("authorization = %q, want %q", got, "Bearer test-secret")
+	}
+}
+
+func TestReloadSingbox_NoSecretHeader(t *testing.T) {
+	authHeader := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authHeader <- r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `",
+				"secret": ""
+			}
+		}
+	}`
+
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+
+	if err := cfg.ReloadSingbox(); err != nil {
+		t.Fatalf("ReloadSingbox: %v", err)
+	}
+
+	var got string
+	select {
+	case got = <-authHeader:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for Clash API request")
+	}
+	if got != "" {
+		t.Fatalf("authorization = %q, want empty", got)
+	}
+}
+
+func TestReloadSingbox_FallsBackToExecutorWhenNoClashAPI(t *testing.T) {
+	fixtureJSON := `{
+		"experimental": {
+			"v2ray_api": {
+				"listen": "127.0.0.1:19001"
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	if err := cfg.ReloadSingbox(); err != nil {
+		t.Fatalf("ReloadSingbox: %v", err)
+	}
+
+	if !tracker.restartCalled {
+		t.Fatalf("RestartService was not called")
+	}
+}
+
+func TestReloadSingbox_FallsBackWhenEmptyController(t *testing.T) {
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": ""
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	if err := cfg.ReloadSingbox(); err != nil {
+		t.Fatalf("ReloadSingbox: %v", err)
+	}
+
+	if !tracker.restartCalled {
+		t.Fatalf("RestartService was not called")
+	}
+}
+
+func TestReloadSingbox_ReturnsErrorOnBadStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `"
+			}
+		}
+	}`
+
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+
+	err := cfg.ReloadSingbox()
+	if err == nil {
+		t.Fatalf("ReloadSingbox returned nil error")
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Fatalf("error = %q, want status code", err)
 	}
 }
 
