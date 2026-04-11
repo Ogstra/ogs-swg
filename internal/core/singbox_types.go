@@ -156,7 +156,7 @@ type Hysteria2User struct {
 }
 
 type Hysteria2Obfs struct {
-	Type     string `json:"type"`     // always "salamander" — no omitempty, must be present when block exists
+	Type     string `json:"type"` // always "salamander" — no omitempty, must be present when block exists
 	Password string `json:"password"`
 }
 
@@ -192,9 +192,75 @@ type V2RayAPI struct {
 	Stats  *V2RayStats `json:"stats,omitempty"`
 }
 
+type ClashAPI struct {
+	ExternalController string                     `json:"external_controller,omitempty"`
+	Secret             string                     `json:"secret,omitempty"`
+	Extra              map[string]json.RawMessage `json:"-"`
+}
+
+func (c *ClashAPI) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*c = ClashAPI{}
+		return nil
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	var next ClashAPI
+	if v, ok := raw["external_controller"]; ok {
+		if err := json.Unmarshal(v, &next.ExternalController); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["secret"]; ok {
+		if err := json.Unmarshal(v, &next.Secret); err != nil {
+			return err
+		}
+	}
+
+	delete(raw, "external_controller")
+	delete(raw, "secret")
+	if len(raw) > 0 {
+		next.Extra = make(map[string]json.RawMessage, len(raw))
+		for key, value := range raw {
+			next.Extra[key] = append(json.RawMessage(nil), value...)
+		}
+	}
+
+	*c = next
+	return nil
+}
+
+func (c ClashAPI) MarshalJSON() ([]byte, error) {
+	raw := make(map[string]json.RawMessage, len(c.Extra)+2)
+	for key, value := range c.Extra {
+		raw[key] = append(json.RawMessage(nil), value...)
+	}
+
+	if c.ExternalController != "" {
+		data, err := json.Marshal(c.ExternalController)
+		if err != nil {
+			return nil, err
+		}
+		raw["external_controller"] = data
+	}
+	if c.Secret != "" {
+		data, err := json.Marshal(c.Secret)
+		if err != nil {
+			return nil, err
+		}
+		raw["secret"] = data
+	}
+
+	return json.Marshal(raw)
+}
+
 type Experimental struct {
 	V2RayAPI  *V2RayAPI                  `json:"v2ray_api,omitempty"`
-	ClashAPI  json.RawMessage            `json:"clash_api,omitempty"`
+	ClashAPI  *ClashAPI                  `json:"clash_api,omitempty"`
 	CacheFile json.RawMessage            `json:"cache_file,omitempty"`
 	Extra     map[string]json.RawMessage `json:"-"`
 }
@@ -218,8 +284,12 @@ func (e *Experimental) UnmarshalJSON(data []byte) error {
 		}
 		next.V2RayAPI = &api
 	}
-	if v, ok := raw["clash_api"]; ok {
-		next.ClashAPI = append(json.RawMessage(nil), v...)
+	if v, ok := raw["clash_api"]; ok && len(v) > 0 && string(v) != "null" {
+		var api ClashAPI
+		if err := json.Unmarshal(v, &api); err != nil {
+			return err
+		}
+		next.ClashAPI = &api
 	}
 	if v, ok := raw["cache_file"]; ok {
 		next.CacheFile = append(json.RawMessage(nil), v...)
@@ -252,8 +322,12 @@ func (e Experimental) MarshalJSON() ([]byte, error) {
 		}
 		raw["v2ray_api"] = data
 	}
-	if len(e.ClashAPI) > 0 {
-		raw["clash_api"] = append(json.RawMessage(nil), e.ClashAPI...)
+	if e.ClashAPI != nil {
+		data, err := json.Marshal(e.ClashAPI)
+		if err != nil {
+			return nil, err
+		}
+		raw["clash_api"] = data
 	}
 	if len(e.CacheFile) > 0 {
 		raw["cache_file"] = append(json.RawMessage(nil), e.CacheFile...)

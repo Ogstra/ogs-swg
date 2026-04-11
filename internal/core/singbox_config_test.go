@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -444,11 +445,118 @@ func TestRoundTrip_ExperimentalUnknownKeyPreserved(t *testing.T) {
 	}
 
 	// clash_api must be preserved
-	if len(resultExp.ClashAPI) == 0 {
+	if resultExp.ClashAPI == nil {
 		t.Error("clash_api missing from experimental after AddUser")
 	}
-	if !jsonSemanticallyEqual(origExp.ClashAPI, resultExp.ClashAPI) {
-		t.Errorf("clash_api changed after AddUser:\n  original: %s\n  result:   %s", origExp.ClashAPI, resultExp.ClashAPI)
+	origClash, err := json.Marshal(origExp.ClashAPI)
+	if err != nil {
+		t.Fatalf("marshal orig clash_api: %v", err)
+	}
+	resultClash, err := json.Marshal(resultExp.ClashAPI)
+	if err != nil {
+		t.Fatalf("marshal result clash_api: %v", err)
+	}
+	if !jsonSemanticallyEqual(origClash, resultClash) {
+		t.Errorf("clash_api changed after AddUser:\n  original: %s\n  result:   %s", origClash, resultClash)
+	}
+}
+
+func TestClashAPI_MarshalUnmarshalRoundTrip(t *testing.T) {
+	orig := ClashAPI{ExternalController: "127.0.0.1:9090", Secret: "synthetic-secret"}
+
+	data, err := json.Marshal(orig)
+	if err != nil {
+		t.Fatalf("marshal clash api: %v", err)
+	}
+	if !strings.Contains(string(data), `"external_controller":"127.0.0.1:9090"`) {
+		t.Fatalf("marshal output %s missing external_controller", data)
+	}
+	if !strings.Contains(string(data), `"secret":"synthetic-secret"`) {
+		t.Fatalf("marshal output %s missing secret", data)
+	}
+
+	var got ClashAPI
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal clash api: %v", err)
+	}
+	if got.ExternalController != orig.ExternalController {
+		t.Fatalf("ExternalController = %q, want %q", got.ExternalController, orig.ExternalController)
+	}
+	if got.Secret != orig.Secret {
+		t.Fatalf("Secret = %q, want %q", got.Secret, orig.Secret)
+	}
+	if got.Extra != nil {
+		t.Fatalf("Extra = %#v, want nil", got.Extra)
+	}
+}
+
+func TestClashAPI_ExtraPreserved(t *testing.T) {
+	input := `{"external_controller":"127.0.0.1:9090","default_mode":"rule","store_selected":true}`
+
+	var api ClashAPI
+	if err := json.Unmarshal([]byte(input), &api); err != nil {
+		t.Fatalf("unmarshal clash api: %v", err)
+	}
+	if api.ExternalController != "127.0.0.1:9090" {
+		t.Fatalf("ExternalController = %q, want %q", api.ExternalController, "127.0.0.1:9090")
+	}
+	if api.Extra == nil {
+		t.Fatal("Extra = nil, want preserved keys")
+	}
+	if _, ok := api.Extra["default_mode"]; !ok {
+		t.Fatalf("default_mode missing from Extra: %#v", api.Extra)
+	}
+	if _, ok := api.Extra["store_selected"]; !ok {
+		t.Fatalf("store_selected missing from Extra: %#v", api.Extra)
+	}
+
+	data, err := json.Marshal(api)
+	if err != nil {
+		t.Fatalf("marshal clash api: %v", err)
+	}
+	if !strings.Contains(string(data), `"external_controller":"127.0.0.1:9090"`) {
+		t.Fatalf("marshal output %s missing external_controller", data)
+	}
+	if !strings.Contains(string(data), `"default_mode":"rule"`) {
+		t.Fatalf("marshal output %s missing default_mode", data)
+	}
+	if !strings.Contains(string(data), `"store_selected":true`) {
+		t.Fatalf("marshal output %s missing store_selected", data)
+	}
+}
+
+func TestClashAPI_EmptyFields(t *testing.T) {
+	data, err := json.Marshal(ClashAPI{})
+	if err != nil {
+		t.Fatalf("marshal empty clash api: %v", err)
+	}
+	if string(data) != "{}" {
+		t.Fatalf("marshal output = %s, want {}", data)
+	}
+}
+
+func TestExperimental_ClashAPITyped(t *testing.T) {
+	input := `{"clash_api":{"external_controller":"0.0.0.0:9090"}}`
+
+	var exp Experimental
+	if err := json.Unmarshal([]byte(input), &exp); err != nil {
+		t.Fatalf("unmarshal experimental: %v", err)
+	}
+	if exp.ClashAPI == nil {
+		t.Fatal("ClashAPI = nil, want typed struct")
+	}
+	if exp.ClashAPI.ExternalController != "0.0.0.0:9090" {
+		t.Fatalf("ExternalController = %q, want %q", exp.ClashAPI.ExternalController, "0.0.0.0:9090")
+	}
+}
+
+func TestExperimental_ClashAPINil(t *testing.T) {
+	var exp Experimental
+	if err := json.Unmarshal([]byte(`{"cache_file":{"enabled":true}}`), &exp); err != nil {
+		t.Fatalf("unmarshal experimental: %v", err)
+	}
+	if exp.ClashAPI != nil {
+		t.Fatalf("ClashAPI = %#v, want nil", exp.ClashAPI)
 	}
 }
 
