@@ -942,7 +942,6 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go s.store.EnforceUserQuotas(s.config)
 	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusCreated)
 }
@@ -1080,7 +1079,6 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		s.store.DeleteUserMetadata(originalName)
 	}
 
-	go s.store.EnforceUserQuotas(s.config)
 	s.cache.Del("api:status")
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
@@ -1217,7 +1215,6 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 		s.store.SaveUserMetadata(meta)
 	}
 
-	go s.store.EnforceUserQuotas(s.config)
 	s.cache.Del("api:status")
 	w.WriteHeader(http.StatusCreated)
 }
