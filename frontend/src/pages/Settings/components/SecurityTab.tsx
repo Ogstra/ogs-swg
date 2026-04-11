@@ -50,10 +50,30 @@ const reasonVariant = (reason: string) => {
             return 'error'
         case 'rate_limit':
             return 'warning'
+        case 'ua_browser':
+        case 'ua_social_fetcher':
         case 'ua_filter':
             return 'info'
         default:
             return 'neutral'
+    }
+}
+
+const formatReasonLabel = (reason: string) => {
+    switch (reason) {
+        case 'ip_block':
+            return 'IP Block'
+        case 'token_block':
+            return 'Token Block'
+        case 'rate_limit':
+            return 'Rate Limit'
+        case 'ua_browser':
+        case 'ua_filter':
+            return 'Browser UA'
+        case 'ua_social_fetcher':
+            return 'Social/Chat Fetcher'
+        default:
+            return reason || 'Unknown'
     }
 }
 
@@ -62,6 +82,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
     const [maxRequests, setMaxRequests] = useState(60)
     const [windowSeconds, setWindowSeconds] = useState(60)
     const [uaFilterEnabled, setUAFilterEnabled] = useState(false)
+    const [socialFetchersBlockEnabled, setSocialFetchersBlockEnabled] = useState(false)
     const [newRule, setNewRule] = useState<CreateProtectionRuleRequest>({
         rule_type: 'ip_block',
         value: '',
@@ -93,6 +114,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
         setMaxRequests(Math.max(1, settingsQuery.data.max_requests || 60))
         setWindowSeconds(Math.max(1, settingsQuery.data.window_seconds || 60))
         setUAFilterEnabled(!!settingsQuery.data.ua_filter_enabled)
+        setSocialFetchersBlockEnabled(!!settingsQuery.data.social_fetchers_block_enabled)
     }, [settingsQuery.data])
 
     const saveSettingsMutation = useMutation({
@@ -100,6 +122,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
             max_requests: Math.max(1, Number(maxRequests) || 1),
             window_seconds: Math.max(1, Number(windowSeconds) || 1),
             ua_filter_enabled: uaFilterEnabled,
+            social_fetchers_block_enabled: socialFetchersBlockEnabled,
         }),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ['subscription-protection'] })
@@ -156,7 +179,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                     </div>
                 ) : (
                     <>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-slate-400">Max Requests</label>
                                 <input
@@ -189,6 +212,18 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                         className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
                                     />
                                     Block browser-like User-Agents
+                                </label>
+                            </div>
+                            <div className="flex items-end">
+                                <label className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 w-full">
+                                    <input
+                                        type="checkbox"
+                                        checked={socialFetchersBlockEnabled}
+                                        disabled={!canWriteSettings}
+                                        onChange={e => setSocialFetchersBlockEnabled(e.target.checked)}
+                                        className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
+                                    />
+                                    Block social/chat link fetchers
                                 </label>
                             </div>
                         </div>
@@ -332,7 +367,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                             <td className="py-3 pr-4 font-mono text-xs text-slate-300">{entry.request_ip || '—'}</td>
                                             <td className="py-3 pr-4">
                                                 <Badge variant={reasonVariant(entry.block_reason)}>
-                                                    {entry.block_reason || 'unknown'}
+                                                    {formatReasonLabel(entry.block_reason)}
                                                 </Badge>
                                             </td>
                                             <td className="py-3 pr-4 max-w-[260px]">
