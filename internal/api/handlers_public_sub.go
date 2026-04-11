@@ -286,7 +286,30 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 	})
 }
 
+// blockedRecordDedupTTL is the window within which a duplicate blocked-request
+// record (same sub + IP + reason) is suppressed to avoid multiple entries from
+// parallel link-preview fetchers or rapid browser retries.
+const blockedRecordDedupTTL = 10 * time.Second
+
 func (s *Server) recordBlockedSubscriptionRequest(r *http.Request, subID int64, users []string, blockReason string) {
+	clientIP := resolveSubscriptionRequestIP(r)
+	dedupKey := fmt.Sprintf("%d|%s|%s", subID, clientIP, blockReason)
+
+	s.blockedRecordDedupMu.Lock()
+	now := s.now()
+	if last, seen := s.blockedRecordDedup[dedupKey]; seen && now.Sub(last) < blockedRecordDedupTTL {
+		s.blockedRecordDedupMu.Unlock()
+		return
+	}
+	// Prune stale entries to keep the map from growing unbounded.
+	for k, t := range s.blockedRecordDedup {
+		if now.Sub(t) >= blockedRecordDedupTTL {
+			delete(s.blockedRecordDedup, k)
+		}
+	}
+	s.blockedRecordDedup[dedupKey] = now
+	s.blockedRecordDedupMu.Unlock()
+
 	meta := extractSubscriptionRequestMetadata(r)
 	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
 		SubID:           subID,

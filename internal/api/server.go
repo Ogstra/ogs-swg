@@ -43,9 +43,11 @@ type Server struct {
 	wgSamplerStop       chan struct{}
 	wgSamplerPaused     bool
 	wgLast              map[string]core.WGSample
-	loginLimiter        *loginLimiter
-	subscriptionLimiter *subscriptionLimiter
-	protectionRules     *protectionRuleCache
+	loginLimiter              *loginLimiter
+	subscriptionLimiter       *subscriptionLimiter
+	protectionRules           *protectionRuleCache
+	blockedRecordDedup        map[string]time.Time
+	blockedRecordDedupMu      sync.Mutex
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -79,9 +81,10 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		wgMux:               sync.RWMutex{},
 		wgLast:              make(map[string]core.WGSample),
 		wgSamplerPaused:     false,
-		loginLimiter:        newLoginLimiter(),
-		subscriptionLimiter: newSubscriptionLimiter(),
-		protectionRules:     newProtectionRuleCache(),
+		loginLimiter:         newLoginLimiter(),
+		subscriptionLimiter:  newSubscriptionLimiter(),
+		protectionRules:      newProtectionRuleCache(),
+		blockedRecordDedup:   make(map[string]time.Time),
 	}
 	srv.reloadProtectionRules(context.Background())
 	return srv
