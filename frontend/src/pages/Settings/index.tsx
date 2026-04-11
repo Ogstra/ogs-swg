@@ -377,7 +377,7 @@ export default function Settings() {
         },
         {
             id: 'security',
-            label: <span className="flex items-center gap-2"><ShieldAlert size={16} /> Security</span>,
+            label: <span className="flex items-center gap-2"><ShieldAlert size={16} /> Sub Security</span>,
             content: (
                 <SecurityTab
                     canWriteSettings={canWriteSettings}
