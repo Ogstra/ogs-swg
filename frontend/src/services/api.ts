@@ -156,6 +156,7 @@ export interface SubscriptionProtectionConfig {
     max_requests: number;
     window_seconds: number;
     ua_filter_enabled: boolean;
+    social_fetchers_block_enabled: boolean;
 }
 
 export type ProtectionRuleType = 'ip_block' | 'token_block' | 'ip_allow';

@@ -1349,8 +1349,14 @@ function DatabaseTab({
     }
 
     const normalizeVerboseAppleOS = (primary?: string, secondary?: string) => {
-        const first = (primary || '').trim()
-        const second = (secondary || '').trim()
+        const normalizeHistoryValue = (value?: string) => {
+            const normalized = (value || '').trim()
+            if (!normalized) return ''
+            if (['0', 'unknown', 'n/a', 'null', 'nil', 'none', '-'].includes(normalized.toLowerCase())) return ''
+            return normalized
+        }
+        const first = normalizeHistoryValue(primary)
+        const second = normalizeHistoryValue(secondary)
         const parseVerbose = (value: string) => value.match(/^(macOS|iOS|iPadOS)\s+Version\s+([0-9.]+)(?:\s+\(Build\s+([^)]+)\))?$/i)
         const firstMatch = parseVerbose(first)
         const secondMatch = parseVerbose(second)
@@ -1363,10 +1369,16 @@ function DatabaseTab({
     }
 
     const resolveDisplayedDevice = (run: SubscriptionRequestHistoryEntry) => {
+        const normalizeHistoryValue = (value?: string) => {
+            const normalized = (value || '').trim()
+            if (!normalized) return ''
+            if (['0', 'unknown', 'n/a', 'null', 'nil', 'none', '-'].includes(normalized.toLowerCase())) return ''
+            return normalized
+        }
         const parsed = parseClientIdentity(run.user_agent)
         const verboseOS = normalizeVerboseAppleOS(run.device_os, run.device_os_version)
         const osName = verboseOS.osName || parsed.deviceOS
-        let deviceModel = (run.device_model || '').trim() || parsed.deviceModel
+        let deviceModel = normalizeHistoryValue(run.device_model) || parsed.deviceModel
 
         if (osName === 'macOS') {
             if (!deviceModel || /^(iphone|ipad|ipod)$/i.test(deviceModel)) {
@@ -1409,19 +1421,20 @@ function DatabaseTab({
 
     const formatAppVersion = (run: SubscriptionRequestHistoryEntry) => {
         const parsed = parseClientIdentity(run.user_agent)
-        if (run.app_version) return `App ${run.app_version}`
+        const appVersion = (run.app_version || '').trim()
+        if (appVersion && appVersion !== '0') return `App ${appVersion}`
         if (parsed.clientVersion) return `Build ${parsed.clientVersion}`
         return ''
     }
 
     const getSubscriptionHistoryBadge = (run: SubscriptionRequestHistoryEntry) => {
-        if (run.blocked) {
+        if (Boolean(run.blocked)) {
             return {
                 label: 'Blocked',
                 className: 'bg-red-900/20 text-red-400 border border-red-900/30',
             }
         }
-        if (run.served_from_cache) {
+        if (Boolean(run.served_from_cache)) {
             return {
                 label: 'Delivered (Cached)',
                 className: 'bg-amber-900/20 text-amber-400 border border-amber-900/30',
@@ -1430,6 +1443,24 @@ function DatabaseTab({
         return {
             label: 'Delivered (Live)',
             className: 'bg-emerald-900/20 text-emerald-400 border border-emerald-900/30',
+        }
+    }
+
+    const formatBlockedReasonLabel = (reason?: string) => {
+        switch ((reason || '').trim()) {
+            case 'ip_block':
+                return 'IP Block'
+            case 'token_block':
+                return 'Token Block'
+            case 'rate_limit':
+                return 'Rate Limit'
+            case 'ua_browser':
+            case 'ua_filter':
+                return 'Browser UA'
+            case 'ua_social_fetcher':
+                return 'Social/Chat Fetcher'
+            default:
+                return (reason || '').trim()
         }
     }
 
@@ -1591,6 +1622,19 @@ function DatabaseTab({
                             ) : (
                                 subscriptionRequestHistory.map((run) => {
                                     const badge = getSubscriptionHistoryBadge(run)
+                                    const isBlocked = Boolean(run.blocked)
+                                    const blockedReason = formatBlockedReasonLabel(run.block_reason)
+                                    const country = (() => {
+                                        const value = (run.country || '').trim()
+                                        return value && value !== '0' ? value : ''
+                                    })()
+                                    const hwidPrefix = (() => {
+                                        const value = (run.hwid_prefix || '').trim()
+                                        return value && value !== '0' ? value : ''
+                                    })()
+                                    const deviceDetails = formatDeviceDetails(run)
+                                    const appVersion = formatAppVersion(run)
+                                    const extraDetails = [deviceDetails, appVersion, country, hwidPrefix ? `HWID ${hwidPrefix}` : ''].filter(Boolean).join(' • ')
                                     return (
                                     <div key={run.id} className="py-2 border-b border-slate-800/50 last:border-0">
                                         <div className="min-w-0 flex-1">
@@ -1600,6 +1644,11 @@ function DatabaseTab({
                                                     <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${badge.className}`}>
                                                         {badge.label}
                                                     </span>
+                                                    {isBlocked && blockedReason && (
+                                                        <span className="min-w-0 truncate text-[10px] text-red-400" title={blockedReason}>
+                                                            {blockedReason}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <div className="shrink-0 text-right font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
                                             </div>
@@ -1612,14 +1661,9 @@ function DatabaseTab({
                                             <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
                                                 {formatClientLabel(run)}
                                             </div>
-                                            {run.blocked && run.block_reason && (
-                                                <div className="truncate text-red-400 text-[10px]" title={run.block_reason}>
-                                                    Reason: {run.block_reason}
-                                                </div>
-                                            )}
-                                            {(formatDeviceDetails(run) || formatAppVersion(run) || run.country || run.hwid_prefix) && (
-                                                <div className="truncate text-slate-500 text-[10px]" title={[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}>
-                                                    {[formatDeviceDetails(run), formatAppVersion(run), run.country, run.hwid_prefix ? `HWID ${run.hwid_prefix}` : ''].filter(Boolean).join(' • ')}
+                                            {extraDetails && (
+                                                <div className="truncate text-slate-500 text-[10px]" title={extraDetails}>
+                                                    {extraDetails}
                                                 </div>
                                             )}
                                         </div>
