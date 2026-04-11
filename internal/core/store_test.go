@@ -1,9 +1,12 @@
 package core
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // ---------------------------------------------------------------------------
@@ -273,5 +276,43 @@ func TestGetSBTopTotals_IncludesCompressedHistory(t *testing.T) {
 	}
 	if totals[0].Rx != 300 || totals[0].Tx != 150 {
 		t.Fatalf("GetSBTopTotals rx/tx = (%d, %d); want (300, 150)", totals[0].Rx, totals[0].Tx)
+	}
+}
+
+func TestNewStore_MigratesLegacySubscriptionRequestsBeforeCreatingBlockedIndex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "legacy-store.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	legacySchema := `
+	CREATE TABLE subscription_requests (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		sub_id INTEGER NOT NULL,
+		requested_at INTEGER NOT NULL,
+		served_from_cache INTEGER NOT NULL DEFAULT 0
+	);
+	`
+	if _, err := db.Exec(legacySchema); err != nil {
+		t.Fatalf("creating legacy schema: %v", err)
+	}
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore should migrate legacy subscription_requests schema: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	var blocked sql.NullInt64
+	if err := store.db.QueryRow("SELECT blocked FROM subscription_requests LIMIT 1").Scan(&blocked); err != nil && err != sql.ErrNoRows {
+		t.Fatalf("blocked column missing after migration: %v", err)
+	}
+
+	var indexName string
+	if err := store.db.QueryRow("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_subscription_requests_blocked'").Scan(&indexName); err != nil {
+		t.Fatalf("blocked index missing after migration: %v", err)
 	}
 }
