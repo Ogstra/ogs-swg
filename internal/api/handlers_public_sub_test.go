@@ -945,6 +945,72 @@ func TestHandlePublicSubscription_InvalidatesCachedRefreshPolicyAfterSubscriptio
 	}
 }
 
+func TestHandlePublicSubscription_OmitsIntervalHeaderAfterDisablingViaUpdate(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	initialInterval := int64(24)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:                      "disable-interval-token",
+		Name:                       "Disable Interval Bundle",
+		QuotaLimit:                 sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod:                sql.NullString{String: "monthly", Valid: true},
+		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
+		ProfileUpdateIntervalHours: sql.NullInt64{Int64: initialInterval, Valid: true},
+		UpdateAlways:               0,
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	// First fetch: interval header should be present and cached.
+	firstReq := httptest.NewRequest(http.MethodGet, "/s/disable-interval-token", nil)
+	firstReq.SetPathValue("token", "disable-interval-token")
+	firstRec := httptest.NewRecorder()
+	server.handlePublicSubscription(firstRec, firstReq)
+
+	if got := firstRec.Header().Get("profile-update-interval"); got != "24" {
+		t.Fatalf("first profile-update-interval=%q want %q", got, "24")
+	}
+
+	// Update subscription: disable the interval by sending explicit null.
+	body, err := json.Marshal(map[string]any{
+		"name":                          "Disable Interval Bundle",
+		"quota_limit":                   int64(0),
+		"quota_period":                  "monthly",
+		"users":                         []string{"alice"},
+		"profile_update_interval_hours": nil,
+		"update_always":                 false,
+	})
+	if err != nil {
+		t.Fatalf("marshal update body: %v", err)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/subscriptions/"+strconv.FormatInt(subID, 10), strings.NewReader(string(body)))
+	updateReq.SetPathValue("id", strconv.FormatInt(subID, 10))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	server.handleUpdateSubscription(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%q", updateRec.Code, updateRec.Body.String())
+	}
+
+	// Second fetch: interval header must be absent.
+	secondReq := httptest.NewRequest(http.MethodGet, "/s/disable-interval-token", nil)
+	secondReq.SetPathValue("token", "disable-interval-token")
+	secondRec := httptest.NewRecorder()
+	server.handlePublicSubscription(secondRec, secondReq)
+
+	if got := secondRec.Header().Get("profile-update-interval"); got != "" {
+		t.Fatalf("after disabling: profile-update-interval=%q want absent", got)
+	}
+}
+
 func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
 
