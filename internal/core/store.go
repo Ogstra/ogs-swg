@@ -276,8 +276,6 @@ func (s *Store) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
 		ON subscription_requests(sub_id, requested_at DESC);
-	CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked
-		ON subscription_requests(blocked, requested_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
 		ON subscription_protection_rules(rule_type, value);
 	`
