@@ -480,7 +480,7 @@ export default function Subscriptions() {
                             const lastRequest = getLastRequestMeta(sub)
                             return (
                                 <div className="p-4 space-y-3">
-                                    <div className="flex items-start justify-between gap-3">
+                                    <div className="flex items-center justify-between gap-3">
                                         <p className="min-w-0 flex-1 text-white font-semibold truncate">{sub.name}</p>
                                         <div className="flex gap-2 shrink-0">
                                             {canWriteUsers && (
