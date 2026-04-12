@@ -602,7 +602,7 @@ export default function Subscriptions() {
                                             <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
                                                 {(u.inbound_tags && u.inbound_tags.length > 0) ? (
                                                     u.inbound_tags.map(tag => (
-                                                        <Badge key={tag} variant="info" className="max-w-[120px] truncate">{tag}</Badge>
+                                                        <Badge key={tag} variant="info" className="max-w-[80px]" title={tag}>{tag}</Badge>
                                                     ))
                                                 ) : (
                                                     <Badge variant="neutral">All</Badge>
