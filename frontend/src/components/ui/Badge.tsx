@@ -17,7 +17,7 @@ export function Badge({ children, variant = 'neutral', className = '' }: BadgePr
 
     return (
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${variants[variant]} ${className}`}>
-            {children}
+            <span className="truncate">{children}</span>
         </span>
     )
 }
