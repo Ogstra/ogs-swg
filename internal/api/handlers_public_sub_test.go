@@ -162,6 +162,50 @@ func TestHandlePublicSubscription_SetsProfileTitleAndKeepsItOnCachedResponses(t 
 	}
 }
 
+func TestHandlePublicSubscription_UsesMemberAliasInDeliveredProfileName(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "alias-token",
+		Name:        "Alias Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+		Alias:    "Alice Phone",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/alias-token", nil)
+	req.SetPathValue("token", "alias-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	body, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+
+	decoded := string(body)
+	if !strings.Contains(decoded, "#VLESS-Alice+Phone") {
+		t.Fatalf("decoded body=%q want alias-based link label", decoded)
+	}
+	if strings.Contains(decoded, "#VLESS-alice") {
+		t.Fatalf("decoded body=%q should not keep canonical username as delivered label when alias exists", decoded)
+	}
+}
+
 func TestHandlePublicSubscription_UsesSingleCanonicalInboundForLegacyUsers(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServerWithConfig(t, `{
 		"inbounds": [

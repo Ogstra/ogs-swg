@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -48,7 +49,7 @@ func (c *protectionRuleCache) isTokenBlocked(token string) bool {
 	return ok
 }
 
-func (c *protectionRuleCache) reload(rules []store.ProtectionRule) {
+func (c *protectionRuleCache) reload(rules []store.SubscriptionProtectionRule) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -153,7 +154,7 @@ func (s *Server) handleCreateProtectionRule(w http.ResponseWriter, r *http.Reque
 		RuleType:  req.RuleType,
 		Value:     req.Value,
 		Note:      req.Note,
-		CreatedAt: time.Now().Unix(),
+		CreatedAt: sql.NullInt64{Int64: time.Now().Unix(), Valid: true},
 	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -190,7 +191,10 @@ func (s *Server) handleGetBlockedLog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, err := s.store.Queries.GetBlockedSubscriptionRequests(r.Context(), limit, offset)
+	rows, err := s.store.Queries.GetBlockedSubscriptionRequests(r.Context(), store.GetBlockedSubscriptionRequestsParams{
+		Limit:  limit,
+		Offset: offset,
+	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -25,18 +25,24 @@ func generateToken() string {
 }
 
 type SubscriptionResponse struct {
-	ID                         int64    `json:"id"`
-	Token                      *string  `json:"token,omitempty"`
-	Name                       string   `json:"name"`
-	QuotaLimit                 int64    `json:"quota_limit"`
-	QuotaPeriod                string   `json:"quota_period"`
-	UsedBytes                  int64    `json:"used_bytes"`
-	Users                      []string `json:"users"`
-	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
-	UpdateAlways               bool     `json:"update_always"`
-	LastRequestAt              *int64   `json:"last_request_at"`
-	CreatedAt                  int64    `json:"created_at"`
-	UpdatedAt                  int64    `json:"updated_at"`
+	ID                         int64                        `json:"id"`
+	Token                      *string                      `json:"token,omitempty"`
+	Name                       string                       `json:"name"`
+	QuotaLimit                 int64                        `json:"quota_limit"`
+	QuotaPeriod                string                       `json:"quota_period"`
+	UsedBytes                  int64                        `json:"used_bytes"`
+	Users                      []string                     `json:"users"`
+	Members                    []SubscriptionMemberResponse `json:"members"`
+	ProfileUpdateIntervalHours *int64                       `json:"profile_update_interval_hours"`
+	UpdateAlways               bool                         `json:"update_always"`
+	LastRequestAt              *int64                       `json:"last_request_at"`
+	CreatedAt                  int64                        `json:"created_at"`
+	UpdatedAt                  int64                        `json:"updated_at"`
+}
+
+type SubscriptionMemberResponse struct {
+	Username string `json:"username"`
+	Alias    string `json:"alias"`
 }
 
 type SubscriptionDefaultsResponse struct {
@@ -252,11 +258,12 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 	res := make([]SubscriptionResponse, 0, len(subs))
 	includeSecrets := canManageSubscriptionSecrets(r)
 	for _, sub := range subs {
-		users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
+		memberRows, _ := s.store.Queries.GetSubscriptionMembers(r.Context(), sub.ID)
+		members := subscriptionMembersResponseFromStore(memberRows)
 		usedBytes, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), store.GetSubscriptionUsageInRangeParams{
 			SubID: sub.ID,
 			Ts:    startOfMonth.Unix(),
-			Ts2:   now.Unix(),
+			Ts_2:  now.Unix(),
 		})
 		var token *string
 		if includeSecrets {
@@ -269,7 +276,8 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			QuotaLimit:                 sub.QuotaLimit.Int64,
 			QuotaPeriod:                sub.QuotaPeriod.String,
 			UsedBytes:                  usedBytes,
-			Users:                      users,
+			Users:                      subscriptionUsersFromMembers(members),
+			Members:                    members,
 			ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 			UpdateAlways:               int64ToBool(sub.UpdateAlways),
 			LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
@@ -282,12 +290,70 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 }
 
 type CreateSubscriptionRequest struct {
-	Name                       string             `json:"name"`
-	QuotaLimit                 int64              `json:"quota_limit"`
-	QuotaPeriod                string             `json:"quota_period"`
-	Users                      []string           `json:"users"`
-	ProfileUpdateIntervalHours optionalInt64Field `json:"profile_update_interval_hours"`
-	UpdateAlways               *bool              `json:"update_always"`
+	Name                       string                      `json:"name"`
+	QuotaLimit                 int64                       `json:"quota_limit"`
+	QuotaPeriod                string                      `json:"quota_period"`
+	Users                      []string                    `json:"users"`
+	Members                    []SubscriptionMemberRequest `json:"members"`
+	ProfileUpdateIntervalHours optionalInt64Field          `json:"profile_update_interval_hours"`
+	UpdateAlways               *bool                       `json:"update_always"`
+}
+
+type SubscriptionMemberRequest struct {
+	Username string `json:"username"`
+	Alias    string `json:"alias"`
+}
+
+func normalizeSubscriptionMembers(users []string, members []SubscriptionMemberRequest) []SubscriptionMemberRequest {
+	normalized := make([]SubscriptionMemberRequest, 0, len(users)+len(members))
+	seen := make(map[string]struct{}, len(users)+len(members))
+
+	appendMember := func(username, alias string) {
+		trimmedUsername := strings.TrimSpace(username)
+		if trimmedUsername == "" {
+			return
+		}
+		if _, ok := seen[trimmedUsername]; ok {
+			return
+		}
+
+		seen[trimmedUsername] = struct{}{}
+		normalized = append(normalized, SubscriptionMemberRequest{
+			Username: trimmedUsername,
+			Alias:    strings.TrimSpace(alias),
+		})
+	}
+
+	if len(members) > 0 {
+		for _, member := range members {
+			appendMember(member.Username, member.Alias)
+		}
+		return normalized
+	}
+
+	for _, username := range users {
+		appendMember(username, "")
+	}
+	return normalized
+}
+
+func subscriptionMembersResponseFromStore(rows []store.SubscriptionUser) []SubscriptionMemberResponse {
+	members := make([]SubscriptionMemberResponse, 0, len(rows))
+	for _, row := range rows {
+		members = append(members, SubscriptionMemberResponse{
+			Username: row.UserName,
+			Alias:    row.Alias,
+		})
+	}
+	return members
+}
+
+func subscriptionUsersFromMembers(members []SubscriptionMemberResponse) []string {
+	users := make([]string, 0, len(members))
+	for _, member := range members {
+		users = append(users, member.Username)
+	}
+	return users
 }
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -307,6 +373,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	members := normalizeSubscriptionMembers(req.Users, req.Members)
 
 	token := generateToken()
 	id, err := s.store.Queries.CreateSubscription(r.Context(), store.CreateSubscriptionParams{
@@ -323,10 +390,11 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	for _, user := range req.Users {
+	for _, member := range members {
 		_ = s.store.Queries.AddUserToSubscription(r.Context(), store.AddUserToSubscriptionParams{
 			SubID:    id,
-			UserName: user,
+			UserName: member.Username,
+			Alias:    member.Alias,
 		})
 	}
 
@@ -349,14 +417,15 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	users, _ := s.store.Queries.GetUsersForSubscription(r.Context(), id)
+	memberRows, _ := s.store.Queries.GetSubscriptionMembers(r.Context(), id)
+	members := subscriptionMembersResponseFromStore(memberRows)
 
 	now := time.Now()
 	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	usedBytes, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), store.GetSubscriptionUsageInRangeParams{
 		SubID: id,
 		Ts:    startOfMonth.Unix(),
-		Ts2:   now.Unix(),
+		Ts_2:  now.Unix(),
 	})
 	var token *string
 	if canManageSubscriptionSecrets(r) {
@@ -371,7 +440,8 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		QuotaLimit:                 sub.QuotaLimit.Int64,
 		QuotaPeriod:                sub.QuotaPeriod.String,
 		UsedBytes:                  usedBytes,
-		Users:                      users,
+		Users:                      subscriptionUsersFromMembers(members),
+		Members:                    members,
 		ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 		UpdateAlways:               int64ToBool(sub.UpdateAlways),
 		LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
@@ -404,6 +474,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	members := normalizeSubscriptionMembers(req.Users, req.Members)
 
 	current, err := s.store.Queries.GetSubscriptionByID(r.Context(), id)
 	if err != nil {
@@ -426,10 +497,11 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	s.store.Queries.ClearSubscriptionUsers(r.Context(), id)
-	for _, user := range req.Users {
+	for _, member := range members {
 		_ = s.store.Queries.AddUserToSubscription(r.Context(), store.AddUserToSubscriptionParams{
 			SubID:    id,
-			UserName: user,
+			UserName: member.Username,
+			Alias:    member.Alias,
 		})
 	}
 
