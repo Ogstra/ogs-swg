@@ -977,7 +977,7 @@ export default function UserManagement() {
                                     <div className="flex flex-wrap justify-end gap-1.5">
                                         {(user.inbound_tags && user.inbound_tags.length > 0) ? (
                                             user.inbound_tags.map(tag => (
-                                                <Badge key={tag} variant="info" className="max-w-[130px]" title={tag}>{tag}</Badge>
+                                                <Badge key={tag} variant="info" className="max-w-[110px]" title={tag}>{tag}</Badge>
                                             ))
                                         ) : (
                                             <Badge variant="neutral">All</Badge>
