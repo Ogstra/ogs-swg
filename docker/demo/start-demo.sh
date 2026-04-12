@@ -24,6 +24,7 @@ touch "$ACCESS_LOG"
 export DEMO_DB_PATH="$DB_PATH"
 export DEMO_LOG_PATH="$ACCESS_LOG"
 export DEMO_API_KEY="${OGS_API_KEY:-demo-readonly-key}"
+export DEMO_DEV_MODE="${OGS_DEMO_DEV_MODE:-false}"
 export OGS_ADMIN_USER="${OGS_ADMIN_USER:-demo-readonly}"
 export OGS_ADMIN_PASSWORD="${OGS_ADMIN_PASSWORD:-demo-disabled-${RANDOM}${RANDOM}${RANDOM}}"
 export OGS_DB_PATH="$DB_PATH"
@@ -36,12 +37,44 @@ export OGS_WIREGUARD_TEST_MODE="true"
 export OGS_DEMO_MODE="true"
 export OGS_DISABLE_PASSWORD_LOGIN="true"
 
+case "${DEMO_DEV_MODE,,}" in
+  1|true|yes|on)
+    export OGS_API_KEY_READ_ONLY="false"
+    DEMO_MODE_LABEL="admin/dev"
+    ;;
+  *)
+    export OGS_API_KEY_READ_ONLY="true"
+    DEMO_MODE_LABEL="read-only"
+    ;;
+esac
+
 # ── Frontend: inject auto-login script before </head> ─────────────────────────
 inject_demo_frontend_autologin() {
   [[ -f "$FRONTEND_INDEX" ]] || return 0
 
   local escaped_api_key="${DEMO_API_KEY//\\/\\\\}"
   escaped_api_key="${escaped_api_key//\"/\\\"}"
+  local permissions_literal
+
+  if [[ "$OGS_API_KEY_READ_ONLY" == "false" ]]; then
+    permissions_literal='{
+    can_read_users: true,    can_write_users: true,
+    can_read_wireguard: true, can_write_wireguard: true,
+    can_read_config: true,   can_write_config: true,
+    can_read_settings: true, can_write_settings: true,
+    can_read_panel_users: true, can_write_panel_users: true,
+    can_read_logs: true, can_read_logs_censored: true
+  }'
+  else
+    permissions_literal='{
+    can_read_users: true,    can_write_users: false,
+    can_read_wireguard: true, can_write_wireguard: false,
+    can_read_config: true,   can_write_config: false,
+    can_read_settings: true, can_write_settings: false,
+    can_read_panel_users: false, can_write_panel_users: false,
+    can_read_logs: true, can_read_logs_censored: false
+  }'
+  fi
 
   local snippet tmp_index
   snippet="$(mktemp)"
@@ -49,16 +82,9 @@ inject_demo_frontend_autologin() {
 <!-- DEMO_AUTOLOGIN_START -->
 <script>
 (() => {
-  const readonlyPerms = {
-    can_read_users: true,    can_write_users: false,
-    can_read_wireguard: true, can_write_wireguard: false,
-    can_read_config: true,   can_write_config: false,
-    can_read_settings: true, can_write_settings: false,
-    can_read_panel_users: false, can_write_panel_users: false,
-    can_read_logs: true
-  };
+  const demoPerms = ${permissions_literal};
   localStorage.setItem('api_key', "${escaped_api_key}");
-  localStorage.setItem('permissions', JSON.stringify(readonlyPerms));
+  localStorage.setItem('permissions', JSON.stringify(demoPerms));
   localStorage.setItem('demo_mode', '1');
   localStorage.removeItem('token');
 })();
@@ -82,8 +108,9 @@ SNIPPET
 echo "[demo] config:     $CONFIG_PATH"
 echo "[demo] database:   $DB_PATH"
 echo "[demo] wireguard:  $WG_DIR"
+echo "[demo] mode:       $DEMO_MODE_LABEL"
 inject_demo_frontend_autologin
-echo "[demo] autologin injected (read-only key)"
+echo "[demo] autologin injected ($DEMO_MODE_LABEL key)"
 
 # ── Bootstrap: start server briefly so it initialises the DB schema ───────────
 /app/ogs-swg -config "$CONFIG_PATH" --wg-test-mode &
@@ -102,6 +129,9 @@ trap - EXIT INT TERM
 
 # Dashboard: insert live traffic samples every DEMO_LIVE_INTERVAL_SEC.
 /bin/bash /demo/fake-data-loop.sh sample &
+
+# Subscriptions: keep history, blocked log, and recent activity populated.
+/bin/bash /demo/fake-data-loop.sh subscriptions &
 
 # ── Main server ───────────────────────────────────────────────────────────────
 exec /app/ogs-swg -config "$CONFIG_PATH" --wg-test-mode
