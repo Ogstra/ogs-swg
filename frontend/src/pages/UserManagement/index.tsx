@@ -941,14 +941,8 @@ export default function UserManagement() {
                         return (
                             <div key={user.name} className="p-4 space-y-4">
                                 <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0 flex-1 space-y-1">
+                                    <div className="min-w-0 flex-1">
                                         <div className="font-bold text-slate-200 truncate">{user.name}</div>
-                                        <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                            <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
-                                                {statusText}
-                                            </span>
-                                        </div>
                                     </div>
                                     <div className="flex gap-2">
                                         <ActionIconButton
@@ -975,13 +969,15 @@ export default function UserManagement() {
                                     </div>
                                 </div>
 
-                                <div className="text-xs">
-                                    <div className="flex flex-wrap gap-1.5">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                        <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>{statusText}</span>
+                                    </div>
+                                    <div className="flex flex-wrap justify-end gap-1.5">
                                         {(user.inbound_tags && user.inbound_tags.length > 0) ? (
                                             user.inbound_tags.map(tag => (
-                                                <Badge key={tag} variant="info" className="max-w-[120px] truncate">
-                                                    {tag}
-                                                </Badge>
+                                                <Badge key={tag} variant="info" className="max-w-[80px]" title={tag}>{tag}</Badge>
                                             ))
                                         ) : (
                                             <Badge variant="neutral">All</Badge>
