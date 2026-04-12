@@ -579,35 +579,49 @@ export default function Subscriptions() {
                                 return (
                                     <div
                                         key={u.name}
-                                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0"
+                                        className="px-3 py-2.5 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0"
                                         onClick={() => toggleUser(u.name)}
                                     >
-                                        <input
-                                            type="checkbox"
-                                            checked={isSelected}
-                                            readOnly
-                                            className="shrink-0 pointer-events-none"
-                                        />
-                                        <div className="min-w-0 truncate text-sm text-slate-200 w-32 shrink-0">{u.name}</div>
-                                        {isSelected && (
+                                        <div className="flex items-center gap-3">
                                             <input
-                                                type="text"
-                                                value={alias}
-                                                onChange={e => updateProfileAlias(u.name, e.target.value)}
-                                                onClick={e => e.stopPropagation()}
-                                                placeholder="Alias"
-                                                className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                type="checkbox"
+                                                checked={isSelected}
+                                                readOnly
+                                                className="shrink-0 pointer-events-none"
                                             />
-                                        )}
-                                        <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-1.5">
-                                            {(u.inbound_tags && u.inbound_tags.length > 0) ? (
-                                                u.inbound_tags.map(tag => (
-                                                    <Badge key={tag} variant="info" className="max-w-[120px] truncate">{tag}</Badge>
-                                                ))
-                                            ) : (
-                                                <Badge variant="neutral">All</Badge>
+                                            <div className="min-w-0 flex-1 truncate text-sm text-slate-200">{u.name}</div>
+                                            {isSelected && (
+                                                <input
+                                                    type="text"
+                                                    value={alias}
+                                                    onChange={e => updateProfileAlias(u.name, e.target.value)}
+                                                    onClick={e => e.stopPropagation()}
+                                                    placeholder="Alias"
+                                                    className="hidden sm:block w-40 shrink-0 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                />
                                             )}
+                                            <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                                                {(u.inbound_tags && u.inbound_tags.length > 0) ? (
+                                                    u.inbound_tags.map(tag => (
+                                                        <Badge key={tag} variant="info" className="max-w-[120px] truncate">{tag}</Badge>
+                                                    ))
+                                                ) : (
+                                                    <Badge variant="neutral">All</Badge>
+                                                )}
+                                            </div>
                                         </div>
+                                        {isSelected && (
+                                            <div className="sm:hidden mt-2 pl-6">
+                                                <input
+                                                    type="text"
+                                                    value={alias}
+                                                    onChange={e => updateProfileAlias(u.name, e.target.value)}
+                                                    onClick={e => e.stopPropagation()}
+                                                    placeholder="Alias"
+                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                 )
                             })}
