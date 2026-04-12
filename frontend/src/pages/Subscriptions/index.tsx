@@ -259,11 +259,13 @@ export default function Subscriptions() {
         setModalState({ type: 'qr', data: sub })
     }
     const toggleUser = (userName: string) => {
-        setSelectedProfiles(prev => (
-            prev.some(profile => profile.username === userName)
-                ? prev.filter(profile => profile.username !== userName)
-                : [...prev, ...hydrateSubscriptionProfileAliases([userName])]
-        ))
+        setSelectedProfiles(prev => {
+            const existing = prev.find(profile => profile.username === userName)
+            if (existing) return prev.filter(profile => profile.username !== userName)
+            // Preserve alias from current sub members so re-selecting restores it
+            const savedAlias = modalState.data?.members?.find(m => m.username === userName)?.alias ?? ''
+            return [...prev, { username: userName, alias: savedAlias }]
+        })
     }
 
     const updateProfileAlias = (userName: string, alias: string) => {
