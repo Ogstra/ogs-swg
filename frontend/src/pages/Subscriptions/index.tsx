@@ -585,11 +585,23 @@ export default function Subscriptions() {
                                             type="checkbox"
                                             checked={isSelected}
                                             readOnly
-                                            className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0 pointer-events-none self-center"
+                                            className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0 pointer-events-none self-start mt-1"
                                         />
-                                        <div className="min-w-0 flex-1 space-y-1">
-                                            <div className="max-w-[150px] truncate text-sm text-slate-200">{u.name}</div>
-                                            <div className="flex flex-wrap gap-1.5">
+                                        <div className="flex flex-1 min-w-0 gap-2">
+                                            <div className="w-1/2 min-w-0 space-y-1">
+                                                <div className="truncate text-sm text-slate-200">{u.name}</div>
+                                                {isSelected && (
+                                                    <input
+                                                        type="text"
+                                                        value={alias}
+                                                        onChange={e => updateProfileAlias(u.name, e.target.value)}
+                                                        onClick={e => e.stopPropagation()}
+                                                        placeholder="Alias"
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                    />
+                                                )}
+                                            </div>
+                                            <div className="w-1/2 flex flex-wrap justify-end gap-1.5">
                                                 {(u.inbound_tags && u.inbound_tags.length > 0) ? (
                                                     u.inbound_tags.map(tag => (
                                                         <Badge key={tag} variant="info" className="max-w-[150px]" title={tag}>{tag}</Badge>
@@ -599,16 +611,6 @@ export default function Subscriptions() {
                                                 )}
                                             </div>
                                         </div>
-                                        {isSelected && (
-                                            <textarea
-                                                value={alias}
-                                                onChange={e => updateProfileAlias(u.name, e.target.value.replace(/\n/g, ''))}
-                                                onClick={e => e.stopPropagation()}
-                                                placeholder="Alias"
-                                                rows={1}
-                                                className="w-28 sm:w-36 shrink-0 resize-none bg-slate-900 border border-slate-700 rounded px-2 h-10 py-2.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                                            />
-                                        )}
                                     </div>
                                 )
                             })}
