@@ -572,7 +572,7 @@ export default function Subscriptions() {
                             placeholder="Select Users"
                             className="w-full bg-slate-950 border border-slate-800 rounded-t px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 placeholder:text-slate-400"
                         />
-                        <div className="border border-t-0 border-slate-800 rounded-b bg-slate-950 max-h-[300px] overflow-y-auto">
+                        <div className="border border-t-0 border-slate-800 rounded-b bg-slate-950 h-[300px] overflow-y-auto">
                             {filteredUsers.map(u => {
                                 const isSelected = selectedProfiles.some(p => p.username === u.name)
                                 const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
