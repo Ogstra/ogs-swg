@@ -100,7 +100,13 @@ export default function Subscriptions() {
     const usersInfo = usersQuery.data || []
     const sortedUsersInfo = [...usersInfo].sort((a, b) => a.name.localeCompare(b.name))
     const filteredUsers = userSearch.trim()
-        ? sortedUsersInfo.filter(u => u.name.toLowerCase().includes(userSearch.toLowerCase()))
+        ? sortedUsersInfo.filter(u => {
+            const q = userSearch.toLowerCase()
+            const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
+            return u.name.toLowerCase().includes(q)
+                || alias.toLowerCase().includes(q)
+                || (u.inbound_tags ?? []).some(t => t.toLowerCase().includes(q))
+        })
         : sortedUsersInfo
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
