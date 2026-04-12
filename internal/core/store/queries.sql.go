@@ -1188,7 +1188,7 @@ const getSubscriptionRequestHistory = `-- name: GetSubscriptionRequestHistory :m
 SELECT
 	sr.id,
 	sr.sub_id,
-	s.name,
+	COALESCE(s.name, '') AS name,
 	sr.user_name,
 	sr.request_ip,
 	sr.request_host,
@@ -1212,10 +1212,10 @@ LIMIT ?
 `
 
 type GetSubscriptionRequestHistoryRow struct {
-	ID              int64          `json:"id"`
-	SubID           int64          `json:"sub_id"`
-	Name            sql.NullString `json:"name"`
-	UserName        string         `json:"user_name"`
+	ID              int64  `json:"id"`
+	SubID           int64  `json:"sub_id"`
+	Name            string `json:"name"`
+	UserName        string `json:"user_name"`
 	RequestIp       string         `json:"request_ip"`
 	RequestHost     string         `json:"request_host"`
 	RequestPath     string         `json:"request_path"`
