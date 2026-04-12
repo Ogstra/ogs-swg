@@ -457,7 +457,7 @@ INSERT INTO subscription_requests (
 SELECT
 	sr.id,
 	sr.sub_id,
-	s.name,
+	COALESCE(s.name, '') AS name,
 	sr.user_name,
 	sr.request_ip,
 	sr.request_host,

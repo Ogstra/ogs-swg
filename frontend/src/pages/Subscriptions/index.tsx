@@ -12,7 +12,6 @@ import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCode
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
 import {
-    getSubscriptionProfileAliasSummary,
     getSubscriptionProfileDrafts,
     hydrateSubscriptionProfileAliases,
     serializeSubscriptionProfileAliases,
@@ -82,6 +81,7 @@ export default function Subscriptions() {
     const [defaultIntervalEnabled, setDefaultIntervalEnabled] = useState(false)
     const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
+    const [userSearch, setUserSearch] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
@@ -99,6 +99,9 @@ export default function Subscriptions() {
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
     const sortedUsersInfo = [...usersInfo].sort((a, b) => a.name.localeCompare(b.name))
+    const filteredUsers = userSearch.trim()
+        ? sortedUsersInfo.filter(u => u.name.toLowerCase().includes(userSearch.toLowerCase()))
+        : sortedUsersInfo
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
 
@@ -112,6 +115,7 @@ export default function Subscriptions() {
         setNameInput('')
         setQuotaGB('0')
         setSelectedProfiles(hydrateSubscriptionProfileAliases([]))
+        setUserSearch('')
         applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
         setModalState({ type: 'create' })
     }
@@ -119,6 +123,7 @@ export default function Subscriptions() {
     const openEdit = (sub: Subscription) => {
         setNameInput(sub.name)
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
+        setUserSearch('')
         setSelectedProfiles(getSubscriptionProfileDrafts(sub))
         setProfileUpdateIntervalEnabled(sub.profile_update_interval_hours != null)
         setProfileUpdateIntervalHours(
@@ -262,10 +267,6 @@ export default function Subscriptions() {
                 : profile
         )))
     }
-
-    const getSubscriptionMemberSummary = (sub: Subscription): string[] => (
-        getSubscriptionProfileAliasSummary(getSubscriptionProfileDrafts(sub))
-    )
 
     const getQuotaPill = (sub: Subscription) => {
         const used = sub.used_bytes || 0
@@ -440,14 +441,7 @@ export default function Subscriptions() {
                                         })()}
                                     </td>
                                     <td className="p-4">
-                                        <div className="space-y-1">
-                                            <div className="text-slate-400 text-sm">{sub.users?.length || 0} users</div>
-                                            {getSubscriptionMemberSummary(sub).length > 0 && (
-                                                <div className="text-xs text-slate-500 truncate" title={getSubscriptionMemberSummary(sub).join(', ')}>
-                                                    {getSubscriptionMemberSummary(sub).join(', ')}
-                                                </div>
-                                            )}
-                                        </div>
+                                        <div className="text-slate-400 text-sm">{sub.users?.length || 0} users</div>
                                     </td>
                                     <td className="p-4">{getQuotaPill(sub)}</td>
                                     <td className="p-4">
@@ -486,20 +480,10 @@ export default function Subscriptions() {
                         {(() => {
                             const lastRequest = getLastRequestMeta(sub)
                             return (
-                                <div className="p-4 space-y-4">
+                                <div className="p-4 space-y-3">
                                     <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0 flex-1 space-y-1">
-                                            <div className="flex items-start gap-3">
-                                                <p className="min-w-0 flex-1 text-white font-semibold truncate">{sub.name}</p>
-                                                <div className="shrink-0 flex items-center gap-2">
-                                                    <div className={`w-2 h-2 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                                    <span className={`text-xs ${lastRequest.textClass}`}>
-                                                        {lastRequest.text}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2">
+                                        <p className="min-w-0 flex-1 text-white font-semibold truncate">{sub.name}</p>
+                                        <div className="flex gap-2 shrink-0">
                                             {canWriteUsers && (
                                                 <>
                                                     {sub.token && (
@@ -521,15 +505,12 @@ export default function Subscriptions() {
                                         </div>
                                     </div>
 
-                                    <div className="text-xs space-y-1">
-                                        <div className="text-slate-400">
-                                            {sub.users?.length || 0} users
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-2 h-2 rounded-full shrink-0 ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                            <span className={`text-xs ${lastRequest.textClass}`}>{lastRequest.text}</span>
                                         </div>
-                                        {getSubscriptionMemberSummary(sub).length > 0 && (
-                                            <div className="text-slate-500" title={getSubscriptionMemberSummary(sub).join(', ')}>
-                                                {getSubscriptionMemberSummary(sub).join(', ')}
-                                            </div>
-                                        )}
+                                        <div className="text-xs text-slate-400 shrink-0">{sub.users?.length || 0} users</div>
                                     </div>
 
                                     <div className="bg-slate-950/50 rounded-lg p-3">
@@ -555,8 +536,8 @@ export default function Subscriptions() {
                 }
             >
                 <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="md:col-span-2">
+                    <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-2">
                             <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
                             <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="" />
                         </div>
@@ -584,72 +565,58 @@ export default function Subscriptions() {
                         setUpdateAlways
                     )}
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
-                        <div className="border border-slate-800 rounded bg-slate-950 max-h-[300px] overflow-y-auto">
-                            {sortedUsersInfo.map(u => (
-                                <label key={u.name} className="flex items-start gap-3 p-3 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0">
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedProfiles.some(profile => profile.username === u.name)}
-                                        onChange={() => toggleUser(u.name)}
-                                        className="mr-3 shrink-0"
-                                    />
-                                    <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
-                                        <div className="min-w-0 truncate text-sm text-slate-200">{u.name}</div>
-                                        <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                        <input
+                            type="text"
+                            value={userSearch}
+                            onChange={e => setUserSearch(e.target.value)}
+                            placeholder="Select Users"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-t px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 placeholder:text-slate-400"
+                        />
+                        <div className="border border-t-0 border-slate-800 rounded-b bg-slate-950 max-h-[300px] overflow-y-auto">
+                            {filteredUsers.map(u => {
+                                const isSelected = selectedProfiles.some(p => p.username === u.name)
+                                const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
+                                return (
+                                    <div
+                                        key={u.name}
+                                        className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0"
+                                        onClick={() => toggleUser(u.name)}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            readOnly
+                                            className="shrink-0 pointer-events-none"
+                                        />
+                                        <div className="min-w-0 truncate text-sm text-slate-200 w-32 shrink-0">{u.name}</div>
+                                        {isSelected && (
+                                            <input
+                                                type="text"
+                                                value={alias}
+                                                onChange={e => updateProfileAlias(u.name, e.target.value)}
+                                                onClick={e => e.stopPropagation()}
+                                                placeholder="Alias"
+                                                className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                            />
+                                        )}
+                                        <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-1.5">
                                             {(u.inbound_tags && u.inbound_tags.length > 0) ? (
                                                 u.inbound_tags.map(tag => (
-                                                    <Badge key={tag} variant="info" className="max-w-[120px] truncate">
-                                                        {tag}
-                                                    </Badge>
+                                                    <Badge key={tag} variant="info" className="max-w-[120px] truncate">{tag}</Badge>
                                                 ))
                                             ) : (
                                                 <Badge variant="neutral">All</Badge>
                                             )}
                                         </div>
                                     </div>
-                                </label>
-                            ))}
-                            {sortedUsersInfo.length === 0 && <div className="p-4 text-center text-slate-500 text-sm">No users available</div>}
+                                )
+                            })}
+                            {filteredUsers.length === 0 && (
+                                <div className="p-4 text-center text-slate-500 text-sm">
+                                    {userSearch.trim() ? 'No users match your search' : 'No users available'}
+                                </div>
+                            )}
                         </div>
-                    </div>
-                    <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
-                        <div>
-                            <h3 className="text-sm font-semibold text-white">Optional Profile Labels</h3>
-                            <p className="mt-1 text-xs text-slate-400">
-                                These aliases are saved with the subscription and become the client-visible profile labels while the canonical username stays visible here for mapping.
-                            </p>
-                        </div>
-                        {selectedProfiles.length === 0 ? (
-                            <div className="rounded-lg border border-dashed border-slate-800 px-3 py-4 text-sm text-slate-500">
-                                Select one or more users to add optional labels.
-                            </div>
-                        ) : (
-                            <div className="space-y-3">
-                                {selectedProfiles.map(profile => (
-                                    <div key={profile.username} className="grid grid-cols-1 gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] md:items-center">
-                                        <div className="min-w-0">
-                                            <div className="text-xs uppercase tracking-wide text-slate-500">Canonical username</div>
-                                            <div className="truncate text-sm font-medium text-slate-200" title={profile.username}>
-                                                {profile.username}
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label className="mb-1 block text-xs uppercase tracking-wide text-slate-500">
-                                                Optional alias
-                                            </label>
-                                            <input
-                                                type="text"
-                                                value={profile.alias}
-                                                onChange={e => updateProfileAlias(profile.username, e.target.value)}
-                                                className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                                                placeholder="Laptop, Dad iPhone, Office Mac..."
-                                            />
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
                     </div>
                 </div>
             </Modal>
