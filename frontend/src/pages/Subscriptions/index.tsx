@@ -590,7 +590,7 @@ export default function Subscriptions() {
                                                     onChange={e => updateProfileAlias(u.name, e.target.value)}
                                                     onClick={e => e.stopPropagation()}
                                                     placeholder="Alias"
-                                                    className="hidden sm:block w-40 shrink-0 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                    className="w-20 sm:w-36 shrink-0 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
                                                 />
                                             )}
                                             <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
@@ -603,18 +603,6 @@ export default function Subscriptions() {
                                                 )}
                                             </div>
                                         </div>
-                                        {isSelected && (
-                                            <div className="sm:hidden mt-2 pl-6">
-                                                <input
-                                                    type="text"
-                                                    value={alias}
-                                                    onChange={e => updateProfileAlias(u.name, e.target.value)}
-                                                    onClick={e => e.stopPropagation()}
-                                                    placeholder="Alias"
-                                                    className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-                                                />
-                                            </div>
-                                        )}
                                     </div>
                                 )
                             })}
