@@ -852,7 +852,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 					subUsed, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), sqlcStore.GetSubscriptionUsageInRangeParams{
 						SubID: sub.ID,
 						Ts:    startOfMonth.Unix(),
-						Ts2:   now.Unix(),
+						Ts_2:  now.Unix(),
 					})
 					subQuota = &SubQuotaInfo{
 						Name:       sub.Name,

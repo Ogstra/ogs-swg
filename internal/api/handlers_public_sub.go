@@ -47,6 +47,13 @@ type parsedSubscriptionUserAgent struct {
 	deviceOSVer   string
 }
 
+func subscriptionMemberDisplayName(username, alias string) string {
+	if trimmed := strings.TrimSpace(alias); trimmed != "" {
+		return trimmed
+	}
+	return username
+}
+
 var (
 	subscriptionUserAgentClientPlatformVersionRE = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z][A-Za-z0-9 _.-]{0,31})/([A-Za-z0-9._-]{1,64})`)
 	subscriptionUserAgentProductRE               = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z0-9._-]{1,64})`)
@@ -74,10 +81,14 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	users, err := s.store.Queries.GetUsersForSubscription(r.Context(), sub.ID)
-	if err != nil || len(users) == 0 {
+	memberRows, err := s.store.Queries.GetSubscriptionMembers(r.Context(), sub.ID)
+	if err != nil || len(memberRows) == 0 {
 		http.NotFound(w, r)
 		return
+	}
+	users := make([]string, 0, len(memberRows))
+	for _, member := range memberRows {
+		users = append(users, member.UserName)
 	}
 
 	clientIP := resolveSubscriptionRequestIP(r)
@@ -151,7 +162,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	for _, username := range users {
+	for _, member := range memberRows {
+		username := member.UserName
 		userInbounds, err := s.config.GetUserInbounds(username)
 		if err != nil || len(userInbounds) == 0 {
 			continue
@@ -214,7 +226,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 			switch inbType {
 			case "vless":
-				link, buildErr = buildVlessLink(username, &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildVlessLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "vmess":
 				infoCopy := userInfo
 				if userMeta != nil {
@@ -225,11 +237,11 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 						infoCopy.VmessAlterID = userMeta.VmessAlterID
 					}
 				}
-				link, buildErr = buildVmessLink(username, &infoCopy, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildVmessLink(subscriptionMemberDisplayName(username, member.Alias), &infoCopy, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "trojan":
-				link, buildErr = buildTrojanLink(username, &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildTrojanLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "hysteria2":
-				link, buildErr = buildHysteria2Link(username, &userInfo, inboundView, currentHost, port)
+				link, buildErr = buildHysteria2Link(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
 			}
 
 			if buildErr == nil && link != "" {

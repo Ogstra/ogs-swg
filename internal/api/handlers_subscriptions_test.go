@@ -13,12 +13,18 @@ import (
 )
 
 type subscriptionMutationRequest struct {
-	Name                       string   `json:"name"`
-	QuotaLimit                 int64    `json:"quota_limit"`
-	QuotaPeriod                string   `json:"quota_period"`
-	Users                      []string `json:"users"`
-	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours,omitempty"`
-	UpdateAlways               *bool    `json:"update_always,omitempty"`
+	Name                       string                      `json:"name"`
+	QuotaLimit                 int64                       `json:"quota_limit"`
+	QuotaPeriod                string                      `json:"quota_period"`
+	Users                      []string                    `json:"users"`
+	Members                    []subscriptionMemberPayload `json:"members,omitempty"`
+	ProfileUpdateIntervalHours *int64                      `json:"profile_update_interval_hours,omitempty"`
+	UpdateAlways               *bool                       `json:"update_always,omitempty"`
+}
+
+type subscriptionMemberPayload struct {
+	Username string `json:"username"`
+	Alias    string `json:"alias"`
 }
 
 type subscriptionCreateResponse struct {
@@ -27,18 +33,19 @@ type subscriptionCreateResponse struct {
 }
 
 type subscriptionDetailResponse struct {
-	ID                         int64    `json:"id"`
-	Token                      *string  `json:"token"`
-	Name                       string   `json:"name"`
-	QuotaLimit                 int64    `json:"quota_limit"`
-	QuotaPeriod                string   `json:"quota_period"`
-	UsedBytes                  int64    `json:"used_bytes"`
-	Users                      []string `json:"users"`
-	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
-	UpdateAlways               bool     `json:"update_always"`
-	LastRequestAt              *int64   `json:"last_request_at"`
-	CreatedAt                  int64    `json:"created_at"`
-	UpdatedAt                  int64    `json:"updated_at"`
+	ID                         int64                       `json:"id"`
+	Token                      *string                     `json:"token"`
+	Name                       string                      `json:"name"`
+	QuotaLimit                 int64                       `json:"quota_limit"`
+	QuotaPeriod                string                      `json:"quota_period"`
+	UsedBytes                  int64                       `json:"used_bytes"`
+	Users                      []string                    `json:"users"`
+	Members                    []subscriptionMemberPayload `json:"members"`
+	ProfileUpdateIntervalHours *int64                      `json:"profile_update_interval_hours"`
+	UpdateAlways               bool                        `json:"update_always"`
+	LastRequestAt              *int64                      `json:"last_request_at"`
+	CreatedAt                  int64                       `json:"created_at"`
+	UpdatedAt                  int64                       `json:"updated_at"`
 }
 
 type subscriptionDefaultsResponse struct {
@@ -513,6 +520,51 @@ func TestUpdateSubscription_ReplacesAssignedUsers(t *testing.T) {
 	got := getSubscriptionForTest(t, server, created.ID)
 	if len(got.Users) != 1 || got.Users[0] != "alice" {
 		t.Fatalf("users=%v want [alice]", got.Users)
+	}
+}
+
+func TestSubscriptionAliases_RoundTripThroughCreateAndUpdate(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Alias Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Members: []subscriptionMemberPayload{
+			{Username: "alice", Alias: "Alice Phone"},
+			{Username: "bob", Alias: ""},
+		},
+	})
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Users) != 2 || got.Users[0] != "alice" || got.Users[1] != "bob" {
+		t.Fatalf("users=%v want [alice bob]", got.Users)
+	}
+	if len(got.Members) != 2 {
+		t.Fatalf("members=%v want 2 entries", got.Members)
+	}
+	if got.Members[0].Username != "alice" || got.Members[0].Alias != "Alice Phone" {
+		t.Fatalf("first member=%+v want alice/Alice Phone", got.Members[0])
+	}
+	if got.Members[1].Username != "bob" || got.Members[1].Alias != "" {
+		t.Fatalf("second member=%+v want bob/empty alias", got.Members[1])
+	}
+
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:        "Alias Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Members: []subscriptionMemberPayload{
+			{Username: "alice", Alias: "Work iPhone"},
+		},
+	})
+
+	updated := getSubscriptionForTest(t, server, created.ID)
+	if len(updated.Users) != 1 || updated.Users[0] != "alice" {
+		t.Fatalf("updated users=%v want [alice]", updated.Users)
+	}
+	if len(updated.Members) != 1 || updated.Members[0].Alias != "Work iPhone" {
+		t.Fatalf("updated members=%v want alias persisted", updated.Members)
 	}
 }
 

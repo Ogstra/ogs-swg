@@ -295,6 +295,6 @@ func (s *Store) subscriptionUsage(subID int64, quotaPeriod string, now time.Time
 	return s.Queries.GetSubscriptionUsageInRange(context.Background(), sqlcStore.GetSubscriptionUsageInRangeParams{
 		SubID: subID,
 		Ts:    subscriptionUsageWindowStart(quotaPeriod, now),
-		Ts2:   now.Unix(),
+		Ts_2:  now.Unix(),
 	})
 }
