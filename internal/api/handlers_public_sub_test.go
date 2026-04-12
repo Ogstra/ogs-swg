@@ -706,7 +706,7 @@ func TestSubscriptionProtectionRuleRoutes(t *testing.T) {
 	if len(blocked) != 1 {
 		t.Fatalf("blocked-log rows=%d want 1", len(blocked))
 	}
-	if blocked[0].SubID != subID || blocked[0].BlockReason != "ip_block" || blocked[0].RequestIP != "198.51.100.77" {
+	if blocked[0].SubID != subID || blocked[0].BlockReason != "ip_block" || blocked[0].RequestIp != "198.51.100.77" {
 		t.Fatalf("unexpected blocked row: %+v", blocked[0])
 	}
 
@@ -1468,8 +1468,8 @@ func TestHandleSubscriptionRequestHistory_PrefersPublicForwardedIPFromTrustedPro
 	if len(got) == 0 {
 		t.Fatalf("history empty")
 	}
-	if got[0].RequestIP != "198.51.100.143" {
-		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "198.51.100.143")
+	if got[0].RequestIp != "198.51.100.143" {
+		t.Fatalf("request_ip=%q want %q", got[0].RequestIp, "198.51.100.143")
 	}
 }
 
@@ -1517,8 +1517,8 @@ func TestHandleSubscriptionRequestHistory_PreservesIPv6ForwardedIPFromTrustedPro
 	if len(got) == 0 {
 		t.Fatalf("history empty")
 	}
-	if got[0].RequestIP != "2001:db8::143" {
-		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "2001:db8::143")
+	if got[0].RequestIp != "2001:db8::143" {
+		t.Fatalf("request_ip=%q want %q", got[0].RequestIp, "2001:db8::143")
 	}
 }
 
@@ -1575,10 +1575,10 @@ func TestHandleSubscriptionRequestHistory_CensorsSensitiveFieldsForRestrictedCal
 	if got[0].UserName != "Restricted" {
 		t.Fatalf("user_name=%q want %q", got[0].UserName, "Restricted")
 	}
-	if got[0].RequestIP != "***" {
-		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "***")
+	if got[0].RequestIp != "***" {
+		t.Fatalf("request_ip=%q want %q", got[0].RequestIp, "***")
 	}
-	if got[0].RequestHost != "" || got[0].RequestPath != "" || got[0].UserAgent != "" || got[0].DeviceModel != "" || got[0].DeviceOS != "" || got[0].DeviceOSVersion != "" || got[0].AppVersion != "" || got[0].Country != "" || got[0].HwidHash != "" || got[0].HwidPrefix != "" {
+	if got[0].RequestHost != "" || got[0].RequestPath != "" || got[0].UserAgent != "" || got[0].DeviceModel != "" || got[0].DeviceOs != "" || got[0].DeviceOsVersion != "" || got[0].AppVersion != "" || got[0].Country != "" || got[0].HwidHash != "" || got[0].HwidPrefix != "" {
 		t.Fatalf("expected sensitive request metadata to be censored, got %+v", got[0])
 	}
 }
@@ -1621,7 +1621,10 @@ func TestBlockedSubscriptionRequest_DedupWithinWindow(t *testing.T) {
 		}
 	}
 
-	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), 10, 0)
+	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), store.GetBlockedSubscriptionRequestsParams{
+		Limit:  10,
+		Offset: 0,
+	})
 	if err != nil {
 		t.Fatalf("GetBlockedSubscriptionRequests: %v", err)
 	}
