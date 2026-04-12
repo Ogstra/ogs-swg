@@ -24,7 +24,7 @@ func addProtectionRuleForTest(t *testing.T, s *Server, ruleType string, value st
 		RuleType:  ruleType,
 		Value:     value,
 		Note:      "test",
-		CreatedAt: time.Now().Unix(),
+		CreatedAt: sql.NullInt64{Int64: time.Now().Unix(), Valid: true},
 	}); err != nil {
 		t.Fatalf("InsertProtectionRule: %v", err)
 	}
@@ -566,7 +566,10 @@ func TestHandlePublicSubscription_BlockedRequestRecorded(t *testing.T) {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 
-	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), 10, 0)
+	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), store.GetBlockedSubscriptionRequestsParams{
+		Limit:  10,
+		Offset: 0,
+	})
 	if err != nil {
 		t.Fatalf("GetBlockedSubscriptionRequests: %v", err)
 	}
@@ -671,14 +674,14 @@ func TestSubscriptionProtectionRuleRoutes(t *testing.T) {
 		t.Fatalf("create status=%d body=%q", createRec.Code, createRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules", nil)
+	listReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules", http.NoBody)
 	listReq.Header.Set("X-API-Key", "settings-key")
 	listRec := serveAuthedRequest(server, listReq)
 	if listRec.Code != http.StatusOK {
 		t.Fatalf("list status=%d body=%q", listRec.Code, listRec.Body.String())
 	}
 
-	var rules []store.ProtectionRule
+	var rules []store.SubscriptionProtectionRule
 	if err := json.NewDecoder(listRec.Body).Decode(&rules); err != nil {
 		t.Fatalf("decode rules: %v", err)
 	}
@@ -689,14 +692,14 @@ func TestSubscriptionProtectionRuleRoutes(t *testing.T) {
 		t.Fatalf("unexpected rule: %+v", rules[0])
 	}
 
-	blockedReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules/blocked-log?limit=10&offset=0", nil)
+	blockedReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules/blocked-log?limit=10&offset=0", http.NoBody)
 	blockedReq.Header.Set("X-API-Key", "settings-key")
 	blockedRec := serveAuthedRequest(server, blockedReq)
 	if blockedRec.Code != http.StatusOK {
 		t.Fatalf("blocked-log status=%d body=%q", blockedRec.Code, blockedRec.Body.String())
 	}
 
-	var blocked []store.BlockedSubscriptionRequest
+	var blocked []store.GetBlockedSubscriptionRequestsRow
 	if err := json.NewDecoder(blockedRec.Body).Decode(&blocked); err != nil {
 		t.Fatalf("decode blocked-log: %v", err)
 	}
@@ -707,14 +710,14 @@ func TestSubscriptionProtectionRuleRoutes(t *testing.T) {
 		t.Fatalf("unexpected blocked row: %+v", blocked[0])
 	}
 
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/settings/protection-rules/"+strconv.FormatInt(rules[0].ID, 10), nil)
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/settings/protection-rules/"+strconv.FormatInt(rules[0].ID, 10), http.NoBody)
 	deleteReq.Header.Set("X-API-Key", "settings-key")
 	deleteRec := serveAuthedRequest(server, deleteReq)
 	if deleteRec.Code != http.StatusOK {
 		t.Fatalf("delete status=%d body=%q", deleteRec.Code, deleteRec.Body.String())
 	}
 
-	listAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules", nil)
+	listAfterDeleteReq := httptest.NewRequest(http.MethodGet, "/api/settings/protection-rules", http.NoBody)
 	listAfterDeleteReq.Header.Set("X-API-Key", "settings-key")
 	listAfterDeleteRec := serveAuthedRequest(server, listAfterDeleteReq)
 	if listAfterDeleteRec.Code != http.StatusOK {
@@ -792,7 +795,10 @@ func TestHandlePublicSubscription_SocialFetchersFilter_Enabled(t *testing.T) {
 		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
 	}
 
-	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), 10, 0)
+	rows, err := dataStore.Queries.GetBlockedSubscriptionRequests(t.Context(), store.GetBlockedSubscriptionRequestsParams{
+		Limit:  10,
+		Offset: 0,
+	})
 	if err != nil {
 		t.Fatalf("GetBlockedSubscriptionRequests: %v", err)
 	}
@@ -1105,43 +1111,43 @@ func TestHandleSubscriptionRequestHistory_ReturnsRequesterMetadata(t *testing.T)
 	if len(got) == 0 {
 		t.Fatalf("history empty")
 	}
-	if got[0].Name != "History Bundle" {
+	if got[0].Name != "History Bundle" { // Corrected field name
 		t.Fatalf("name=%q want %q", got[0].Name, "History Bundle")
 	}
-	if got[0].UserName != "alice" {
+	if got[0].UserName != "alice" { // Corrected field name
 		t.Fatalf("user_name=%q want %q", got[0].UserName, "alice")
 	}
-	if got[0].RequestIP != "198.51.100.5" {
-		t.Fatalf("request_ip=%q want %q", got[0].RequestIP, "198.51.100.5")
+	if got[0].RequestIp != "198.51.100.5" { // Corrected field name
+		t.Fatalf("request_ip=%q want %q", got[0].RequestIp, "198.51.100.5")
 	}
-	if got[0].RequestHost != "swg.example.com" {
+	if got[0].RequestHost != "swg.example.com" { // Corrected field name
 		t.Fatalf("request_host=%q want %q", got[0].RequestHost, "swg.example.com")
 	}
-	if got[0].RequestPath != "/s/[token]" {
+	if got[0].RequestPath != "/s/[token]" { // Corrected field name
 		t.Fatalf("request_path=%q want %q", got[0].RequestPath, "/s/[token]")
 	}
-	if got[0].UserAgent != "v2raytun/ios" {
+	if got[0].UserAgent != "v2raytun/ios" { // Corrected field name
 		t.Fatalf("user_agent=%q want %q", got[0].UserAgent, "v2raytun/ios")
 	}
-	if got[0].DeviceModel != "iPhone 14 Pro Max" {
+	if got[0].DeviceModel != "iPhone 14 Pro Max" { // Corrected field name
 		t.Fatalf("device_model=%q want %q", got[0].DeviceModel, "iPhone 14 Pro Max")
 	}
-	if got[0].DeviceOS != "iOS" {
-		t.Fatalf("device_os=%q want %q", got[0].DeviceOS, "iOS")
+	if got[0].DeviceOs != "iOS" { // Corrected field name
+		t.Fatalf("device_os=%q want %q", got[0].DeviceOs, "iOS")
 	}
-	if got[0].DeviceOSVersion != "26.4" {
-		t.Fatalf("device_os_version=%q want %q", got[0].DeviceOSVersion, "26.4")
+	if got[0].DeviceOsVersion != "26.4" { // Corrected field name
+		t.Fatalf("device_os_version=%q want %q", got[0].DeviceOsVersion, "26.4")
 	}
-	if got[0].AppVersion != "2.4.4" {
+	if got[0].AppVersion != "2.4.4" { // Corrected field name
 		t.Fatalf("app_version=%q want %q", got[0].AppVersion, "2.4.4")
 	}
-	if got[0].Country != "AR" {
+	if got[0].Country != "AR" { // Corrected field name
 		t.Fatalf("country=%q want %q", got[0].Country, "AR")
 	}
-	if got[0].HwidPrefix != "1226BDD7" {
+	if got[0].HwidPrefix != "1226BDD7" { // Corrected field name
 		t.Fatalf("hwid_prefix=%q want %q", got[0].HwidPrefix, "1226BDD7")
 	}
-	if got[0].HwidHash != hashSubscriptionHWID("1226BDD7-30DF-409A-9FE7-C9CBCABC2335") {
+	if got[0].HwidHash != hashSubscriptionHWID("1226BDD7-30DF-409A-9FE7-C9CBCABC2335") { // Corrected field name
 		t.Fatalf("hwid_hash=%q want hash of x-hwid", got[0].HwidHash)
 	}
 }
