@@ -17,6 +17,7 @@ services:
       - TZ=${TZ:-America/Argentina/Buenos_Aires}
       - OGS_API_KEY=${OGS_API_KEY:-demo-readonly-key}
       - OGS_API_KEY_READ_ONLY=true
+      - OGS_DEMO_DEV_MODE=${OGS_DEMO_DEV_MODE:-false}
       - OGS_DEMO_MODE=true
       - OGS_DISABLE_PASSWORD_LOGIN=true
       - OGS_PUBLIC_IP=203.0.113.10

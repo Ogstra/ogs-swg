@@ -31,5 +31,12 @@
   "aggregation_enabled": true,
   "aggregation_days": 7,
   "public_ip": "203.0.113.10",
+  "subscription_domain": "swg-demo.local",
+  "subscription_protection": {
+    "max_requests": 6,
+    "window_seconds": 60,
+    "ua_filter_enabled": true,
+    "social_fetchers_block_enabled": true
+  },
   "api_key": ""
 }
