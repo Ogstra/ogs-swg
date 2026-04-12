@@ -240,6 +240,7 @@ export interface Subscription {
     quota_period: string;
     used_bytes: number;
     users: string[];
+    members: SubscriptionMember[];
     profile_update_interval_hours?: number | null;
     update_always?: boolean;
     last_request_at?: number | null;
@@ -247,11 +248,17 @@ export interface Subscription {
     updated_at: number;
 }
 
+export interface SubscriptionMember {
+    username: string;
+    alias: string;
+}
+
 export interface SubscriptionMutationRequest {
     name: string;
     quota_limit: number;
     quota_period: string;
     users: string[];
+    members?: SubscriptionMember[];
     profile_update_interval_hours: number | null;
     update_always: boolean;
 }

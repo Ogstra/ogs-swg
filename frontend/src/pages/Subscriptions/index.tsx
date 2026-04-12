@@ -11,6 +11,13 @@ import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2 } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
+import {
+    getSubscriptionProfileAliasSummary,
+    getSubscriptionProfileDrafts,
+    hydrateSubscriptionProfileAliases,
+    serializeSubscriptionProfileAliases,
+    type SelectedSubscriptionProfile,
+} from './profileAliases'
 
 const formatBytes = (bytes: number): string => {
     if (!bytes || bytes === 0) return '0'
@@ -56,9 +63,10 @@ const subscriptionDefaultsToRefreshPolicyDraft = (defaults: SubscriptionDefaults
 
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
-    const { permissions } = useAuth()
+    const { permissions, token } = useAuth()
     const queryClient = useQueryClient()
     const canWriteUsers = !!permissions?.can_write_users
+    const canManagePanelScopedDefaults = canWriteUsers && !!token
 
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
@@ -67,7 +75,7 @@ export default function Subscriptions() {
 
     const [nameInput, setNameInput] = useState('')
     const [quotaGB, setQuotaGB] = useState('0')
-    const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+    const [selectedProfiles, setSelectedProfiles] = useState<SelectedSubscriptionProfile[]>([])
     const [profileUpdateIntervalEnabled, setProfileUpdateIntervalEnabled] = useState(false)
     const [profileUpdateIntervalHours, setProfileUpdateIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [updateAlways, setUpdateAlways] = useState(false)
@@ -85,7 +93,7 @@ export default function Subscriptions() {
     const defaultsQuery = useQuery({
         queryKey: ['subscription-defaults'],
         queryFn: () => api.getSubscriptionDefaults(),
-        enabled: canWriteUsers,
+        enabled: canManagePanelScopedDefaults,
     })
 
     const subs = subsQuery.data || []
@@ -103,7 +111,7 @@ export default function Subscriptions() {
     const openCreate = () => {
         setNameInput('')
         setQuotaGB('0')
-        setSelectedUsers([])
+        setSelectedProfiles(hydrateSubscriptionProfileAliases([]))
         applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
         setModalState({ type: 'create' })
     }
@@ -111,7 +119,7 @@ export default function Subscriptions() {
     const openEdit = (sub: Subscription) => {
         setNameInput(sub.name)
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
-        setSelectedUsers(sub.users || [])
+        setSelectedProfiles(getSubscriptionProfileDrafts(sub))
         setProfileUpdateIntervalEnabled(sub.profile_update_interval_hours != null)
         setProfileUpdateIntervalHours(
             sub.profile_update_interval_hours != null
@@ -147,7 +155,8 @@ export default function Subscriptions() {
             name: nameInput.trim(),
             quota_limit: quotaLimit,
             quota_period: 'monthly' as const,
-            users: selectedUsers,
+            users: selectedProfiles.map(profile => profile.username),
+            members: serializeSubscriptionProfileAliases(selectedProfiles),
             profile_update_interval_hours: intervalHours,
             update_always: updateAlways,
         }
@@ -239,8 +248,24 @@ export default function Subscriptions() {
         setModalState({ type: 'qr', data: sub })
     }
     const toggleUser = (userName: string) => {
-        setSelectedUsers(prev => prev.includes(userName) ? prev.filter(u => u !== userName) : [...prev, userName])
+        setSelectedProfiles(prev => (
+            prev.some(profile => profile.username === userName)
+                ? prev.filter(profile => profile.username !== userName)
+                : [...prev, ...hydrateSubscriptionProfileAliases([userName])]
+        ))
     }
+
+    const updateProfileAlias = (userName: string, alias: string) => {
+        setSelectedProfiles(prev => prev.map(profile => (
+            profile.username === userName
+                ? { ...profile, alias }
+                : profile
+        )))
+    }
+
+    const getSubscriptionMemberSummary = (sub: Subscription): string[] => (
+        getSubscriptionProfileAliasSummary(getSubscriptionProfileDrafts(sub))
+    )
 
     const getQuotaPill = (sub: Subscription) => {
         const used = sub.used_bytes || 0
@@ -367,7 +392,7 @@ export default function Subscriptions() {
                         onClick={openDefaults}
                         title="Subscription Defaults"
                         className="h-9 w-9"
-                        disabled={!canWriteUsers}
+                        disabled={!canManagePanelScopedDefaults}
                     >
                         <Settings2 size={16} />
                     </ActionIconButton>
@@ -414,7 +439,16 @@ export default function Subscriptions() {
                                             )
                                         })()}
                                     </td>
-                                    <td className="p-4 text-slate-400">{sub.users?.length || 0} users</td>
+                                    <td className="p-4">
+                                        <div className="space-y-1">
+                                            <div className="text-slate-400 text-sm">{sub.users?.length || 0} users</div>
+                                            {getSubscriptionMemberSummary(sub).length > 0 && (
+                                                <div className="text-xs text-slate-500 truncate" title={getSubscriptionMemberSummary(sub).join(', ')}>
+                                                    {getSubscriptionMemberSummary(sub).join(', ')}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </td>
                                     <td className="p-4">{getQuotaPill(sub)}</td>
                                     <td className="p-4">
                                         <div className="flex items-center justify-end gap-2">
@@ -487,10 +521,15 @@ export default function Subscriptions() {
                                         </div>
                                     </div>
 
-                                    <div className="text-xs">
+                                    <div className="text-xs space-y-1">
                                         <div className="text-slate-400">
                                             {sub.users?.length || 0} users
                                         </div>
+                                        {getSubscriptionMemberSummary(sub).length > 0 && (
+                                            <div className="text-slate-500" title={getSubscriptionMemberSummary(sub).join(', ')}>
+                                                {getSubscriptionMemberSummary(sub).join(', ')}
+                                            </div>
+                                        )}
                                     </div>
 
                                     <div className="bg-slate-950/50 rounded-lg p-3">
@@ -549,7 +588,12 @@ export default function Subscriptions() {
                         <div className="border border-slate-800 rounded bg-slate-950 max-h-[300px] overflow-y-auto">
                             {sortedUsersInfo.map(u => (
                                 <label key={u.name} className="flex items-start gap-3 p-3 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0">
-                                    <input type="checkbox" checked={selectedUsers.includes(u.name)} onChange={() => toggleUser(u.name)} className="mr-3 shrink-0" />
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedProfiles.some(profile => profile.username === u.name)}
+                                        onChange={() => toggleUser(u.name)}
+                                        className="mr-3 shrink-0"
+                                    />
                                     <div className="min-w-0 flex-1 flex items-start justify-between gap-3">
                                         <div className="min-w-0 truncate text-sm text-slate-200">{u.name}</div>
                                         <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
@@ -568,6 +612,44 @@ export default function Subscriptions() {
                             ))}
                             {sortedUsersInfo.length === 0 && <div className="p-4 text-center text-slate-500 text-sm">No users available</div>}
                         </div>
+                    </div>
+                    <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/70 p-4">
+                        <div>
+                            <h3 className="text-sm font-semibold text-white">Optional Profile Labels</h3>
+                            <p className="mt-1 text-xs text-slate-400">
+                                These aliases are saved with the subscription and become the client-visible profile labels while the canonical username stays visible here for mapping.
+                            </p>
+                        </div>
+                        {selectedProfiles.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-slate-800 px-3 py-4 text-sm text-slate-500">
+                                Select one or more users to add optional labels.
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {selectedProfiles.map(profile => (
+                                    <div key={profile.username} className="grid grid-cols-1 gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] md:items-center">
+                                        <div className="min-w-0">
+                                            <div className="text-xs uppercase tracking-wide text-slate-500">Canonical username</div>
+                                            <div className="truncate text-sm font-medium text-slate-200" title={profile.username}>
+                                                {profile.username}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="mb-1 block text-xs uppercase tracking-wide text-slate-500">
+                                                Optional alias
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={profile.alias}
+                                                onChange={e => updateProfileAlias(profile.username, e.target.value)}
+                                                className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                                placeholder="Laptop, Dad iPhone, Office Mac..."
+                                            />
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
             </Modal>
