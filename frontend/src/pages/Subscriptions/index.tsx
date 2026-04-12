@@ -587,7 +587,7 @@ export default function Subscriptions() {
                                             readOnly
                                             className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0 pointer-events-none self-start mt-1"
                                         />
-                                        <div className="flex flex-1 min-w-0 gap-2">
+                                        <div className="flex flex-1 min-w-0 items-start gap-2">
                                             <div className="w-1/2 min-w-0 space-y-1">
                                                 <div className="truncate text-sm text-slate-200">{u.name}</div>
                                                 {isSelected && (
