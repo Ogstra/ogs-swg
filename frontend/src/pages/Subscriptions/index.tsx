@@ -343,33 +343,26 @@ export default function Subscriptions() {
                 {helperText && <p className="mt-1 text-xs text-slate-400">{helperText}</p>}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                <label className="flex items-start gap-3 cursor-pointer min-h-[42px]">
-                    <input
-                        type="checkbox"
-                        checked={intervalEnabled}
-                        onChange={e => setIntervalEnabled(e.target.checked)}
-                        className="mt-1 shrink-0"
-                    />
-                    <div className="space-y-1">
-                        <div className="text-sm font-medium text-slate-200">Emit profile-update-interval</div>
-                    </div>
-                </label>
-
-                <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">Refresh Interval (hours)</label>
-                    <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={intervalHours}
-                        onChange={e => setIntervalHours(e.target.value)}
-                        disabled={!intervalEnabled}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                        placeholder="24"
-                    />
-                </div>
-            </div>
+            <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={intervalEnabled}
+                    onChange={e => setIntervalEnabled(e.target.checked)}
+                    className="shrink-0"
+                />
+                <div className="flex-1 text-sm font-medium text-slate-200">Emit profile-update-interval</div>
+                <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={intervalHours}
+                    onChange={e => setIntervalHours(e.target.value)}
+                    disabled={!intervalEnabled}
+                    onClick={e => e.stopPropagation()}
+                    className="w-20 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="Hours"
+                />
+            </label>
 
             <label className="flex items-start gap-3 cursor-pointer">
                 <input
