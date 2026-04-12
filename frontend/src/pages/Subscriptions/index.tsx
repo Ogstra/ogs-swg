@@ -356,7 +356,7 @@ export default function Subscriptions() {
                     type="checkbox"
                     checked={intervalEnabled}
                     onChange={e => setIntervalEnabled(e.target.checked)}
-                    className="shrink-0"
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0"
                 />
                 <div className="flex-1 text-sm font-medium text-slate-200">Emit profile-update-interval</div>
                 <input
@@ -377,7 +377,7 @@ export default function Subscriptions() {
                     type="checkbox"
                     checked={updateAlwaysValue}
                     onChange={e => setUpdateAlwaysValue(e.target.checked)}
-                    className="mt-1 shrink-0"
+                    className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0"
                 />
                 <div className="space-y-1">
                     <div className="text-sm font-medium text-slate-200">update-always</div>
@@ -587,7 +587,7 @@ export default function Subscriptions() {
                                             type="checkbox"
                                             checked={isSelected}
                                             readOnly
-                                            className="shrink-0 pointer-events-none self-center"
+                                            className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0 pointer-events-none self-center"
                                         />
                                         <div className="min-w-0 flex-1 space-y-1">
                                             <div className="truncate text-sm text-slate-200">{u.name}</div>
