@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2 } from 'lucide-react'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
 import {
@@ -82,6 +82,7 @@ export default function Subscriptions() {
     const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
     const [userSearch, setUserSearch] = useState('')
+    const [expandedAliasUsers, setExpandedAliasUsers] = useState<Set<string>>(new Set())
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
@@ -122,6 +123,7 @@ export default function Subscriptions() {
         setQuotaGB('0')
         setSelectedProfiles(hydrateSubscriptionProfileAliases([]))
         setUserSearch('')
+        setExpandedAliasUsers(new Set())
         applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
         setModalState({ type: 'create' })
     }
@@ -130,7 +132,9 @@ export default function Subscriptions() {
         setNameInput(sub.name)
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
         setUserSearch('')
-        setSelectedProfiles(getSubscriptionProfileDrafts(sub))
+        const drafts = getSubscriptionProfileDrafts(sub)
+        setSelectedProfiles(drafts)
+        setExpandedAliasUsers(new Set(drafts.filter(p => p.alias).map(p => p.username)))
         setProfileUpdateIntervalEnabled(sub.profile_update_interval_hours != null)
         setProfileUpdateIntervalHours(
             sub.profile_update_interval_hours != null
@@ -274,6 +278,24 @@ export default function Subscriptions() {
                 ? { ...profile, alias }
                 : profile
         )))
+    }
+
+    const toggleAlias = (userName: string) => {
+        const isExpanded = expandedAliasUsers.has(userName)
+        if (isExpanded) {
+            updateProfileAlias(userName, '')
+            setExpandedAliasUsers(prev => {
+                const next = new Set(prev)
+                next.delete(userName)
+                return next
+            })
+        } else {
+            setExpandedAliasUsers(prev => {
+                const next = new Set(prev)
+                next.add(userName)
+                return next
+            })
+        }
     }
 
     const getQuotaPill = (sub: Subscription) => {
@@ -575,6 +597,7 @@ export default function Subscriptions() {
                             {filteredUsers.map(u => {
                                 const isSelected = selectedProfiles.some(p => p.username === u.name)
                                 const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
+                                const aliasExpanded = expandedAliasUsers.has(u.name)
                                 return (
                                     <div
                                         key={u.name}
@@ -590,24 +613,38 @@ export default function Subscriptions() {
                                         <div className="flex flex-1 min-w-0 items-start gap-2">
                                             <div className="w-1/2 min-w-0 space-y-1">
                                                 <div className="truncate text-sm text-slate-200">{u.name}</div>
-                                                {isSelected && (
+                                                {isSelected && aliasExpanded && (
                                                     <input
                                                         type="text"
                                                         value={alias}
                                                         onChange={e => updateProfileAlias(u.name, e.target.value)}
                                                         onClick={e => e.stopPropagation()}
+                                                        onBlur={() => {
+                                                            if (!alias.trim()) toggleAlias(u.name)
+                                                        }}
                                                         placeholder="Alias"
                                                         className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
                                                     />
                                                 )}
                                             </div>
-                                            <div className="w-1/2 flex flex-wrap justify-end gap-1.5">
-                                                {(u.inbound_tags && u.inbound_tags.length > 0) ? (
-                                                    u.inbound_tags.map(tag => (
-                                                        <Badge key={tag} variant="info" className="max-w-[150px]" title={tag}>{tag}</Badge>
-                                                    ))
-                                                ) : (
-                                                    <Badge variant="neutral">All</Badge>
+                                            <div className="w-1/2 flex items-start gap-1">
+                                                <div className="flex-1 flex flex-wrap justify-end gap-1.5">
+                                                    {(u.inbound_tags && u.inbound_tags.length > 0) ? (
+                                                        u.inbound_tags.map(tag => (
+                                                            <Badge key={tag} variant="info" className="max-w-[150px]" title={tag}>{tag}</Badge>
+                                                        ))
+                                                    ) : (
+                                                        <Badge variant="neutral">All</Badge>
+                                                    )}
+                                                </div>
+                                                {isSelected && (
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); toggleAlias(u.name) }}
+                                                        title={aliasExpanded ? 'Remove alias' : 'Set alias'}
+                                                        className={`shrink-0 p-1 rounded border transition-all ${aliasExpanded ? 'bg-blue-500/15 border-blue-500/50 text-blue-400 hover:bg-blue-500/25' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                                                    >
+                                                        <Tag size={11} />
+                                                    </button>
                                                 )}
                                             </div>
                                         </div>
