@@ -1639,8 +1639,8 @@ function DatabaseTab({
                                     <div key={run.id} className="py-2 border-b border-slate-800/50 last:border-0">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-start justify-between gap-3">
-                                                <div className="flex min-w-0 flex-1 items-center gap-2">
-                                                    <div className="truncate text-slate-200 text-xs font-medium" title={run.name}>{run.name}</div>
+                                                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                                                    <div className="max-w-[9rem] truncate text-slate-200 text-xs font-medium sm:max-w-[14rem]" title={run.name}>{run.name}</div>
                                                     <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${badge.className}`}>
                                                         {badge.label}
                                                     </span>
@@ -1650,7 +1650,9 @@ function DatabaseTab({
                                                         </span>
                                                     )}
                                                 </div>
-                                                <div className="shrink-0 text-right font-mono text-blue-400 text-xs">{run.request_ip || '-'}</div>
+                                                <div className="max-w-[7.5rem] shrink-0 truncate text-right font-mono text-blue-400 text-xs sm:max-w-[12rem]" title={run.request_ip || '-'}>
+                                                    {run.request_ip || '-'}
+                                                </div>
                                             </div>
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="min-w-0 flex-1 truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
