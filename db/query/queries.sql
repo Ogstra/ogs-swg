@@ -324,48 +324,51 @@ INSERT INTO subscriptions (
 
 -- name: GetSubscriptionByToken :one
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	created_at,
-	updated_at
-FROM subscriptions
-WHERE token = ?;
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+WHERE s.token = ?;
 
 -- name: GetSubscriptionByID :one
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	created_at,
-	updated_at
-FROM subscriptions
-WHERE id = ?;
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+WHERE s.id = ?;
 
 -- name: GetAllSubscriptions :many
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	created_at,
-	updated_at
-FROM subscriptions
-ORDER BY created_at DESC;
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+ORDER BY s.created_at DESC;
 
 -- name: UpdateSubscription :exec
 UPDATE subscriptions
@@ -401,6 +404,7 @@ SELECT
 	s.reset_day,
 	s.profile_update_interval_hours,
 	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
 	s.created_at,
 	s.updated_at
 FROM subscriptions s

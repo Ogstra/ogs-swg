@@ -578,15 +578,15 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 	if shouldCensorSubscriptionRequestHistory(r) {
 		for i := range runs {
 			runs[i].UserName = "Restricted"
-			if runs[i].RequestIP != "" {
-				runs[i].RequestIP = "***"
+			if runs[i].RequestIp != "" {
+				runs[i].RequestIp = "***"
 			}
 			runs[i].RequestHost = ""
 			runs[i].RequestPath = ""
 			runs[i].UserAgent = ""
 			runs[i].DeviceModel = ""
-			runs[i].DeviceOS = ""
-			runs[i].DeviceOSVersion = ""
+			runs[i].DeviceOs = ""
+			runs[i].DeviceOsVersion = ""
 			runs[i].AppVersion = ""
 			runs[i].Country = ""
 			runs[i].HwidHash = ""
