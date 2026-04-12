@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 CREATE TABLE IF NOT EXISTS subscription_users (
 	sub_id INTEGER NOT NULL,
 	user_name TEXT NOT NULL,
+	alias TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (sub_id, user_name),
 	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
 	FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
@@ -149,8 +150,21 @@ CREATE TABLE IF NOT EXISTS subscription_requests (
 	hwid_prefix TEXT NOT NULL DEFAULT '',
 	requested_at INTEGER NOT NULL,
 	served_from_cache INTEGER NOT NULL DEFAULT 0,
+	blocked INTEGER NOT NULL DEFAULT 0,
+	block_reason TEXT NOT NULL DEFAULT '',
 	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS subscription_protection_rules (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	rule_type TEXT NOT NULL,
+	value TEXT NOT NULL,
+	note TEXT NOT NULL DEFAULT '',
+	created_at INTEGER DEFAULT (strftime('%s','now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
 	ON subscription_requests(sub_id, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
+	ON subscription_protection_rules(rule_type, value);

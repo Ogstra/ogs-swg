@@ -27,6 +27,16 @@ type DailyWgUsage struct {
 	Tx        int64  `json:"tx"`
 }
 
+type DashboardPreference struct {
+	Principal               string        `json:"principal"`
+	DefaultService          string        `json:"default_service"`
+	RefreshMs               int64         `json:"refresh_ms"`
+	DefaultRange            string        `json:"default_range"`
+	DetailChartTargetPoints int64         `json:"detail_chart_target_points"`
+	CreatedAt               sql.NullInt64 `json:"created_at"`
+	UpdatedAt               sql.NullInt64 `json:"updated_at"`
+}
+
 type ImportState struct {
 	Key   string         `json:"key"`
 	Value sql.NullString `json:"value"`
@@ -39,27 +49,24 @@ type InboundMetum struct {
 }
 
 type PanelUser struct {
-	Username           string        `json:"username"`
-	PasswordHash       string        `json:"password_hash"`
-	CanReadUsers       int64         `json:"can_read_users"`
-	CanWriteUsers      int64         `json:"can_write_users"`
-	CanReadWireguard   int64         `json:"can_read_wireguard"`
-	CanWriteWireguard  int64         `json:"can_write_wireguard"`
-	CanReadConfig      int64         `json:"can_read_config"`
-	CanWriteConfig     int64         `json:"can_write_config"`
-	CanReadSettings    int64         `json:"can_read_settings"`
-	CanWriteSettings   int64         `json:"can_write_settings"`
-	CanReadPanelUsers  int64         `json:"can_read_panel_users"`
-	CanWritePanelUsers int64         `json:"can_write_panel_users"`
-	CanReadLogs        int64         `json:"can_read_logs"`
-	CreatedAt          sql.NullInt64 `json:"created_at"`
-	UpdatedAt          sql.NullInt64 `json:"updated_at"`
-}
-
-type PanelUserSubscriptionDefault struct {
+	Username                                      string        `json:"username"`
+	PasswordHash                                  string        `json:"password_hash"`
+	CanReadUsers                                  int64         `json:"can_read_users"`
+	CanWriteUsers                                 int64         `json:"can_write_users"`
+	CanReadWireguard                              int64         `json:"can_read_wireguard"`
+	CanWriteWireguard                             int64         `json:"can_write_wireguard"`
+	CanReadConfig                                 int64         `json:"can_read_config"`
+	CanWriteConfig                                int64         `json:"can_write_config"`
+	CanReadSettings                               int64         `json:"can_read_settings"`
+	CanWriteSettings                              int64         `json:"can_write_settings"`
+	CanReadPanelUsers                             int64         `json:"can_read_panel_users"`
+	CanWritePanelUsers                            int64         `json:"can_write_panel_users"`
+	CanReadLogs                                   int64         `json:"can_read_logs"`
 	SubscriptionDefaultProfileUpdateIntervalHours sql.NullInt64 `json:"subscription_default_profile_update_interval_hours"`
 	SubscriptionDefaultUpdateAlways               int64         `json:"subscription_default_update_always"`
 	SubscriptionDefaultDestinationsJson           string        `json:"subscription_default_destinations_json"`
+	CreatedAt                                     sql.NullInt64 `json:"created_at"`
+	UpdatedAt                                     sql.NullInt64 `json:"updated_at"`
 }
 
 type Sample struct {
@@ -87,33 +94,43 @@ type Subscription struct {
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
 	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
 	UpdateAlways               int64          `json:"update_always"`
-	LastRequestAt              sql.NullInt64  `json:"last_request_at"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
+}
+
+type SubscriptionProtectionRule struct {
+	ID        int64         `json:"id"`
+	RuleType  string        `json:"rule_type"`
+	Value     string        `json:"value"`
+	Note      string        `json:"note"`
+	CreatedAt sql.NullInt64 `json:"created_at"`
 }
 
 type SubscriptionRequest struct {
 	ID              int64  `json:"id"`
 	SubID           int64  `json:"sub_id"`
 	UserName        string `json:"user_name"`
-	RequestIP       string `json:"request_ip"`
+	RequestIp       string `json:"request_ip"`
 	RequestHost     string `json:"request_host"`
 	RequestPath     string `json:"request_path"`
 	UserAgent       string `json:"user_agent"`
 	DeviceModel     string `json:"device_model"`
-	DeviceOS        string `json:"device_os"`
-	DeviceOSVersion string `json:"device_os_version"`
+	DeviceOs        string `json:"device_os"`
+	DeviceOsVersion string `json:"device_os_version"`
 	AppVersion      string `json:"app_version"`
 	Country         string `json:"country"`
 	HwidHash        string `json:"hwid_hash"`
 	HwidPrefix      string `json:"hwid_prefix"`
 	RequestedAt     int64  `json:"requested_at"`
 	ServedFromCache int64  `json:"served_from_cache"`
+	Blocked         int64  `json:"blocked"`
+	BlockReason     string `json:"block_reason"`
 }
 
 type SubscriptionUser struct {
 	SubID    int64  `json:"sub_id"`
 	UserName string `json:"user_name"`
+	Alias    string `json:"alias"`
 }
 
 type User struct {

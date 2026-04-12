@@ -409,7 +409,8 @@ WHERE su.user_name = ?;
 
 -- Subscription Users Queries --
 -- name: AddUserToSubscription :exec
-INSERT OR IGNORE INTO subscription_users (sub_id, user_name) VALUES (?, ?);
+INSERT INTO subscription_users (sub_id, user_name, alias) VALUES (?, ?, ?)
+ON CONFLICT(sub_id, user_name) DO UPDATE SET alias = excluded.alias;
 
 -- name: RemoveUserFromSubscription :exec
 DELETE FROM subscription_users WHERE sub_id = ? AND user_name = ?;
@@ -419,3 +420,95 @@ DELETE FROM subscription_users WHERE sub_id = ?;
 
 -- name: GetUsersForSubscription :many
 SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY user_name ASC;
+
+-- name: GetSubscriptionMembers :many
+SELECT sub_id, user_name, alias
+FROM subscription_users
+WHERE sub_id = ?
+ORDER BY user_name ASC;
+
+-- Subscription Requests Queries --
+-- name: InsertSubscriptionRequest :exec
+INSERT INTO subscription_requests (
+	sub_id,
+	user_name,
+	request_ip,
+	request_host,
+	request_path,
+	user_agent,
+	device_model,
+	device_os,
+	device_os_version,
+	app_version,
+	country,
+	hwid_hash,
+	hwid_prefix,
+	requested_at,
+	served_from_cache,
+	blocked,
+	block_reason
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- name: GetSubscriptionRequestHistory :many
+SELECT
+	sr.id,
+	sr.sub_id,
+	s.name,
+	sr.user_name,
+	sr.request_ip,
+	sr.request_host,
+	sr.request_path,
+	sr.user_agent,
+	sr.device_model,
+	sr.device_os,
+	sr.device_os_version,
+	sr.app_version,
+	sr.country,
+	sr.hwid_hash,
+	sr.hwid_prefix,
+	sr.requested_at,
+	sr.served_from_cache,
+	sr.blocked,
+	sr.block_reason
+FROM subscription_requests sr
+LEFT JOIN subscriptions s ON s.id = sr.sub_id
+ORDER BY sr.requested_at DESC, sr.id DESC
+LIMIT ?;
+
+-- name: GetBlockedSubscriptionRequests :many
+SELECT
+	sr.id,
+	sr.sub_id,
+	COALESCE(s.name, '') AS sub_name,
+	sr.request_ip,
+	sr.requested_at,
+	sr.block_reason,
+	sr.user_agent
+FROM subscription_requests sr
+LEFT JOIN subscriptions s ON s.id = sr.sub_id
+WHERE sr.blocked = 1
+ORDER BY sr.requested_at DESC, sr.id DESC
+LIMIT ? OFFSET ?;
+
+-- name: CountSubscriptionRequests :one
+SELECT COUNT(*) FROM subscription_requests;
+
+-- name: PruneSubscriptionRequestsOlderThan :exec
+DELETE FROM subscription_requests WHERE requested_at < ?;
+
+-- Subscription Protection Rules Queries --
+-- name: InsertProtectionRule :exec
+INSERT INTO subscription_protection_rules (
+	rule_type,
+	value,
+	note,
+	created_at
+) VALUES (?, ?, ?, ?);
+
+-- name: GetAllProtectionRules :many
+SELECT id, rule_type, value, note, created_at
+FROM subscription_protection_rules
+ORDER BY created_at DESC, id DESC;
+
+-- name: DeleteProtectionRule :exec
+DELETE FROM subscription_protection_rules WHERE id = ?;

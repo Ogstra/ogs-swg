@@ -17,9 +17,9 @@ type Querier interface {
 	CountAdmins(ctx context.Context) (int64, error)
 	CountDailyUsage(ctx context.Context) (int64, error)
 	CountPanelUsers(ctx context.Context) (int64, error)
-	CountSubscriptionRequests(ctx context.Context) (int64, error)
 	// Samples Queries --
 	CountSamples(ctx context.Context) (int64, error)
+	CountSubscriptionRequests(ctx context.Context) (int64, error)
 	CountWGDailyUsage(ctx context.Context) (int64, error)
 	// WireGuard Samples --
 	CountWGSamples(ctx context.Context) (int64, error)
@@ -31,6 +31,7 @@ type Querier interface {
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (int64, error)
 	DeleteInboundMeta(ctx context.Context, tag string) error
 	DeletePanelUser(ctx context.Context, username string) error
+	DeleteProtectionRule(ctx context.Context, id int64) error
 	DeleteSubscription(ctx context.Context, id int64) error
 	DeleteUser(ctx context.Context, email string) error
 	GetActiveUserCount(ctx context.Context, ts int64) (int64, error)
@@ -40,9 +41,11 @@ type Querier interface {
 	GetAdmin(ctx context.Context, username string) (string, error)
 	GetAllInboundMeta(ctx context.Context) ([]GetAllInboundMetaRow, error)
 	GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, error)
+	GetAllProtectionRules(ctx context.Context) ([]SubscriptionProtectionRule, error)
 	GetAllSubscriptions(ctx context.Context) ([]Subscription, error)
 	GetAllUsers(ctx context.Context) ([]User, error)
 	GetAllWGPeers(ctx context.Context) ([]GetAllWGPeersRow, error)
+	GetBlockedSubscriptionRequests(ctx context.Context, arg GetBlockedSubscriptionRequestsParams) ([]GetBlockedSubscriptionRequestsRow, error)
 	GetDailyUsageInDateRange(ctx context.Context, arg GetDailyUsageInDateRangeParams) ([]DailyUsage, error)
 	GetGlobalTraffic(ctx context.Context, arg GetGlobalTrafficParams) ([]GetGlobalTrafficRow, error)
 	GetInboundMeta(ctx context.Context, tag string) (GetInboundMetaRow, error)
@@ -51,12 +54,14 @@ type Querier interface {
 	GetLastSeenUserWithTraffic(ctx context.Context, user string) (interface{}, error)
 	GetMaxTimestamp(ctx context.Context) (interface{}, error)
 	GetMaxTimestampForUser(ctx context.Context, user string) (interface{}, error)
-	GetPanelUser(ctx context.Context, username string) (PanelUser, error)
+	GetPanelUser(ctx context.Context, username string) (GetPanelUserRow, error)
+	GetPanelUserSubscriptionDefaults(ctx context.Context, username string) (GetPanelUserSubscriptionDefaultsRow, error)
 	GetSamplerRuns(ctx context.Context, limit int64) ([]GetSamplerRunsRow, error)
-	GetSubscriptionRequestHistory(ctx context.Context, limit int64) ([]GetSubscriptionRequestHistoryRow, error)
 	GetSamplesForUser(ctx context.Context, arg GetSamplesForUserParams) ([]Sample, error)
 	GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error)
 	GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error)
+	GetSubscriptionMembers(ctx context.Context, subID int64) ([]SubscriptionUser, error)
+	GetSubscriptionRequestHistory(ctx context.Context, limit int64) ([]GetSubscriptionRequestHistoryRow, error)
 	GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error)
 	GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error)
 	GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserParams) ([]GetTrafficPerUserRow, error)
@@ -68,9 +73,12 @@ type Querier interface {
 	GetWGTrafficSeries(ctx context.Context, arg GetWGTrafficSeriesParams) ([]GetWGTrafficSeriesRow, error)
 	// Daily Usage --
 	InsertDailyUsage(ctx context.Context, arg InsertDailyUsageParams) error
+	// Subscription Protection Rules Queries --
+	InsertProtectionRule(ctx context.Context, arg InsertProtectionRuleParams) error
 	InsertSample(ctx context.Context, arg InsertSampleParams) error
 	// Sampler Runs --
 	InsertSamplerRun(ctx context.Context, arg InsertSamplerRunParams) error
+	// Subscription Requests Queries --
 	InsertSubscriptionRequest(ctx context.Context, arg InsertSubscriptionRequestParams) error
 	InsertWGDailyUsage(ctx context.Context, arg InsertWGDailyUsageParams) error
 	InsertWGSample(ctx context.Context, arg InsertWGSampleParams) error
@@ -85,6 +93,7 @@ type Querier interface {
 	UpdateAdminUsername(ctx context.Context, arg UpdateAdminUsernameParams) error
 	UpdatePanelUserPassword(ctx context.Context, arg UpdatePanelUserPasswordParams) error
 	UpdatePanelUserPermissions(ctx context.Context, arg UpdatePanelUserPermissionsParams) error
+	UpdatePanelUserSubscriptionDefaults(ctx context.Context, arg UpdatePanelUserSubscriptionDefaultsParams) error
 	UpdatePanelUsername(ctx context.Context, arg UpdatePanelUsernameParams) error
 	UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error
 	UpdateWGPeerHandshake(ctx context.Context, arg UpdateWGPeerHandshakeParams) error
