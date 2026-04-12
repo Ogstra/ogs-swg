@@ -94,6 +94,7 @@ type Subscription struct {
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
 	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
 	UpdateAlways               int64          `json:"update_always"`
+	LastRequestAt              sql.NullInt64  `json:"last_request_at"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
 }

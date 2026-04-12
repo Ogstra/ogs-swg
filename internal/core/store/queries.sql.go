@@ -546,18 +546,19 @@ func (q *Queries) GetAllProtectionRules(ctx context.Context) ([]SubscriptionProt
 
 const getAllSubscriptions = `-- name: GetAllSubscriptions :many
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	created_at,
-	updated_at
-FROM subscriptions
-ORDER BY created_at DESC
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+ORDER BY s.created_at DESC
 `
 
 func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
@@ -578,6 +579,7 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 			&i.ResetDay,
 			&i.ProfileUpdateIntervalHours,
 			&i.UpdateAlways,
+			&i.LastRequestAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1082,18 +1084,19 @@ func (q *Queries) GetSamplesForUser(ctx context.Context, arg GetSamplesForUserPa
 
 const getSubscriptionByID = `-- name: GetSubscriptionByID :one
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	created_at,
-	updated_at
-FROM subscriptions
-WHERE id = ?
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+WHERE s.id = ?
 `
 
 func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error) {
@@ -1108,6 +1111,7 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 		&i.ResetDay,
 		&i.ProfileUpdateIntervalHours,
 		&i.UpdateAlways,
+		&i.LastRequestAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1116,18 +1120,19 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 
 const getSubscriptionByToken = `-- name: GetSubscriptionByToken :one
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	created_at,
-	updated_at
-FROM subscriptions
-WHERE token = ?
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+WHERE s.token = ?
 `
 
 func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error) {
@@ -1142,6 +1147,7 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 		&i.ResetDay,
 		&i.ProfileUpdateIntervalHours,
 		&i.UpdateAlways,
+		&i.LastRequestAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1300,6 +1306,7 @@ SELECT
 	s.reset_day,
 	s.profile_update_interval_hours,
 	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
 	s.created_at,
 	s.updated_at
 FROM subscriptions s
@@ -1325,6 +1332,7 @@ func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) 
 			&i.ResetDay,
 			&i.ProfileUpdateIntervalHours,
 			&i.UpdateAlways,
+			&i.LastRequestAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
