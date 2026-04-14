@@ -61,6 +61,11 @@ export interface FeatureFlags {
     journalctl_available?: boolean;
 }
 
+export interface ConfigBackupEntry {
+    name: string;
+    created_at: string;
+}
+
 export interface LogSearchParams {
     query: string;
     limit?: number;
@@ -620,6 +625,26 @@ export const api = {
         await handleResponse(res, 'Failed to fetch WireGuard raw config');
         return res.text();
     },
+    getWireGuardConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
+        const res = await fetch('/api/wireguard/config/backups', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard config backups');
+        return res.json();
+    },
+    getWireGuardConfigBackupsForInterface: async (iface: string): Promise<ConfigBackupEntry[]> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backups`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard config backups');
+        return res.json();
+    },
+    getWireGuardConfigBackupContent: async (name: string): Promise<string> => {
+        const res = await fetch(`/api/wireguard/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard backup');
+        return res.text();
+    },
+    getWireGuardConfigBackupContentForInterface: async (iface: string, name: string): Promise<string> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard backup');
+        return res.text();
+    },
     updateWireGuardConfigForInterface: async (iface: string, config: string): Promise<void> => {
         const res = await fetch(`${wireGuardInterfaceBase(iface)}/config`, {
             method: 'PUT',
@@ -871,6 +896,10 @@ export const api = {
         const res = await fetch('/api/wireguard/config/backup', { method: 'POST', headers: buildHeaders() });
         await handleResponse(res, 'Failed to backup WireGuard config');
     },
+    backupWireGuardConfigForInterface: async (iface: string): Promise<void> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup`, { method: 'POST', headers: buildHeaders() });
+        await handleResponse(res, 'Failed to backup WireGuard config');
+    },
     restoreWireGuardConfig: async (): Promise<string> => {
         const res = await fetch('/api/wireguard/config/restore', { method: 'POST', headers: buildHeaders() });
         await handleResponse(res, 'Failed to restore WireGuard config');
@@ -880,6 +909,16 @@ export const api = {
         const res = await fetch('/api/config/backup/meta', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to load backup metadata');
         return res.json();
+    },
+    getConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
+        const res = await fetch('/api/config/backups', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch config backups');
+        return res.json();
+    },
+    getConfigBackupContent: async (name: string): Promise<string> => {
+        const res = await fetch(`/api/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch config backup');
+        return res.text();
     },
     updateWireGuardConfig: async (config: string): Promise<void> => {
         const res = await fetch('/api/wireguard/config', {

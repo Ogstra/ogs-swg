@@ -6,6 +6,7 @@ import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { formatBytes } from '../../utils/traffic'
+import { useToast } from '../../context/ToastContext'
 
 type DashboardRange = '30m' | '1h' | '6h' | '24h' | '1w' | '1m' | 'custom'
 
@@ -162,6 +163,7 @@ const WireGuardIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
 )
 
 export default function Dashboard() {
+    const { error: toastError } = useToast()
     const queryClient = useQueryClient()
     const [timeRange, setTimeRange] = useState<DashboardRange>('24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
@@ -323,7 +325,7 @@ export default function Dashboard() {
         } catch (err) {
             setSingboxPendingChanges(true)
             console.error('Failed to apply Sing-box changes:', err)
-            alert('Failed to apply changes. Please try again.')
+            toastError('Failed to apply changes. Please try again.')
         }
     }
 

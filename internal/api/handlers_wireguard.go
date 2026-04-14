@@ -1603,21 +1603,32 @@ func (s *Server) handleBackupWireGuardConfig(w http.ResponseWriter, r *http.Requ
 	if !s.requireWireGuard(w) {
 		return
 	}
-	src := s.config.WireGuardConfigPath
-	dst := src + ".bak"
-	if err := s.copyConfig(r.Context(), src, dst); err != nil {
+	src, err := s.wireGuardConfigPathForContext(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.createConfigBackup(r.Context(), src); err != nil {
 		http.Error(w, "Backup failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleBackupWireGuardConfigForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleBackupWireGuardConfig)
+}
+
 func (s *Server) handleRestoreWireGuardConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireWireGuard(w) {
 		return
 	}
-	src := s.config.WireGuardConfigPath + ".bak"
-	dst := s.config.WireGuardConfigPath
+	dst, err := s.wireGuardConfigPathForContext(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	src := dst + ".bak"
 	if err := s.copyConfig(r.Context(), src, dst); err != nil {
 		if isNotFoundErr(err) {
 			http.Error(w, "Backup not found", http.StatusNotFound)
@@ -1627,7 +1638,6 @@ func (s *Server) handleRestoreWireGuardConfig(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var content []byte
-	var err error
 	if s.executor != nil {
 		content, err = s.executor.ReadConfig(r.Context(), dst)
 	} else {
@@ -1639,4 +1649,57 @@ func (s *Server) handleRestoreWireGuardConfig(w http.ResponseWriter, r *http.Req
 	}
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write(content)
+}
+
+func (s *Server) handleListWireGuardConfigBackups(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	src, err := s.wireGuardConfigPathForContext(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	backups, err := s.listConfigBackups(src, 10)
+	if err != nil {
+		http.Error(w, "Failed to list backups: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(backups)
+}
+
+func (s *Server) handleListWireGuardConfigBackupsForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleListWireGuardConfigBackups)
+}
+
+func (s *Server) handleGetWireGuardConfigBackup(w http.ResponseWriter, r *http.Request) {
+	if !s.requireWireGuard(w) {
+		return
+	}
+	src, err := s.wireGuardConfigPathForContext(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		http.Error(w, "backup name is required", http.StatusBadRequest)
+		return
+	}
+	content, err := s.readNamedBackup(r.Context(), src, name)
+	if err != nil {
+		if isNotFoundErr(err) {
+			http.Error(w, "Backup not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to read backup: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write(content)
+}
+
+func (s *Server) handleGetWireGuardConfigBackupForInterface(w http.ResponseWriter, r *http.Request) {
+	s.runScopedWireGuardHandler(w, r, (*Server).handleGetWireGuardConfigBackup)
 }

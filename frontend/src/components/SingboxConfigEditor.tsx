@@ -6,11 +6,14 @@ import InboundList from './singbox/InboundList'
 import { Card } from './ui/Card'
 import { RawEditorPanel } from './raw/RawEditorPanel'
 import { useAuth } from '../context/AuthContext'
+import { useToast } from '../context/ToastContext'
+import { ConfirmModal } from './ui/ConfirmModal'
 
 type TabId = 'inbounds' | 'rules' | 'outbounds' | 'raw'
 
 export default function SingboxConfigEditor() {
     const { permissions } = useAuth()
+    const { success, error: toastError } = useToast()
     const canWriteConfig = !!permissions?.can_write_config
     const [activeTab, setActiveTab] = useState<TabId>('inbounds')
     const [config, setConfig] = useState('')
@@ -27,6 +30,7 @@ export default function SingboxConfigEditor() {
     const [outbounds, setOutbounds] = useState<SingboxOutboundView[]>([])
     const [outboundsLoading, setOutboundsLoading] = useState(false)
     const [outboundsSaving, setOutboundsSaving] = useState(false)
+    const [restoreConfirmOpen, setRestoreConfirmOpen] = useState(false)
 
     // Load Config
     useEffect(() => {
@@ -59,7 +63,6 @@ export default function SingboxConfigEditor() {
             }
         } catch (err: any) {
             console.error('Failed to load config:', err)
-            // alert('Failed to load config') // Don't block UI with alerts on load
         } finally {
             setLoading(false)
         }
@@ -81,24 +84,28 @@ export default function SingboxConfigEditor() {
     const handleBackup = async () => {
         try {
             await api.backupConfig()
-            alert('Backup created (.bak)')
+            success('Backup created (.bak)')
             loadBackupMeta()
         } catch (err: any) {
-            alert('Backup failed: ' + err.message || err)
+            toastError('Backup failed: ' + (err.message || err))
         }
     }
 
-    const handleRestore = async () => {
-        if (!confirm('Restore from backup? This will overwrite current config.')) return
+    const handleRestore = () => {
+        setRestoreConfirmOpen(true)
+    }
+
+    const handleConfirmRestore = async () => {
         try {
             const cfg = await api.restoreConfig()
             const formatted = JSON.stringify(cfg, null, 2)
             setConfig(formatted)
             setOriginalConfig(formatted)
-            alert('Restored from backup')
+            success('Restored from backup')
             loadBackupMeta()
+            setRestoreConfirmOpen(false)
         } catch (err: any) {
-            alert('Restore failed: ' + err.message || err)
+            toastError('Restore failed: ' + (err.message || err))
         }
     }
 
@@ -109,16 +116,16 @@ export default function SingboxConfigEditor() {
             try {
                 JSON.parse(config)
             } catch (e: any) {
-                alert(`Invalid JSON: ${e.message}`)
+                toastError(`Invalid JSON: ${e.message}`)
                 setSaving(false)
                 return
             }
 
             await api.updateSingboxConfig(config)
             setOriginalConfig(config)
-            alert('Configuration saved and service restarted!')
+            success('Configuration saved and service restarted!')
         } catch (err: any) {
-            alert(`Failed to save: ${err.message || err}`)
+            toastError(`Failed to save: ${err.message || err}`)
         } finally {
             setSaving(false)
         }
@@ -131,7 +138,7 @@ export default function SingboxConfigEditor() {
             setOutbounds(Array.isArray(nextOutbounds) ? nextOutbounds : [])
         } catch (err: any) {
             console.error('Failed to load outbounds', err)
-            alert('Failed to load outbounds')
+            toastError('Failed to load outbounds')
         } finally {
             setOutboundsLoading(false)
         }
@@ -145,11 +152,11 @@ export default function SingboxConfigEditor() {
                 domain_strategy: (outbound.domain_strategy || '').trim(),
             }))
             await api.updateSingboxOutboundDomainStrategies(updates)
-            alert('Outbound domain_strategy values saved')
+            success('Outbound domain_strategy values saved')
             await loadOutbounds()
         } catch (err: any) {
             console.error('Failed to save outbounds', err)
-            alert('Failed to save outbounds')
+            toastError('Failed to save outbounds')
         } finally {
             setOutboundsSaving(false)
         }
@@ -201,7 +208,7 @@ export default function SingboxConfigEditor() {
             }
         } catch (err: any) {
             console.error('Failed to load rules', err)
-            alert('Failed to load rules')
+            toastError('Failed to load rules')
         } finally {
             setRulesLoading(false)
         }
@@ -210,7 +217,7 @@ export default function SingboxConfigEditor() {
     const saveRules = async () => {
         const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
         if (hasInvalid) {
-            alert('Please fix rules before saving')
+            toastError('Please fix rules before saving')
             return
         }
         setRulesSaving(true)
@@ -233,11 +240,11 @@ export default function SingboxConfigEditor() {
             parsed.route = route
             parsed.route.rules = nextRules
             await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
-            alert('Rules saved')
+            success('Rules saved')
             await loadRules()
         } catch (err: any) {
             console.error('Failed to save rules', err)
-            alert('Failed to save rules')
+            toastError('Failed to save rules')
         } finally {
             setRulesSaving(false)
         }
@@ -334,6 +341,15 @@ export default function SingboxConfigEditor() {
                     )}
                 </div>
             </div>
+            <ConfirmModal
+                isOpen={restoreConfirmOpen}
+                onClose={() => setRestoreConfirmOpen(false)}
+                onConfirm={handleConfirmRestore}
+                title="Restore from backup?"
+                message="This will overwrite the current config in the editor with the last backup."
+                confirmLabel="Restore"
+                confirmTone="danger"
+            />
         </div>
     )
 }

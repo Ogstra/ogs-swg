@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag } from 'lucide-react'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
 import {
@@ -64,6 +64,7 @@ export default function Subscriptions() {
     const { success, error: toastError } = useToast()
     const { permissions, token } = useAuth()
     const queryClient = useQueryClient()
+    const canReadUsers = !!permissions?.can_read_users
     const canWriteUsers = !!permissions?.can_write_users
     const canManagePanelScopedDefaults = canWriteUsers && !!token
 
@@ -83,9 +84,11 @@ export default function Subscriptions() {
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
     const [userSearch, setUserSearch] = useState('')
     const [expandedAliasUsers, setExpandedAliasUsers] = useState<Set<string>>(new Set())
+    const [sortKey, setSortKey] = useState<'name' | 'last_request' | 'users' | 'quota'>('name')
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
-    const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
-    const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
+    const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
+    const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers(), enabled: canReadUsers })
     const domainQuery = useQuery({
         queryKey: ['settings-subscription-domain'],
         queryFn: () => api.getSubscriptionDomain(),
@@ -111,6 +114,28 @@ export default function Subscriptions() {
         : sortedUsersInfo
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
+    const sortedSubs = [...subs].sort((a, b) => {
+        const dir = sortDir === 'asc' ? 1 : -1
+        switch (sortKey) {
+            case 'last_request':
+                return ((a.last_request_at || 0) - (b.last_request_at || 0)) * dir
+            case 'users':
+                return ((a.users?.length || 0) - (b.users?.length || 0)) * dir
+            case 'quota': {
+                const aLimit = a.quota_limit || 0
+                const bLimit = b.quota_limit || 0
+                const aRatio = aLimit ? ((a.used_bytes || 0) / aLimit) : 0
+                const bRatio = bLimit ? ((b.used_bytes || 0) / bLimit) : 0
+                if (Math.abs(aRatio - bRatio) < 0.0001) {
+                    return ((a.used_bytes || 0) - (b.used_bytes || 0)) * dir
+                }
+                return (aRatio - bRatio) * dir
+            }
+            case 'name':
+            default:
+                return a.name.localeCompare(b.name) * dir
+        }
+    })
 
     const applyRefreshPolicyDraft = (draft: RefreshPolicyDraft) => {
         setProfileUpdateIntervalEnabled(draft.intervalEnabled)
@@ -119,6 +144,10 @@ export default function Subscriptions() {
     }
 
     const openCreate = () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         setNameInput('')
         setQuotaGB('0')
         setSelectedProfiles(hydrateSubscriptionProfileAliases([]))
@@ -129,6 +158,10 @@ export default function Subscriptions() {
     }
 
     const openEdit = (sub: Subscription) => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         setNameInput(sub.name)
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
         setUserSearch('')
@@ -150,6 +183,10 @@ export default function Subscriptions() {
     }
 
     const openDefaults = () => {
+        if (!canManagePanelScopedDefaults) {
+            toastError('No permission to manage subscription defaults')
+            return
+        }
         const refreshDraft = subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults)
         setDefaultIntervalEnabled(refreshDraft.intervalEnabled)
         setDefaultIntervalHours(refreshDraft.intervalHours)
@@ -158,6 +195,10 @@ export default function Subscriptions() {
     }
 
     const handleSave = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         if (!nameInput.trim()) return toastError('Name is required')
         const quotaLimit = parseGBInput(quotaGB)
         const intervalHours = profileUpdateIntervalEnabled ? parseIntervalHours(profileUpdateIntervalHours) : null
@@ -192,6 +233,10 @@ export default function Subscriptions() {
     }
 
     const handleSaveDefaults = async () => {
+        if (!canManagePanelScopedDefaults) {
+            toastError('No permission to manage subscription defaults')
+            return
+        }
         const intervalHours = defaultIntervalEnabled ? parseIntervalHours(defaultIntervalHours) : null
         if (defaultIntervalEnabled && intervalHours == null) {
             return toastError('Default refresh interval must be a whole number greater than zero')
@@ -212,6 +257,10 @@ export default function Subscriptions() {
     }
 
     const handleDelete = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         if (!confirmDelete) return
         try {
             await api.deleteSubscription(confirmDelete.id)
@@ -224,6 +273,10 @@ export default function Subscriptions() {
     }
 
     const handleRegenerate = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         if (!confirmRegenerate) return
         try {
             await api.regenerateSubscriptionToken(confirmRegenerate.id)
@@ -236,6 +289,10 @@ export default function Subscriptions() {
     }
 
     const copyLink = async (token: string) => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         try {
             const protocol = window.location.protocol
             const link = `${protocol}//${subDomain}/s/${token}`
@@ -356,6 +413,24 @@ export default function Subscriptions() {
         }
     }
 
+    const toggleSort = (key: typeof sortKey) => {
+        if (sortKey === key) {
+            setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+        } else {
+            setSortKey(key)
+            setSortDir(['last_request', 'users', 'quota'].includes(key) ? 'desc' : 'asc')
+        }
+    }
+
+    const renderSortIcon = (key: typeof sortKey) => {
+        if (sortKey !== key) {
+            return <ArrowUpDown size={12} className="inline ml-1 text-slate-500" />
+        }
+        return sortDir === 'asc'
+            ? <ArrowUp size={12} className="inline ml-1 text-white" />
+            : <ArrowDown size={12} className="inline ml-1 text-white" />
+    }
+
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
     const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
     // Product rules currently support only Direct and Shadowrocket in this modal.
@@ -440,22 +515,30 @@ export default function Subscriptions() {
                     <table className="w-full min-w-[980px] text-left border-collapse table-fixed">
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                                <th className="w-[260px] p-4 font-semibold">Name</th>
-                                <th className="p-4 font-semibold">Last Request</th>
-                                <th className="p-4 font-semibold">Users</th>
-                                <th className="p-4 font-semibold">Quota</th>
+                                <th className="w-[260px] p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('name')}>
+                                    Name {renderSortIcon('name')}
+                                </th>
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('last_request')}>
+                                    Last Request {renderSortIcon('last_request')}
+                                </th>
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('users')}>
+                                    Users {renderSortIcon('users')}
+                                </th>
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
+                                    Quota {renderSortIcon('quota')}
+                                </th>
                                 <th className="p-4 font-semibold text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {subs.length === 0 ? (
+                            {sortedSubs.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="p-12 text-center text-slate-500">
                                         <LinkIcon size={48} className="mx-auto mb-4 opacity-20" />
                                         <p>No subscriptions found.</p>
                                     </td>
                                 </tr>
-                            ) : subs.map(sub => (
+                            ) : sortedSubs.map(sub => (
                                 <tr key={sub.id} className="border-b last:border-0 border-slate-800/50 hover:bg-slate-800/20 transition-colors">
                                     <td className="w-[260px] p-4">
                                         <div className="max-w-[260px] truncate text-white font-medium" title={sub.name}>{sub.name}</div>
@@ -501,12 +584,12 @@ export default function Subscriptions() {
 
             {/* Mobile cards */}
             <div className="sm:hidden space-y-3">
-                {subs.length === 0 ? (
+                {sortedSubs.length === 0 ? (
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">
                         <LinkIcon size={48} className="mx-auto mb-4 opacity-20" />
                         <p>No subscriptions found.</p>
                     </div>
-                ) : subs.map(sub => (
+                ) : sortedSubs.map(sub => (
                     <div key={sub.id} className="bg-slate-900 border border-slate-800 rounded-xl">
                         {(() => {
                             const lastRequest = getLastRequestMeta(sub)
@@ -562,7 +645,7 @@ export default function Subscriptions() {
                 footer={
                     <div className="flex gap-3 justify-end w-full">
                         <Button variant="secondary" onClick={() => setModalState({ type: null })}>Cancel</Button>
-                        <Button variant="primary" onClick={handleSave}>Save</Button>
+                        <Button variant="primary" onClick={handleSave} disabled={!canWriteUsers}>Save</Button>
                     </div>
                 }
             >
@@ -678,7 +761,7 @@ export default function Subscriptions() {
                 footer={
                     <div className="flex gap-3 justify-end w-full">
                         <Button variant="secondary" onClick={() => setDefaultsModalOpen(false)}>Cancel</Button>
-                        <Button variant="primary" onClick={handleSaveDefaults}>Save Defaults</Button>
+                        <Button variant="primary" onClick={handleSaveDefaults} disabled={!canManagePanelScopedDefaults}>Save Defaults</Button>
                     </div>
                 }
             >

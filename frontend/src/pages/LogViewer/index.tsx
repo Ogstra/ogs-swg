@@ -142,6 +142,9 @@ export default function LogViewer() {
         setLines([])
         setViewMode('search')
         setSearchStatus('Searching logs...')
+        let completed = false
+        let matchedCount = 0
+        let truncated = false
         try {
             await api.searchLogsStream({
                 query: q,
@@ -151,24 +154,35 @@ export default function LogViewer() {
                 signal: controller.signal,
             }, event => {
                 if (searchAbortRef.current !== controller) return
+                if (completed && event.type !== 'error') return
                 if (event.type === 'status') {
-                    setSearchStatus(event.message || 'Searching logs...')
+                    matchedCount = event.matched ?? matchedCount
+                    if (!completed) {
+                        setSearchStatus(event.message || 'Searching logs...')
+                    }
                     return
                 }
                 if (event.type === 'chunk') {
+                    matchedCount = event.matched ?? matchedCount
                     const nextLines = [...(event.logs || [])].reverse()
                     startTransition(() => {
                         setLines(prev => [...nextLines, ...prev])
                     })
-                    setSearchStatus(`Found ${event.matched ?? 0} lines...`)
+                    if (!completed) {
+                        setSearchStatus(`Found ${event.matched ?? 0} lines...`)
+                    }
                     return
                 }
                 if (event.type === 'done') {
-                    const suffix = event.truncated ? ' (limit reached)' : ''
+                    completed = true
+                    matchedCount = event.matched ?? matchedCount
+                    truncated = event.truncated === true
+                    const suffix = truncated ? ' (limit reached)' : ''
                     setSearchStatus(`Showing ${event.matched ?? 0} lines${suffix}`)
                     return
                 }
                 if (event.type === 'error') {
+                    completed = true
                     setLines([event.message || 'Search failed'])
                     setSearchStatus('Search failed')
                 }
@@ -186,6 +200,10 @@ export default function LogViewer() {
         } finally {
             if (searchAbortRef.current === controller) {
                 searchAbortRef.current = null
+                if (!completed && matchedCount > 0) {
+                    const suffix = truncated || matchedCount >= searchLimit ? ' (limit reached)' : ''
+                    setSearchStatus(`Showing ${matchedCount} lines${suffix}`)
+                }
                 setSearching(false)
             }
         }
