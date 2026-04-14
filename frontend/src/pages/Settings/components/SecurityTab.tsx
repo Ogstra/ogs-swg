@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Shield, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { Card } from '../../../components/ui/Card'
 import { Button } from '../../../components/ui/Button'
 import { Badge } from '../../../components/ui/Badge'
@@ -179,7 +179,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                     </div>
                 ) : (
                     <>
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-slate-400">Max Requests</label>
                                 <input
@@ -203,7 +203,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                 />
                             </div>
                             <div className="flex items-end">
-                                <label className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 w-full">
+                                <label className="flex h-full min-h-[42px] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 w-full">
                                     <input
                                         type="checkbox"
                                         checked={uaFilterEnabled}
@@ -211,11 +211,11 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                         onChange={e => setUAFilterEnabled(e.target.checked)}
                                         className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
                                     />
-                                    Block browser-like User-Agents
+                                    <span className="leading-tight">Block browser-like User-Agents</span>
                                 </label>
                             </div>
                             <div className="flex items-end">
-                                <label className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 w-full">
+                                <label className="flex h-full min-h-[42px] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 w-full">
                                     <input
                                         type="checkbox"
                                         checked={socialFetchersBlockEnabled}
@@ -223,21 +223,20 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                         onChange={e => setSocialFetchersBlockEnabled(e.target.checked)}
                                         className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
                                     />
-                                    Block social/chat link fetchers
+                                    <span className="leading-tight">Block social/chat link fetchers</span>
                                 </label>
                             </div>
                         </div>
-                        <div className="flex justify-end mt-4">
-                            <Button
-                                onClick={() => saveSettingsMutation.mutate()}
-                                isLoading={saveSettingsMutation.isPending}
-                                disabled={!canWriteSettings}
-                                icon={<Shield size={16} />}
-                            >
-                                Save
-                            </Button>
-                        </div>
-                    </>
+	                        <div className="flex justify-end mt-4">
+	                            <Button
+	                                onClick={() => saveSettingsMutation.mutate()}
+	                                isLoading={saveSettingsMutation.isPending}
+	                                disabled={!canWriteSettings}
+	                            >
+	                                Save
+	                            </Button>
+	                        </div>
+	                    </>
                 )}
             </Card>
 
@@ -292,46 +291,87 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                         No protection rules configured.
                     </div>
                 ) : (
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead className="text-left text-slate-400">
-                                <tr className="border-b border-slate-800">
-                                    <th className="py-2 pr-4 font-medium">Type</th>
-                                    <th className="py-2 pr-4 font-medium">Value</th>
-                                    <th className="py-2 pr-4 font-medium">Note</th>
-                                    <th className="py-2 pr-4 font-medium">Created</th>
-                                    <th className="py-2 font-medium text-right">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {rules.map(rule => (
-                                    <tr key={rule.id} className="border-b border-slate-900/80 text-slate-200">
-                                        <td className="py-3 pr-4">
-                                            <Badge variant={ruleVariant(rule.rule_type)}>
-                                                {rule.rule_type}
-                                            </Badge>
-                                        </td>
-                                        <td className="py-3 pr-4 font-mono text-xs text-slate-300">{rule.value}</td>
-                                        <td className="py-3 pr-4 text-slate-400">{rule.note || '—'}</td>
-                                        <td className="py-3 pr-4 text-slate-400">{formatTimestamp(rule.created_at)}</td>
-                                        <td className="py-3 text-right">
-                                            <Button
-                                                variant="danger"
-                                                size="sm"
-                                                disabled={!canWriteSettings}
-                                                isLoading={deleteRuleMutation.isPending && deleteRuleMutation.variables === rule.id}
-                                                onClick={() => deleteRuleMutation.mutate(rule.id)}
-                                                icon={<Trash2 size={14} />}
-                                            >
-                                                Delete
-                                            </Button>
-                                        </td>
+                    <>
+                        <div className="space-y-3 md:hidden">
+                            {rules.map(rule => (
+                                <div key={rule.id} className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <Badge variant={ruleVariant(rule.rule_type)} className="shrink-0 whitespace-nowrap">
+                                            {rule.rule_type}
+                                        </Badge>
+                                        <Button
+                                            variant="danger"
+                                            size="sm"
+                                            disabled={!canWriteSettings}
+                                            isLoading={deleteRuleMutation.isPending && deleteRuleMutation.variables === rule.id}
+                                            onClick={() => deleteRuleMutation.mutate(rule.id)}
+                                            icon={<Trash2 size={14} />}
+                                        >
+                                            Delete
+                                        </Button>
+                                    </div>
+
+                                    <div className="space-y-3 text-sm">
+                                        <div className="min-w-0">
+                                            <p className="text-xs uppercase tracking-wide text-slate-500">Value</p>
+                                            <p className="mt-1 break-all font-mono text-xs text-slate-300">{rule.value}</p>
+                                        </div>
+                                        <div className="grid grid-cols-1 gap-3">
+                                            <div className="min-w-0">
+                                                <p className="text-xs uppercase tracking-wide text-slate-500">Note</p>
+                                                <p className="mt-1 break-words text-slate-400">{rule.note || '—'}</p>
+                                            </div>
+                                            <div className="min-w-0">
+                                                <p className="text-xs uppercase tracking-wide text-slate-500">Created</p>
+                                                <p className="mt-1 text-slate-400">{formatTimestamp(rule.created_at)}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        <div className="hidden overflow-x-auto md:block">
+                            <table className="w-full text-sm">
+                                <thead className="text-left text-slate-400">
+                                    <tr className="border-b border-slate-800">
+                                        <th className="py-2 pr-4 font-medium">Type</th>
+                                        <th className="py-2 pr-4 font-medium">Value</th>
+                                        <th className="py-2 pr-4 font-medium">Note</th>
+                                        <th className="py-2 pr-4 font-medium">Created</th>
+                                        <th className="py-2 font-medium text-right">Actions</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
+                                </thead>
+                                <tbody>
+                                    {rules.map(rule => (
+                                        <tr key={rule.id} className="border-b border-slate-900/80 text-slate-200">
+                                            <td className="py-3 pr-4">
+                                                <Badge variant={ruleVariant(rule.rule_type)}>
+                                                    {rule.rule_type}
+                                                </Badge>
+                                            </td>
+                                            <td className="py-3 pr-4 font-mono text-xs text-slate-300">{rule.value}</td>
+                                            <td className="py-3 pr-4 text-slate-400">{rule.note || '—'}</td>
+                                            <td className="py-3 pr-4 text-slate-400">{formatTimestamp(rule.created_at)}</td>
+                                            <td className="py-3 text-right">
+                                                <Button
+                                                    variant="danger"
+                                                    size="sm"
+                                                    disabled={!canWriteSettings}
+                                                    isLoading={deleteRuleMutation.isPending && deleteRuleMutation.variables === rule.id}
+                                                    onClick={() => deleteRuleMutation.mutate(rule.id)}
+                                                    icon={<Trash2 size={14} />}
+                                                >
+                                                    Delete
+                                                </Button>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+	                    </>
+	                )}
             </Card>
 
             <Card
@@ -349,7 +389,41 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                     </div>
                 ) : (
                     <>
-                        <div className="overflow-x-auto">
+	                        <div className="space-y-3 md:hidden">
+	                            {blockedRows.map((entry: BlockedSubscriptionRequestEntry) => (
+	                                <div key={entry.id} className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-3">
+	                                    <div className="flex items-start justify-between gap-3">
+	                                        <div className="min-w-0">
+	                                            <p className="truncate text-sm font-medium text-white" title={entry.sub_name || `#${entry.sub_id}`}>
+	                                                {entry.sub_name || `#${entry.sub_id}`}
+	                                            </p>
+	                                        </div>
+                                        <Badge variant={reasonVariant(entry.block_reason)} className="shrink-0 whitespace-nowrap">
+                                            {formatReasonLabel(entry.block_reason)}
+                                        </Badge>
+	                                    </div>
+
+	                                    <div className="grid grid-cols-2 gap-3 text-sm">
+	                                        <div className="min-w-0">
+	                                            <p className="truncate font-mono text-slate-200" title={entry.request_ip || '—'}>
+	                                                {entry.request_ip || '—'}
+	                                            </p>
+	                                        </div>
+	                                        <div className="min-w-0">
+	                                            <p className="text-right text-slate-300">{formatTimestamp(entry.requested_at)}</p>
+	                                        </div>
+	                                    </div>
+
+	                                    <div className="min-w-0 rounded-lg border border-slate-800/80 bg-slate-900/80 px-3 py-2">
+	                                        <p className="break-words text-sm text-slate-300">
+	                                            {entry.user_agent || '—'}
+	                                        </p>
+	                                    </div>
+	                                </div>
+                            ))}
+                        </div>
+
+                        <div className="hidden overflow-x-auto md:block">
                             <table className="w-full text-sm">
                                 <thead className="text-left text-slate-400">
                                     <tr className="border-b border-slate-800">

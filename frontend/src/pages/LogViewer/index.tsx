@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../../services/api'
-import { Terminal, RefreshCw, Search } from 'lucide-react'
+import { Terminal, RefreshCw, Search, X } from 'lucide-react'
 
 function hasBooleanOperator(query: string): boolean {
     return /\b(AND|OR)\b/i.test(query)
@@ -391,16 +391,21 @@ export default function LogViewer() {
                                 onClick={() => handleSearch()}
                                 disabled={searching}
                                 className="h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                aria-label={searching ? 'Searching' : 'Search'}
+                                title={searching ? 'Searching' : 'Search'}
                             >
                                 {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
-                                {searching ? 'Searching...' : 'Search'}
+                                <span className="hidden sm:inline">{searching ? 'Searching...' : 'Search'}</span>
                             </button>
                             {searching && (
                                 <button
                                     onClick={handleCancelSearch}
-                                    className="h-[38px] px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-colors border border-slate-700"
+                                    className="h-[38px] px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-colors border border-slate-700 flex items-center gap-2"
+                                    aria-label="Cancel search"
+                                    title="Cancel search"
                                 >
-                                    Cancel
+                                    <X size={14} />
+                                    <span className="hidden sm:inline">Cancel</span>
                                 </button>
                             )}
                         </div>

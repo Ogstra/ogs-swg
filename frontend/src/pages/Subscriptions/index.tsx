@@ -302,8 +302,18 @@ export default function Subscriptions() {
         const used = sub.used_bytes || 0
         const limit = sub.quota_limit || 0
         if (limit === 0) {
-            // No sub-level quota — show usage as informational
-            return <span className="text-slate-400 text-xs">{formatBytes(used)} used</span>
+            return (
+                <div className="flex flex-col gap-1 min-w-[120px]">
+                    <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                        <span className="text-slate-300">{formatBytes(used)}</span>
+                        <span className="text-center text-slate-300"></span>
+                        <span className="text-right text-xl leading-none">∞</span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div className="h-full w-full rounded-full bg-slate-700/50" />
+                    </div>
+                </div>
+            )
         }
         const rawRatio = used / limit
         const pct = Math.min(100, Math.round(rawRatio * 100))

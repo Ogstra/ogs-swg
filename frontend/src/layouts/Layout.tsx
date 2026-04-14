@@ -1,19 +1,22 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, Link, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson, Link as LinkIcon } from 'lucide-react';
+import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson, Link as LinkIcon, ChevronDown, ChevronRight, Server, Database, ShieldAlert, UserCog } from 'lucide-react';
 
 export const Layout: React.FC = () => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const location = useLocation();
+    const [settingsOpen, setSettingsOpen] = useState(location.pathname === '/settings');
     const navigate = useNavigate();
     const { logout, permissions } = useAuth();
 
     const isActive = (path: string) => location.pathname === path;
     const wireGuardQueryIface = new URLSearchParams(location.search).get('iface') || '';
     const wireGuardActive = location.pathname === '/wireguard';
+    const settingsActiveTab = new URLSearchParams(location.search).get('tab') || 'general';
+    const settingsActive = location.pathname === '/settings';
 
     const interfacesQuery = useQuery({
         queryKey: ['layout-wireguard-interfaces'],
@@ -38,10 +41,25 @@ export const Layout: React.FC = () => {
         if (!item.permission) return true;
         return permissions?.[item.permission] === true;
     });
+    const settingsSubtabs = [
+        { id: 'general', label: 'General', icon: Settings, permission: 'can_read_settings' as const },
+        { id: 'singbox', label: 'Sing-box', icon: Server, permission: 'can_read_config' as const },
+        { id: 'wireguard-interfaces', label: 'WireGuard', icon: Shield, permission: 'can_read_wireguard' as const },
+        { id: 'dashboard', label: 'Dashboard', icon: Settings, permission: 'can_read_settings' as const },
+        { id: 'database', label: 'Database', icon: Database, permission: 'can_read_settings' as const },
+        { id: 'security', label: 'Sub Security', icon: ShieldAlert, permission: 'can_read_settings' as const },
+        { id: 'panel-users', label: 'Admins', icon: UserCog, permission: 'can_read_panel_users' as const },
+    ].filter(item => permissions?.[item.permission] === true);
 
     const activeLabel = allNavItems.find(n => n.path === location.pathname)?.label || 'OGS-SWG';
     const rawCommit = (import.meta.env.VITE_APP_COMMIT as string | undefined) || '';
     const commitLabel = rawCommit ? rawCommit.slice(0, 7) : 'local';
+
+    useEffect(() => {
+        if (settingsActive) {
+            setSettingsOpen(true);
+        }
+    }, [settingsActive]);
 
     const handleLogout = () => {
         logout();
@@ -72,22 +90,68 @@ export const Layout: React.FC = () => {
                     {navItems.map(item => {
                         const itemActive = isActive(item.path);
                         const isWireGuardItem = item.path === '/wireguard';
+                        const isSettingsItem = item.path === '/settings';
 
                         return (
                             <div key={item.path} className="space-y-1">
-                                <Link
-                                    to={item.path}
-                                    onClick={() => setSidebarOpen(false)}
-                                    className={`
-                                        w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors
-                                        ${itemActive
-                                            ? 'bg-slate-800 text-white'
-                                            : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}
-                                    `}
-                                >
-                                    <item.icon size={18} className={itemActive ? 'text-blue-500' : 'text-slate-400'} />
-                                    {item.label}
-                                </Link>
+                                {isSettingsItem ? (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSettingsOpen(prev => !prev)}
+                                            className={`
+                                                w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors
+                                                ${itemActive
+                                                    ? 'bg-slate-800 text-white'
+                                                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}
+                                            `}
+                                        >
+                                            <span className="flex items-center gap-3">
+                                                <item.icon size={18} className={itemActive ? 'text-blue-500' : 'text-slate-400'} />
+                                                {item.label}
+                                            </span>
+                                            {settingsOpen ? <ChevronDown size={16} className="text-slate-500" /> : <ChevronRight size={16} className="text-slate-500" />}
+                                        </button>
+
+                                        {settingsOpen && settingsSubtabs.length > 0 && (
+                                            <div className="ml-6 space-y-0.5">
+                                                {settingsSubtabs.map(subtab => {
+                                                    const subtabActive = settingsActive && settingsActiveTab === subtab.id;
+                                                    return (
+                                                        <Link
+                                                            key={subtab.id}
+                                                            to={`/settings?tab=${encodeURIComponent(subtab.id)}`}
+                                                            onClick={() => setSidebarOpen(false)}
+                                                            className={`
+                                                                w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors
+                                                                ${subtabActive
+                                                                    ? 'bg-slate-800/60 text-white'
+                                                                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/40'}
+                                                            `}
+                                                        >
+                                                            <subtab.icon size={14} />
+                                                            <span>{subtab.label}</span>
+                                                        </Link>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </>
+                                ) : (
+                                    <Link
+                                        to={item.path}
+                                        onClick={() => setSidebarOpen(false)}
+                                        className={`
+                                            w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors
+                                            ${itemActive
+                                                ? 'bg-slate-800 text-white'
+                                                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800'}
+                                        `}
+                                    >
+                                        <item.icon size={18} className={itemActive ? 'text-blue-500' : 'text-slate-400'} />
+                                        {item.label}
+                                    </Link>
+                                )}
 
                                 {isWireGuardItem && wireGuardInterfaces.length > 0 && (
                                     <div className="ml-6 space-y-0.5">
