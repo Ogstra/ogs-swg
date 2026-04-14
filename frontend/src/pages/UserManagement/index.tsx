@@ -816,12 +816,12 @@ export default function UserManagement() {
                                             </td>
                                             <td className="p-4 align-middle">
                                                 <div className="w-1/2 min-w-[140px]">
-                                                    <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                                                        <span>{formatBytes(user.total)}</span>
-                                                        <span className="text-center text-slate-300">
+                                                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                                                        <span className="truncate whitespace-nowrap">{formatBytes(user.total)}</span>
+                                                        <span className="px-2 text-center text-slate-300 whitespace-nowrap">
                                                             {user.quota_limit ? `${Math.round((user.total / user.quota_limit) * 100)}%` : ''}
                                                         </span>
-                                                        <span className="text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
+                                                        <span className="truncate whitespace-nowrap text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
                                                     </div>
                                                     <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                                         <div
@@ -980,10 +980,10 @@ export default function UserManagement() {
                                     </div>
 
                                     <div className="bg-slate-950/50 rounded-lg p-3">
-                                        <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                                            <span>{formatBytes(user.total)}</span>
-                                            <span className="text-center text-slate-300">{quotaPercent}</span>
-                                            <span className="text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
+                                        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                                            <span className="truncate whitespace-nowrap">{formatBytes(user.total)}</span>
+                                            <span className="px-2 text-center text-slate-300 whitespace-nowrap">{quotaPercent}</span>
+                                            <span className="truncate whitespace-nowrap text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
                                         </div>
                                         <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                             <div

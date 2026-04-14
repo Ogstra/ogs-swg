@@ -304,10 +304,10 @@ export default function Subscriptions() {
         if (limit === 0) {
             return (
                 <div className="flex flex-col gap-1 min-w-[120px]">
-                    <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                        <span className="text-slate-300">{formatBytes(used)}</span>
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                        <span className="truncate whitespace-nowrap text-slate-300">{formatBytes(used)}</span>
                         <span className="text-center text-slate-300"></span>
-                        <span className="text-right text-xl leading-none">∞</span>
+                        <span className="text-right text-xl leading-none whitespace-nowrap">∞</span>
                     </div>
                     <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
                         <div className="h-full w-full rounded-full bg-slate-700/50" />
@@ -321,12 +321,12 @@ export default function Subscriptions() {
         const barColor = over ? 'bg-red-500' : pct > 80 ? 'bg-yellow-500' : 'bg-emerald-500'
         return (
             <div className="flex flex-col gap-1 min-w-[120px]">
-                <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                    <span className={over ? 'text-red-400 font-semibold' : 'text-slate-300'}>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                    <span className={`truncate whitespace-nowrap ${over ? 'text-red-400 font-semibold' : 'text-slate-300'}`}>
                         {formatBytes(used)}
                     </span>
-                    <span className="text-center text-slate-300">{pct}%</span>
-                    <span className="text-right">{formatBytes(limit)}</span>
+                    <span className="px-2 text-center text-slate-300 whitespace-nowrap">{pct}%</span>
+                    <span className="truncate whitespace-nowrap text-right">{formatBytes(limit)}</span>
                 </div>
                 <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
                     <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${Math.min(rawRatio * 100, 100)}%` }} />
