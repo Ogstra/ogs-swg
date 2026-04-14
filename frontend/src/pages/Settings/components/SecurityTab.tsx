@@ -166,6 +166,31 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
     const rules = rulesQuery.data ?? []
     const blockedRows = blockedLogQuery.data ?? []
 
+    const handleSaveSettings = () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
+        saveSettingsMutation.mutate()
+    }
+
+    const handleCreateRule = () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
+        if (!newRule.value.trim()) return
+        createRuleMutation.mutate()
+    }
+
+    const handleDeleteRule = (id: number) => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
+        deleteRuleMutation.mutate(id)
+    }
+
     return (
         <div className="space-y-4 sm:space-y-6">
             <Card
@@ -229,7 +254,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                         </div>
 	                        <div className="flex justify-end mt-4">
 	                            <Button
-	                                onClick={() => saveSettingsMutation.mutate()}
+	                                onClick={handleSaveSettings}
 	                                isLoading={saveSettingsMutation.isPending}
 	                                disabled={!canWriteSettings}
 	                            >
@@ -272,7 +297,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                         className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors disabled:opacity-60"
                     />
                     <Button
-                        onClick={() => createRuleMutation.mutate()}
+                        onClick={handleCreateRule}
                         isLoading={createRuleMutation.isPending}
                         disabled={!canWriteSettings || !newRule.value.trim()}
                         icon={<Plus size={16} />}
@@ -304,7 +329,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                             size="sm"
                                             disabled={!canWriteSettings}
                                             isLoading={deleteRuleMutation.isPending && deleteRuleMutation.variables === rule.id}
-                                            onClick={() => deleteRuleMutation.mutate(rule.id)}
+                                            onClick={() => handleDeleteRule(rule.id)}
                                             icon={<Trash2 size={14} />}
                                         >
                                             Delete
@@ -359,7 +384,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                                     size="sm"
                                                     disabled={!canWriteSettings}
                                                     isLoading={deleteRuleMutation.isPending && deleteRuleMutation.variables === rule.id}
-                                                    onClick={() => deleteRuleMutation.mutate(rule.id)}
+                                                    onClick={() => handleDeleteRule(rule.id)}
                                                     icon={<Trash2 size={14} />}
                                                 >
                                                     Delete

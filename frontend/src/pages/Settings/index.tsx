@@ -29,6 +29,7 @@ import {
 type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
 type DbInfo = { rows: number; sizeMB: number }
 type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; detailChartTargetPoints: number }
+type PendingServiceAction = { service: string; action: 'restart' | 'stop' | 'start' }
 
 const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
     defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : 'singbox',
@@ -66,6 +67,10 @@ export default function Settings() {
     })
     const [historyLimit, setHistoryLimit] = useState(10)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
+    const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction | null>(null)
+    const [serviceActionLoading, setServiceActionLoading] = useState(false)
+    const [pruneConfirmOpen, setPruneConfirmOpen] = useState(false)
+    const [pruneLoading, setPruneLoading] = useState(false)
     const [publicIP, setPublicIP] = useState<string>('')
     const [subscriptionDomain, setSubscriptionDomain] = useState<string>('')
     const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>({
@@ -283,22 +288,27 @@ export default function Settings() {
             toastError('Retention is disabled')
             return
         }
-        if (!confirm('Prune old samples now?')) return
+        setPruneConfirmOpen(true)
+    }
+
+    const handleConfirmPruneNow = async () => {
+        setPruneLoading(true)
         try {
             const res = await api.pruneNow()
             success(`Pruned ${res.deleted} samples`)
             await loadDbStats()
+            setPruneConfirmOpen(false)
         } catch (err) {
             toastError('Prune failed: ' + err)
+        } finally {
+            setPruneLoading(false)
         }
     }
 
-    const handleServiceAction = async (service: string, action: 'restart' | 'stop' | 'start') => {
-        if (!canWriteConfig) {
-            toastError('No write permission for service control')
-            return
-        }
-        if (!confirm(`Are you sure you want to ${action} ${service}?`)) return
+    const handleConfirmServiceAction = async () => {
+        if (!pendingServiceAction) return
+        const { service, action } = pendingServiceAction
+        setServiceActionLoading(true)
         try {
             if (action === 'restart') {
                 await api.restartService(service)
@@ -309,9 +319,20 @@ export default function Settings() {
             }
             await loadDbStats()
             success(`${service} ${action}ed successfully`)
+            setPendingServiceAction(null)
         } catch (err) {
             toastError(`Failed to ${action} ${service}: ` + err)
+        } finally {
+            setServiceActionLoading(false)
         }
+    }
+
+    const handleServiceAction = (service: string, action: 'restart' | 'stop' | 'start') => {
+        if (!canWriteConfig) {
+            toastError('No write permission for service control')
+            return
+        }
+        setPendingServiceAction({ service, action })
     }
 
     const tabs = [
@@ -448,6 +469,37 @@ export default function Settings() {
                         <RefreshCw size={16} className={loading && !samplerRunning ? 'animate-spin' : ''} />
                     </button>
                 }
+            />
+
+            <ConfirmModal
+                isOpen={!!pendingServiceAction}
+                onClose={() => {
+                    if (serviceActionLoading) return
+                    setPendingServiceAction(null)
+                }}
+                onConfirm={handleConfirmServiceAction}
+                title="Confirm service action"
+                message={pendingServiceAction ? `Are you sure you want to ${pendingServiceAction.action} ${pendingServiceAction.service}?` : undefined}
+                confirmLabel={
+                    pendingServiceAction
+                        ? pendingServiceAction.action.charAt(0).toUpperCase() + pendingServiceAction.action.slice(1)
+                        : 'Confirm'
+                }
+                confirmTone={pendingServiceAction?.action === 'stop' ? 'danger' : 'primary'}
+                isLoading={serviceActionLoading}
+            />
+            <ConfirmModal
+                isOpen={pruneConfirmOpen}
+                onClose={() => {
+                    if (pruneLoading) return
+                    setPruneConfirmOpen(false)
+                }}
+                onConfirm={handleConfirmPruneNow}
+                title="Prune old samples?"
+                message="This will delete samples outside the configured retention window."
+                confirmLabel="Prune"
+                confirmTone="danger"
+                isLoading={pruneLoading}
             />
         </div>
     )

@@ -181,7 +181,7 @@ export default function WireGuard() {
             return
         }
         if (!newName.trim()) {
-            alert('Alias is required')
+            toastError('Alias is required')
             return
         }
         if (!activeInterface) {
@@ -380,8 +380,9 @@ export default function WireGuard() {
         try {
             await api.restartService('wireguard')
             await refreshData()
+            success('WireGuard restarted')
         } catch (err) {
-            alert('Failed to restart WireGuard: ' + err)
+            toastError('Failed to restart WireGuard: ' + err)
         }
     }
 

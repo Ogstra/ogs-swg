@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -881,8 +882,7 @@ func (s *Server) handleBackupConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	src := s.config.SingboxConfigPath
-	dst := src + ".bak"
-	if err := s.copyConfig(r.Context(), src, dst); err != nil {
+	if err := s.createConfigBackup(r.Context(), src); err != nil {
 		http.Error(w, "Backup failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -946,6 +946,116 @@ func (s *Server) handleGetBackupMeta(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
+}
+
+type configBackupEntry struct {
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (s *Server) handleListConfigBackups(w http.ResponseWriter, r *http.Request) {
+	backups, err := s.listConfigBackups(s.config.SingboxConfigPath, 10)
+	if err != nil {
+		http.Error(w, "Failed to list backups: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(backups)
+}
+
+func (s *Server) handleGetConfigBackup(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		http.Error(w, "backup name is required", http.StatusBadRequest)
+		return
+	}
+	content, err := s.readNamedBackup(r.Context(), s.config.SingboxConfigPath, name)
+	if err != nil {
+		if isNotFoundErr(err) {
+			http.Error(w, "Backup not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to read backup: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write(content)
+}
+
+func backupTimestamp() string {
+	return time.Now().UTC().Format("20060102-150405")
+}
+
+func timestampedBackupPath(src string) string {
+	return filepath.Join(filepath.Dir(src), fmt.Sprintf("%s.%s.bak", filepath.Base(src), backupTimestamp()))
+}
+
+func (s *Server) createConfigBackup(ctx context.Context, src string) error {
+	if err := s.copyConfig(ctx, src, timestampedBackupPath(src)); err != nil {
+		return err
+	}
+	return s.copyConfig(ctx, src, src+".bak")
+}
+
+func (s *Server) listConfigBackups(src string, limit int) ([]configBackupEntry, error) {
+	dir := filepath.Dir(src)
+	base := filepath.Base(src)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	backups := make([]configBackupEntry, 0, limit)
+	type backupFile struct {
+		name string
+		when time.Time
+	}
+	files := make([]backupFile, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == base+".bak" {
+			continue
+		}
+		if !strings.HasPrefix(name, base+".") || !strings.HasSuffix(name, ".bak") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, backupFile{name: name, when: info.ModTime()})
+	}
+
+	sort.Slice(files, func(i, j int) bool { return files[i].when.After(files[j].when) })
+	if limit > 0 && len(files) > limit {
+		files = files[:limit]
+	}
+	for _, file := range files {
+		backups = append(backups, configBackupEntry{
+			Name:      file.name,
+			CreatedAt: file.when.UTC().Format(time.RFC3339),
+		})
+	}
+	return backups, nil
+}
+
+func (s *Server) readNamedBackup(ctx context.Context, src, name string) ([]byte, error) {
+	base := filepath.Base(src)
+	cleanName := filepath.Base(strings.TrimSpace(name))
+	if cleanName == "" || cleanName != name {
+		return nil, os.ErrNotExist
+	}
+	if !strings.HasPrefix(cleanName, base+".") || !strings.HasSuffix(cleanName, ".bak") || cleanName == base+".bak" {
+		return nil, os.ErrNotExist
+	}
+	fullPath := filepath.Join(filepath.Dir(src), cleanName)
+	if s.executor != nil {
+		return s.executor.ReadConfig(ctx, fullPath)
+	}
+	return os.ReadFile(fullPath)
 }
 
 func (s *Server) copyConfig(ctx context.Context, src, dst string) error {
