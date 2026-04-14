@@ -815,33 +815,26 @@ export default function UserManagement() {
                                                 <div className="max-w-[260px] font-semibold text-slate-200 truncate" title={user.name}>{user.name}</div>
                                             </td>
                                             <td className="p-4 align-middle">
-                                                {user.quota_limit ? (
-                                                    <div className="w-1/2 min-w-[140px]">
-                                                        <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
-                                                            <span>{formatBytes(user.total)}</span>
-                                                            <span>{formatBytes(user.quota_limit)}</span>
-                                                        </div>
-                                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                                            <div
-                                                                className={`h-full rounded-full transition-all duration-500 ${(user.total / user.quota_limit) > 1 ? 'bg-red-500' :
+                                                <div className="w-1/2 min-w-[140px]">
+                                                    <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                                                        <span>{formatBytes(user.total)}</span>
+                                                        <span className="text-center text-slate-300">
+                                                            {user.quota_limit ? `${Math.round((user.total / user.quota_limit) * 100)}%` : ''}
+                                                        </span>
+                                                        <span className="text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
+                                                    </div>
+                                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full rounded-full transition-all duration-500 ${user.quota_limit
+                                                                ? ((user.total / user.quota_limit) > 1 ? 'bg-red-500' :
                                                                     (user.total / user.quota_limit) > 0.8 ? 'bg-amber-500' :
-                                                                        'bg-blue-500'
-                                                                    }`}
-                                                                style={{ width: `${Math.min((user.total / user.quota_limit) * 100, 100)}%` }}
-                                                            />
-                                                        </div>
+                                                                        'bg-blue-500')
+                                                                : 'bg-slate-700/50'
+                                                                }`}
+                                                            style={{ width: `${user.quota_limit ? Math.min((user.total / user.quota_limit) * 100, 100) : 100}%` }}
+                                                        />
                                                     </div>
-                                                ) : (
-                                                    <div className="w-1/2 min-w-[140px]">
-                                                        <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
-                                                            <span>{formatBytes(user.total)}</span>
-                                                            <span className="text-xl leading-none">∞</span>
-                                                        </div>
-                                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                                            <div className="h-full bg-slate-700/50 w-full rounded-full" />
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                </div>
                                             </td>
 
                                             <td className="p-4">
@@ -905,7 +898,7 @@ export default function UserManagement() {
                 </div>
 
                 {/* Mobile List */}
-                <div className="md:hidden divide-y divide-slate-800">
+                <div className="md:hidden space-y-3">
                     {(sortedUsers || []).map(user => {
                         const isExceeded = user.quota_limit ? user.total > user.quota_limit : false
                         const quotaRatio = user.quota_limit ? (user.total / user.quota_limit) : 0
@@ -939,63 +932,65 @@ export default function UserManagement() {
                         }
 
                         return (
-                            <div key={user.name} className="p-4 space-y-4">
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0 flex-1">
-                                        <div className="font-bold text-slate-200 truncate">{user.name}</div>
+                            <div key={user.name} className="bg-slate-900 border border-slate-800 rounded-xl">
+                                <div className="p-4 space-y-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-semibold text-white truncate">{user.name}</div>
+                                        </div>
+                                        <div className="flex gap-2 shrink-0">
+                                            <ActionIconButton
+                                                onClick={() => handleEditClick(user)}
+                                                disabled={!canWriteUsers}
+                                                tone="primary"
+                                            >
+                                                <Edit size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton
+                                                onClick={() => openQrModal(user)}
+                                                disabled={!canWriteUsers}
+                                                title="Show QR / Link"
+                                            >
+                                                <QrCodeIcon size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton
+                                                onClick={() => handleDeleteClick(user)}
+                                                disabled={!canWriteUsers}
+                                                tone="danger"
+                                            >
+                                                <Trash2 size={16} />
+                                            </ActionIconButton>
+                                        </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <ActionIconButton
-                                            onClick={() => handleEditClick(user)}
-                                            disabled={!canWriteUsers}
-                                            tone="primary"
-                                        >
-                                            <Edit size={16} />
-                                        </ActionIconButton>
-                                        <ActionIconButton
-                                            onClick={() => openQrModal(user)}
-                                            disabled={!canWriteUsers}
-                                            title="Show QR / Link"
-                                        >
-                                            <QrCodeIcon size={16} />
-                                        </ActionIconButton>
-                                        <ActionIconButton
-                                            onClick={() => handleDeleteClick(user)}
-                                            disabled={!canWriteUsers}
-                                            tone="danger"
-                                        >
-                                            <Trash2 size={16} />
-                                        </ActionIconButton>
-                                    </div>
-                                </div>
 
-                                <div className="flex items-center justify-between gap-3">
-                                    <div className="flex items-center gap-2 shrink-0">
-                                        <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                        <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>{statusText}</span>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                            <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>{statusText}</span>
+                                        </div>
+                                        <div className="flex flex-wrap justify-end gap-1.5">
+                                            {(user.inbound_tags && user.inbound_tags.length > 0) ? (
+                                                user.inbound_tags.map(tag => (
+                                                    <Badge key={tag} variant="info" className="max-w-[200px]" title={tag}>{tag}</Badge>
+                                                ))
+                                            ) : (
+                                                <Badge variant="neutral">All</Badge>
+                                            )}
+                                        </div>
                                     </div>
-                                    <div className="flex flex-wrap justify-end gap-1.5">
-                                        {(user.inbound_tags && user.inbound_tags.length > 0) ? (
-                                            user.inbound_tags.map(tag => (
-                                                <Badge key={tag} variant="info" className="max-w-[200px]" title={tag}>{tag}</Badge>
-                                            ))
-                                        ) : (
-                                            <Badge variant="neutral">All</Badge>
-                                        )}
-                                    </div>
-                                </div>
 
-                                <div className="bg-slate-950/50 rounded-lg p-3">
-                                    <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                                        <span>{formatBytes(user.total)}</span>
-                                        <span className="text-center text-slate-300">{quotaPercent}</span>
-                                        <span className="text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
-                                    </div>
-                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all duration-500 ${user.quota_limit ? (quotaRatio > 1 ? 'bg-red-500' : quotaRatio > 0.8 ? 'bg-amber-500' : 'bg-blue-500') : 'bg-slate-700/50'}`}
-                                            style={{ width: `${user.quota_limit ? Math.min(quotaRatio * 100, 100) : 100}%` }}
-                                        />
+                                    <div className="bg-slate-950/50 rounded-lg p-3">
+                                        <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                                            <span>{formatBytes(user.total)}</span>
+                                            <span className="text-center text-slate-300">{quotaPercent}</span>
+                                            <span className="text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
+                                        </div>
+                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-500 ${user.quota_limit ? (quotaRatio > 1 ? 'bg-red-500' : quotaRatio > 0.8 ? 'bg-amber-500' : 'bg-blue-500') : 'bg-slate-700/50'}`}
+                                                style={{ width: `${user.quota_limit ? Math.min(quotaRatio * 100, 100) : 100}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>

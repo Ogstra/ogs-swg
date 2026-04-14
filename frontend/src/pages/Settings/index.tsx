@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { api, FeatureFlags, SamplerHistoryEntry, SubscriptionRequestHistoryEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
 import { Save, RefreshCw, UserCog, Shield, ShieldAlert, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
@@ -39,6 +40,7 @@ const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | n
 })
 
 export default function Settings() {
+    const [searchParams, setSearchParams] = useSearchParams()
     const queryClient = useQueryClient()
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -397,6 +399,19 @@ export default function Settings() {
         return true
     })
 
+    const validTabIds = tabs.map(tab => tab.id)
+    const requestedTab = searchParams.get('tab') || ''
+    const activeTab = validTabIds.includes(requestedTab) ? requestedTab : tabs[0]?.id
+
+    useEffect(() => {
+        if (!tabs.length || !activeTab) return
+        if (requestedTab === activeTab) return
+
+        const nextParams = new URLSearchParams(searchParams)
+        nextParams.set('tab', activeTab)
+        setSearchParams(nextParams, { replace: true })
+    }, [activeTab, requestedTab, searchParams, setSearchParams, tabs.length])
+
     return (
         <div className="h-full min-h-0 flex flex-col gap-0 sm:gap-6">
             <div className="flex items-center justify-between">
@@ -416,6 +431,12 @@ export default function Settings() {
 
             <Tabs
                 tabs={tabs}
+                activeTab={activeTab}
+                onTabChange={(tabId) => {
+                    const nextParams = new URLSearchParams(searchParams)
+                    nextParams.set('tab', tabId)
+                    setSearchParams(nextParams, { replace: true })
+                }}
                 className="flex-1 min-h-0"
                 headerRight={
                     <button
@@ -576,8 +597,11 @@ function GeneralTab({
                         <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_singbox ? 'opacity-50' : ''}`}>
                             <div className="flex items-center justify-between">
                                 <div className="font-semibold text-white">sing-box</div>
-                                <Badge variant={serviceStatus.singbox === true ? 'success' : serviceStatus.singbox === false ? 'error' : 'neutral'}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.singbox === true ? 'bg-emerald-500' : serviceStatus.singbox === false ? 'bg-red-500' : 'bg-slate-500'}`} />
+                                <Badge
+                                    variant={serviceStatus.singbox === true ? 'success' : serviceStatus.singbox === false ? 'error' : 'neutral'}
+                                    className="whitespace-nowrap"
+                                >
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${serviceStatus.singbox === true ? 'bg-emerald-500' : serviceStatus.singbox === false ? 'bg-red-500' : 'bg-slate-500'}`} />
                                     {serviceStatus.singbox === true ? 'Running' : serviceStatus.singbox === false ? 'Stopped' : 'Unknown'}
                                 </Badge>
                             </div>
@@ -607,8 +631,11 @@ function GeneralTab({
                         <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_wireguard ? 'opacity-50' : ''}`}>
                             <div className="flex items-center justify-between">
                                 <div className="font-semibold text-white">WireGuard</div>
-                                <Badge variant={serviceStatus.wireguard === true ? 'success' : serviceStatus.wireguard === false ? 'error' : 'neutral'}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.wireguard === true ? 'bg-emerald-500' : serviceStatus.wireguard === false ? 'bg-red-500' : 'bg-slate-500'}`} />
+                                <Badge
+                                    variant={serviceStatus.wireguard === true ? 'success' : serviceStatus.wireguard === false ? 'error' : 'neutral'}
+                                    className="whitespace-nowrap"
+                                >
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${serviceStatus.wireguard === true ? 'bg-emerald-500' : serviceStatus.wireguard === false ? 'bg-red-500' : 'bg-slate-500'}`} />
                                     {serviceStatus.wireguard === true ? 'Running' : serviceStatus.wireguard === false ? 'Stopped' : 'Unknown'}
                                 </Badge>
                             </div>
@@ -985,8 +1012,8 @@ function WireGuardInterfacesTab() {
                         >
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <Badge variant={iface.is_up ? 'success' : 'neutral'}>
-                                        <div className={`w-1.5 h-1.5 rounded-full ${iface.is_up ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                                    <Badge variant={iface.is_up ? 'success' : 'neutral'} className="whitespace-nowrap">
+                                        <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${iface.is_up ? 'bg-emerald-500' : 'bg-slate-500'}`} />
                                         {iface.is_up ? 'Up' : 'Down'}
                                     </Badge>
                                     <div className="flex gap-1.5">
