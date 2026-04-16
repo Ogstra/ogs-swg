@@ -1479,30 +1479,42 @@ function DatabaseTab({
             }
         }
 
+        const osVersion = verboseOS.osVersion || parsed.deviceOSVersion
+        // Detect Windows computer hostnames (e.g. DESKTOP-GVV6ID8, LAPTOP-ABC123)
+        const windowsHostname = run.device_os === 'Windows' &&
+            !!deviceModel &&
+            !['pc', 'desktop', 'laptop', 'windows'].includes(deviceModel.toLowerCase())
+            ? deviceModel : ''
+
         return {
             parsed,
             deviceModel,
+            windowsHostname,
             osName,
-            osVersion: verboseOS.osVersion || parsed.deviceOSVersion,
+            osVersion,
             osBuild: verboseOS.osBuild,
         }
     }
 
     const formatClientLabel = (run: SubscriptionRequestHistoryEntry) => {
-        const { parsed, deviceModel } = resolveDisplayedDevice(run)
+        const { parsed, deviceModel, windowsHostname, osName, osVersion } = resolveDisplayedDevice(run)
         const clientName = parsed.clientName || run.user_agent
-        if (deviceModel && clientName) return `${clientName} on ${deviceModel}`
-        if (deviceModel) return deviceModel
+        const displayDevice = windowsHostname
+            ? (osName && osVersion ? `${osName} ${osVersion}` : osName || deviceModel)
+            : deviceModel
+        if (displayDevice && clientName) return `${clientName} on ${displayDevice}`
+        if (displayDevice) return displayDevice
         if (clientName) return clientName
         return 'Unknown client'
     }
 
     const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
-        const { parsed, osName, osVersion } = resolveDisplayedDevice(run)
+        const { parsed, osName, osVersion, windowsHostname } = resolveDisplayedDevice(run)
         const details: string[] = []
         if (osName && osVersion) details.push(`${osName} ${osVersion}`)
         else if (osName) details.push(osName)
         else if (osVersion) details.push(osVersion)
+        if (windowsHostname) details.push(windowsHostname)
         if (parsed.darwinVersion && parsed.darwinVersion !== osVersion) {
             details.push(`Darwin ${parsed.darwinVersion}`)
         }
