@@ -764,10 +764,18 @@ func buildShadowsocksLink(name string, userInfo *core.UserInboundInfo, view *cor
 		return "", fmt.Errorf("Shadowsocks inbound method missing")
 	}
 
-	// SIP002 URI: ss://BASE64(method:password)@host:port#tag
-	credentials := base64.StdEncoding.EncodeToString([]byte(method + ":" + password))
+	// Shadowsocks 2022 multi-user: inbound has a top-level server key that the
+	// client must prepend to the user key ("server_key:user_key").
+	credential := method + ":"
+	if serverKey, _ := view.Raw["password"].(string); strings.TrimSpace(serverKey) != "" {
+		credential += strings.TrimSpace(serverKey) + ":" + password
+	} else {
+		credential += password
+	}
+
+	// SIP002 URI: ss://BASE64(method[:server_key]:user_key)@host:port#tag
 	nameTag := url.QueryEscape(name)
-	return fmt.Sprintf("ss://%s@%s:%s#%s", credentials, host, port, nameTag), nil
+	return fmt.Sprintf("ss://%s@%s:%s#%s", base64.StdEncoding.EncodeToString([]byte(credential)), host, port, nameTag), nil
 }
 
 func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
