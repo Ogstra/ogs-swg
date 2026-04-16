@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1178,5 +1179,67 @@ func TestGetUserInbounds_Hysteria2(t *testing.T) {
 	}
 	if info.UUID != "" {
 		t.Errorf("UUID = %q; want empty string", info.UUID)
+	}
+}
+
+func TestGetClashAPISettings_Configured(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := tmp + "/config.json"
+	content := `{"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090","secret":"test-secret"}}}`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg := &Config{
+		EnableSingbox:     true,
+		SingboxConfigPath: configPath,
+	}
+
+	api, err := cfg.GetClashAPISettings()
+	if err != nil {
+		t.Fatalf("GetClashAPISettings: %v", err)
+	}
+	if api == nil {
+		t.Fatal("GetClashAPISettings returned nil")
+	}
+	if api.ExternalController != "127.0.0.1:9090" {
+		t.Fatalf("ExternalController = %q; want %q", api.ExternalController, "127.0.0.1:9090")
+	}
+	if api.Secret != "test-secret" {
+		t.Fatalf("Secret = %q; want %q", api.Secret, "test-secret")
+	}
+}
+
+func TestGetClashAPISettings_Disabled(t *testing.T) {
+	cfg := &Config{EnableSingbox: false}
+
+	api, err := cfg.GetClashAPISettings()
+	if err != nil {
+		t.Fatalf("GetClashAPISettings: %v", err)
+	}
+	if api != nil {
+		t.Fatalf("GetClashAPISettings = %#v; want nil", api)
+	}
+}
+
+func TestGetClashAPISettings_NoClashAPI(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := tmp + "/config.json"
+	content := `{"experimental":{}}`
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg := &Config{
+		EnableSingbox:     true,
+		SingboxConfigPath: configPath,
+	}
+
+	api, err := cfg.GetClashAPISettings()
+	if err != nil {
+		t.Fatalf("GetClashAPISettings: %v", err)
+	}
+	if api != nil {
+		t.Fatalf("GetClashAPISettings = %#v; want nil", api)
 	}
 }
