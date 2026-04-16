@@ -1480,17 +1480,25 @@ function DatabaseTab({
         }
 
         const osVersion = verboseOS.osVersion || parsed.deviceOSVersion
-        // On Windows, device_model is a computer hostname — keep it for details, use OS as display label
-        const windowsHostname = run.device_os === 'Windows' &&
-            !!deviceModel &&
-            !['pc', 'desktop', 'laptop', 'windows'].includes(deviceModel.toLowerCase())
-            ? deviceModel : ''
+        // On Windows, device_model may be "HOSTNAME" or "HOSTNAME/user" — extract both parts
+        let windowsHostname = ''
+        let windowsUser = ''
+        if (run.device_os === 'Windows' && deviceModel && !['pc', 'desktop', 'laptop', 'windows'].includes(deviceModel.toLowerCase())) {
+            const slashIdx = deviceModel.indexOf('/')
+            if (slashIdx !== -1) {
+                windowsHostname = deviceModel.slice(0, slashIdx).trim()
+                windowsUser = deviceModel.slice(slashIdx + 1).trim()
+            } else {
+                windowsHostname = deviceModel
+            }
+        }
         if (run.device_os === 'Windows') deviceModel = 'Windows'
 
         return {
             parsed,
             deviceModel,
             windowsHostname,
+            windowsUser,
             osName,
             osVersion,
             osBuild: verboseOS.osBuild,
@@ -1512,6 +1520,7 @@ function DatabaseTab({
         if (osName && osVersion) details.push(`${osName} ${osVersion}`)
         else if (osName) details.push(osName)
         else if (osVersion) details.push(osVersion)
+        if (windowsUser) details.push(windowsUser)
         if (windowsHostname) details.push(windowsHostname)
         if (parsed.darwinVersion && parsed.darwinVersion !== osVersion) {
             details.push(`Darwin ${parsed.darwinVersion}`)
