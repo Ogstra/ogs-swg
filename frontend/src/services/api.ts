@@ -1063,6 +1063,15 @@ export const api = {
         await handleResponse(res, 'Failed to generate self-signed certificate');
         return res.json();
     },
+    generateRandBase64: async (keyLength: number): Promise<{ value: string }> => {
+        const res = await fetch('/api/tools/rand-base64', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ key_length: keyLength })
+        });
+        await handleResponse(res, 'Failed to generate random base64');
+        return res.json();
+    },
     applySingboxChanges: async (): Promise<{ success: boolean; message: string }> => {
         const res = await fetch('/api/singbox/apply', {
             method: 'POST',

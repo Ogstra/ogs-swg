@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/rsa"
@@ -14,7 +15,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -34,6 +37,16 @@ type SelfSignedCertResponse struct {
 	CertPath string `json:"cert_path"`
 	KeyPath  string `json:"key_path"`
 }
+
+type RandBase64Request struct {
+	KeyLength int `json:"key_length"`
+}
+
+type RandBase64Response struct {
+	Value string `json:"value"`
+}
+
+var execCommandContext = exec.CommandContext
 
 func (s *Server) handleGenerateRealityKeys(w http.ResponseWriter, r *http.Request) {
 	// Generate X25519 Key Pair
@@ -161,6 +174,53 @@ func (s *Server) handleGenerateSelfSignedCert(w http.ResponseWriter, r *http.Req
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(SelfSignedCertResponse{CertPath: certPath, KeyPath: keyPath}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleGenerateRandBase64(w http.ResponseWriter, r *http.Request) {
+	perms := getPermissions(r)
+	if perms == nil || (!perms.CanWriteConfig && !perms.CanWriteUsers) {
+		http.Error(w, "Forbidden", http.StatusForbidden)
+		return
+	}
+
+	var req RandBase64Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.KeyLength <= 0 {
+		http.Error(w, "key_length must be a positive integer", http.StatusBadRequest)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	cmd := execCommandContext(ctx, "sing-box", "generate", "rand", "--base64", strconv.Itoa(req.KeyLength))
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		http.Error(w, "sing-box generate rand timeout", http.StatusGatewayTimeout)
+		return
+	}
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = err.Error()
+		}
+		http.Error(w, "Failed to generate random base64: "+message, http.StatusInternalServerError)
+		return
+	}
+
+	value := strings.TrimSpace(string(output))
+	if value == "" {
+		http.Error(w, "Failed to generate random base64: empty output", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(RandBase64Response{Value: value}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

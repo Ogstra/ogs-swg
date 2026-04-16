@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Save } from 'lucide-react'
+import { RefreshCw, Save } from 'lucide-react'
 import { api } from '../../services/api'
 import { Button } from '../ui/Button'
 import { ConfirmModal } from '../ui/ConfirmModal'
 import { Modal } from '../ui/Modal'
+import { keyLengthForShadowsocksMethod } from '../../utils/shadowsocks'
 import {
     buildInboundSubmission,
     computeInboundVisibility,
@@ -24,6 +25,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
     const [validationError, setValidationError] = useState('')
     const [certLoading, setCertLoading] = useState(false)
     const [certError, setCertError] = useState('')
+    const [shadowsocksServerPasswordLoading, setShadowsocksServerPasswordLoading] = useState(false)
+    const [shadowsocksUserPasswordLoading, setShadowsocksUserPasswordLoading] = useState(false)
     const [pendingRenameSubmission, setPendingRenameSubmission] = useState<any | null>(null)
     const [showRenameConfirm, setShowRenameConfirm] = useState(false)
     const [saveLoading, setSaveLoading] = useState(false)
@@ -32,6 +35,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
         setFormData(normalizeInboundForEditor(initialData || getDefaultInbound('vless')))
         setValidationError('')
         setCertError('')
+        setShadowsocksServerPasswordLoading(false)
+        setShadowsocksUserPasswordLoading(false)
         setPendingRenameSubmission(null)
         setShowRenameConfirm(false)
         setSaveLoading(false)
@@ -46,6 +51,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
     const originalTag = String(initialData?.tag || '').trim()
     const pendingRenameTag = String(pendingRenameSubmission?.tag || formData.tag || '').trim()
     const isHysteria2 = formData.type === 'hysteria2'
+    const isShadowsocks = formData.type === 'shadowsocks'
 
     const updateForm = (updater: (current: any) => any) => {
         setFormData((prev: any) => normalizeInboundForEditor(updater(prev)))
@@ -72,6 +78,28 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
             setCertError(err?.message || 'Failed to generate certificate')
         } finally {
             setCertLoading(false)
+        }
+    }
+
+    const generateShadowsocksPassword = async (target: 'server' | 'user') => {
+        const keyLength = keyLengthForShadowsocksMethod(formData.method || '')
+        if (target === 'server') setShadowsocksServerPasswordLoading(true)
+        else setShadowsocksUserPasswordLoading(true)
+        try {
+            const res = await api.generateRandBase64(keyLength)
+            if (target === 'server') {
+                updateForm((prev: any) => ({ ...prev, password: res.value }))
+            } else {
+                updateForm((prev: any) => ({
+                    ...prev,
+                    users: [{ ...(prev.users?.[0] || {}), password: res.value }],
+                }))
+            }
+        } catch (err: any) {
+            setValidationError(err?.message || 'Failed to generate Shadowsocks password')
+        } finally {
+            if (target === 'server') setShadowsocksServerPasswordLoading(false)
+            else setShadowsocksUserPasswordLoading(false)
         }
     }
 
@@ -160,6 +188,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 <option value="vmess">VMess</option>
                                 <option value="trojan">Trojan</option>
                                 <option value="hysteria2">Hysteria2</option>
+                                <option value="shadowsocks">Shadowsocks</option>
                             </select>
                         </div>
                         <div className="space-y-1">
@@ -204,25 +233,27 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 Overrides the generated share-link host while preserving the original public hostname as TLS SNI fallback.
                             </p>
                         </div>
-                        <div className="space-y-1">
-                            <label className="text-xs font-medium text-slate-300">Link TLS Verification</label>
-                            <select
-                                value={formData.link_allow_insecure || 'auto'}
-                                onChange={e => updateForm(prev => ({ ...prev, link_allow_insecure: e.target.value }))}
-                                className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
-                            >
-                                <option value="auto">Auto</option>
-                                <option value="enabled">Force allowInsecure=1</option>
-                                <option value="disabled">Force strict verification</option>
-                            </select>
-                            <p className="text-[11px] text-slate-400">
-                                Controls whether generated share links include <code>allowInsecure=1</code>. Auto keeps the backend heuristic.
-                            </p>
-                        </div>
+                        {visibility.showLinkTlsVerification && (
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-300">Link TLS Verification</label>
+                                <select
+                                    value={formData.link_allow_insecure || 'auto'}
+                                    onChange={e => updateForm(prev => ({ ...prev, link_allow_insecure: e.target.value }))}
+                                    className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                                >
+                                    <option value="auto">Auto</option>
+                                    <option value="enabled">Force allowInsecure=1</option>
+                                    <option value="disabled">Force strict verification</option>
+                                </select>
+                                <p className="text-[11px] text-slate-400">
+                                    Controls whether generated share links include <code>allowInsecure=1</code>. Auto keeps the backend heuristic.
+                                </p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
-
+                {visibility.showTlsSection && (
                 <div className="space-y-4">
                     <div className="flex items-center justify-between">
                         <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">TLS Configuration</h3>
@@ -480,6 +511,127 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                         </div>
                     )}
                 </div>
+                )}
+
+                {visibility.showShadowsocksSection && (
+                    <div className="space-y-4">
+                        <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">Shadowsocks</h3>
+                        <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-300">Network</label>
+                                    <div className="flex flex-wrap gap-4 rounded border border-slate-800 bg-slate-950 px-3 py-2">
+                                        {['tcp', 'udp'].map(network => (
+                                            <label key={network} className="flex items-center gap-2 text-sm text-white">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={(formData.network || []).includes(network)}
+                                                    onChange={e => updateForm((prev: any) => {
+                                                        const next = new Set(Array.isArray(prev.network) ? prev.network : [])
+                                                        if (e.target.checked) next.add(network)
+                                                        else next.delete(network)
+                                                        return { ...prev, network: Array.from(next) }
+                                                    })}
+                                                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                                />
+                                                <span className="uppercase">{network}</span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-300">Method</label>
+                                    <select
+                                        value={formData.method || ''}
+                                        onChange={e => updateForm(prev => ({ ...prev, method: e.target.value }))}
+                                        className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+                                    >
+                                        <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
+                                        <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {isShadowsocks && (
+                                <label className="flex cursor-pointer items-center gap-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!formData.udp_fragment}
+                                        onChange={e => updateForm(prev => ({ ...prev, udp_fragment: e.target.checked }))}
+                                        className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
+                                    />
+                                    <span className="text-xs font-medium text-white">Enable UDP Fragment</span>
+                                </label>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-300">Server Password</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={formData.password || ''}
+                                            onChange={e => updateForm(prev => ({ ...prev, password: e.target.value }))}
+                                            className="flex-1 rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                                            placeholder="Required for the inbound"
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="icon"
+                                            size="icon"
+                                            className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
+                                            onClick={() => void generateShadowsocksPassword('server')}
+                                            disabled={shadowsocksServerPasswordLoading}
+                                            title={`Generate base64 password using sing-box (${keyLengthForShadowsocksMethod(formData.method || '')} bytes)`}
+                                        >
+                                            <RefreshCw size={16} className={shadowsocksServerPasswordLoading ? 'animate-spin' : ''} />
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-300">User Name</label>
+                                    <input
+                                        type="text"
+                                        value={formData.users?.[0]?.name || ''}
+                                        onChange={e => updateForm((prev: any) => ({
+                                            ...prev,
+                                            users: [{ ...(prev.users?.[0] || {}), name: e.target.value }],
+                                        }))}
+                                        className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                                        placeholder="default"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-300">User Password</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={formData.users?.[0]?.password || ''}
+                                        onChange={e => updateForm((prev: any) => ({
+                                            ...prev,
+                                            users: [{ ...(prev.users?.[0] || {}), password: e.target.value }],
+                                        }))}
+                                        className="flex-1 rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                                        placeholder="Required for the user entry"
+                                    />
+                                    <Button
+                                        type="button"
+                                        variant="icon"
+                                        size="icon"
+                                        className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
+                                        onClick={() => void generateShadowsocksPassword('user')}
+                                        disabled={shadowsocksUserPasswordLoading}
+                                        title={`Generate base64 password using sing-box (${keyLengthForShadowsocksMethod(formData.method || '')} bytes)`}
+                                    >
+                                        <RefreshCw size={16} className={shadowsocksUserPasswordLoading ? 'animate-spin' : ''} />
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {visibility.showHysteria2Password && (
                     <div className="space-y-4">

@@ -1,10 +1,12 @@
-export type InboundType = 'vless' | 'vmess' | 'trojan' | 'hysteria2'
+export type InboundType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks'
 
 type InboundLike = Record<string, any>
 
 export interface InboundVisibility {
+    showTlsSection: boolean
     showRealitySection: boolean
     showRealityToggle: boolean
+    showLinkTlsVerification: boolean
     showAlpn: boolean
     showTransport: boolean
     showTransportPath: boolean
@@ -13,6 +15,7 @@ export interface InboundVisibility {
     showHysteria2Password: boolean
     showHysteria2Bandwidth: boolean
     showHysteria2Obfs: boolean
+    showShadowsocksSection: boolean
     showWsHeaders: boolean
     showWsEarlyData: boolean
 }
@@ -160,11 +163,40 @@ const DEFAULT_HYSTERIA2 = {
     },
 }
 
+const DEFAULT_SHADOWSOCKS = {
+    type: 'shadowsocks',
+    tag: 'shadowsocks-in',
+    listen: '::',
+    listen_port: 8080,
+    network: ['tcp', 'udp'],
+    udp_fragment: false,
+    method: '2022-blake3-aes-128-gcm',
+    password: '',
+    external_port: '',
+    override_address: '',
+    users: [
+        {
+            name: 'default',
+            password: '',
+        },
+    ],
+    multiplex: {
+        enabled: true,
+        padding: false,
+        brutal: {
+            enabled: false,
+            up_mbps: 100,
+            down_mbps: 100,
+        },
+    },
+}
+
 const DEFAULT_BY_TYPE: Record<InboundType, InboundLike> = {
     vless: DEFAULT_VLESS,
     vmess: DEFAULT_VMESS,
     trojan: DEFAULT_TROJAN,
     hysteria2: DEFAULT_HYSTERIA2,
+    shadowsocks: DEFAULT_SHADOWSOCKS,
 }
 
 function cloneValue<T>(value: T): T {
@@ -173,7 +205,7 @@ function cloneValue<T>(value: T): T {
 
 function toInboundType(type: unknown): InboundType {
     const raw = String(type || '').toLowerCase()
-    if (raw === 'vmess' || raw === 'trojan' || raw === 'hysteria2') return raw
+    if (raw === 'vmess' || raw === 'trojan' || raw === 'hysteria2' || raw === 'shadowsocks') return raw
     return 'vless'
 }
 
@@ -211,6 +243,7 @@ function normalizeHeadersForEditor(headers: unknown): string {
 }
 
 function normalizeTls(type: InboundType, tls: any, fallback: any) {
+    if (type === 'shadowsocks') return undefined
     const normalized: any = {
         ...cloneValue(fallback),
         ...(tls && typeof tls === 'object' ? cloneValue(tls) : {}),
@@ -240,7 +273,7 @@ function normalizeTls(type: InboundType, tls: any, fallback: any) {
 }
 
 function normalizeTransport(type: InboundType, transport: any, fallback: any) {
-    if (type === 'hysteria2') return undefined
+    if (type === 'hysteria2' || type === 'shadowsocks') return undefined
     const transportEnabled = isTransportConfigured(transport)
     const normalized: any = {
         ...cloneValue(fallback),
@@ -296,6 +329,26 @@ function normalizeHysteria2Obfs(obfs: unknown) {
     }
 }
 
+function normalizeShadowsocksUsers(users: unknown, tag: string) {
+    if (!Array.isArray(users) || users.length === 0) {
+        return [{ name: tag || 'default', password: '' }]
+    }
+    return users.map((user: any, index: number) => ({
+        ...cloneValue(user || {}),
+        name: String(user?.name || (index === 0 ? tag || 'default' : `user-${index + 1}`)),
+        password: String(user?.password || ''),
+    }))
+}
+
+function normalizeShadowsocksNetwork(network: unknown) {
+    const values = Array.isArray(network) ? network : [network]
+    const normalized = values
+        .map(value => String(value || '').trim().toLowerCase())
+        .filter(value => value === 'tcp' || value === 'udp')
+    if (normalized.length === 0) return ['tcp', 'udp']
+    return Array.from(new Set(normalized))
+}
+
 export function getDefaultInbound(type: unknown = 'vless') {
     return cloneValue(DEFAULT_BY_TYPE[toInboundType(type)])
 }
@@ -314,15 +367,18 @@ export function computeInboundVisibility(inbound: InboundLike | null | undefined
     const tlsEnabled = !!inbound?.tls?.enabled
     const transportType = getInboundTransportType(inbound)
     const transportEnabled = transportType !== ''
+    const showTlsSection = type !== 'shadowsocks'
     const showRealityToggle = type === 'vless' && tlsEnabled
     const showRealitySection = showRealityToggle && !!inbound?.tls?.reality?.enabled
     const showTransport = type !== 'hysteria2'
     const showMultiplex = type !== 'hysteria2'
     const showWsFields = showTransport && transportEnabled && transportType === 'ws'
     return {
+        showTlsSection,
         showRealitySection,
         showRealityToggle,
-        showAlpn: tlsEnabled && type !== 'hysteria2',
+        showLinkTlsVerification: type !== 'shadowsocks',
+        showAlpn: tlsEnabled && type !== 'hysteria2' && type !== 'shadowsocks',
         showTransport,
         showTransportPath: showTransport && transportEnabled && ['http', 'ws', 'httpupgrade'].includes(transportType),
         showTransportServiceName: showTransport && transportEnabled && transportType === 'grpc',
@@ -330,6 +386,7 @@ export function computeInboundVisibility(inbound: InboundLike | null | undefined
         showHysteria2Password: type === 'hysteria2',
         showHysteria2Bandwidth: type === 'hysteria2',
         showHysteria2Obfs: type === 'hysteria2',
+        showShadowsocksSection: type === 'shadowsocks',
         showWsHeaders: showWsFields,
         showWsEarlyData: showWsFields,
     }
@@ -372,6 +429,13 @@ function stripHiddenInboundState(inbound: InboundLike) {
         delete inbound.obfs
     }
 
+    if (!visibility.showShadowsocksSection) {
+        delete inbound.network
+        delete inbound.udp_fragment
+        delete inbound.method
+        delete inbound.password
+    }
+
     return inbound
 }
 
@@ -398,6 +462,14 @@ export function normalizeInboundForEditor(value: InboundLike | null | undefined)
         normalized.down_mbps = source.down_mbps ?? ''
         normalized.obfs = normalizeHysteria2Obfs(source.obfs)
         normalized.users = normalizeHysteria2Users(source.users, String(source.tag || fallback.tag))
+    }
+
+    if (type === 'shadowsocks') {
+        normalized.network = normalizeShadowsocksNetwork(source.network ?? fallback.network)
+        normalized.udp_fragment = !!source.udp_fragment
+        normalized.method = String(source.method || fallback.method || '')
+        normalized.password = String(source.password || '')
+        normalized.users = normalizeShadowsocksUsers(source.users, String(source.tag || fallback.tag))
     }
 
     return stripHiddenInboundState(normalized)
@@ -524,6 +596,39 @@ export function buildInboundSubmission(formData: InboundLike) {
         }
 
         // Hysteria2 does not support sniff fields
+
+        return { submission }
+    }
+
+    if (type === 'shadowsocks') {
+        delete submission.tls
+        delete submission.transport
+
+        const networkValues = normalizeShadowsocksNetwork(submission.network)
+        if (networkValues.length === 0) {
+            return { error: 'Shadowsocks network must include tcp or udp.' }
+        }
+        submission.network = networkValues
+        submission.udp_fragment = !!submission.udp_fragment
+
+        const method = String(submission.method || '').trim()
+        if (!method) {
+            return { error: 'Shadowsocks method is required.' }
+        }
+        submission.method = method
+
+        const serverPassword = String(submission.password || '').trim()
+        if (!serverPassword) {
+            return { error: 'Shadowsocks server password is required.' }
+        }
+        submission.password = serverPassword
+
+        const userName = String(submission.users?.[0]?.name || submission.tag || 'default').trim()
+        const userPassword = String(submission.users?.[0]?.password || '').trim()
+        if (!userPassword) {
+            return { error: 'Shadowsocks user password is required.' }
+        }
+        submission.users = [{ name: userName || submission.tag || 'default', password: userPassword }]
 
         return { submission }
     }
