@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"crypto/ecdh"
 	"crypto/rand"
 	"crypto/rsa"
@@ -15,9 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -45,8 +42,6 @@ type RandBase64Request struct {
 type RandBase64Response struct {
 	Value string `json:"value"`
 }
-
-var execCommandContext = exec.CommandContext
 
 func (s *Server) handleGenerateRealityKeys(w http.ResponseWriter, r *http.Request) {
 	// Generate X25519 Key Pair
@@ -195,29 +190,12 @@ func (s *Server) handleGenerateRandBase64(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-
-	cmd := execCommandContext(ctx, "sing-box", "generate", "rand", "--base64", strconv.Itoa(req.KeyLength))
-	output, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
-		http.Error(w, "sing-box generate rand timeout", http.StatusGatewayTimeout)
+	buf := make([]byte, req.KeyLength)
+	if _, err := rand.Read(buf); err != nil {
+		http.Error(w, "Failed to generate random base64: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = err.Error()
-		}
-		http.Error(w, "Failed to generate random base64: "+message, http.StatusInternalServerError)
-		return
-	}
-
-	value := strings.TrimSpace(string(output))
-	if value == "" {
-		http.Error(w, "Failed to generate random base64: empty output", http.StatusInternalServerError)
-		return
-	}
+	value := base64.StdEncoding.EncodeToString(buf)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(RandBase64Response{Value: value}); err != nil {

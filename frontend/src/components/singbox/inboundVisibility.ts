@@ -174,12 +174,7 @@ const DEFAULT_SHADOWSOCKS = {
     password: '',
     external_port: '',
     override_address: '',
-    users: [
-        {
-            name: 'default',
-            password: '',
-        },
-    ],
+    users: [],
     multiplex: {
         enabled: true,
         padding: false,
@@ -330,9 +325,7 @@ function normalizeHysteria2Obfs(obfs: unknown) {
 }
 
 function normalizeShadowsocksUsers(users: unknown, tag: string) {
-    if (!Array.isArray(users) || users.length === 0) {
-        return [{ name: tag || 'default', password: '' }]
-    }
+    if (!Array.isArray(users) || users.length === 0) return []
     return users.map((user: any, index: number) => ({
         ...cloneValue(user || {}),
         name: String(user?.name || (index === 0 ? tag || 'default' : `user-${index + 1}`)),
@@ -623,12 +616,26 @@ export function buildInboundSubmission(formData: InboundLike) {
         }
         submission.password = serverPassword
 
-        const userName = String(submission.users?.[0]?.name || submission.tag || 'default').trim()
-        const userPassword = String(submission.users?.[0]?.password || '').trim()
-        if (!userPassword) {
-            return { error: 'Shadowsocks user password is required.' }
+        if (Array.isArray(submission.users)) {
+            const users = submission.users
+                .map((user: any, index: number) => ({
+                    ...cloneValue(user || {}),
+                    name: String(user?.name || (index === 0 ? submission.tag || 'default' : `user-${index + 1}`)).trim(),
+                    password: String(user?.password || '').trim(),
+                }))
+                .filter((user: any) => user.password)
+
+            if (users.length > 0) {
+                submission.users = users.map((user: any, index: number) => ({
+                    name: user.name || (index === 0 ? submission.tag || 'default' : `user-${index + 1}`),
+                    password: user.password,
+                }))
+            } else {
+                delete submission.users
+            }
+        } else {
+            delete submission.users
         }
-        submission.users = [{ name: userName || submission.tag || 'default', password: userPassword }]
 
         return { submission }
     }
