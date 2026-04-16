@@ -1480,11 +1480,12 @@ function DatabaseTab({
         }
 
         const osVersion = verboseOS.osVersion || parsed.deviceOSVersion
-        // Detect Windows computer hostnames (e.g. DESKTOP-GVV6ID8, LAPTOP-ABC123)
+        // On Windows, device_model is a computer hostname — keep it for details, use OS as display label
         const windowsHostname = run.device_os === 'Windows' &&
             !!deviceModel &&
             !['pc', 'desktop', 'laptop', 'windows'].includes(deviceModel.toLowerCase())
             ? deviceModel : ''
+        if (run.device_os === 'Windows') deviceModel = 'Windows'
 
         return {
             parsed,
@@ -1497,13 +1498,10 @@ function DatabaseTab({
     }
 
     const formatClientLabel = (run: SubscriptionRequestHistoryEntry) => {
-        const { parsed, deviceModel, windowsHostname, osName, osVersion } = resolveDisplayedDevice(run)
+        const { parsed, deviceModel } = resolveDisplayedDevice(run)
         const clientName = parsed.clientName || run.user_agent
-        const displayDevice = windowsHostname
-            ? (osName && osVersion ? `${osName} ${osVersion}` : osName || deviceModel)
-            : deviceModel
-        if (displayDevice && clientName) return `${clientName} on ${displayDevice}`
-        if (displayDevice) return displayDevice
+        if (deviceModel && clientName) return `${clientName} on ${deviceModel}`
+        if (deviceModel) return deviceModel
         if (clientName) return clientName
         return 'Unknown client'
     }
