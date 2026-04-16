@@ -730,6 +730,58 @@ func TestRoundTrip_ExperimentalUnknownKeyPreserved(t *testing.T) {
 	}
 }
 
+func TestAddUser_Shadowsocks_PreservesExplicitEmptyClashAPISecret(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "shadowsocks",
+				"tag": "test-ss",
+				"listen": "0.0.0.0",
+				"listen_port": 10005,
+				"method": "2022-blake3-aes-128-gcm",
+				"users": []
+			}
+		],
+		"experimental": {
+			"clash_api": {
+				"external_controller": "127.0.0.1:9090",
+				"secret": ""
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.ManagedInbounds = []string{"test-ss"}
+	cfg.StatsInbounds = []string{"test-ss"}
+
+	if err := cfg.AddUser("dora", "shadow-secret", "", "test-ss", "", 0); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+
+	var result map[string]json.RawMessage
+	if err := json.Unmarshal(stub.data, &result); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	var experimental map[string]json.RawMessage
+	if err := json.Unmarshal(result["experimental"], &experimental); err != nil {
+		t.Fatalf("unmarshal experimental: %v", err)
+	}
+
+	var clash map[string]json.RawMessage
+	if err := json.Unmarshal(experimental["clash_api"], &clash); err != nil {
+		t.Fatalf("unmarshal clash_api: %v", err)
+	}
+
+	secretRaw, ok := clash["secret"]
+	if !ok {
+		t.Fatal("clash_api.secret missing after AddUser")
+	}
+	if string(secretRaw) != `""` {
+		t.Fatalf("clash_api.secret = %s, want empty string", secretRaw)
+	}
+}
+
 func TestClashAPI_MarshalUnmarshalRoundTrip(t *testing.T) {
 	orig := ClashAPI{ExternalController: "127.0.0.1:9090", Secret: "synthetic-secret"}
 
@@ -801,6 +853,23 @@ func TestClashAPI_EmptyFields(t *testing.T) {
 	}
 	if string(data) != "{}" {
 		t.Fatalf("marshal output = %s, want {}", data)
+	}
+}
+
+func TestClashAPI_PreservesExplicitEmptyKnownFields(t *testing.T) {
+	input := `{"external_controller":"","secret":""}`
+
+	var api ClashAPI
+	if err := json.Unmarshal([]byte(input), &api); err != nil {
+		t.Fatalf("unmarshal clash api: %v", err)
+	}
+
+	data, err := json.Marshal(api)
+	if err != nil {
+		t.Fatalf("marshal clash api: %v", err)
+	}
+	if !jsonSemanticallyEqual([]byte(input), data) {
+		t.Fatalf("marshal output = %s, want semantic match with %s", data, input)
 	}
 }
 
