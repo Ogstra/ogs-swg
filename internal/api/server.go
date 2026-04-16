@@ -315,6 +315,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/config/backup", s.secure(s.requirePerm(canReadConfig, s.handleGetConfigBackup)))
 	protected.HandleFunc("GET /api/tools/reality-keys", s.secure(s.requirePerm(canWriteConfig, s.handleGenerateRealityKeys)))
 	protected.HandleFunc("POST /api/tools/self-signed-cert", s.secure(s.requirePerm(canWriteConfig, s.handleGenerateSelfSignedCert)))
+	protected.HandleFunc("POST /api/tools/rand-base64", s.secure(s.handleGenerateRandBase64))
 	protected.HandleFunc("GET /api/sysctl", s.secure(s.requirePerm(canReadConfig, s.handleGetSysctl)))
 	protected.HandleFunc("POST /api/sysctl", s.secure(s.requirePerm(canWriteConfig, s.handleApplySysctl)))
 

@@ -11,6 +11,7 @@ import { Modal } from '../../components/ui/Modal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { canSelectInboundUserFlow } from '../../components/singbox/inboundVisibility'
+import { keyLengthForShadowsocksMethod } from '../../utils/shadowsocks'
 import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
@@ -87,6 +88,7 @@ export default function UserManagement() {
     const [usageLimitGb, setUsageLimitGb] = useState<string>('0')
     const [usageData, setUsageData] = useState<any[]>([])
     const [loadingUsage, setLoadingUsage] = useState(false)
+    const [credentialLoading, setCredentialLoading] = useState(false)
 
     // Create/Edit Form State
     const [newUser, setNewUser] = useState<CreateUserRequest>({
@@ -229,6 +231,16 @@ export default function UserManagement() {
             if (getFirstInboundTagForType(type)) return type
         }
         return supportedUserTypes[0] || 'vless'
+    }
+
+    const generateCredentialForType = async (type: UserType, inboundTag?: string) => {
+        if (type === 'shadowsocks') {
+            const inbound = getInboundByTag(inboundTag || '')
+            const method = String((inbound as any)?.method || '')
+            const { value } = await api.generateRandBase64(keyLengthForShadowsocksMethod(method))
+            return value
+        }
+        return generateRandomCredential(type)
     }
 
     useEffect(() => {
@@ -501,7 +513,7 @@ export default function UserManagement() {
                     vmess_alter_id: vmessAlterID,
                     reset_day: 1,
                 }
-                if (!payload.uuid) payload.uuid = generateRandomCredential(userType)
+                if (!payload.uuid) payload.uuid = await generateCredentialForType(userType, inboundTag)
 
                 await api.updateUser(payload)
 
@@ -536,7 +548,7 @@ export default function UserManagement() {
                     inbound_tag: inboundTag,
                     flow: selectedFlow,
                 }
-                if (!payload.uuid) payload.uuid = generateRandomCredential(userType)
+                if (!payload.uuid) payload.uuid = await generateCredentialForType(userType, inboundTag)
                 await api.createUser(payload)
                 success(`User created successfully`)
             }
@@ -603,7 +615,7 @@ export default function UserManagement() {
 
                 usersToCreate.push({
                     name: fullName,
-                    uuid: generateRandomCredential((bulkInboundType || 'vless') as UserType),
+                    uuid: await generateCredentialForType((bulkInboundType || 'vless') as UserType, bulkConfig.inbound_tag),
                     flow: bulkFlow,
                     vmess_security: bulkVmessSecurity,
                     vmess_alter_id: bulkVmessAlterID,
@@ -1067,10 +1079,21 @@ export default function UserManagement() {
                                     variant="icon"
                                     size="icon"
                                     className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
-                                    onClick={() => setNewUser({ ...newUser, uuid: generateRandomCredential(userType) })}
+                                    onClick={async () => {
+                                        setCredentialLoading(true)
+                                        try {
+                                            const value = await generateCredentialForType(userType, currentInboundRow.tag)
+                                            setNewUser(prev => ({ ...prev, uuid: value }))
+                                        } catch (err) {
+                                            toastError('Failed to generate credential: ' + err)
+                                        } finally {
+                                            setCredentialLoading(false)
+                                        }
+                                    }}
+                                    disabled={credentialLoading}
                                     title={credentialActionLabel}
                                 >
-                                    <RefreshCw size={16} />
+                                    <RefreshCw size={16} className={credentialLoading ? 'animate-spin' : ''} />
                                 </Button>
                             </div>
                         </div>
