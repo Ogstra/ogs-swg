@@ -15,8 +15,8 @@ import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
-const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2'])
-type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2'
+const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks'])
+type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks'
 
 function bytesToGbString(bytes?: number) {
     return bytes && bytes > 0 ? (bytes / BYTES_PER_GB).toFixed(2) : ''
@@ -31,7 +31,7 @@ function parseGbToBytes(input: string) {
 }
 
 function isPasswordUserType(type: string): boolean {
-    return type === 'trojan' || type === 'hysteria2'
+    return type === 'trojan' || type === 'hysteria2' || type === 'shadowsocks'
 }
 
 function generateRandomCredential(type: UserType): string {
@@ -53,6 +53,7 @@ function generateRandomCredential(type: UserType): string {
 }
 
 function formatUserTypeLabel(type: UserType): string {
+    if (type === 'shadowsocks') return 'Shadowsocks'
     return type === 'hysteria2' ? 'Hysteria2' : type.toUpperCase()
 }
 
@@ -64,7 +65,7 @@ export default function UserManagement() {
     const canWriteConfig = !!permissions?.can_write_config
 
     const queryClient = useQueryClient()
-    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan', 'hysteria2']
+    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks']
     const [userType, setUserType] = useState<UserType>('vless')
     // Modals state
     const [modalState, setModalState] = useState<{
@@ -411,6 +412,15 @@ export default function UserManagement() {
                             flow: canEditFlowForInbound(nextType, row.tag) ? (match.flow || '') : '',
                         }
                     }))
+                }
+                if (isPasswordUserType(nextType)) {
+                    const first = list[0]
+                    if (first?.password) {
+                        setNewUser(prev => ({
+                            ...prev,
+                            uuid: first.password || prev.uuid,
+                        }))
+                    }
                 }
                 if (nextType === 'vmess') {
                     const first = list[0]

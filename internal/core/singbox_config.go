@@ -826,6 +826,12 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 					Password: user.Password,
 				})
 				continue
+			case "shadowsocks":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
 			case "trojan":
 				uuid = user.Password
 				flow = ""

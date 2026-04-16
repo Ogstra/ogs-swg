@@ -41,6 +41,11 @@ type TrojanUser struct {
 	Password string `json:"password"` // NOT uuid - Trojan uses password
 }
 
+type ShadowsocksUser struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
 type VlessInbound struct {
 	InboundBase
 	ListenFields
@@ -66,6 +71,14 @@ type TrojanInbound struct {
 	TLS       json.RawMessage `json:"tls,omitempty"`
 	Multiplex json.RawMessage `json:"multiplex,omitempty"`
 	Transport json.RawMessage `json:"transport,omitempty"`
+}
+
+type ShadowsocksInbound struct {
+	InboundBase
+	ListenFields
+	Method    string            `json:"method"`
+	Users     []ShadowsocksUser `json:"users"`
+	Multiplex json.RawMessage   `json:"multiplex,omitempty"`
 }
 
 type RealityHandshake struct {
@@ -145,6 +158,16 @@ func (t *TrojanInbound) Base() InboundBase { return t.InboundBase }
 func (t *TrojanInbound) UserNames() []string {
 	names := make([]string, len(t.Users))
 	for i, u := range t.Users {
+		names[i] = u.Name
+	}
+	return names
+}
+
+func (s *ShadowsocksInbound) Base() InboundBase { return s.InboundBase }
+
+func (s *ShadowsocksInbound) UserNames() []string {
+	names := make([]string, len(s.Users))
+	for i, u := range s.Users {
 		names[i] = u.Name
 	}
 	return names

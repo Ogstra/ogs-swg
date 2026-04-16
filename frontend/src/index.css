@@ -149,6 +149,8 @@ select.select-field:focus {
 }
 
 .raw-editor {
+    --raw-editor-gutter-width: 2.25rem;
+    --raw-editor-gutter-gap: 0.5rem;
     font-family: Menlo, Monaco, 'Fira Code', monospace !important;
     font-size: 14px;
     line-height: 1.5;
@@ -162,7 +164,7 @@ select.select-field:focus {
     color: #e2e8f0;
     caret-color: #3b82f6;
     min-height: 100% !important;
-    padding-left: 2.75rem !important;
+    padding-left: calc(var(--raw-editor-gutter-width) + var(--raw-editor-gutter-gap)) !important;
 }
 
 .raw-editor pre {
@@ -174,14 +176,14 @@ select.select-field:focus {
 
 .raw-editor-line {
     display: grid;
-    grid-template-columns: 2.25rem minmax(0, 1fr);
+    grid-template-columns: calc(var(--raw-editor-gutter-width) + var(--raw-editor-gutter-gap)) minmax(0, 1fr);
     align-items: baseline;
 }
 
 .raw-editor-line-number {
     display: inline-flex;
     justify-content: flex-end;
-    padding-right: 0.5rem;
+    padding-right: var(--raw-editor-gutter-gap);
     color: #64748b;
     user-select: none;
 }
