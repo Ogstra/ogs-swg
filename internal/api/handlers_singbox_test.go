@@ -1145,6 +1145,40 @@ func TestBuildShadowsocksLink(t *testing.T) {
 	}
 }
 
+func TestBuildShadowsocksLink_2022MultiUser_IncludesServerKey(t *testing.T) {
+	// Shadowsocks 2022 multi-user: inbound has top-level server password.
+	// Client needs "server_key:user_key" so sing-box can authenticate.
+	view := &core.SingboxInboundView{
+		Type: "shadowsocks",
+		Raw: map[string]interface{}{
+			"method":   "2022-blake3-aes-128-gcm",
+			"password": "server-key-base64",
+		},
+	}
+	user := &core.UserInboundInfo{Password: "user-key-base64"}
+
+	link, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildShadowsocksLink() error = %v", err)
+	}
+
+	withoutFragment, _, _ := strings.Cut(link, "#")
+	rest := strings.TrimPrefix(withoutFragment, "ss://")
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx < 0 {
+		t.Fatalf("link missing @: %q", link)
+	}
+	userinfo := rest[:atIdx]
+	decoded, err := base64.StdEncoding.DecodeString(userinfo)
+	if err != nil {
+		t.Fatalf("base64 decode userinfo %q: %v", userinfo, err)
+	}
+	want := "2022-blake3-aes-128-gcm:server-key-base64:user-key-base64"
+	if string(decoded) != want {
+		t.Errorf("decoded userinfo = %q; want %q", string(decoded), want)
+	}
+}
+
 func TestHandleGetUserInbounds_ShadowsocksRedaction(t *testing.T) {
 	const ssConfig = `{"inbounds":[{"type":"shadowsocks","tag":"ss-in","listen":"::","listen_port":8443,"method":"2022-blake3-aes-128-gcm","users":[{"name":"alice","password":"s3cr3t"}]}]}`
 
