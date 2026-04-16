@@ -15,6 +15,61 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
+func TestDashboard_UsesConfiguredActiveUserWindow(t *testing.T) {
+	tmp := t.TempDir()
+	dbPath := filepath.Join(tmp, "test.db")
+	store, err := core.NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if err := store.CreatePanelUser("alice", "password123", core.PanelUserPermissions{CanReadSettings: true, CanWriteSettings: true}); err != nil {
+		t.Fatalf("CreatePanelUser: %v", err)
+	}
+	if err := store.UpdateDashboardPreferences(context.Background(), "alice", core.DashboardPreferences{
+		ActiveUserWindowMinutes: 10,
+	}); err != nil {
+		t.Fatalf("UpdateDashboardPreferences: %v", err)
+	}
+
+	now := time.Now().Unix()
+	if err := store.BulkInsert([]core.Sample{
+		{User: "alice-user", Timestamp: now - (7 * 60), Uplink: 4096, Downlink: 4096},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	server := NewServer(store, &core.Config{
+		EnableSingbox:        true,
+		ActiveThresholdBytes: 1,
+	}, &dashboardExecutorStub{})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard?start=1&end="+strconv.FormatInt(now, 10), nil)
+	req = req.WithContext(context.WithValue(req.Context(), userContextKey, map[string]interface{}{"sub": "alice"}))
+	rec := httptest.NewRecorder()
+	server.handleGetDashboardData(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var payload DashboardData
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	gotCount, _ := payload.Status["active_users_singbox"].(float64)
+	if int(gotCount) != 1 {
+		t.Fatalf("active_users_singbox = %v; want 1", payload.Status["active_users_singbox"])
+	}
+
+	gotList, _ := payload.Status["active_users_singbox_list"].([]interface{})
+	if len(gotList) != 1 || gotList[0] != "alice-user" {
+		t.Fatalf("active_users_singbox_list = %#v; want [alice-user]", payload.Status["active_users_singbox_list"])
+	}
+}
+
 type dashboardExecutorStub struct {
 	stats map[string]core.PeerStats
 }

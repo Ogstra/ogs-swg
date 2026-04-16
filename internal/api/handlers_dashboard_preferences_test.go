@@ -42,11 +42,11 @@ func TestDashboardPreferencesHandlersPersistPerPrincipal(t *testing.T) {
 	if err := json.NewDecoder(getRec.Body).Decode(&defaults); err != nil {
 		t.Fatalf("decode defaults: %v", err)
 	}
-	if defaults.DefaultService != "singbox" || defaults.RefreshMs != 10000 || defaults.DefaultRange != "24h" || defaults.DetailChartTargetPoints != 200 {
+	if defaults.DefaultService != "singbox" || defaults.RefreshMs != 10000 || defaults.DefaultRange != "24h" || defaults.ActiveUserWindowMinutes != 5 || defaults.DetailChartTargetPoints != 200 {
 		t.Fatalf("unexpected defaults: %+v", defaults)
 	}
 
-	putReq := authReq(httptest.NewRequest(http.MethodPut, "/api/settings/dashboard-preferences", strings.NewReader(`{"default_service":"wireguard","refresh_ms":15000,"default_range":"1w","detail_chart_target_points":100}`)))
+	putReq := authReq(httptest.NewRequest(http.MethodPut, "/api/settings/dashboard-preferences", strings.NewReader(`{"default_service":"wireguard","refresh_ms":15000,"default_range":"1w","active_user_window_minutes":10,"detail_chart_target_points":100}`)))
 	putReq.Header.Set("Content-Type", "application/json")
 	putRec := httptest.NewRecorder()
 	server.handleUpdateDashboardPreferences(putRec, putReq)
@@ -64,7 +64,7 @@ func TestDashboardPreferencesHandlersPersistPerPrincipal(t *testing.T) {
 	if err := json.NewDecoder(getRec.Body).Decode(&saved); err != nil {
 		t.Fatalf("decode saved: %v", err)
 	}
-	if saved.DefaultService != "wireguard" || saved.RefreshMs != 15000 || saved.DefaultRange != "1w" || saved.DetailChartTargetPoints != 100 {
+	if saved.DefaultService != "wireguard" || saved.RefreshMs != 15000 || saved.DefaultRange != "1w" || saved.ActiveUserWindowMinutes != 10 || saved.DetailChartTargetPoints != 100 {
 		t.Fatalf("unexpected saved prefs: %+v", saved)
 	}
 }

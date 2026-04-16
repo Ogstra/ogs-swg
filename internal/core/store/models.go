@@ -32,6 +32,7 @@ type DashboardPreference struct {
 	DefaultService          string        `json:"default_service"`
 	RefreshMs               int64         `json:"refresh_ms"`
 	DefaultRange            string        `json:"default_range"`
+	ActiveUserWindowMinutes int64         `json:"active_user_window_minutes"`
 	DetailChartTargetPoints int64         `json:"detail_chart_target_points"`
 	CreatedAt               sql.NullInt64 `json:"created_at"`
 	UpdatedAt               sql.NullInt64 `json:"updated_at"`

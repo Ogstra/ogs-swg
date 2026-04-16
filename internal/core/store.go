@@ -199,6 +199,7 @@ func (s *Store) initSchema() error {
 		default_service TEXT NOT NULL DEFAULT 'singbox',
 		refresh_ms INTEGER NOT NULL DEFAULT 10000,
 		default_range TEXT NOT NULL DEFAULT '24h',
+		active_user_window_minutes INTEGER NOT NULL DEFAULT 5,
 		detail_chart_target_points INTEGER NOT NULL DEFAULT 200,
 		created_at INTEGER DEFAULT (strftime('%s','now')),
 		updated_at INTEGER DEFAULT (strftime('%s','now'))
@@ -311,6 +312,7 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN default_service TEXT NOT NULL DEFAULT 'singbox';")
 	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN refresh_ms INTEGER NOT NULL DEFAULT 10000;")
 	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN default_range TEXT NOT NULL DEFAULT '24h';")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN active_user_window_minutes INTEGER NOT NULL DEFAULT 5;")
 	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN detail_chart_target_points INTEGER NOT NULL DEFAULT 200;")
 	s.db.Exec(`UPDATE dashboard_preferences SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE dashboard_preferences SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
@@ -377,6 +379,7 @@ type DashboardPreferences struct {
 	DefaultService          string `json:"default_service"`
 	RefreshMs               int    `json:"refresh_ms"`
 	DefaultRange            string `json:"default_range"`
+	ActiveUserWindowMinutes int    `json:"active_user_window_minutes"`
 	DetailChartTargetPoints int    `json:"detail_chart_target_points"`
 }
 
@@ -385,6 +388,7 @@ func DefaultDashboardPreferences() DashboardPreferences {
 		DefaultService:          "singbox",
 		RefreshMs:               10000,
 		DefaultRange:            "24h",
+		ActiveUserWindowMinutes: 5,
 		DetailChartTargetPoints: 200,
 	}
 }
@@ -400,6 +404,9 @@ func normalizeDashboardPreferences(p DashboardPreferences) DashboardPreferences 
 	}
 	if p.RefreshMs >= 1000 {
 		out.RefreshMs = p.RefreshMs
+	}
+	if p.ActiveUserWindowMinutes >= 1 && p.ActiveUserWindowMinutes <= 1440 {
+		out.ActiveUserWindowMinutes = p.ActiveUserWindowMinutes
 	}
 	switch p.DetailChartTargetPoints {
 	case 50, 100, 150, 200:
@@ -757,13 +764,13 @@ func (s *Store) UpdatePanelUserSubscriptionDefaults(ctx context.Context, usernam
 func (s *Store) GetDashboardPreferences(ctx context.Context, principal string) (DashboardPreferences, error) {
 	defaults := DefaultDashboardPreferences()
 	row := s.db.QueryRowContext(ctx, `
-		SELECT default_service, refresh_ms, default_range, detail_chart_target_points
+		SELECT default_service, refresh_ms, default_range, active_user_window_minutes, detail_chart_target_points
 		FROM dashboard_preferences
 		WHERE principal = ?
 	`, principal)
 
 	var prefs DashboardPreferences
-	if err := row.Scan(&prefs.DefaultService, &prefs.RefreshMs, &prefs.DefaultRange, &prefs.DetailChartTargetPoints); err != nil {
+	if err := row.Scan(&prefs.DefaultService, &prefs.RefreshMs, &prefs.DefaultRange, &prefs.ActiveUserWindowMinutes, &prefs.DetailChartTargetPoints); err != nil {
 		if err == sql.ErrNoRows {
 			return defaults, nil
 		}
@@ -776,15 +783,16 @@ func (s *Store) UpdateDashboardPreferences(ctx context.Context, principal string
 	prefs = normalizeDashboardPreferences(prefs)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO dashboard_preferences (
-			principal, default_service, refresh_ms, default_range, detail_chart_target_points, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+			principal, default_service, refresh_ms, default_range, active_user_window_minutes, detail_chart_target_points, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
 		ON CONFLICT(principal) DO UPDATE SET
 			default_service = excluded.default_service,
 			refresh_ms = excluded.refresh_ms,
 			default_range = excluded.default_range,
+			active_user_window_minutes = excluded.active_user_window_minutes,
 			detail_chart_target_points = excluded.detail_chart_target_points,
 			updated_at = strftime('%s','now')
-	`, principal, prefs.DefaultService, prefs.RefreshMs, prefs.DefaultRange, prefs.DetailChartTargetPoints)
+	`, principal, prefs.DefaultService, prefs.RefreshMs, prefs.DefaultRange, prefs.ActiveUserWindowMinutes, prefs.DetailChartTargetPoints)
 	return err
 }
 

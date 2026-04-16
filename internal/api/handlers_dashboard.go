@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -267,6 +268,18 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	endStr := r.URL.Query().Get("end")
 
 	start, end, interval := resolveDashboardWindow(rangeStr, startStr, endStr)
+	dashboardPrefs := core.DefaultDashboardPreferences()
+	cachePrincipal := "__default__"
+	if principal, ok := s.dashboardPreferencesPrincipal(r); ok {
+		cachePrincipal = principal
+		prefs, err := s.store.GetDashboardPreferences(r.Context(), principal)
+		if err != nil {
+			log.Printf("dashboard: load preferences for %s: %v", principal, err)
+		} else {
+			dashboardPrefs = prefs
+		}
+	}
+	activeUsersWindow := time.Duration(dashboardPrefs.ActiveUserWindowMinutes) * time.Minute
 
 	// Cache key
 	// For presets we key by (rangeStr, quantized end), so multiple requests in the same
@@ -275,12 +288,12 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	// are cached independently.
 	var cacheKey string
 	if startStr != "" && endStr != "" {
-		cacheKey = "custom:" + strconv.FormatInt(start, 10) + ":" + strconv.FormatInt(end, 10)
+		cacheKey = cachePrincipal + ":window:" + strconv.Itoa(dashboardPrefs.ActiveUserWindowMinutes) + ":custom:" + strconv.FormatInt(start, 10) + ":" + strconv.FormatInt(end, 10)
 	} else {
 		if rangeStr == "" {
 			rangeStr = "24h"
 		}
-		cacheKey = "range:" + rangeStr + ":" + strconv.FormatInt(end, 10)
+		cacheKey = cachePrincipal + ":window:" + strconv.Itoa(dashboardPrefs.ActiveUserWindowMinutes) + ":range:" + rangeStr + ":" + strconv.FormatInt(end, 10)
 	}
 
 	if cachedPayload, found := s.cache.Get(cacheKey); found {
@@ -293,7 +306,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// 1. Fetch System Status
-	status := s.collectSystemStatus(r.Context())
+	status := s.collectSystemStatus(r.Context(), activeUsersWindow)
 
 	// 2. Fetch WireGuard peers for range calculations
 	var wgPeerKeys []string
@@ -560,9 +573,12 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 	})
 }
 
-func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{} {
+func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time.Duration) map[string]interface{} {
 	// Replicating logic from handleGetSystemStatus
 	// Ideally refactor to shared method, but copy-paste is safer for now to avoid breaking legacy endpoint
+	if activeUsersWindow <= 0 {
+		activeUsersWindow = 5 * time.Minute
+	}
 	singboxStatus := false
 	wireguardStatus := false
 	activeUsersSB := int64(0)
@@ -580,13 +596,13 @@ func (s *Server) collectSystemStatus(ctx context.Context) map[string]interface{}
 		}
 		// Fetch active users list (previously we only fetched count)
 		// We use the same threshold mechanism
-		if users, err := s.store.GetActiveUsersWithThreshold(5*time.Minute, s.config.ActiveThresholdBytes); err == nil {
+		if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, s.config.ActiveThresholdBytes); err == nil {
 			activeUsersSBList = users
 			activeUsersSB = int64(len(users))
 		}
 		// Fallback: if threshold-based result is empty, show sessions with any traffic.
 		if activeUsersSB == 0 {
-			if users, err := s.store.GetActiveUsers(5 * time.Minute); err == nil {
+			if users, err := s.store.GetActiveUsers(activeUsersWindow); err == nil {
 				activeUsersSBList = users
 				activeUsersSB = int64(len(users))
 			}
