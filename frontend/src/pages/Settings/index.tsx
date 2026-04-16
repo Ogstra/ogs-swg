@@ -1515,7 +1515,7 @@ function DatabaseTab({
     }
 
     const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
-        const { parsed, osName, osVersion, windowsHostname } = resolveDisplayedDevice(run)
+        const { parsed, osName, osVersion, windowsHostname, windowsUser } = resolveDisplayedDevice(run)
         const details: string[] = []
         if (osName && osVersion) details.push(`${osName} ${osVersion}`)
         else if (osName) details.push(osName)
