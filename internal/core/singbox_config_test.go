@@ -782,6 +782,38 @@ func TestAddUser_Shadowsocks_PreservesExplicitEmptyClashAPISecret(t *testing.T) 
 	}
 }
 
+func TestAddUser_Shadowsocks_ClashAPIKeysOutOfAlphabeticalOrder(t *testing.T) {
+	// clash_api keys in non-alphabetical order: "secret" before "external_controller".
+	// ClashAPI.MarshalJSON uses a map so Go's json.Marshal sorts keys alphabetically.
+	// assertExperimentalAllowedChanges must compare semantically, not byte-by-byte.
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "shadowsocks",
+				"tag": "test-ss",
+				"listen": "0.0.0.0",
+				"listen_port": 10005,
+				"method": "2022-blake3-aes-128-gcm",
+				"users": []
+			}
+		],
+		"experimental": {
+			"clash_api": {
+				"secret": "",
+				"external_controller": "127.0.0.1:9090"
+			}
+		}
+	}`
+
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	cfg.ManagedInbounds = []string{"test-ss"}
+	cfg.StatsInbounds = []string{"test-ss"}
+
+	if err := cfg.AddUser("dora", "shadow-secret", "", "test-ss", "", 0); err != nil {
+		t.Fatalf("AddUser failed with out-of-order clash_api keys: %v", err)
+	}
+}
+
 func TestClashAPI_MarshalUnmarshalRoundTrip(t *testing.T) {
 	orig := ClashAPI{ExternalController: "127.0.0.1:9090", Secret: "synthetic-secret"}
 
