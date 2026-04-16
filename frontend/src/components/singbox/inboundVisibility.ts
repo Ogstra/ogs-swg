@@ -370,7 +370,7 @@ export function computeInboundVisibility(inbound: InboundLike | null | undefined
     const showTlsSection = type !== 'shadowsocks'
     const showRealityToggle = type === 'vless' && tlsEnabled
     const showRealitySection = showRealityToggle && !!inbound?.tls?.reality?.enabled
-    const showTransport = type !== 'hysteria2'
+    const showTransport = type !== 'hysteria2' && type !== 'shadowsocks'
     const showMultiplex = type !== 'hysteria2'
     const showWsFields = showTransport && transportEnabled && transportType === 'ws'
     return {
