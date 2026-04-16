@@ -1106,54 +1106,42 @@ func TestBuildShadowsocksLink(t *testing.T) {
 		Type: "shadowsocks",
 		Raw: map[string]interface{}{
 			"method": "2022-blake3-aes-128-gcm",
-			"multiplex": map[string]interface{}{
-				"enabled": true,
-			},
 		},
 	}
 	user := &core.UserInboundInfo{Password: "shadow-secret"}
 
-	link, err := buildShadowsocksLink(user, view, "1.2.3.4", "443")
+	link, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
 	if err != nil {
 		t.Fatalf("buildShadowsocksLink() error = %v", err)
 	}
 
-	var payload struct {
-		Outbounds []struct {
-			Type       string `json:"type"`
-			Server     string `json:"server"`
-			ServerPort int    `json:"server_port"`
-			Method     string `json:"method"`
-			Password   string `json:"password"`
-			Multiplex  struct {
-				Enabled bool `json:"enabled"`
-			} `json:"multiplex"`
-		} `json:"outbounds"`
+	// Must be a valid ss:// SIP002 URI: ss://BASE64(method:password)@host:port#tag
+	if !strings.HasPrefix(link, "ss://") {
+		t.Fatalf("link = %q; want ss:// prefix", link)
 	}
-	if err := json.Unmarshal([]byte(link), &payload); err != nil {
-		t.Fatalf("unmarshal shadowsocks payload: %v", err)
+	// Split off fragment
+	withoutFragment, fragment, _ := strings.Cut(link, "#")
+	wantFragment := url.QueryEscape("SS-alice")
+	if fragment != wantFragment {
+		t.Errorf("fragment = %q; want %q", fragment, wantFragment)
 	}
-	if len(payload.Outbounds) != 1 {
-		t.Fatalf("outbounds len = %d; want 1", len(payload.Outbounds))
+	// Split userinfo from host
+	rest := strings.TrimPrefix(withoutFragment, "ss://")
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx < 0 {
+		t.Fatalf("link missing @: %q", link)
 	}
-	outbound := payload.Outbounds[0]
-	if outbound.Type != "shadowsocks" {
-		t.Errorf("type = %q; want %q", outbound.Type, "shadowsocks")
+	userinfo, hostport := rest[:atIdx], rest[atIdx+1:]
+	if hostport != "1.2.3.4:443" {
+		t.Errorf("hostport = %q; want %q", hostport, "1.2.3.4:443")
 	}
-	if outbound.Server != "1.2.3.4" {
-		t.Errorf("server = %q; want %q", outbound.Server, "1.2.3.4")
+	decoded, err := base64.StdEncoding.DecodeString(userinfo)
+	if err != nil {
+		t.Fatalf("base64 decode userinfo %q: %v", userinfo, err)
 	}
-	if outbound.ServerPort != 443 {
-		t.Errorf("server_port = %d; want %d", outbound.ServerPort, 443)
-	}
-	if outbound.Method != "2022-blake3-aes-128-gcm" {
-		t.Errorf("method = %q; want %q", outbound.Method, "2022-blake3-aes-128-gcm")
-	}
-	if outbound.Password != "shadow-secret" {
-		t.Errorf("password = %q; want %q", outbound.Password, "shadow-secret")
-	}
-	if !outbound.Multiplex.Enabled {
-		t.Errorf("multiplex.enabled = false; want true")
+	want := "2022-blake3-aes-128-gcm:shadow-secret"
+	if string(decoded) != want {
+		t.Errorf("decoded userinfo = %q; want %q", string(decoded), want)
 	}
 }
 
