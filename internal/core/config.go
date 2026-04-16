@@ -87,7 +87,7 @@ var ErrUserAssignedToAnotherInbound = errors.New("user is already assigned to an
 
 func isUserInboundType(inbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(inbType)) {
-	case "vless", "vmess", "trojan", "hysteria2":
+	case "vless", "vmess", "trojan", "hysteria2", "shadowsocks":
 		return true
 	default:
 		return false
@@ -242,7 +242,7 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 				})
 				vmessAlterID = parseAlterIDValue(alterRaw)
 			}
-			if inbType == "trojan" || inbType == "hysteria2" {
+			if inbType == "trojan" || inbType == "hysteria2" || inbType == "shadowsocks" {
 				uuid, _ = userMapData["password"].(string)
 				flow = ""
 			}
@@ -346,6 +346,11 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 				})
 			case *TrojanInbound:
 				inb.Users = append(inb.Users, TrojanUser{
+					Name:     name,
+					Password: uuid,
+				})
+			case *ShadowsocksInbound:
+				inb.Users = append(inb.Users, ShadowsocksUser{
 					Name:     name,
 					Password: uuid,
 				})
@@ -535,6 +540,14 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity
 						break
 					}
 				}
+			case *ShadowsocksInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
+						found = true
+						break
+					}
+				}
 			case *Hysteria2Inbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == name {
@@ -608,6 +621,13 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 						found = true
 					}
 				}
+			case *ShadowsocksInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
 			case *Hysteria2Inbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == name {
@@ -675,6 +695,14 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 					}
 				}
 			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == originalName {
+						inb.Users[i].Name = newName
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *ShadowsocksInbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == originalName {
 						inb.Users[i].Name = newName
@@ -760,6 +788,12 @@ func decodeTypedInbound(raw json.RawMessage) (ManagedInbound, error) {
 		var inbound TrojanInbound
 		if err := json.Unmarshal(raw, &inbound); err != nil {
 			return nil, fmt.Errorf("decode trojan inbound: %w", err)
+		}
+		return &inbound, nil
+	case "shadowsocks":
+		var inbound ShadowsocksInbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode shadowsocks inbound: %w", err)
 		}
 		return &inbound, nil
 	case "hysteria2":
@@ -979,8 +1013,8 @@ func (c *Config) SyncInboundsFromSingbox() error {
 		}
 		inbType, _ := inb["type"].(string)
 
-		// Auto-discover VLESS, VMess, Trojan
-		if inbType == "vless" || inbType == "vmess" || inbType == "trojan" || inbType == "hysteria2" {
+		// Auto-discover user-backed protocols managed by the panel.
+		if inbType == "vless" || inbType == "vmess" || inbType == "trojan" || inbType == "hysteria2" || inbType == "shadowsocks" {
 			if !managedSet[tag] {
 				c.ManagedInbounds = append(c.ManagedInbounds, tag)
 				managedSet[tag] = true

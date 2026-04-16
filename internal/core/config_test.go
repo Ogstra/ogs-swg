@@ -140,6 +140,41 @@ func TestAddUser_Trojan(t *testing.T) {
 	}
 }
 
+func TestAddUser_Shadowsocks(t *testing.T) {
+	cfg, _ := newTestConfig(t, `{
+  "inbounds": [
+    {"type":"shadowsocks","tag":"test-ss","listen":"0.0.0.0","listen_port":10005,"method":"2022-blake3-aes-128-gcm","users":[]}
+  ],
+  "experimental": {
+    "v2ray_api": {"listen":"127.0.0.1:19001","stats":{"enabled":true,"inbounds":["test-ss"],"outbounds":["direct"],"users":[]}}
+  }
+}`)
+	cfg.ManagedInbounds = []string{"test-ss"}
+	cfg.StatsInbounds = []string{"test-ss"}
+
+	const password = "shadow-secret"
+	if err := cfg.AddUser("dora", password, "", "test-ss", "", 0); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+
+	inbounds, err := cfg.GetUserInbounds("dora")
+	if err != nil {
+		t.Fatalf("GetUserInbounds: %v", err)
+	}
+	if len(inbounds) != 1 {
+		t.Fatalf("expected 1 inbound entry, got %d", len(inbounds))
+	}
+	if inbounds[0].Tag != "test-ss" {
+		t.Errorf("expected Tag=test-ss, got %q", inbounds[0].Tag)
+	}
+	if inbounds[0].Password != password {
+		t.Errorf("expected Password=%q, got %q", password, inbounds[0].Password)
+	}
+	if inbounds[0].UUID != "" {
+		t.Errorf("expected UUID empty for shadowsocks, got %q", inbounds[0].UUID)
+	}
+}
+
 func TestAddUser_Duplicate(t *testing.T) {
 	cfg, _ := newTestConfig(t, fixtureJSON)
 	const uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -236,6 +271,34 @@ func TestUpdateUserInInbound(t *testing.T) {
 	}
 	if inbounds[0].UUID != newUUID {
 		t.Errorf("expected UUID=%q after update, got %q", newUUID, inbounds[0].UUID)
+	}
+}
+
+func TestUpdateUserInInbound_Shadowsocks(t *testing.T) {
+	cfg, _ := newTestConfig(t, `{
+  "inbounds": [
+    {"type":"shadowsocks","tag":"test-ss","listen":"0.0.0.0","listen_port":10005,"method":"2022-blake3-aes-128-gcm","users":[]}
+  ]
+}`)
+	cfg.ManagedInbounds = []string{"test-ss"}
+	cfg.StatsInbounds = []string{"test-ss"}
+
+	if err := cfg.AddUser("eve", "old-secret", "", "test-ss", "", 0); err != nil {
+		t.Fatalf("AddUser: %v", err)
+	}
+	if err := cfg.UpdateUserInInbound("eve", "new-secret", "", "test-ss", "", 0); err != nil {
+		t.Fatalf("UpdateUserInInbound: %v", err)
+	}
+
+	inbounds, err := cfg.GetUserInbounds("eve")
+	if err != nil {
+		t.Fatalf("GetUserInbounds: %v", err)
+	}
+	if len(inbounds) != 1 {
+		t.Fatalf("expected 1 inbound entry, got %d", len(inbounds))
+	}
+	if inbounds[0].Password != "new-secret" {
+		t.Errorf("expected Password=%q after update, got %q", "new-secret", inbounds[0].Password)
 	}
 }
 

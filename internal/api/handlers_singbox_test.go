@@ -1101,6 +1101,123 @@ func TestBuildHysteria2Link_EmptyPassword(t *testing.T) {
 	}
 }
 
+func TestBuildShadowsocksLink(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "shadowsocks",
+		Raw: map[string]interface{}{
+			"method": "2022-blake3-aes-128-gcm",
+			"multiplex": map[string]interface{}{
+				"enabled": true,
+			},
+		},
+	}
+	user := &core.UserInboundInfo{Password: "shadow-secret"}
+
+	link, err := buildShadowsocksLink(user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildShadowsocksLink() error = %v", err)
+	}
+
+	var payload struct {
+		Outbounds []struct {
+			Type       string `json:"type"`
+			Server     string `json:"server"`
+			ServerPort int    `json:"server_port"`
+			Method     string `json:"method"`
+			Password   string `json:"password"`
+			Multiplex  struct {
+				Enabled bool `json:"enabled"`
+			} `json:"multiplex"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal([]byte(link), &payload); err != nil {
+		t.Fatalf("unmarshal shadowsocks payload: %v", err)
+	}
+	if len(payload.Outbounds) != 1 {
+		t.Fatalf("outbounds len = %d; want 1", len(payload.Outbounds))
+	}
+	outbound := payload.Outbounds[0]
+	if outbound.Type != "shadowsocks" {
+		t.Errorf("type = %q; want %q", outbound.Type, "shadowsocks")
+	}
+	if outbound.Server != "1.2.3.4" {
+		t.Errorf("server = %q; want %q", outbound.Server, "1.2.3.4")
+	}
+	if outbound.ServerPort != 443 {
+		t.Errorf("server_port = %d; want %d", outbound.ServerPort, 443)
+	}
+	if outbound.Method != "2022-blake3-aes-128-gcm" {
+		t.Errorf("method = %q; want %q", outbound.Method, "2022-blake3-aes-128-gcm")
+	}
+	if outbound.Password != "shadow-secret" {
+		t.Errorf("password = %q; want %q", outbound.Password, "shadow-secret")
+	}
+	if !outbound.Multiplex.Enabled {
+		t.Errorf("multiplex.enabled = false; want true")
+	}
+}
+
+func TestHandleGetUserInbounds_ShadowsocksRedaction(t *testing.T) {
+	const ssConfig = `{"inbounds":[{"type":"shadowsocks","tag":"ss-in","listen":"::","listen_port":8443,"method":"2022-blake3-aes-128-gcm","users":[{"name":"alice","password":"s3cr3t"}]}]}`
+
+	server, _ := newSingboxHandlerTestServer(ssConfig)
+
+	withPerms := func(perms core.PanelUserPermissions) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/api/users/alice/inbounds", nil)
+		req.SetPathValue("name", "alice")
+		ctx := context.WithValue(req.Context(), permissionsContextKey, &perms)
+		return req.WithContext(ctx)
+	}
+
+	decodeInbounds := func(t *testing.T, rec *httptest.ResponseRecorder) []core.UserInboundInfo {
+		t.Helper()
+		var inbounds []core.UserInboundInfo
+		if err := json.NewDecoder(rec.Body).Decode(&inbounds); err != nil {
+			t.Fatalf("decode inbounds: %v body=%q", err, rec.Body.String())
+		}
+		return inbounds
+	}
+
+	t.Run("read-only masks Shadowsocks password", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.handleGetUserInbounds(rec, withPerms(core.PanelUserPermissions{
+			CanReadUsers:  true,
+			CanWriteUsers: false,
+		}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+		inbounds := decodeInbounds(t, rec)
+		if len(inbounds) == 0 {
+			t.Fatal("expected at least one inbound; got none")
+		}
+		if got := inbounds[0].Password; got != maskedValue {
+			t.Errorf("password = %q; want %q (masked)", got, maskedValue)
+		}
+		if got := inbounds[0].UUID; got != "" {
+			t.Errorf("uuid = %q; want empty", got)
+		}
+	})
+
+	t.Run("write-capable preserves plaintext password", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.handleGetUserInbounds(rec, withPerms(core.PanelUserPermissions{
+			CanReadUsers:  true,
+			CanWriteUsers: true,
+		}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+		inbounds := decodeInbounds(t, rec)
+		if len(inbounds) == 0 {
+			t.Fatal("expected at least one inbound; got none")
+		}
+		if got := inbounds[0].Password; got != "s3cr3t" {
+			t.Errorf("password = %q; want %q (plaintext)", got, "s3cr3t")
+		}
+	})
+}
+
 func TestHandleGetUserInbounds_Hysteria2Redaction(t *testing.T) {
 	const hy2Config = `{"inbounds":[{"type":"hysteria2","tag":"hy2-in","listen":"::","listen_port":8443,"tls":{"enabled":true},"users":[{"name":"alice","password":"s3cr3t"}]}]}`
 

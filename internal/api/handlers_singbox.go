@@ -328,7 +328,7 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		inbType = "vless"
 	}
 
-	if inbType != "hysteria2" && inbType != "trojan" && userInfo.UUID == "" {
+	if inbType != "hysteria2" && inbType != "trojan" && inbType != "shadowsocks" && userInfo.UUID == "" {
 		return "", "", fmt.Errorf("User credential missing for inbound")
 	}
 
@@ -385,6 +385,9 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		return link, inbType, err
 	case "hysteria2":
 		link, err := buildHysteria2Link(name, userInfo, inboundView, host, port)
+		return link, inbType, err
+	case "shadowsocks":
+		link, err := buildShadowsocksLink(userInfo, inboundView, host, port)
 		return link, inbType, err
 	default:
 		return "", "", fmt.Errorf("Inbound type is not supported")
@@ -744,6 +747,49 @@ func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.
 	}
 	base += "#" + nameTag
 	return base, nil
+}
+
+func buildShadowsocksLink(userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+	password := strings.TrimSpace(userInfo.Password)
+	if password == "" {
+		password = strings.TrimSpace(userInfo.UUID)
+	}
+	if password == "" {
+		return "", fmt.Errorf("User password missing for shadowsocks inbound")
+	}
+
+	method, _ := view.Raw["method"].(string)
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return "", fmt.Errorf("Shadowsocks inbound method missing")
+	}
+
+	serverPort, err := strconv.Atoi(strings.TrimSpace(port))
+	if err != nil {
+		return "", fmt.Errorf("Invalid server port: %w", err)
+	}
+
+	outbound := map[string]interface{}{
+		"type":        "shadowsocks",
+		"server":      host,
+		"server_port": serverPort,
+		"method":      method,
+		"password":    password,
+	}
+	if multiplex, ok := view.Raw["multiplex"].(map[string]interface{}); ok {
+		if enabled, ok := multiplex["enabled"].(bool); ok {
+			outbound["multiplex"] = map[string]bool{"enabled": enabled}
+		}
+	}
+
+	payload := map[string]interface{}{
+		"outbounds": []map[string]interface{}{outbound},
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal shadowsocks payload: %w", err)
+	}
+	return string(encoded), nil
 }
 
 func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
