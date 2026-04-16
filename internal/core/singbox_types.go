@@ -216,9 +216,11 @@ type V2RayAPI struct {
 }
 
 type ClashAPI struct {
-	ExternalController string                     `json:"external_controller,omitempty"`
-	Secret             string                     `json:"secret,omitempty"`
-	Extra              map[string]json.RawMessage `json:"-"`
+	ExternalController    string                     `json:"external_controller,omitempty"`
+	Secret                string                     `json:"secret,omitempty"`
+	Extra                 map[string]json.RawMessage `json:"-"`
+	hasExternalController bool
+	hasSecret             bool
 }
 
 func (c *ClashAPI) UnmarshalJSON(data []byte) error {
@@ -234,11 +236,13 @@ func (c *ClashAPI) UnmarshalJSON(data []byte) error {
 
 	var next ClashAPI
 	if v, ok := raw["external_controller"]; ok {
+		next.hasExternalController = true
 		if err := json.Unmarshal(v, &next.ExternalController); err != nil {
 			return err
 		}
 	}
 	if v, ok := raw["secret"]; ok {
+		next.hasSecret = true
 		if err := json.Unmarshal(v, &next.Secret); err != nil {
 			return err
 		}
@@ -263,14 +267,14 @@ func (c ClashAPI) MarshalJSON() ([]byte, error) {
 		raw[key] = append(json.RawMessage(nil), value...)
 	}
 
-	if c.ExternalController != "" {
+	if c.hasExternalController || c.ExternalController != "" {
 		data, err := json.Marshal(c.ExternalController)
 		if err != nil {
 			return nil, err
 		}
 		raw["external_controller"] = data
 	}
-	if c.Secret != "" {
+	if c.hasSecret || c.Secret != "" {
 		data, err := json.Marshal(c.Secret)
 		if err != nil {
 			return nil, err
