@@ -616,7 +616,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 			params.Set("packetEncoding", packetEncoding)
 		}
 
-		nameTag := url.QueryEscape("VLESS-" + name)
+		nameTag := url.QueryEscape(name)
 		base := fmt.Sprintf("vless://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
 		if encoded := params.Encode(); encoded != "" {
 			base += "?" + encoded
@@ -659,7 +659,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		params.Set("serviceName", transport.ServiceName)
 	}
 
-	nameTag := url.QueryEscape("VLESS-" + name)
+	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("vless://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
 	if encoded := params.Encode(); encoded != "" {
 		base += "?" + encoded
@@ -708,7 +708,7 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 		params.Set("serviceName", transport.ServiceName)
 	}
 
-	nameTag := url.QueryEscape("TROJAN-" + name)
+	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("trojan://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
 	if encoded := params.Encode(); encoded != "" {
 		base += "?" + encoded
@@ -736,7 +736,7 @@ func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.
 			params.Set("obfs-password", obfsPwd)
 		}
 	}
-	nameTag := url.QueryEscape("HY2-" + name)
+	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("hysteria2://%s@%s:%s",
 		url.QueryEscape(password),
 		host,
@@ -766,7 +766,7 @@ func buildShadowsocksLink(name string, userInfo *core.UserInboundInfo, view *cor
 
 	// SIP002 URI: ss://BASE64(method:password)@host:port#tag
 	credentials := base64.StdEncoding.EncodeToString([]byte(method + ":" + password))
-	nameTag := url.QueryEscape("SS-" + name)
+	nameTag := url.QueryEscape(name)
 	return fmt.Sprintf("ss://%s@%s:%s#%s", credentials, host, port, nameTag), nil
 }
 
@@ -791,7 +791,7 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 
 	payload := map[string]string{
 		"v":    "2",
-		"ps":   "VMESS-" + name,
+		"ps":   name,
 		"add":  host,
 		"port": port,
 		"id":   userInfo.UUID,

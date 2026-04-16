@@ -242,6 +242,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 				link, buildErr = buildTrojanLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "hysteria2":
 				link, buildErr = buildHysteria2Link(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
+			case "shadowsocks":
+				link, buildErr = buildShadowsocksLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
 			}
 
 			if buildErr == nil && link != "" {

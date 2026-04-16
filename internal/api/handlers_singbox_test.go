@@ -1006,8 +1006,8 @@ func TestBuildHysteria2Link_Basic(t *testing.T) {
 	if !strings.HasPrefix(link, "hysteria2://s3cr3t@1.2.3.4:443") {
 		t.Errorf("link = %q; want prefix hysteria2://s3cr3t@1.2.3.4:443", link)
 	}
-	if !strings.HasSuffix(link, "#HY2-alice") {
-		t.Errorf("link = %q; want suffix #HY2-alice", link)
+	if !strings.HasSuffix(link, "#alice") {
+		t.Errorf("link = %q; want suffix #alice", link)
 	}
 	if strings.Contains(link, "sni=") {
 		t.Errorf("link should not contain sni=; got %q", link)
@@ -1121,7 +1121,7 @@ func TestBuildShadowsocksLink(t *testing.T) {
 	}
 	// Split off fragment
 	withoutFragment, fragment, _ := strings.Cut(link, "#")
-	wantFragment := url.QueryEscape("SS-alice")
+	wantFragment := url.QueryEscape("alice")
 	if fragment != wantFragment {
 		t.Errorf("fragment = %q; want %q", fragment, wantFragment)
 	}
