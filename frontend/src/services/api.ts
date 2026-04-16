@@ -119,18 +119,6 @@ export interface DashboardConsumerChartData {
     chart_data: UnifiedChartPoint[];
 }
 
-export interface ConnectionUser {
-    name: string;
-    upload: number;
-    download: number;
-    connections: number;
-}
-
-export interface ConnectionsResponse {
-    realtime: boolean;
-    users: ConnectionUser[];
-}
-
 export interface DashboardPreferences {
     default_service: 'singbox' | 'wireguard';
     refresh_ms: number;
@@ -1039,11 +1027,6 @@ export const api = {
         if (end) params.append('end', end);
         const res = await fetch(`/api/dashboard?${params.toString()}`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch dashboard data');
-        return res.json();
-    },
-    getConnections: async (): Promise<ConnectionsResponse> => {
-        const res = await fetch('/api/connections', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch connections');
         return res.json();
     },
     getDashboardConsumerChart: async (

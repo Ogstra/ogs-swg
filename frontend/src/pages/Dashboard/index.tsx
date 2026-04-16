@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, UnifiedChartPoint, Consumer, TrafficStats, DashboardPreferences as StoredDashboardPreferences, ConnectionUser } from '../../services/api'
+import { api, UnifiedChartPoint, Consumer, TrafficStats, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../../components/ui/Card'
@@ -266,13 +266,6 @@ export default function Dashboard() {
         refetchInterval: refreshInterval,
         placeholderData: previousData => previousData,
     })
-    const connectionsQuery = useQuery({
-        queryKey: ['connections'],
-        queryFn: () => api.getConnections(),
-        enabled: prefsLoaded,
-        refetchInterval: 7000,
-        placeholderData: previousData => previousData,
-    })
 
     const loading = dashboardQuery.isFetching
     const lastUpdated = dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt) : new Date()
@@ -309,16 +302,6 @@ export default function Dashboard() {
         active_users_singbox_list: [],
         active_users_wireguard_list: []
     }
-    const fallbackActiveSessionUsers: ConnectionUser[] = (status.active_users_singbox_list || []).map((user: string) => ({
-        name: user,
-        upload: 0,
-        download: 0,
-        connections: 0,
-    }))
-    const connectionsData = connectionsQuery.data
-    const activeSessionUsers = connectionsData?.users ?? fallbackActiveSessionUsers
-    const activeSessionCount = connectionsData?.users?.length ?? Number(status.active_users_singbox || fallbackActiveSessionUsers.length)
-    const isRealtimeConnections = connectionsData?.realtime ?? false
     const singboxPendingChanges = !!dashboardQuery.data?.singbox_pending_changes
 
     const setSingboxPendingChanges = (pending: boolean) => {
@@ -337,7 +320,6 @@ export default function Dashboard() {
             await api.applySingboxChanges()
             await Promise.all([
                 dashboardQuery.refetch(),
-                connectionsQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
             ])
         } catch (err) {
@@ -406,7 +388,6 @@ export default function Dashboard() {
         }
         await Promise.all([
             dashboardQuery.refetch(),
-            connectionsQuery.refetch(),
             selectedConsumer ? selectedConsumerQuery.refetch() : Promise.resolve(),
         ])
     }
@@ -532,23 +513,16 @@ export default function Dashboard() {
 
                     <div className="border-t border-slate-800 pt-4">
                         <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-2">
-                                <p className="text-sm font-semibold text-slate-300">Active Sessions</p>
-                                {connectionsData && !isRealtimeConnections && (
-                                    <span className="text-[9px] font-medium bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20">
-                                        approx
-                                    </span>
-                                )}
-                            </div>
+                            <p className="text-sm font-semibold text-slate-300">Active Sessions</p>
                             <span className="text-xs font-mono bg-slate-800 text-white px-2 py-0.5 rounded-md border border-slate-700">
-                                {activeSessionCount} clients
+                                {status.active_users_singbox} clients
                             </span>
                         </div>
-                        {activeSessionUsers.length > 0 && (
+                        {status.active_users_singbox_list && status.active_users_singbox_list.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-2">
-                                {activeSessionUsers.map((user, idx: number) => (
-                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20" title={user.name}>
-                                        {user.name}
+                                {status.active_users_singbox_list.map((user: string, idx: number) => (
+                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20" title={user}>
+                                        {user}
                                     </span>
                                 ))}
                             </div>

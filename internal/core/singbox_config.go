@@ -1141,33 +1141,6 @@ func (c *Config) ReloadSingbox() error {
 	return cmd.Run()
 }
 
-// GetClashAPISettings reads the current sing-box config and returns Clash API
-// settings when a controller is configured. The config lock is held only while
-// reading the file so callers can safely make network requests afterwards.
-func (c *Config) GetClashAPISettings() (*ClashAPI, error) {
-	if !c.EnableSingbox {
-		return nil, nil
-	}
-
-	c.mu.Lock()
-	raw, err := c.readSingboxConfigLocked()
-	c.mu.Unlock()
-	if err != nil {
-		return nil, fmt.Errorf("read sing-box config: %w", err)
-	}
-
-	var cfg SingboxConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal sing-box config: %w", err)
-	}
-
-	if cfg.Experimental == nil || cfg.Experimental.ClashAPI == nil || cfg.Experimental.ClashAPI.ExternalController == "" {
-		return nil, nil
-	}
-
-	return cfg.Experimental.ClashAPI, nil
-}
-
 func (c *Config) reloadViaClashAPI(api *ClashAPI) error {
 	body, err := json.Marshal(map[string]string{"path": c.SingboxConfigPath})
 	if err != nil {
