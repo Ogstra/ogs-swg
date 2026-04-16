@@ -28,13 +28,14 @@ import {
 
 type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
 type DbInfo = { rows: number; sizeMB: number }
-type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; detailChartTargetPoints: number }
+type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; activeUserWindowMinutes: number; detailChartTargetPoints: number }
 type PendingServiceAction = { service: string; action: 'restart' | 'stop' | 'start' }
 
 const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
     defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : 'singbox',
     refreshMs: prefs?.refresh_ms && prefs.refresh_ms >= 1000 ? prefs.refresh_ms : 10000,
     defaultRange: prefs?.default_range || '24h',
+    activeUserWindowMinutes: prefs?.active_user_window_minutes && prefs.active_user_window_minutes >= 1 ? prefs.active_user_window_minutes : 5,
     detailChartTargetPoints: [50, 100, 150, 200].includes(Number(prefs?.detail_chart_target_points))
         ? Number(prefs?.detail_chart_target_points)
         : 200,
@@ -77,6 +78,7 @@ export default function Settings() {
         defaultService: 'singbox',
         refreshMs: 10000,
         defaultRange: '24h',
+        activeUserWindowMinutes: 5,
         detailChartTargetPoints: 200,
     })
     const dashboardPrefsQuery = useQuery({
@@ -523,6 +525,7 @@ function DashboardTab({
             defaultService: dashboardPrefs.defaultService || 'singbox',
             refreshMs: Math.max(1000, Number(dashboardPrefs.refreshMs) || 10000),
             defaultRange: dashboardPrefs.defaultRange || '24h',
+            activeUserWindowMinutes: Math.max(1, Number(dashboardPrefs.activeUserWindowMinutes) || 5),
             detailChartTargetPoints: [50, 100, 150, 200].includes(Number(dashboardPrefs.detailChartTargetPoints))
                 ? Number(dashboardPrefs.detailChartTargetPoints)
                 : 200,
@@ -532,6 +535,7 @@ function DashboardTab({
                 default_service: normalized.defaultService,
                 refresh_ms: normalized.refreshMs,
                 default_range: normalized.defaultRange as StoredDashboardPreferences['default_range'],
+                active_user_window_minutes: normalized.activeUserWindowMinutes,
                 detail_chart_target_points: normalized.detailChartTargetPoints,
             })
             setDashboardPrefs(normalized)
@@ -545,7 +549,7 @@ function DashboardTab({
     return (
         <div className="space-y-4 sm:space-y-6">
             <Card title="Dashboard Preferences">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div className="space-y-1">
                         <label className="text-xs font-medium text-slate-400">Default Service</label>
                         <select
@@ -581,6 +585,16 @@ function DashboardTab({
                             <option value="1w">Last Week</option>
                             <option value="1m">Last Month</option>
                         </select>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-400">Active User Window (minutes)</label>
+                        <input
+                            type="number"
+                            min={1}
+                            value={dashboardPrefs.activeUserWindowMinutes}
+                            onChange={e => setDashboardPrefs(prev => ({ ...prev, activeUserWindowMinutes: Math.max(1, Number(e.target.value) || 5) }))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                        />
                     </div>
                     <div className="space-y-1">
                         <label className="text-xs font-medium text-slate-400">Selected User Chart Samples</label>

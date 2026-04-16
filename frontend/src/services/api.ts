@@ -123,6 +123,7 @@ export interface DashboardPreferences {
     default_service: 'singbox' | 'wireguard';
     refresh_ms: number;
     default_range: '30m' | '1h' | '6h' | '24h' | '1w' | '1m';
+    active_user_window_minutes: number;
     detail_chart_target_points: number;
 }
 

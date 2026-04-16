@@ -14,6 +14,7 @@ type DashboardPrefs = {
     defaultService?: 'singbox' | 'wireguard'
     refreshMs?: number
     defaultRange?: DashboardRange
+    activeUserWindowMinutes?: number
     detailChartTargetPoints?: number
 }
 
@@ -46,6 +47,7 @@ const defaultDashboardPrefs: DashboardPrefs = {
     defaultService: 'singbox',
     refreshMs: 10000,
     defaultRange: '24h',
+    activeUserWindowMinutes: 5,
     detailChartTargetPoints: defaultDetailChartTargetPoints,
 }
 
@@ -61,6 +63,9 @@ const dashboardPrefsFromApi = (prefs?: Partial<StoredDashboardPreferences> | nul
     defaultRange: (prefs?.default_range && ['30m', '1h', '6h', '24h', '1w', '1m'].includes(prefs.default_range))
         ? prefs.default_range as DashboardRange
         : defaultDashboardPrefs.defaultRange,
+    activeUserWindowMinutes: prefs?.active_user_window_minutes && prefs.active_user_window_minutes >= 1
+        ? prefs.active_user_window_minutes
+        : defaultDashboardPrefs.activeUserWindowMinutes,
     detailChartTargetPoints: [50, 100, 150, 200].includes(Number(prefs?.detail_chart_target_points))
         ? Number(prefs?.detail_chart_target_points)
         : defaultDashboardPrefs.detailChartTargetPoints,
