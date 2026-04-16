@@ -26,7 +26,6 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
     const [certLoading, setCertLoading] = useState(false)
     const [certError, setCertError] = useState('')
     const [shadowsocksServerPasswordLoading, setShadowsocksServerPasswordLoading] = useState(false)
-    const [shadowsocksUserPasswordLoading, setShadowsocksUserPasswordLoading] = useState(false)
     const [pendingRenameSubmission, setPendingRenameSubmission] = useState<any | null>(null)
     const [showRenameConfirm, setShowRenameConfirm] = useState(false)
     const [saveLoading, setSaveLoading] = useState(false)
@@ -36,7 +35,6 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
         setValidationError('')
         setCertError('')
         setShadowsocksServerPasswordLoading(false)
-        setShadowsocksUserPasswordLoading(false)
         setPendingRenameSubmission(null)
         setShowRenameConfirm(false)
         setSaveLoading(false)
@@ -81,25 +79,16 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
         }
     }
 
-    const generateShadowsocksPassword = async (target: 'server' | 'user') => {
+    const generateShadowsocksPassword = async () => {
         const keyLength = keyLengthForShadowsocksMethod(formData.method || '')
-        if (target === 'server') setShadowsocksServerPasswordLoading(true)
-        else setShadowsocksUserPasswordLoading(true)
+        setShadowsocksServerPasswordLoading(true)
         try {
             const res = await api.generateRandBase64(keyLength)
-            if (target === 'server') {
-                updateForm((prev: any) => ({ ...prev, password: res.value }))
-            } else {
-                updateForm((prev: any) => ({
-                    ...prev,
-                    users: [{ ...(prev.users?.[0] || {}), password: res.value }],
-                }))
-            }
+            updateForm((prev: any) => ({ ...prev, password: res.value }))
         } catch (err: any) {
             setValidationError(err?.message || 'Failed to generate Shadowsocks password')
         } finally {
-            if (target === 'server') setShadowsocksServerPasswordLoading(false)
-            else setShadowsocksUserPasswordLoading(false)
+            setShadowsocksServerPasswordLoading(false)
         }
     }
 
@@ -580,7 +569,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                             variant="icon"
                                             size="icon"
                                             className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
-                                            onClick={() => void generateShadowsocksPassword('server')}
+                                            onClick={() => void generateShadowsocksPassword()}
                                             disabled={shadowsocksServerPasswordLoading}
                                             title={`Generate base64 password using sing-box (${keyLengthForShadowsocksMethod(formData.method || '')} bytes)`}
                                         >
@@ -600,33 +589,6 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                         className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
                                         placeholder="default"
                                     />
-                                </div>
-                            </div>
-
-                            <div className="space-y-1">
-                                <label className="text-xs font-medium text-slate-300">User Password</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={formData.users?.[0]?.password || ''}
-                                        onChange={e => updateForm((prev: any) => ({
-                                            ...prev,
-                                            users: [{ ...(prev.users?.[0] || {}), password: e.target.value }],
-                                        }))}
-                                        className="flex-1 rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
-                                        placeholder="Required for the user entry"
-                                    />
-                                    <Button
-                                        type="button"
-                                        variant="icon"
-                                        size="icon"
-                                        className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
-                                        onClick={() => void generateShadowsocksPassword('user')}
-                                        disabled={shadowsocksUserPasswordLoading}
-                                        title={`Generate base64 password using sing-box (${keyLengthForShadowsocksMethod(formData.method || '')} bytes)`}
-                                    >
-                                        <RefreshCw size={16} className={shadowsocksUserPasswordLoading ? 'animate-spin' : ''} />
-                                    </Button>
                                 </div>
                             </div>
                         </div>
