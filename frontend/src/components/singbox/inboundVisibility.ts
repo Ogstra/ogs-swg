@@ -145,12 +145,7 @@ const DEFAULT_HYSTERIA2 = {
     link_allow_insecure: 'auto',
     up_mbps: '',
     down_mbps: '',
-    users: [
-        {
-            name: 'default',
-            password: '',
-        },
-    ],
+    users: [],
     obfs: {
         type: '',
         password: '',
@@ -305,7 +300,7 @@ function normalizeMultiplex(type: InboundType, multiplex: any, fallback: any) {
 
 function normalizeHysteria2Users(users: unknown, tag: string) {
     if (!Array.isArray(users) || users.length === 0) {
-        return [{ name: tag || 'default', password: '' }]
+        return []
     }
     return users.map((user: any, index: number) => ({
         ...cloneValue(user || {}),
@@ -563,10 +558,6 @@ export function buildInboundSubmission(formData: InboundLike) {
             return { error: 'Hysteria2 requires TLS and cannot be saved with TLS disabled.' }
         }
 
-        const userName = String(submission.users?.[0]?.name || submission.tag || 'default')
-        const existingPassword = String(submission.users?.[0]?.password || '')
-        submission.users = [{ name: userName, password: existingPassword }]
-
         const upMbps = parseOptionalPositiveInteger(submission.up_mbps, 'Hysteria2 up_mbps')
         if (upMbps.error) return { error: upMbps.error }
         const downMbps = parseOptionalPositiveInteger(submission.down_mbps, 'Hysteria2 down_mbps')
@@ -615,27 +606,6 @@ export function buildInboundSubmission(formData: InboundLike) {
             return { error: 'Shadowsocks server password is required.' }
         }
         submission.password = serverPassword
-
-        if (Array.isArray(submission.users)) {
-            const users = submission.users
-                .map((user: any, index: number) => ({
-                    ...cloneValue(user || {}),
-                    name: String(user?.name || (index === 0 ? submission.tag || 'default' : `user-${index + 1}`)).trim(),
-                    password: String(user?.password || '').trim(),
-                }))
-                .filter((user: any) => user.password)
-
-            if (users.length > 0) {
-                submission.users = users.map((user: any, index: number) => ({
-                    name: user.name || (index === 0 ? submission.tag || 'default' : `user-${index + 1}`),
-                    password: user.password,
-                }))
-            } else {
-                delete submission.users
-            }
-        } else {
-            delete submission.users
-        }
 
         return { submission }
     }

@@ -76,7 +76,9 @@ type TrojanInbound struct {
 type ShadowsocksInbound struct {
 	InboundBase
 	ListenFields
+	Network   []string          `json:"network,omitempty"`
 	Method    string            `json:"method"`
+	Password  string            `json:"password,omitempty"`
 	Users     []ShadowsocksUser `json:"users"`
 	Multiplex json.RawMessage   `json:"multiplex,omitempty"`
 }
