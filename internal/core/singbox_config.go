@@ -296,7 +296,7 @@ func assertExperimentalAllowedChanges(before, after json.RawMessage) error {
 		if key == "v2ray_api" {
 			continue
 		}
-		if !rawMessageEqual(beforeMap[key], afterMap[key]) {
+		if !jsonSemanticallyEqual(beforeMap[key], afterMap[key]) {
 			return fmt.Errorf("subsection %q changed outside allowed scope", key)
 		}
 	}
