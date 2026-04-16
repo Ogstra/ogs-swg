@@ -553,7 +553,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 </label>
                             )}
 
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-300">Server Password</label>
                                     <div className="flex gap-2">
@@ -576,19 +576,6 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                             <RefreshCw size={16} className={shadowsocksServerPasswordLoading ? 'animate-spin' : ''} />
                                         </Button>
                                     </div>
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-slate-300">User Name</label>
-                                    <input
-                                        type="text"
-                                        value={formData.users?.[0]?.name || ''}
-                                        onChange={e => updateForm((prev: any) => ({
-                                            ...prev,
-                                            users: [{ ...(prev.users?.[0] || {}), name: e.target.value }],
-                                        }))}
-                                        className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
-                                        placeholder="default"
-                                    />
                                 </div>
                             </div>
                         </div>
