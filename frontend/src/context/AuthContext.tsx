@@ -27,6 +27,8 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 const PERMISSIONS_KEY = 'permissions';
 const API_KEY_KEY = 'api_key';
+const DASHBOARD_PREFS_KEY = 'dashboard:prefs:v1';
+const DASHBOARD_SNAPSHOT_PREFIX = 'dashboard:snapshot:v1:';
 
 const normalizePermissions = (raw: any): PanelUserPermissions => ({
     can_read_users: !!raw?.can_read_users,
@@ -42,6 +44,16 @@ const normalizePermissions = (raw: any): PanelUserPermissions => ({
     can_read_logs: !!raw?.can_read_logs,
     can_read_logs_censored: !!raw?.can_read_logs_censored,
 });
+
+const clearDashboardStartupCache = () => {
+    localStorage.removeItem(DASHBOARD_PREFS_KEY);
+    for (let i = localStorage.length - 1; i >= 0; i -= 1) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(DASHBOARD_SNAPSHOT_PREFIX)) {
+            localStorage.removeItem(key);
+        }
+    }
+};
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
@@ -109,12 +121,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
 
         const data = await res.json();
+        clearDashboardStartupCache();
         setApiKey(null);
         setToken(data.token);
         setPermissions(data.permissions ? normalizePermissions(data.permissions) : null);
     };
 
     const logout = () => {
+        clearDashboardStartupCache();
         setToken(null);
         setApiKey(null);
         setPermissions(null);

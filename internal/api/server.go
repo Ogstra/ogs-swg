@@ -620,8 +620,14 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 		if relPath != "" && relPath != "." {
 			fullPath := filepath.Join(distDir, filepath.FromSlash(relPath))
 			if st, err := os.Stat(fullPath); err == nil && !st.IsDir() {
-				if strings.EqualFold(filepath.Ext(fullPath), ".html") {
+				switch {
+				case strings.EqualFold(filepath.Base(fullPath), "sw.js"):
 					setFrontendDocumentCacheHeaders(w)
+					w.Header().Set("Service-Worker-Allowed", "/")
+				case strings.EqualFold(filepath.Ext(fullPath), ".html"):
+					setFrontendDocumentCacheHeaders(w)
+				case strings.EqualFold(filepath.Ext(fullPath), ".webmanifest"):
+					w.Header().Set("Cache-Control", "public, max-age=3600")
 				}
 				http.ServeFile(w, r, fullPath)
 				return

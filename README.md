@@ -1,6 +1,6 @@
 # OGS-SWG Panel
 
-Unified control plane for **Sing-box** (**VLESS/Reality**, **VMess**, **Trojan**, **Hysteria2**) and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
+Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
 <img width="3024" height="1714" alt="image" src="https://github.com/user-attachments/assets/9fca6d02-1f95-406b-a59e-0127b2c693ae" />
 
@@ -21,18 +21,22 @@ A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstr
 
 ## Features
 
-|           | Reality | TLS | None | TCP | WebSocket | HTTP | gRPC | HTTP Upgrade | UDP |
-|-----------|:-------:|:---:|:----:|:---:|:---------:|:----:|:----:|:------------:|:---:|
-| VLESS     | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| VMess     | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| Trojan    | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
-| Hysteria2 | — | ✓ | — | — | — | — | — | — | ✓ |
-| WireGuard | — | — | — | — | — | — | — | — | ✓ |
+|             | Reality | TLS | None | TCP | WebSocket | HTTP | gRPC | HTTP Upgrade | UDP |
+|-------------|:-------:|:---:|:----:|:---:|:---------:|:----:|:----:|:------------:|:---:|
+| VLESS       | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| VMess       | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Trojan      | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | — |
+| Hysteria2   | — | ✓ | — | — | — | — | — | — | ✓ |
+| Shadowsocks | — | — | ✓ | ✓ | — | — | — | — | ✓ |
+| AnyTLS      | — | ✓ | — | ✓ | — | — | — | — | — |
+| Naive       | — | ✓ | — | ✓ | — | — | — | — | ✓ |
+| WireGuard   | — | — | — | — | — | — | — | — | ✓ |
 
-*   **Inbound Management**: create and edit managed Sing-box inbounds for VLESS, VMess, Trojan, and Hysteria2 from the UI, including Reality, WebSocket, and protocol-specific field validation.
-*   **User Management**: create, edit, and delete Sing-box users per inbound; supports multiple inbound assignments, traffic limits, expiry dates, and Hysteria2 password-based users.
+*   **Inbound Management**: create and edit managed Sing-box inbounds from the UI, including Reality, WebSocket, and protocol-specific field validation.
+*   **User Management**: create, edit, and delete Sing-box users per inbound; supports multiple inbound assignments, traffic limits, expiry dates, and password/key-based users for Hysteria2, Shadowsocks, AnyTLS, and Naive.
 *   **Traffic Monitoring**: per-user download/upload stats for Sing-box inbounds; per-peer rx/tx stats across all WireGuard interfaces.
 *   **WireGuard Interfaces**: create, configure, enable/disable, and delete WireGuard interfaces; raw `.conf` editing per interface.
+*   **Subscriptions**: create tokenized subscription bundles with per-member aliases, quota limits, refresh policies, request history, and supported QR variants for Direct and Shadowrocket.
 *   **Service Control**: restart/stop Sing-box and WireGuard services and reload configurations without leaving the UI.
 *   **Logs**: tail and filter Sing-box access logs and systemd journal entries in real time.
 *   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.
@@ -48,9 +52,14 @@ Current Hysteria2 support includes:
 *   Optional `salamander` obfuscation
 *   Per-inbound share-link override for `allowInsecure`
 
-Operational notes:
+### Subscriptions
 
-
+*   Per-member aliases control the display name emitted in generated subscription links.
+*   Subscription quotas can be set independently of individual user quotas.
+*   Refresh behavior supports `profile-update-interval` and `update-always` headers.
+*   Panel-scoped defaults can prefill refresh policy and destination settings for new subscriptions.
+*   Request history records subscription activity, cache hits, detected client/device metadata, and blocked requests.
+*   Protection rules support token/IP blocking, allowlisting, basic rate limiting, and optional browser/social-fetcher filtering.
 
 ## Execution Modes
 
@@ -134,19 +143,38 @@ Parameters are merged from `config.json`, `.env`, and environment variables.
 ```json
 {
   "listen_addr": ":8080",
-  "api_key": "CHANGE_ME",
-  "database_path": "./data/stats.db",
-
-  "singbox_config_path": "/etc/sing-box/config.json",
-  "singbox_api_addr": "127.0.0.1:8080",
-  "managed_inbounds": ["in-reality", "in-reality-2"],
+  "api_key": "",
+  "jwt_secret": "",
+  "public_ip": "",
+  "enable_singbox": true,
+  "enable_wireguard": true,
+  "use_stats_sampler": true,
   "log_source": "journal",
   "access_log_path": "/var/log/singbox.log",
-
+  "database_path": "./data/stats.db",
+  "singbox_config_path": "/etc/sing-box/config.json",
+  "singbox_api_addr": "127.0.0.1:8080",
   "wireguard_config_path": "/etc/wireguard/wg0.conf",
-
   "execution_mode": "",
-
+  "managed_inbounds": [
+    "in-reality",
+    "in-reality-2"
+  ],
+  "stats_inbounds": [
+    "in-reality",
+    "in-reality-2"
+  ],
+  "stats_outbounds": [
+    "direct"
+  ],
+  "sampler_interval_sec": 30,
+  "active_threshold_bytes": 2048,
+  "wg_sampler_interval_sec": 60,
+  "retention_enabled": false,
+  "retention_days": 90,
+  "wg_retention_days": 30,
+  "aggregation_enabled": false,
+  "aggregation_days": 7,
   "sysctl_whitelist": [
     "net.ipv4.ip_forward",
     "net.ipv6.conf.all.forwarding"

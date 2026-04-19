@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	sqlcStore "github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
 type ServiceActionRequest struct {
@@ -78,8 +79,15 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.shouldDetachServiceAction("restart", req.Service) {
+		var afterSuccess func()
+		if req.Service == "sing-box" {
+			afterSuccess = func() {
+				s.config.ClearSingboxPendingChanges()
+				s.InvalidateSubCache()
+			}
+		}
 		s.writeAcceptedServiceAction(w)
-		s.dispatchDetachedServiceAction("restart", req.Service, s.executor.RestartService, nil)
+		s.dispatchDetachedServiceAction("restart", req.Service, s.executor.RestartService, afterSuccess)
 		return
 	}
 
@@ -90,6 +98,9 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 
 	if req.Service == "wireguard" {
 		s.clearWireGuardPending()
+	} else if req.Service == "sing-box" {
+		s.config.ClearSingboxPendingChanges()
+		s.InvalidateSubCache()
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -534,18 +545,120 @@ func (s *Server) handleSamplerHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(runs)
 }
 
-func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http.Request) {
-	limit := 5
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
-			limit = v
+type subscriptionRequestHistoryPageResponse struct {
+	Items      []sqlcStore.GetSubscriptionRequestHistoryRow `json:"items"`
+	HasMore    bool                                         `json:"has_more"`
+	NextOffset int                                          `json:"next_offset"`
+}
+
+func parseBoundedIntQuery(r *http.Request, key string, fallback, minValue, maxValue int) int {
+	value := fallback
+	if raw := r.URL.Query().Get(key); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			value = parsed
 		}
 	}
-	runs, err := s.store.Queries.GetSubscriptionRequestHistory(r.Context(), int64(limit))
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http.Request) {
+	limit := parseBoundedIntQuery(r, "limit", 5, 1, 100)
+	offset := parseBoundedIntQuery(r, "offset", 0, 0, 1_000_000)
+	subID := parseBoundedIntQuery(r, "sub_id", 0, 0, 1_000_000_000)
+	censor := shouldCensorSubscriptionRequestHistory(r)
+	pageRequested := r.URL.Query().Has("offset")
+
+	page, err := s.getSubscriptionRequestHistoryPage(r.Context(), limit, offset, subID, censor)
 	if err != nil {
 		http.Error(w, "Failed to read subscription request history: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	if page.HasMore {
+		s.prefetchSubscriptionRequestHistoryPage(limit, page.NextOffset, subID, censor)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if pageRequested {
+		json.NewEncoder(w).Encode(page)
+		return
+	}
+	json.NewEncoder(w).Encode(page.Items)
+}
+
+func (s *Server) getSubscriptionRequestHistoryPage(ctx context.Context, limit, offset, subID int, censor bool) (subscriptionRequestHistoryPageResponse, error) {
+	cacheKey := fmt.Sprintf("subscription-request-history:v2:censor=%t:sub=%d:limit=%d:offset=%d", censor, subID, limit, offset)
+	if offset > 0 {
+		if cached, found := s.cache.Get(cacheKey); found {
+			if page, ok := cached.(subscriptionRequestHistoryPageResponse); ok {
+				return page, nil
+			}
+		}
+	}
+
+	page, err := s.loadSubscriptionRequestHistoryPage(ctx, limit, offset, subID, censor)
+	if err != nil {
+		return subscriptionRequestHistoryPageResponse{}, err
+	}
+	if offset > 0 {
+		s.cache.SetWithTTL(cacheKey, page, 1, 30*time.Second)
+	}
+	return page, nil
+}
+
+func (s *Server) prefetchSubscriptionRequestHistoryPage(limit, offset, subID int, censor bool) {
+	if offset <= 0 {
+		return
+	}
+
+	cacheKey := fmt.Sprintf("subscription-request-history:v2:censor=%t:sub=%d:limit=%d:offset=%d", censor, subID, limit, offset)
+	if _, found := s.cache.Get(cacheKey); found {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		page, err := s.loadSubscriptionRequestHistoryPage(ctx, limit, offset, subID, censor)
+		if err != nil {
+			log.Printf("subscription request history: prefetch failed sub_id=%d offset=%d limit=%d: %v", subID, offset, limit, err)
+			return
+		}
+		s.cache.SetWithTTL(cacheKey, page, 1, 30*time.Second)
+	}()
+}
+
+func (s *Server) loadSubscriptionRequestHistoryPage(ctx context.Context, limit, offset, subID int, censor bool) (subscriptionRequestHistoryPageResponse, error) {
+	rows, err := s.store.Queries.GetSubscriptionRequestHistory(ctx, sqlcStore.GetSubscriptionRequestHistoryParams{
+		SubID:  int64(subID),
+		Limit:  int64(limit + 1),
+		Offset: int64(offset),
+	})
+	if err != nil {
+		return subscriptionRequestHistoryPageResponse{}, err
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	s.prepareSubscriptionRequestHistoryRows(ctx, rows, censor)
+
+	return subscriptionRequestHistoryPageResponse{
+		Items:      rows,
+		HasMore:    hasMore,
+		NextOffset: offset + len(rows),
+	}, nil
+}
+
+func (s *Server) prepareSubscriptionRequestHistoryRows(ctx context.Context, runs []sqlcStore.GetSubscriptionRequestHistoryRow, censor bool) {
 	if s != nil && s.store != nil {
 		currentUsers := make(map[int64]string, len(runs))
 		for i := range runs {
@@ -554,7 +667,7 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 				runs[i].UserName = names
 				continue
 			}
-			users, usersErr := s.store.Queries.GetUsersForSubscription(r.Context(), runs[i].SubID)
+			users, usersErr := s.store.Queries.GetUsersForSubscription(ctx, runs[i].SubID)
 			if usersErr != nil {
 				log.Printf("subscription request history: failed to resolve current users for sub_id=%d: %v", runs[i].SubID, usersErr)
 				continue
@@ -576,7 +689,7 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 			runs[i].UserName = names
 		}
 	}
-	if shouldCensorSubscriptionRequestHistory(r) {
+	if censor {
 		for i := range runs {
 			runs[i].UserName = "Restricted"
 			if runs[i].RequestIp != "" {
@@ -594,8 +707,6 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 			runs[i].HwidPrefix = ""
 		}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(runs)
 }
 
 func shouldCensorSubscriptionRequestHistory(r *http.Request) bool {

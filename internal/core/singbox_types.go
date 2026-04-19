@@ -41,6 +41,16 @@ type TrojanUser struct {
 	Password string `json:"password"` // NOT uuid - Trojan uses password
 }
 
+type AnyTLSUser struct {
+	Name     string `json:"name"`
+	Password string `json:"password"`
+}
+
+type NaiveUser struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 type ShadowsocksUser struct {
 	Name     string `json:"name"`
 	Password string `json:"password"`
@@ -71,6 +81,23 @@ type TrojanInbound struct {
 	TLS       json.RawMessage `json:"tls,omitempty"`
 	Multiplex json.RawMessage `json:"multiplex,omitempty"`
 	Transport json.RawMessage `json:"transport,omitempty"`
+}
+
+type AnyTLSInbound struct {
+	InboundBase
+	ListenFields
+	Users         []AnyTLSUser   `json:"users"`
+	PaddingScheme []string       `json:"padding_scheme,omitempty"`
+	TLS           json.RawMessage `json:"tls,omitempty"`
+}
+
+type NaiveInbound struct {
+	InboundBase
+	ListenFields
+	Network               string         `json:"network,omitempty"`
+	Users                 []NaiveUser    `json:"users"`
+	QuicCongestionControl string         `json:"quic_congestion_control,omitempty"`
+	TLS                   json.RawMessage `json:"tls,omitempty"`
 }
 
 type ShadowsocksInbound struct {
@@ -161,6 +188,26 @@ func (t *TrojanInbound) UserNames() []string {
 	names := make([]string, len(t.Users))
 	for i, u := range t.Users {
 		names[i] = u.Name
+	}
+	return names
+}
+
+func (a *AnyTLSInbound) Base() InboundBase { return a.InboundBase }
+
+func (a *AnyTLSInbound) UserNames() []string {
+	names := make([]string, len(a.Users))
+	for i, u := range a.Users {
+		names[i] = u.Name
+	}
+	return names
+}
+
+func (n *NaiveInbound) Base() InboundBase { return n.InboundBase }
+
+func (n *NaiveInbound) UserNames() []string {
+	names := make([]string, len(n.Users))
+	for i, u := range n.Users {
+		names[i] = u.Username
 	}
 	return names
 }

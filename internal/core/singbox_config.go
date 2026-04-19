@@ -498,6 +498,9 @@ func decodeSingboxInboundUserViews(rawUsers interface{}) []SingboxInboundUserVie
 
 		user := SingboxInboundUserView{}
 		user.Name, _ = userMap["name"].(string)
+		if user.Name == "" {
+			user.Name, _ = userMap["username"].(string)
+		}
 		user.UUID, _ = userMap["uuid"].(string)
 		user.ID, _ = userMap["id"].(string)
 		user.Password, _ = userMap["password"].(string)
@@ -821,6 +824,18 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 			flow := user.Flow
 			switch inbound.Type {
 			case "hysteria2":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
+			case "anytls":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
+			case "naive":
 				result = append(result, UserInboundInfo{
 					Tag:      inbound.Tag,
 					Password: user.Password,

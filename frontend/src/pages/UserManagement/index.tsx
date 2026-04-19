@@ -16,8 +16,8 @@ import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
-const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks'])
-type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks'
+const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks', 'anytls', 'naive'])
+type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks' | 'anytls' | 'naive'
 
 function bytesToGbString(bytes?: number) {
     return bytes && bytes > 0 ? (bytes / BYTES_PER_GB).toFixed(2) : ''
@@ -32,7 +32,7 @@ function parseGbToBytes(input: string) {
 }
 
 function isPasswordUserType(type: string): boolean {
-    return type === 'trojan' || type === 'hysteria2' || type === 'shadowsocks'
+    return type === 'trojan' || type === 'hysteria2' || type === 'shadowsocks' || type === 'anytls' || type === 'naive'
 }
 
 function generateRandomCredential(type: UserType): string {
@@ -55,7 +55,10 @@ function generateRandomCredential(type: UserType): string {
 
 function formatUserTypeLabel(type: UserType): string {
     if (type === 'shadowsocks') return 'Shadowsocks'
-    return type === 'hysteria2' ? 'Hysteria2' : type.toUpperCase()
+    if (type === 'hysteria2') return 'Hysteria2'
+    if (type === 'anytls') return 'AnyTLS'
+    if (type === 'naive') return 'Naive'
+    return type.toUpperCase()
 }
 
 export default function UserManagement() {
@@ -66,7 +69,7 @@ export default function UserManagement() {
     const canWriteConfig = !!permissions?.can_write_config
 
     const queryClient = useQueryClient()
-    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks']
+    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks', 'anytls', 'naive']
     const [userType, setUserType] = useState<UserType>('vless')
     // Modals state
     const [modalState, setModalState] = useState<{
@@ -89,6 +92,9 @@ export default function UserManagement() {
     const [usageData, setUsageData] = useState<any[]>([])
     const [loadingUsage, setLoadingUsage] = useState(false)
     const [credentialLoading, setCredentialLoading] = useState(false)
+    const [singboxApplyLoading, setSingboxApplyLoading] = useState(false)
+    const [singboxRestartConfirmOpen, setSingboxRestartConfirmOpen] = useState(false)
+    const [singboxRestartLoading, setSingboxRestartLoading] = useState(false)
 
     // Create/Edit Form State
     const [newUser, setNewUser] = useState<CreateUserRequest>({
@@ -642,9 +648,16 @@ export default function UserManagement() {
             toastError('No write permission for config changes')
             return
         }
+        setSingboxApplyLoading(true)
         try {
+            const result = await api.applySingboxChanges()
+            if (result.restart_required) {
+                setSingboxPendingChanges(true)
+                setSingboxRestartConfirmOpen(true)
+                return
+            }
+
             setSingboxPendingChanges(false)
-            await api.applySingboxChanges()
             await Promise.all([
                 pendingChangesQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
@@ -653,6 +666,23 @@ export default function UserManagement() {
         } catch (err) {
             setSingboxPendingChanges(true)
             toastError('Failed to apply changes. Please try again.')
+        } finally {
+            setSingboxApplyLoading(false)
+        }
+    }
+
+    const handleConfirmSingboxRestart = async () => {
+        setSingboxRestartLoading(true)
+        try {
+            await api.restartService('sing-box')
+            setSingboxPendingChanges(false)
+            setSingboxRestartConfirmOpen(false)
+            success('Sing-box restart started')
+        } catch (err) {
+            setSingboxPendingChanges(true)
+            toastError('Failed to restart Sing-box: ' + err)
+        } finally {
+            setSingboxRestartLoading(false)
         }
     }
 
@@ -666,7 +696,7 @@ export default function UserManagement() {
                         <Users className="text-yellow-500" size={20} />
                         <div>
                             <p className="text-sm font-medium text-yellow-200">Sing-box Configuration Changes Pending</p>
-                            <p className="text-xs text-yellow-300/70 mt-0.5">User changes have been saved but not yet applied. Click "Apply Changes" to restart the service.</p>
+                            <p className="text-xs text-yellow-300/70 mt-0.5">User changes have been saved but not yet applied. Click "Apply Changes" to apply them.</p>
                         </div>
                     </div>
                     <Button
@@ -674,6 +704,7 @@ export default function UserManagement() {
                         variant="primary"
                         size="sm"
                         disabled={!canWriteConfig}
+                        isLoading={singboxApplyLoading}
                         className="whitespace-nowrap bg-yellow-600 hover:bg-yellow-700 text-white"
                     >
                         Apply Changes
@@ -1257,6 +1288,20 @@ export default function UserManagement() {
                 message={confirmDeleteUser ? `This will delete "${confirmDeleteUser.name}".` : 'This action cannot be undone.'}
                 confirmLabel="Delete"
                 confirmTone="danger"
+            />
+
+            <ConfirmModal
+                isOpen={singboxRestartConfirmOpen}
+                onClose={() => {
+                    if (singboxRestartLoading) return
+                    setSingboxRestartConfirmOpen(false)
+                }}
+                onConfirm={handleConfirmSingboxRestart}
+                title="Restart Sing-box?"
+                message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
+                confirmLabel="Restart"
+                confirmTone="primary"
+                isLoading={singboxRestartLoading}
             />
 
             {/* Bulk Create Modal */}

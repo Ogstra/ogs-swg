@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -338,6 +339,99 @@ func TestReloadSingbox_UsesClashAPIWhenConfigured(t *testing.T) {
 	}
 	if tracker.restartCalled {
 		t.Fatalf("RestartService called during Clash API reload")
+	}
+}
+
+func TestApplySingboxChanges_UsesClashAPIWhenConfigured(t *testing.T) {
+	requestReceived := make(chan *http.Request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestReceived <- r
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `"
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	cfg.MarkSingboxPending()
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	if err := cfg.ApplySingboxChanges(); err != nil {
+		t.Fatalf("ApplySingboxChanges: %v", err)
+	}
+
+	select {
+	case <-requestReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for Clash API request")
+	}
+	if cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = true, want false after successful Clash API apply")
+	}
+	if tracker.restartCalled {
+		t.Fatalf("RestartService called during Clash API apply")
+	}
+}
+
+func TestApplySingboxChanges_RequiresRestartWhenNoClashAPI(t *testing.T) {
+	cfg, stub := newTestConfig(t, `{}`)
+	cfg.EnableSingbox = true
+	cfg.MarkSingboxPending()
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	err := cfg.ApplySingboxChanges()
+	var restartRequired *SingboxRestartRequiredError
+	if !errors.As(err, &restartRequired) {
+		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
+	}
+	if restartRequired.Reason != "clash_api_not_configured" {
+		t.Fatalf("restart reason = %q, want clash_api_not_configured", restartRequired.Reason)
+	}
+	if tracker.restartCalled {
+		t.Fatalf("RestartService called before explicit confirmation")
+	}
+	if !cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = false, want true until confirmed restart")
+	}
+}
+
+func TestApplySingboxChanges_RequiresRestartWhenClashAPIFails(t *testing.T) {
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "127.0.0.1:1"
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	cfg.MarkSingboxPending()
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	err := cfg.ApplySingboxChanges()
+	var restartRequired *SingboxRestartRequiredError
+	if !errors.As(err, &restartRequired) {
+		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
+	}
+	if restartRequired.Reason != "clash_api_reload_failed" {
+		t.Fatalf("restart reason = %q, want clash_api_reload_failed", restartRequired.Reason)
+	}
+	if tracker.restartCalled {
+		t.Fatalf("RestartService called before explicit confirmation")
+	}
+	if !cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = false, want true until confirmed restart")
 	}
 }
 

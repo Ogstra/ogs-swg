@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, UnifiedChartPoint, Consumer, TrafficStats, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
+import { api, UnifiedChartPoint, Consumer, TrafficStats, DashboardData, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
+import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { formatBytes } from '../../utils/traffic'
 import { useToast } from '../../context/ToastContext'
 
@@ -43,6 +44,8 @@ const toUnixSeconds = (value: string) => {
 const maskedConsumerKey = '********'
 const detailChartInterpolationFactor = 4
 const defaultDetailChartTargetPoints = 200
+const dashboardPrefsStorageKey = 'dashboard:prefs:v1'
+const dashboardSnapshotPrefix = 'dashboard:snapshot:v1:'
 const defaultDashboardPrefs: DashboardPrefs = {
     defaultService: 'singbox',
     refreshMs: 10000,
@@ -70,6 +73,58 @@ const dashboardPrefsFromApi = (prefs?: Partial<StoredDashboardPreferences> | nul
         ? Number(prefs?.detail_chart_target_points)
         : defaultDashboardPrefs.detailChartTargetPoints,
 })
+
+type DashboardSnapshot = {
+    data: DashboardData
+    savedAt: number
+}
+
+const readStoredDashboardPrefs = (): DashboardPrefs | null => {
+    if (typeof window === 'undefined') return null
+    try {
+        const raw = window.localStorage.getItem(dashboardPrefsStorageKey)
+        return raw ? dashboardPrefsFromApi(JSON.parse(raw)) : null
+    } catch {
+        return null
+    }
+}
+
+const writeStoredDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null) => {
+    if (typeof window === 'undefined' || !prefs) return
+    try {
+        window.localStorage.setItem(dashboardPrefsStorageKey, JSON.stringify(prefs))
+    } catch {
+        // Best-effort startup optimization only.
+    }
+}
+
+const dashboardSnapshotKey = (requestWindow: DashboardRequestWindow) => {
+    if (requestWindow.range === 'custom') {
+        return `${dashboardSnapshotPrefix}custom:${requestWindow.startText}:${requestWindow.endText}`
+    }
+    return `${dashboardSnapshotPrefix}${requestWindow.range}`
+}
+
+const readDashboardSnapshot = (key: string): DashboardSnapshot | null => {
+    if (typeof window === 'undefined') return null
+    try {
+        const raw = window.localStorage.getItem(key)
+        if (!raw) return null
+        const parsed = JSON.parse(raw) as DashboardSnapshot
+        return parsed?.data ? parsed : null
+    } catch {
+        return null
+    }
+}
+
+const writeDashboardSnapshot = (key: string, data?: DashboardData) => {
+    if (typeof window === 'undefined' || !data) return
+    try {
+        window.localStorage.setItem(key, JSON.stringify({ data, savedAt: Date.now() }))
+    } catch {
+        // Ignore storage pressure; the network path still works.
+    }
+}
 
 const chartPointsEqual = (left: UnifiedChartPoint, right: UnifiedChartPoint) => (
     left.ts === right.ts &&
@@ -168,12 +223,13 @@ const WireGuardIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
 )
 
 export default function Dashboard() {
-    const { error: toastError } = useToast()
+    const { success, error: toastError } = useToast()
     const queryClient = useQueryClient()
-    const [timeRange, setTimeRange] = useState<DashboardRange>('24h')
-    const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
-    const [refreshInterval, setRefreshInterval] = useState<number>(10000)
-    const [prefsLoaded, setPrefsLoaded] = useState(false)
+    const [initialDashboardPrefs] = useState(() => readStoredDashboardPrefs())
+    const [timeRange, setTimeRange] = useState<DashboardRange>(initialDashboardPrefs?.defaultRange || '24h')
+    const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>(initialDashboardPrefs?.defaultService || 'singbox')
+    const [refreshInterval, setRefreshInterval] = useState<number>(initialDashboardPrefs?.refreshMs || 10000)
+    const [prefsLoaded, setPrefsLoaded] = useState(true)
     const [selectedConsumers, setSelectedConsumers] = useState<Record<'singbox' | 'wireguard', Consumer | null>>({
         singbox: null,
         wireguard: null,
@@ -187,7 +243,10 @@ export default function Dashboard() {
     const chartContainerRef = useRef<HTMLDivElement | null>(null)
     const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
     const detailChartCacheRef = useRef<DensifiedChartCache | null>(null)
-    const [detailChartTargetPoints, setDetailChartTargetPoints] = useState<number>(defaultDetailChartTargetPoints)
+    const [detailChartTargetPoints, setDetailChartTargetPoints] = useState<number>(initialDashboardPrefs?.detailChartTargetPoints || defaultDetailChartTargetPoints)
+    const [singboxApplyLoading, setSingboxApplyLoading] = useState(false)
+    const [singboxRestartConfirmOpen, setSingboxRestartConfirmOpen] = useState(false)
+    const [singboxRestartLoading, setSingboxRestartLoading] = useState(false)
     const prefsInitializedRef = useRef(false)
 
     const computeRangeSeconds = (range: string) => {
@@ -215,7 +274,8 @@ export default function Dashboard() {
         if (dashboardPrefsQuery.isPending) return
 
         const prefs = dashboardPrefsFromApi(dashboardPrefsQuery.data)
-        if (prefs.defaultService === 'wireguard') setChartMode('wireguard')
+        writeStoredDashboardPrefs(dashboardPrefsQuery.data)
+        setChartMode(prefs.defaultService || 'singbox')
         if (prefs.defaultRange) setTimeRange(prefs.defaultRange)
         if (prefs.refreshMs && prefs.refreshMs >= 1000) setRefreshInterval(prefs.refreshMs)
         setDetailChartTargetPoints(prefs.detailChartTargetPoints ?? defaultDetailChartTargetPoints)
@@ -259,6 +319,8 @@ export default function Dashboard() {
         }
         return { range: timeRange }
     }, [timeRange, customRangeState])
+    const dashboardSnapshotStorageKey = useMemo(() => dashboardSnapshotKey(requestWindow), [requestWindow])
+    const dashboardSnapshot = useMemo(() => readDashboardSnapshot(dashboardSnapshotStorageKey), [dashboardSnapshotStorageKey])
 
     const dashboardQuery = useQuery({
         queryKey: requestWindow.range === 'custom'
@@ -269,11 +331,20 @@ export default function Dashboard() {
             : api.getDashboardData(requestWindow.range),
         enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid),
         refetchInterval: refreshInterval,
-        placeholderData: previousData => previousData,
+        placeholderData: previousData => previousData ?? dashboardSnapshot?.data,
     })
 
+    useEffect(() => {
+        if (!dashboardQuery.data || dashboardQuery.isPlaceholderData || dashboardQuery.dataUpdatedAt === 0) return
+        writeDashboardSnapshot(dashboardSnapshotStorageKey, dashboardQuery.data)
+    }, [dashboardQuery.data, dashboardQuery.dataUpdatedAt, dashboardQuery.isPlaceholderData, dashboardSnapshotStorageKey])
+
     const loading = dashboardQuery.isFetching
-    const lastUpdated = dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt) : new Date()
+    const lastUpdated = dashboardQuery.dataUpdatedAt
+        ? new Date(dashboardQuery.dataUpdatedAt)
+        : dashboardSnapshot?.savedAt
+            ? new Date(dashboardSnapshot.savedAt)
+            : new Date()
     const chartData: UnifiedChartPoint[] = dashboardQuery.data?.chart_data || []
     const chartDomain: [number, number] = useMemo(() => {
         if (chartData.length > 1) {
@@ -320,17 +391,42 @@ export default function Dashboard() {
     }
 
     const handleApplySingboxChanges = async () => {
+        setSingboxApplyLoading(true)
         try {
+            const result = await api.applySingboxChanges()
+            if (result.restart_required) {
+                setSingboxPendingChanges(true)
+                setSingboxRestartConfirmOpen(true)
+                return
+            }
+
             setSingboxPendingChanges(false)
-            await api.applySingboxChanges()
             await Promise.all([
                 dashboardQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
             ])
+            success('Sing-box configuration applied successfully')
         } catch (err) {
             setSingboxPendingChanges(true)
             console.error('Failed to apply Sing-box changes:', err)
             toastError('Failed to apply changes. Please try again.')
+        } finally {
+            setSingboxApplyLoading(false)
+        }
+    }
+
+    const handleConfirmSingboxRestart = async () => {
+        setSingboxRestartLoading(true)
+        try {
+            await api.restartService('sing-box')
+            setSingboxPendingChanges(false)
+            setSingboxRestartConfirmOpen(false)
+            success('Sing-box restart started')
+        } catch (err) {
+            setSingboxPendingChanges(true)
+            toastError('Failed to restart Sing-box: ' + err)
+        } finally {
+            setSingboxRestartLoading(false)
         }
     }
 
@@ -406,13 +502,14 @@ export default function Dashboard() {
                         <Shield className="text-yellow-500" size={20} />
                         <div>
                             <p className="text-sm font-medium text-yellow-200">Sing-box Configuration Changes Pending</p>
-                            <p className="text-xs text-yellow-300/70 mt-0.5">Changes have been saved but not yet applied. Click "Apply Changes" to restart the service.</p>
+                            <p className="text-xs text-yellow-300/70 mt-0.5">Changes have been saved but not yet applied. Click "Apply Changes" to apply them.</p>
                         </div>
                     </div>
                     <Button
                         onClick={handleApplySingboxChanges}
                         variant="primary"
                         size="sm"
+                        isLoading={singboxApplyLoading}
                         className="whitespace-nowrap bg-yellow-600 hover:bg-yellow-700 text-white"
                     >
                         Apply Changes
@@ -771,6 +868,19 @@ export default function Dashboard() {
                     </div>
                 </Card>
             </div>
+            <ConfirmModal
+                isOpen={singboxRestartConfirmOpen}
+                onClose={() => {
+                    if (singboxRestartLoading) return
+                    setSingboxRestartConfirmOpen(false)
+                }}
+                onConfirm={handleConfirmSingboxRestart}
+                title="Restart Sing-box?"
+                message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
+                confirmLabel="Restart"
+                confirmTone="primary"
+                isLoading={singboxRestartLoading}
+            />
         </div >
     )
 }

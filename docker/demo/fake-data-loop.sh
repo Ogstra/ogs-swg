@@ -10,14 +10,15 @@ SUB_REQUEST_INTERVAL="${DEMO_SUB_REQUEST_INTERVAL_SEC:-8}"
 RETENTION="${DEMO_RETENTION_SECONDS:-172800}"
 
 USERS=(user-01 user-02 user-03 user-04 user-05 user-06 user-07 user-08)
-INBOUNDS=(demo-vless-443 demo-vless-8443)
+INBOUNDS=(demo-vless-reality demo-vmess-ws demo-trojan-tls demo-hysteria2 demo-shadowsocks-2022)
+INBOUND_PROTOCOLS=(vless vmess trojan hysteria2 shadowsocks)
 
 SUB_TOKENS=(demo-sub-mobile demo-sub-overquota demo-sub-cached demo-sub-unlimited)
-SUB_NAMES=("Mobile Essentials" "Office Team Over Quota" "Cached Devices" "Unlimited Lab")
+SUB_NAMES=("Reality Mobile" "Mixed Office Over Quota" "Cached VMess/Trojan" "Unlimited UDP Lab")
 SUB_QUOTAS=($((60 * 1024 * 1024 * 1024)) $((3 * 1024 * 1024 * 1024)) $((24 * 1024 * 1024 * 1024)) 0)
 SUB_INTERVALS=(24 6 12 0)
 SUB_UPDATE_ALWAYS=(0 1 0 1)
-SUB_USERS=("user-01,user-02" "user-03,user-04" "user-05,user-06" "user-07,user-08")
+SUB_USERS=("user-01,user-02" "user-03,user-05" "user-04,user-06" "user-07,user-08")
 
 REQUEST_UAS=(
   "Shadowrocket/2.2.82 CFNetwork/1568.200.51 Darwin/24.1.0"
@@ -78,6 +79,20 @@ sub_id_sql() {
   printf "(SELECT id FROM subscriptions WHERE token='%s')" "${SUB_TOKENS[$idx]}"
 }
 
+subscription_alias_for_user() {
+  case "$1" in
+    user-01) printf 'Reality Phone' ;;
+    user-02) printf 'Reality Laptop' ;;
+    user-03) printf 'VMess Desktop' ;;
+    user-04) printf 'VMess Tablet' ;;
+    user-05) printf 'Trojan Office' ;;
+    user-06) printf 'Hysteria2 Travel' ;;
+    user-07) printf 'Shadowsocks TCP' ;;
+    user-08) printf 'Shadowsocks UDP' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 wait_for_db() {
   until sqlite3 "$DB_PATH" "SELECT 1 FROM samples LIMIT 1;" >/dev/null 2>&1; do
     sleep 1
@@ -86,11 +101,54 @@ wait_for_db() {
 
 seed_core_entities() {
   local now="$1"
-  local sql="" i user interval_sql
+  local sql="" i user interval_sql credential flow vmess_security inbound_tags
 
-  for user in "${USERS[@]}"; do
+  for i in "${!USERS[@]}"; do
+    user="${USERS[$i]}"
     local quota=$(( (100 + RANDOM % 101) * 1024 * 1024 * 1024 ))
-    sql+="INSERT INTO users(email,quota_limit,quota_period,reset_day,enabled) VALUES('${user}',${quota},'monthly',1,1) ON CONFLICT(email) DO UPDATE SET quota_limit=excluded.quota_limit,enabled=1;"
+    credential=""
+    flow=""
+    vmess_security=""
+    inbound_tags="[]"
+    case "$user" in
+      user-01)
+        credential="11111111-1111-4111-8111-111111111111"
+        flow="xtls-rprx-vision"
+        inbound_tags='["demo-vless-reality"]'
+        ;;
+      user-02)
+        credential="22222222-2222-4222-8222-222222222222"
+        flow="xtls-rprx-vision"
+        inbound_tags='["demo-vless-reality"]'
+        ;;
+      user-03)
+        credential="33333333-3333-4333-8333-333333333333"
+        vmess_security="auto"
+        inbound_tags='["demo-vmess-ws"]'
+        ;;
+      user-04)
+        credential="44444444-4444-4444-8444-444444444444"
+        vmess_security="auto"
+        inbound_tags='["demo-vmess-ws"]'
+        ;;
+      user-05)
+        credential="demo-trojan-user-05-pass"
+        inbound_tags='["demo-trojan-tls"]'
+        ;;
+      user-06)
+        credential="demo-hysteria2-user-06-pass"
+        inbound_tags='["demo-hysteria2"]'
+        ;;
+      user-07)
+        credential="YWJjZGVmMDEyMzQ1Njc4OQ=="
+        inbound_tags='["demo-shadowsocks-2022"]'
+        ;;
+      user-08)
+        credential="ZmVkY2JhOTg3NjU0MzIxMA=="
+        inbound_tags='["demo-shadowsocks-2022"]'
+        ;;
+    esac
+    sql+="INSERT INTO users(email,quota_limit,quota_period,reset_day,enabled,credential,flow,vmess_security,inbound_tags) VALUES('${user}',${quota},'monthly',1,1,'${credential}','${flow}','${vmess_security}','${inbound_tags}') ON CONFLICT(email) DO UPDATE SET quota_limit=excluded.quota_limit,enabled=1,credential=excluded.credential,flow=excluded.flow,vmess_security=excluded.vmess_security,inbound_tags=excluded.inbound_tags;"
   done
 
   for i in "${!WG_KEYS[@]}"; do
@@ -112,7 +170,7 @@ seed_core_entities() {
     local -a sub_users=()
     IFS=',' read -r -a sub_users <<< "${SUB_USERS[$i]}"
     for user in "${sub_users[@]}"; do
-      sql+="INSERT OR REPLACE INTO subscription_users(sub_id,user_name) VALUES($(sub_id_sql "$i"),'${user}');"
+      sql+="INSERT OR REPLACE INTO subscription_users(sub_id,user_name,alias) VALUES($(sub_id_sql "$i"),'${user}','$(subscription_alias_for_user "$user")');"
     done
   done
   sql+="INSERT INTO subscription_protection_rules(rule_type,value,note,created_at) VALUES"
@@ -306,7 +364,7 @@ do_log_loop() {
   local -a TARGETS=(cdn-edge.demo.invalid:443 api-gw.demo.invalid:443 media.demo.invalid:443 updates.demo.invalid:443 198.51.100.44:443)
 
   while true; do
-    local sys_ts panel_ts tz inbound user conn latency port client target fsize
+    local sys_ts panel_ts tz inbound_idx inbound protocol user conn latency port client target fsize
     fsize=$(stat -c%s "$LOG_PATH" 2>/dev/null || echo 0)
     if (( fsize > 1048576 )); then
       : > "$LOG_PATH"
@@ -315,7 +373,9 @@ do_log_loop() {
     sys_ts=$(date +"%b %d %H:%M:%S")
     panel_ts=$(date +"%Y-%m-%d %H:%M:%S")
     tz=$(date +"%z")
-    inbound="${INBOUNDS[$((RANDOM % ${#INBOUNDS[@]}))]}"
+    inbound_idx=$((RANDOM % ${#INBOUNDS[@]}))
+    inbound="${INBOUNDS[$inbound_idx]}"
+    protocol="${INBOUND_PROTOCOLS[$inbound_idx]}"
     user="${USERS[$((RANDOM % ${#USERS[@]}))]}"
     conn=$(( 10000000 + RANDOM % 2000000000 ))
     latency=$(( 12 + RANDOM % 168 ))
@@ -323,10 +383,10 @@ do_log_loop() {
     client="${CLIENTS[$((RANDOM % ${#CLIENTS[@]}))]}"
     target="${TARGETS[$((RANDOM % ${#TARGETS[@]}))]}"
 
-    printf "%s localhost sing-box[2783211]: %s %s INFO [%s 0ms] inbound/vless[%s]: inbound connection from %s:%s\n" \
-      "$sys_ts" "$tz" "$panel_ts" "$conn" "$inbound" "$client" "$port" >> "$LOG_PATH"
-    printf "%s localhost sing-box[2783211]: %s %s INFO [%s %sms] inbound/vless[%s]: [%s] inbound connection to %s\n" \
-      "$sys_ts" "$tz" "$panel_ts" "$conn" "$latency" "$inbound" "$user" "$target" >> "$LOG_PATH"
+    printf "%s localhost sing-box[2783211]: %s %s INFO [%s 0ms] inbound/%s[%s]: inbound connection from %s:%s\n" \
+      "$sys_ts" "$tz" "$panel_ts" "$conn" "$protocol" "$inbound" "$client" "$port" >> "$LOG_PATH"
+    printf "%s localhost sing-box[2783211]: %s %s INFO [%s %sms] inbound/%s[%s]: [%s] inbound connection to %s\n" \
+      "$sys_ts" "$tz" "$panel_ts" "$conn" "$latency" "$protocol" "$inbound" "$user" "$target" >> "$LOG_PATH"
 
     sleep "$LOG_INTERVAL"
   done

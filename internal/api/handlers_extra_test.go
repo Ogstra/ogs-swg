@@ -142,6 +142,19 @@ func waitForClosed(t *testing.T, ch <-chan struct{}, timeout time.Duration, msg 
 	}
 }
 
+func waitForCondition(t *testing.T, timeout time.Duration, msg string, condition func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal(msg)
+}
+
 func TestHandleRestartService_SingboxDispatchesAsync(t *testing.T) {
 	prevDelay := detachedServiceActionDelay
 	detachedServiceActionDelay = 0
@@ -149,6 +162,7 @@ func TestHandleRestartService_SingboxDispatchesAsync(t *testing.T) {
 
 	stub := newServiceActionExecutorStub()
 	cfg := &core.Config{EnableSingbox: true}
+	cfg.MarkSingboxPending()
 	server := NewServer(nil, cfg, stub)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/service/restart", bytes.NewBufferString(`{"service":"sing-box"}`))
@@ -167,6 +181,9 @@ func TestHandleRestartService_SingboxDispatchesAsync(t *testing.T) {
 
 	waitForClosed(t, stub.restartStarted, 100*time.Millisecond, "restart executor was not dispatched")
 	close(stub.restartRelease)
+	waitForCondition(t, 100*time.Millisecond, "sing-box pending changes were not cleared after restart", func() bool {
+		return !cfg.GetSingboxPendingChanges()
+	})
 }
 
 func TestHandleStopService_SingboxDispatchesAsync(t *testing.T) {

@@ -127,6 +127,12 @@ export interface DashboardPreferences {
     detail_chart_target_points: number;
 }
 
+export interface ApplySingboxChangesResponse {
+    success: boolean;
+    message: string;
+    restart_required?: boolean;
+}
+
 export interface SamplerHistoryEntry {
     ts?: number;
     timestamp?: number;
@@ -156,6 +162,12 @@ export interface SubscriptionRequestHistoryEntry {
     served_from_cache: number;
     blocked: number;
     block_reason: string;
+}
+
+export interface SubscriptionRequestHistoryPage {
+    items: SubscriptionRequestHistoryEntry[];
+    has_more: boolean;
+    next_offset: number;
 }
 
 export interface SubscriptionProtectionConfig {
@@ -966,6 +978,13 @@ export const api = {
         await handleResponse(res, 'Failed to fetch subscription request history');
         return res.json();
     },
+    getSubscriptionRequestHistoryPage: async (limit: number = 20, offset: number = 0, subId?: number): Promise<SubscriptionRequestHistoryPage> => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        if (subId && subId > 0) params.set('sub_id', String(subId));
+        const res = await fetch(`/api/subscription-requests/history?${params.toString()}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription request history');
+        return res.json();
+    },
     getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> => {
         const res = await fetch('/api/settings/subscription-protection', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch subscription protection settings');
@@ -1073,11 +1092,14 @@ export const api = {
         await handleResponse(res, 'Failed to generate random base64');
         return res.json();
     },
-    applySingboxChanges: async (): Promise<{ success: boolean; message: string }> => {
+    applySingboxChanges: async (): Promise<ApplySingboxChangesResponse> => {
         const res = await fetch('/api/singbox/apply', {
             method: 'POST',
             headers: buildHeaders('application/json')
         });
+        if (res.status === 409) {
+            return res.json();
+        }
         await handleResponse(res, 'Failed to apply Sing-box changes');
         return res.json();
     },

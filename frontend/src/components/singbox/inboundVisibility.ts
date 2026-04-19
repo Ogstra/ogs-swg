@@ -1,4 +1,4 @@
-export type InboundType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks'
+export type InboundType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks' | 'anytls' | 'naive'
 
 type InboundLike = Record<string, any>
 
@@ -16,6 +16,8 @@ export interface InboundVisibility {
     showHysteria2Bandwidth: boolean
     showHysteria2Obfs: boolean
     showShadowsocksSection: boolean
+    showAnyTLSSection: boolean
+    showNaiveSection: boolean
     showWsHeaders: boolean
     showWsEarlyData: boolean
 }
@@ -181,12 +183,52 @@ const DEFAULT_SHADOWSOCKS = {
     },
 }
 
+const DEFAULT_ANYTLS = {
+    type: 'anytls',
+    tag: 'anytls-in',
+    listen: '0.0.0.0',
+    listen_port: 443,
+    external_port: '',
+    override_address: '',
+    link_allow_insecure: 'auto',
+    users: [],
+    padding_scheme: [],
+    tls: {
+        enabled: true,
+        server_name: '',
+        alpn: ['h2', 'http/1.1'],
+        certificate_path: '',
+        key_path: '',
+    },
+}
+
+const DEFAULT_NAIVE = {
+    type: 'naive',
+    tag: 'naive-in',
+    listen: '0.0.0.0',
+    listen_port: 443,
+    external_port: '',
+    override_address: '',
+    link_allow_insecure: 'auto',
+    network: 'tcp',
+    quic_congestion_control: '',
+    users: [],
+    tls: {
+        enabled: true,
+        server_name: '',
+        certificate_path: '',
+        key_path: '',
+    },
+}
+
 const DEFAULT_BY_TYPE: Record<InboundType, InboundLike> = {
     vless: DEFAULT_VLESS,
     vmess: DEFAULT_VMESS,
     trojan: DEFAULT_TROJAN,
     hysteria2: DEFAULT_HYSTERIA2,
     shadowsocks: DEFAULT_SHADOWSOCKS,
+    anytls: DEFAULT_ANYTLS,
+    naive: DEFAULT_NAIVE,
 }
 
 function cloneValue<T>(value: T): T {
@@ -195,7 +237,7 @@ function cloneValue<T>(value: T): T {
 
 function toInboundType(type: unknown): InboundType {
     const raw = String(type || '').toLowerCase()
-    if (raw === 'vmess' || raw === 'trojan' || raw === 'hysteria2' || raw === 'shadowsocks') return raw
+    if (raw === 'vmess' || raw === 'trojan' || raw === 'hysteria2' || raw === 'shadowsocks' || raw === 'anytls' || raw === 'naive') return raw
     return 'vless'
 }
 
@@ -237,7 +279,7 @@ function normalizeTls(type: InboundType, tls: any, fallback: any) {
     const normalized: any = {
         ...cloneValue(fallback),
         ...(tls && typeof tls === 'object' ? cloneValue(tls) : {}),
-        enabled: type === 'hysteria2' ? true : !!tls?.enabled,
+        enabled: type === 'hysteria2' || type === 'anytls' || type === 'naive' ? true : !!tls?.enabled,
     }
     if (type === 'vless') {
         normalized.reality = {
@@ -254,7 +296,7 @@ function normalizeTls(type: InboundType, tls: any, fallback: any) {
     } else {
         delete normalized.reality
     }
-    if (type === 'hysteria2') {
+    if (type === 'hysteria2' || type === 'naive') {
         delete normalized.alpn
     } else if (!Array.isArray(normalized.alpn)) {
         normalized.alpn = cloneValue(fallback.alpn || [])
@@ -263,7 +305,7 @@ function normalizeTls(type: InboundType, tls: any, fallback: any) {
 }
 
 function normalizeTransport(type: InboundType, transport: any, fallback: any) {
-    if (type === 'hysteria2' || type === 'shadowsocks') return undefined
+    if (type === 'hysteria2' || type === 'shadowsocks' || type === 'anytls' || type === 'naive') return undefined
     const transportEnabled = isTransportConfigured(transport)
     const normalized: any = {
         ...cloneValue(fallback),
@@ -282,7 +324,7 @@ function normalizeTransport(type: InboundType, transport: any, fallback: any) {
 }
 
 function normalizeMultiplex(type: InboundType, multiplex: any, fallback: any) {
-    if (type === 'hysteria2') return undefined
+    if (type === 'hysteria2' || type === 'anytls' || type === 'naive') return undefined
     return {
         ...cloneValue(fallback),
         ...(multiplex && typeof multiplex === 'object' ? cloneValue(multiplex) : {}),
@@ -337,6 +379,11 @@ function normalizeShadowsocksNetwork(network: unknown) {
     return Array.from(new Set(normalized))
 }
 
+function normalizeNaiveNetwork(network: unknown) {
+    const raw = String(network || '').trim().toLowerCase()
+    return raw === 'udp' ? 'udp' : 'tcp'
+}
+
 export function getDefaultInbound(type: unknown = 'vless') {
     return cloneValue(DEFAULT_BY_TYPE[toInboundType(type)])
 }
@@ -344,7 +391,7 @@ export function getDefaultInbound(type: unknown = 'vless') {
 export function getInboundTransportType(inbound: InboundLike | null | undefined): string {
     if (!inbound || typeof inbound !== 'object') return ''
     const type = toInboundType(inbound.type)
-    if (type === 'hysteria2') return ''
+    if (type === 'hysteria2' || type === 'anytls' || type === 'naive') return ''
     const transport = inbound.transport
     if (!isTransportConfigured(transport)) return ''
     return String(transport?.type || '').toLowerCase()
@@ -358,15 +405,15 @@ export function computeInboundVisibility(inbound: InboundLike | null | undefined
     const showTlsSection = type !== 'shadowsocks'
     const showRealityToggle = type === 'vless' && tlsEnabled
     const showRealitySection = showRealityToggle && !!inbound?.tls?.reality?.enabled
-    const showTransport = type !== 'hysteria2' && type !== 'shadowsocks'
-    const showMultiplex = type !== 'hysteria2'
+    const showTransport = type !== 'hysteria2' && type !== 'shadowsocks' && type !== 'anytls' && type !== 'naive'
+    const showMultiplex = type !== 'hysteria2' && type !== 'anytls' && type !== 'naive'
     const showWsFields = showTransport && transportEnabled && transportType === 'ws'
     return {
         showTlsSection,
         showRealitySection,
         showRealityToggle,
         showLinkTlsVerification: type !== 'shadowsocks',
-        showAlpn: tlsEnabled && type !== 'hysteria2' && type !== 'shadowsocks',
+        showAlpn: tlsEnabled && type !== 'hysteria2' && type !== 'shadowsocks' && type !== 'naive',
         showTransport,
         showTransportPath: showTransport && transportEnabled && ['http', 'ws', 'httpupgrade'].includes(transportType),
         showTransportServiceName: showTransport && transportEnabled && transportType === 'grpc',
@@ -375,6 +422,8 @@ export function computeInboundVisibility(inbound: InboundLike | null | undefined
         showHysteria2Bandwidth: type === 'hysteria2',
         showHysteria2Obfs: type === 'hysteria2',
         showShadowsocksSection: type === 'shadowsocks',
+        showAnyTLSSection: type === 'anytls',
+        showNaiveSection: type === 'naive',
         showWsHeaders: showWsFields,
         showWsEarlyData: showWsFields,
     }
@@ -417,8 +466,10 @@ function stripHiddenInboundState(inbound: InboundLike) {
         delete inbound.obfs
     }
 
-    if (!visibility.showShadowsocksSection) {
+    if (!visibility.showShadowsocksSection && !visibility.showNaiveSection) {
         delete inbound.network
+    }
+    if (!visibility.showShadowsocksSection) {
         delete inbound.udp_fragment
         delete inbound.method
         delete inbound.password
@@ -458,6 +509,15 @@ export function normalizeInboundForEditor(value: InboundLike | null | undefined)
         normalized.method = String(source.method || fallback.method || '')
         normalized.password = String(source.password || '')
         normalized.users = normalizeShadowsocksUsers(source.users, String(source.tag || fallback.tag))
+    }
+
+    if (type === 'anytls') {
+        normalized.padding_scheme = Array.isArray(source.padding_scheme) ? source.padding_scheme.map(String) : []
+    }
+
+    if (type === 'naive') {
+        normalized.network = normalizeNaiveNetwork(source.network ?? fallback.network)
+        normalized.quic_congestion_control = String(source.quic_congestion_control || '')
     }
 
     return stripHiddenInboundState(normalized)
@@ -607,6 +667,43 @@ export function buildInboundSubmission(formData: InboundLike) {
         }
         submission.password = serverPassword
 
+        return { submission }
+    }
+
+    if (type === 'anytls') {
+        delete submission.transport
+        delete submission.multiplex
+        if (submission.tls) {
+            submission.tls.enabled = true
+            delete submission.tls.reality
+        }
+        if (!tlsEnabled) {
+            return { error: 'AnyTLS requires TLS and cannot be saved with TLS disabled.' }
+        }
+        if (!Array.isArray(submission.padding_scheme) || submission.padding_scheme.length === 0) {
+            delete submission.padding_scheme
+        }
+        return { submission }
+    }
+
+    if (type === 'naive') {
+        delete submission.transport
+        delete submission.multiplex
+        if (submission.tls) {
+            submission.tls.enabled = true
+            delete submission.tls.reality
+            delete submission.tls.alpn
+        }
+        if (!tlsEnabled) {
+            return { error: 'Naive requires TLS and cannot be saved with TLS disabled.' }
+        }
+        submission.network = normalizeNaiveNetwork(submission.network)
+        const qcc = String(submission.quic_congestion_control || '').trim()
+        if (qcc) {
+            submission.quic_congestion_control = qcc
+        } else {
+            delete submission.quic_congestion_control
+        }
         return { submission }
     }
 
