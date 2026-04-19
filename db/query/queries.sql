@@ -476,8 +476,9 @@ SELECT
 	sr.block_reason
 FROM subscription_requests sr
 LEFT JOIN subscriptions s ON s.id = sr.sub_id
+WHERE (? = 0 OR sr.sub_id = ?)
 ORDER BY sr.requested_at DESC, sr.id DESC
-LIMIT ?;
+LIMIT ? OFFSET ?;
 
 -- name: GetBlockedSubscriptionRequests :many
 SELECT

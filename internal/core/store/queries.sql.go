@@ -1207,34 +1207,46 @@ SELECT
 	sr.block_reason
 FROM subscription_requests sr
 LEFT JOIN subscriptions s ON s.id = sr.sub_id
+WHERE (? = 0 OR sr.sub_id = ?)
 ORDER BY sr.requested_at DESC, sr.id DESC
-LIMIT ?
+LIMIT ? OFFSET ?
 `
+
+type GetSubscriptionRequestHistoryParams struct {
+	SubID  int64 `json:"sub_id"`
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
+}
 
 type GetSubscriptionRequestHistoryRow struct {
 	ID              int64  `json:"id"`
 	SubID           int64  `json:"sub_id"`
 	Name            string `json:"name"`
 	UserName        string `json:"user_name"`
-	RequestIp       string         `json:"request_ip"`
-	RequestHost     string         `json:"request_host"`
-	RequestPath     string         `json:"request_path"`
-	UserAgent       string         `json:"user_agent"`
-	DeviceModel     string         `json:"device_model"`
-	DeviceOs        string         `json:"device_os"`
-	DeviceOsVersion string         `json:"device_os_version"`
-	AppVersion      string         `json:"app_version"`
-	Country         string         `json:"country"`
-	HwidHash        string         `json:"hwid_hash"`
-	HwidPrefix      string         `json:"hwid_prefix"`
-	RequestedAt     int64          `json:"requested_at"`
-	ServedFromCache int64          `json:"served_from_cache"`
-	Blocked         int64          `json:"blocked"`
-	BlockReason     string         `json:"block_reason"`
+	RequestIp       string `json:"request_ip"`
+	RequestHost     string `json:"request_host"`
+	RequestPath     string `json:"request_path"`
+	UserAgent       string `json:"user_agent"`
+	DeviceModel     string `json:"device_model"`
+	DeviceOs        string `json:"device_os"`
+	DeviceOsVersion string `json:"device_os_version"`
+	AppVersion      string `json:"app_version"`
+	Country         string `json:"country"`
+	HwidHash        string `json:"hwid_hash"`
+	HwidPrefix      string `json:"hwid_prefix"`
+	RequestedAt     int64  `json:"requested_at"`
+	ServedFromCache int64  `json:"served_from_cache"`
+	Blocked         int64  `json:"blocked"`
+	BlockReason     string `json:"block_reason"`
 }
 
-func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, limit int64) ([]GetSubscriptionRequestHistoryRow, error) {
-	rows, err := q.db.QueryContext(ctx, getSubscriptionRequestHistory, limit)
+func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, arg GetSubscriptionRequestHistoryParams) ([]GetSubscriptionRequestHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSubscriptionRequestHistory,
+		arg.SubID,
+		arg.SubID,
+		arg.Limit,
+		arg.Offset,
+	)
 	if err != nil {
 		return nil, err
 	}

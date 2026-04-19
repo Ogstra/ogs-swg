@@ -4,7 +4,7 @@ import { api } from '../../services/api'
 import { Button } from '../ui/Button'
 import { ConfirmModal } from '../ui/ConfirmModal'
 import { Modal } from '../ui/Modal'
-import { keyLengthForShadowsocksMethod } from '../../utils/shadowsocks'
+import { keyLengthForShadowsocksMethod, SUPPORTED_SHADOWSOCKS_METHODS } from '../../utils/shadowsocks'
 import {
     buildInboundSubmission,
     computeInboundVisibility,
@@ -50,6 +50,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
     const pendingRenameTag = String(pendingRenameSubmission?.tag || formData.tag || '').trim()
     const isHysteria2 = formData.type === 'hysteria2'
     const isShadowsocks = formData.type === 'shadowsocks'
+    const isAnyTLS = formData.type === 'anytls'
+    const isNaive = formData.type === 'naive'
 
     const updateForm = (updater: (current: any) => any) => {
         setFormData((prev: any) => normalizeInboundForEditor(updater(prev)))
@@ -178,6 +180,8 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 <option value="trojan">Trojan</option>
                                 <option value="hysteria2">Hysteria2</option>
                                 <option value="shadowsocks">Shadowsocks</option>
+                                <option value="anytls">AnyTLS</option>
+                                <option value="naive">Naive</option>
                             </select>
                         </div>
                         <div className="space-y-1">
@@ -535,8 +539,9 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                         onChange={e => updateForm(prev => ({ ...prev, method: e.target.value }))}
                                         className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
                                     >
-                                        <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm</option>
-                                        <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm</option>
+                                        {SUPPORTED_SHADOWSOCKS_METHODS.map(method => (
+                                            <option key={method} value={method}>{method}</option>
+                                        ))}
                                     </select>
                                 </div>
                             </div>
@@ -650,6 +655,70 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                         />
                                     </div>
                                 </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {visibility.showAnyTLSSection && (
+                    <div className="space-y-4">
+                        <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">AnyTLS</h3>
+                        <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
+                            <div className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
+                                AnyTLS always requires TLS. Users are managed per-user below. Padding scheme is optional and advanced.
+                            </div>
+                            {isAnyTLS && (
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-slate-300">Padding Scheme (optional, one rule per line)</label>
+                                    <textarea
+                                        value={(formData.padding_scheme || []).join('\n')}
+                                        onChange={e => updateForm((prev: any) => ({
+                                            ...prev,
+                                            padding_scheme: e.target.value.split('\n').map((s: string) => s.trim()).filter(Boolean),
+                                        }))}
+                                        rows={3}
+                                        className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-white focus:border-blue-500 focus:outline-none"
+                                        placeholder="0-99=random_padding(0,100)"
+                                    />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
+                {visibility.showNaiveSection && (
+                    <div className="space-y-4">
+                        <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">Naive</h3>
+                        <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
+                            <div className="rounded-lg border border-slate-700/80 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
+                                Naive always requires TLS. Users are managed per-user below.
+                            </div>
+                            {isNaive && (
+                                <>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-300">Network</label>
+                                        <select
+                                            value={formData.network || 'tcp'}
+                                            onChange={e => updateForm((prev: any) => ({ ...prev, network: e.target.value }))}
+                                            className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+                                        >
+                                            <option value="tcp">TCP (HTTPS)</option>
+                                            <option value="udp">UDP (QUIC)</option>
+                                        </select>
+                                    </div>
+                                    {formData.network === 'udp' && (
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">QUIC Congestion Control (optional)</label>
+                                            <input
+                                                type="text"
+                                                value={formData.quic_congestion_control || ''}
+                                                onChange={e => updateForm((prev: any) => ({ ...prev, quic_congestion_control: e.target.value }))}
+                                                className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+                                                placeholder="e.g. bbr"
+                                            />
+                                        </div>
+                                    )}
+                                </>
                             )}
                         </div>
                     </div>

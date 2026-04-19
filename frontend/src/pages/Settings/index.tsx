@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import type { Dispatch, SetStateAction, UIEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { api, FeatureFlags, SamplerHistoryEntry, SubscriptionRequestHistoryEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
+import { api, FeatureFlags, SamplerHistoryEntry, Subscription, SubscriptionRequestHistoryEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
 import { Save, RefreshCw, UserCog, Shield, ShieldAlert, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
@@ -30,6 +30,7 @@ type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
 type DbInfo = { rows: number; sizeMB: number }
 type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; activeUserWindowMinutes: number; detailChartTargetPoints: number }
 type PendingServiceAction = { service: string; action: 'restart' | 'stop' | 'start' }
+const SUBSCRIPTION_HISTORY_PAGE_SIZE = 20
 
 const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
     defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : 'singbox',
@@ -48,11 +49,21 @@ export default function Settings() {
     const { permissions } = useAuth()
     const canWriteSettings = !!permissions?.can_write_settings
     const canWriteConfig = !!permissions?.can_write_config
+    const canReadUsers = !!permissions?.can_read_users
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<{ rows: number; sizeMB: number }>({ rows: 0, sizeMB: 0 })
     const [samplerHistory, setSamplerHistory] = useState<SamplerHistoryEntry[]>([])
     const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
+    const [subscriptionHistoryNextOffset, setSubscriptionHistoryNextOffset] = useState(0)
+    const [subscriptionHistoryHasMore, setSubscriptionHistoryHasMore] = useState(false)
+    const [subscriptionHistoryRefreshing, setSubscriptionHistoryRefreshing] = useState(false)
+    const [subscriptionHistoryLoadingMore, setSubscriptionHistoryLoadingMore] = useState(false)
+    const subscriptionRequestHistoryRef = useRef<SubscriptionRequestHistoryEntry[]>([])
+    const subscriptionHistoryRefreshingRef = useRef(false)
+    const subscriptionHistoryLoadingMoreRef = useRef(false)
+    const [subscriptionHistorySubId, setSubscriptionHistorySubId] = useState('all')
+    const subscriptionHistorySubIdRef = useRef(0)
     const [features, setFeatures] = useState<FeatureFlags>({
         enable_singbox: true,
         enable_wireguard: true,
@@ -66,7 +77,7 @@ export default function Settings() {
         aggregation_enabled: false,
         aggregation_days: 7,
     })
-    const [historyLimit, setHistoryLimit] = useState(10)
+    const [historyLimit, setHistoryLimit] = useState(20)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
     const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction | null>(null)
     const [serviceActionLoading, setServiceActionLoading] = useState(false)
@@ -105,11 +116,11 @@ export default function Settings() {
         refetchInterval: Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000),
     })
 
-    const subscriptionRequestHistoryQuery = useQuery({
-        queryKey: ['settings-subscription-request-history', historyLimit],
-        queryFn: () => api.getSubscriptionRequestHistory(historyLimit),
+    const subscriptionsQuery = useQuery({
+        queryKey: ['settings-subscriptions-for-history-filter'],
+        queryFn: () => api.getSubscriptions(),
+        enabled: canReadUsers,
         placeholderData: previousData => previousData,
-        refetchInterval: Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000),
     })
 
     const publicIPQuery = useQuery({
@@ -159,12 +170,6 @@ export default function Settings() {
     }, [samplerHistoryQuery.data])
 
     useEffect(() => {
-        const h = subscriptionRequestHistoryQuery.data
-        if (!h) return
-        setSubscriptionRequestHistory(Array.isArray(h) ? h : [])
-    }, [subscriptionRequestHistoryQuery.data])
-
-    useEffect(() => {
         if (typeof publicIPQuery.data !== 'string') return
         setPublicIP(publicIPQuery.data || '')
     }, [publicIPQuery.data])
@@ -173,6 +178,83 @@ export default function Settings() {
         if (typeof subDomainQuery.data !== 'string') return
         setSubscriptionDomain(subDomainQuery.data || '')
     }, [subDomainQuery.data])
+
+    useEffect(() => {
+        subscriptionRequestHistoryRef.current = subscriptionRequestHistory
+    }, [subscriptionRequestHistory])
+
+    const selectedSubscriptionHistorySubId = subscriptionHistorySubId === 'all'
+        ? 0
+        : Number.parseInt(subscriptionHistorySubId, 10) || 0
+
+    useEffect(() => {
+        subscriptionHistorySubIdRef.current = selectedSubscriptionHistorySubId
+    }, [selectedSubscriptionHistorySubId])
+
+    const handleSubscriptionHistorySubChange = useCallback((value: string) => {
+        subscriptionRequestHistoryRef.current = []
+        setSubscriptionRequestHistory([])
+        setSubscriptionHistoryNextOffset(0)
+        setSubscriptionHistoryHasMore(false)
+        setSubscriptionHistorySubId(value)
+    }, [])
+
+    const refreshSubscriptionRequestHistory = useCallback(async () => {
+        if (subscriptionHistoryRefreshingRef.current) return
+        const subID = selectedSubscriptionHistorySubId
+        subscriptionHistoryRefreshingRef.current = true
+        setSubscriptionHistoryRefreshing(true)
+        try {
+            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
+            if (subscriptionHistorySubIdRef.current !== subID) return
+            const incomingIds = new Set(page.items.map(item => item.id))
+            const merged = [
+                ...page.items,
+                ...subscriptionRequestHistoryRef.current.filter(item => !incomingIds.has(item.id)),
+            ]
+            subscriptionRequestHistoryRef.current = merged
+            setSubscriptionRequestHistory(merged)
+            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
+            setSubscriptionHistoryHasMore(page.has_more)
+        } finally {
+            subscriptionHistoryRefreshingRef.current = false
+            setSubscriptionHistoryRefreshing(false)
+        }
+    }, [selectedSubscriptionHistorySubId])
+
+    const loadMoreSubscriptionRequestHistory = useCallback(async () => {
+        if (subscriptionHistoryLoadingMoreRef.current || !subscriptionHistoryHasMore) return
+
+        const offset = subscriptionHistoryNextOffset
+        const subID = selectedSubscriptionHistorySubId
+        subscriptionHistoryLoadingMoreRef.current = true
+        setSubscriptionHistoryLoadingMore(true)
+        try {
+            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, offset, subID)
+            if (subscriptionHistorySubIdRef.current !== subID) return
+            const existingIds = new Set(subscriptionRequestHistoryRef.current.map(item => item.id))
+            const merged = [
+                ...subscriptionRequestHistoryRef.current,
+                ...page.items.filter(item => !existingIds.has(item.id)),
+            ]
+            subscriptionRequestHistoryRef.current = merged
+            setSubscriptionRequestHistory(merged)
+            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
+            setSubscriptionHistoryHasMore(page.has_more)
+        } finally {
+            subscriptionHistoryLoadingMoreRef.current = false
+            setSubscriptionHistoryLoadingMore(false)
+        }
+    }, [selectedSubscriptionHistorySubId, subscriptionHistoryHasMore, subscriptionHistoryNextOffset])
+
+    useEffect(() => {
+        void refreshSubscriptionRequestHistory()
+        const intervalMs = Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000)
+        const interval = window.setInterval(() => {
+            void refreshSubscriptionRequestHistory()
+        }, intervalMs)
+        return () => window.clearInterval(interval)
+    }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, refreshSubscriptionRequestHistory])
 
     const loadFeatures = async () => {
         await featuresQuery.refetch()
@@ -185,7 +267,7 @@ export default function Settings() {
     const loadSamplerHistory = async () => {
         await Promise.all([
             samplerHistoryQuery.refetch(),
-            subscriptionRequestHistoryQuery.refetch(),
+            refreshSubscriptionRequestHistory(),
         ])
     }
 
@@ -397,6 +479,15 @@ export default function Settings() {
                     setHistoryLimit={setHistoryLimit}
                     samplerHistory={samplerHistory}
                     subscriptionRequestHistory={subscriptionRequestHistory}
+                    subscriptionHistorySubs={subscriptionsQuery.data || []}
+                    subscriptionHistorySubId={subscriptionHistorySubId}
+                    setSubscriptionHistorySubId={handleSubscriptionHistorySubChange}
+                    subscriptionHistorySubsLoading={subscriptionsQuery.isLoading}
+                    canReadUsers={canReadUsers}
+                    subscriptionHistoryHasMore={subscriptionHistoryHasMore}
+                    subscriptionHistoryRefreshing={subscriptionHistoryRefreshing}
+                    subscriptionHistoryLoadingMore={subscriptionHistoryLoadingMore}
+                    loadMoreSubscriptionRequestHistory={loadMoreSubscriptionRequestHistory}
                 />
             )
         },
@@ -1316,6 +1407,15 @@ function DatabaseTab({
     setHistoryLimit,
     samplerHistory,
     subscriptionRequestHistory,
+    subscriptionHistorySubs,
+    subscriptionHistorySubId,
+    setSubscriptionHistorySubId,
+    subscriptionHistorySubsLoading,
+    canReadUsers,
+    subscriptionHistoryHasMore,
+    subscriptionHistoryRefreshing,
+    subscriptionHistoryLoadingMore,
+    loadMoreSubscriptionRequestHistory,
 }: {
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
@@ -1331,6 +1431,15 @@ function DatabaseTab({
     setHistoryLimit: Dispatch<SetStateAction<number>>
     samplerHistory: SamplerHistoryEntry[]
     subscriptionRequestHistory: SubscriptionRequestHistoryEntry[]
+    subscriptionHistorySubs: Subscription[]
+    subscriptionHistorySubId: string
+    setSubscriptionHistorySubId: (value: string) => void
+    subscriptionHistorySubsLoading: boolean
+    canReadUsers: boolean
+    subscriptionHistoryHasMore: boolean
+    subscriptionHistoryRefreshing: boolean
+    subscriptionHistoryLoadingMore: boolean
+    loadMoreSubscriptionRequestHistory: () => Promise<void>
 }) {
     const [databaseCardHeight, setDatabaseCardHeight] = useState<number | null>(null)
     const databaseCardRef = useRef<HTMLDivElement | null>(null)
@@ -1576,6 +1685,14 @@ function DatabaseTab({
         }
     }
 
+    const handleSubscriptionHistoryScroll = (event: UIEvent<HTMLDivElement>) => {
+        const element = event.currentTarget
+        const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
+        if (remaining < 96 && subscriptionHistoryHasMore && !subscriptionHistoryLoadingMore) {
+            void loadMoreSubscriptionRequestHistory()
+        }
+    }
+
     return (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start pb-4 sm:pb-0">
             <div ref={databaseCardRef}>
@@ -1714,21 +1831,27 @@ function DatabaseTab({
                     title="Subscriptions History"
                     className="flex h-full min-h-[208px] min-h-0 flex-col overflow-hidden"
                     action={
-                        <select
-                            value={historyLimit}
-                            onChange={e => setHistoryLimit(parseInt(e.target.value))}
-                            className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
-                        >
-                            <option value={10}>Last 10</option>
-                            <option value={20}>Last 20</option>
-                            <option value={30}>Last 30</option>
-                            <option value={40}>Last 40</option>
-                            <option value={50}>Last 50</option>
-                        </select>
+                        <div className="flex items-center gap-2">
+                            {subscriptionHistoryRefreshing && <RefreshCw size={12} className="animate-spin" />}
+                            <select
+                                value={subscriptionHistorySubId}
+                                onChange={e => setSubscriptionHistorySubId(e.target.value)}
+                                disabled={!canReadUsers || subscriptionHistorySubsLoading}
+                                className="select-field max-w-[180px] bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                <option value="all">All subscriptions</option>
+                                {subscriptionHistorySubs.map(sub => (
+                                    <option key={sub.id} value={String(sub.id)}>{sub.name}</option>
+                                ))}
+                            </select>
+                        </div>
                     }
                 >
                     <div className="flex-1 min-h-0 overflow-hidden">
-                        <div className="h-full min-h-0 space-y-0 overflow-y-auto pr-2 text-sm">
+                        <div
+                            className="h-full min-h-0 space-y-0 overflow-y-auto pr-2 text-sm"
+                            onScroll={handleSubscriptionHistoryScroll}
+                        >
                             {subscriptionRequestHistory.length === 0 ? (
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
@@ -1783,6 +1906,15 @@ function DatabaseTab({
                                         </div>
                                     </div>
                                 )})
+                            )}
+                            {subscriptionHistoryLoadingMore && (
+                                <div className="flex items-center justify-center gap-2 py-3 text-xs text-slate-500">
+                                    <RefreshCw size={12} className="animate-spin" />
+                                    Loading more
+                                </div>
+                            )}
+                            {!subscriptionHistoryHasMore && subscriptionRequestHistory.length > 0 && (
+                                <div className="py-3 text-center text-[10px] text-slate-600">End of history</div>
                             )}
                         </div>
                     </div>

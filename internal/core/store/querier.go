@@ -61,7 +61,7 @@ type Querier interface {
 	GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error)
 	GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error)
 	GetSubscriptionMembers(ctx context.Context, subID int64) ([]SubscriptionUser, error)
-	GetSubscriptionRequestHistory(ctx context.Context, limit int64) ([]GetSubscriptionRequestHistoryRow, error)
+	GetSubscriptionRequestHistory(ctx context.Context, arg GetSubscriptionRequestHistoryParams) ([]GetSubscriptionRequestHistoryRow, error)
 	GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error)
 	GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error)
 	GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserParams) ([]GetTrafficPerUserRow, error)
