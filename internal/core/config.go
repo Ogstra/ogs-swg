@@ -61,8 +61,17 @@ type Config struct {
 
 	JWTSecret string `json:"jwt_secret" env:"OGS_JWT_SECRET"`
 
+	SubscriptionProtection SubscriptionProtectionConfig `json:"subscription_protection"`
+
 	executor SystemExecutor
 	mu       sync.Mutex
+}
+
+type SubscriptionProtectionConfig struct {
+	MaxRequests                int  `json:"max_requests"`
+	WindowSeconds              int  `json:"window_seconds"`
+	UAFilterEnabled            bool `json:"ua_filter_enabled"`
+	SocialFetchersBlockEnabled bool `json:"social_fetchers_block_enabled"`
 }
 
 type UserAccount struct {
@@ -78,7 +87,7 @@ var ErrUserAssignedToAnotherInbound = errors.New("user is already assigned to an
 
 func isUserInboundType(inbType string) bool {
 	switch strings.ToLower(strings.TrimSpace(inbType)) {
-	case "vless", "vmess", "trojan", "hysteria2":
+	case "vless", "vmess", "trojan", "hysteria2", "shadowsocks", "anytls", "naive":
 		return true
 	default:
 		return false
@@ -168,8 +177,18 @@ func LoadConfig(path ...string) *Config {
 		cfg.WireGuardConfigDir = filepath.Dir(derivePath)
 	}
 	cfg.WireGuardConfigDir = filepath.Clean(cfg.WireGuardConfigDir)
+	cfg.normalizeSubscriptionProtection()
 
 	return cfg
+}
+
+func (c *Config) normalizeSubscriptionProtection() {
+	if c.SubscriptionProtection.MaxRequests <= 0 {
+		c.SubscriptionProtection.MaxRequests = 60
+	}
+	if c.SubscriptionProtection.WindowSeconds <= 0 {
+		c.SubscriptionProtection.WindowSeconds = 60
+	}
 }
 
 func (c *Config) GetActiveUsers() ([]UserAccount, error) {
@@ -223,7 +242,12 @@ func (c *Config) GetActiveUsers() ([]UserAccount, error) {
 				})
 				vmessAlterID = parseAlterIDValue(alterRaw)
 			}
-			if inbType == "trojan" || inbType == "hysteria2" {
+			if inbType == "trojan" || inbType == "hysteria2" || inbType == "shadowsocks" || inbType == "anytls" {
+				uuid, _ = userMapData["password"].(string)
+				flow = ""
+			}
+			if inbType == "naive" {
+				name, _ = userMapData["username"].(string)
 				uuid, _ = userMapData["password"].(string)
 				flow = ""
 			}
@@ -330,6 +354,21 @@ func (c *Config) AddUser(name, uuid, flow, inboundTag, vmessSecurity string, vme
 					Name:     name,
 					Password: uuid,
 				})
+			case *AnyTLSInbound:
+				inb.Users = append(inb.Users, AnyTLSUser{
+					Name:     name,
+					Password: uuid,
+				})
+			case *NaiveInbound:
+				inb.Users = append(inb.Users, NaiveUser{
+					Username: name,
+					Password: uuid,
+				})
+			case *ShadowsocksInbound:
+				inb.Users = append(inb.Users, ShadowsocksUser{
+					Name:     name,
+					Password: uuid,
+				})
 			case *Hysteria2Inbound:
 				inb.Users = append(inb.Users, Hysteria2User{
 					Name:     name,
@@ -379,6 +418,30 @@ func (c *Config) RemoveUser(name string) error {
 				}
 				inb.Users = filtered
 			case *TrojanInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name != name {
+						filtered = append(filtered, u)
+					}
+				}
+				inb.Users = filtered
+			case *AnyTLSInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name != name {
+						filtered = append(filtered, u)
+					}
+				}
+				inb.Users = filtered
+			case *NaiveInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Username != name {
+						filtered = append(filtered, u)
+					}
+				}
+				inb.Users = filtered
+			case *ShadowsocksInbound:
 				filtered := inb.Users[:0]
 				for _, u := range inb.Users {
 					if u.Name != name {
@@ -450,6 +513,26 @@ func (c *Config) RemoveUserFromInbound(name, inboundTag string) error {
 					filtered = append(filtered, u)
 				}
 				inb.Users = filtered
+			case *AnyTLSInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Name == name {
+						found = true
+						continue
+					}
+					filtered = append(filtered, u)
+				}
+				inb.Users = filtered
+			case *NaiveInbound:
+				filtered := inb.Users[:0]
+				for _, u := range inb.Users {
+					if u.Username == name {
+						found = true
+						continue
+					}
+					filtered = append(filtered, u)
+				}
+				inb.Users = filtered
 			case *Hysteria2Inbound:
 				filtered := inb.Users[:0]
 				for _, u := range inb.Users {
@@ -509,6 +592,30 @@ func (c *Config) UpdateUserInInbound(name, uuid, flow, inboundTag, vmessSecurity
 					}
 				}
 			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
+						found = true
+						break
+					}
+				}
+			case *AnyTLSInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
+						found = true
+						break
+					}
+				}
+			case *NaiveInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Username == name {
+						inb.Users[i].Password = uuid
+						found = true
+						break
+					}
+				}
+			case *ShadowsocksInbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == name {
 						inb.Users[i].Password = uuid
@@ -589,6 +696,27 @@ func (c *Config) UpdateUser(name, uuid, flow, inboundTag, vmessSecurity string, 
 						found = true
 					}
 				}
+			case *AnyTLSInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *NaiveInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Username == name {
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *ShadowsocksInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == name {
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
 			case *Hysteria2Inbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == name {
@@ -656,6 +784,30 @@ func (c *Config) RenameUser(originalName, newName, uuid, flow, vmessSecurity str
 					}
 				}
 			case *TrojanInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == originalName {
+						inb.Users[i].Name = newName
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *AnyTLSInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Name == originalName {
+						inb.Users[i].Name = newName
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *NaiveInbound:
+				for i := range inb.Users {
+					if inb.Users[i].Username == originalName {
+						inb.Users[i].Username = newName
+						inb.Users[i].Password = uuid
+						found = true
+					}
+				}
+			case *ShadowsocksInbound:
 				for i := range inb.Users {
 					if inb.Users[i].Name == originalName {
 						inb.Users[i].Name = newName
@@ -741,6 +893,24 @@ func decodeTypedInbound(raw json.RawMessage) (ManagedInbound, error) {
 		var inbound TrojanInbound
 		if err := json.Unmarshal(raw, &inbound); err != nil {
 			return nil, fmt.Errorf("decode trojan inbound: %w", err)
+		}
+		return &inbound, nil
+	case "anytls":
+		var inbound AnyTLSInbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode anytls inbound: %w", err)
+		}
+		return &inbound, nil
+	case "naive":
+		var inbound NaiveInbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode naive inbound: %w", err)
+		}
+		return &inbound, nil
+	case "shadowsocks":
+		var inbound ShadowsocksInbound
+		if err := json.Unmarshal(raw, &inbound); err != nil {
+			return nil, fmt.Errorf("decode shadowsocks inbound: %w", err)
 		}
 		return &inbound, nil
 	case "hysteria2":
@@ -917,19 +1087,76 @@ func (c *Config) MarkSingboxPending() {
 	c.SingboxPendingChanges = true
 }
 
+func (c *Config) ClearSingboxPendingChanges() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.SingboxPendingChanges = false
+}
+
 func (c *Config) GetSingboxPendingChanges() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.SingboxPendingChanges
 }
 
-// ApplySingboxChanges applies pending Sing-box configuration changes by reloading the service
+type SingboxRestartRequiredError struct {
+	Reason string
+	Err    error
+}
+
+func (e *SingboxRestartRequiredError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("sing-box restart required: %s: %v", e.Reason, e.Err)
+	}
+	return "sing-box restart required: " + e.Reason
+}
+
+func (e *SingboxRestartRequiredError) Unwrap() error {
+	return e.Err
+}
+
+func (c *Config) getSingboxClashAPILocked() (*ClashAPI, error) {
+	raw, err := c.readSingboxConfigLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	var cfg SingboxConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil, err
+	}
+
+	if cfg.Experimental == nil || cfg.Experimental.ClashAPI == nil || cfg.Experimental.ClashAPI.ExternalController == "" {
+		return nil, nil
+	}
+	return cfg.Experimental.ClashAPI, nil
+}
+
+// ApplySingboxChanges applies pending Sing-box configuration changes without an implicit service restart.
+// If Clash API cannot hot-reload the config, callers must confirm and perform a restart explicitly.
 func (c *Config) ApplySingboxChanges() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := c.ReloadSingbox(); err != nil {
+	if !c.SingboxPendingChanges {
+		return nil
+	}
+
+	if !c.EnableSingbox {
+		c.SingboxPendingChanges = false
+		return nil
+	}
+
+	api, err := c.getSingboxClashAPILocked()
+	if err != nil {
 		return err
+	}
+	if api == nil {
+		return &SingboxRestartRequiredError{Reason: "clash_api_not_configured"}
+	}
+
+	if err := c.reloadViaClashAPI(api); err != nil {
+		return &SingboxRestartRequiredError{Reason: "clash_api_reload_failed", Err: err}
 	}
 
 	c.SingboxPendingChanges = false
@@ -960,8 +1187,8 @@ func (c *Config) SyncInboundsFromSingbox() error {
 		}
 		inbType, _ := inb["type"].(string)
 
-		// Auto-discover VLESS, VMess, Trojan
-		if inbType == "vless" || inbType == "vmess" || inbType == "trojan" || inbType == "hysteria2" {
+		// Auto-discover user-backed protocols managed by the panel.
+		if inbType == "vless" || inbType == "vmess" || inbType == "trojan" || inbType == "hysteria2" || inbType == "shadowsocks" || inbType == "anytls" || inbType == "naive" {
 			if !managedSet[tag] {
 				c.ManagedInbounds = append(c.ManagedInbounds, tag)
 				managedSet[tag] = true

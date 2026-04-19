@@ -1,15 +1,22 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { api, Subscription } from '../../services/api'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { api, Subscription, SubscriptionDefaults } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { Button } from '../../components/ui/Button'
+import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2 } from 'lucide-react'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
+import {
+    getSubscriptionProfileDrafts,
+    hydrateSubscriptionProfileAliases,
+    serializeSubscriptionProfileAliases,
+    type SelectedSubscriptionProfile,
+} from './profileAliases'
 
 const formatBytes = (bytes: number): string => {
     if (!bytes || bytes === 0) return '0'
@@ -23,20 +30,18 @@ const parseGBInput = (value: string): number => {
 }
 
 const toBase64 = (value: string): string => btoa(value)
-const SUBSCRIPTION_DEFAULTS_STORAGE_KEY = 'subscription_create_defaults'
 const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
+const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
+    profile_update_interval_hours: null,
+    update_always: false,
+    destinations: [],
+}
 
 type RefreshPolicyDraft = {
     intervalEnabled: boolean
     intervalHours: string
     updateAlways: boolean
 }
-
-const defaultRefreshPolicyDraft = (): RefreshPolicyDraft => ({
-    intervalEnabled: false,
-    intervalHours: DEFAULT_REFRESH_INTERVAL_HOURS,
-    updateAlways: false,
-})
 
 const parseIntervalHours = (value: string): number | null => {
     const trimmed = value.trim()
@@ -47,30 +52,21 @@ const parseIntervalHours = (value: string): number | null => {
     return parsed
 }
 
-const loadSubscriptionDefaults = (): RefreshPolicyDraft => {
-    if (typeof window === 'undefined') return defaultRefreshPolicyDraft()
-
-    try {
-        const raw = window.localStorage.getItem(SUBSCRIPTION_DEFAULTS_STORAGE_KEY)
-        if (!raw) return defaultRefreshPolicyDraft()
-
-        const parsed = JSON.parse(raw) as { profile_update_interval_hours?: unknown; update_always?: unknown }
-        const hasInterval = typeof parsed.profile_update_interval_hours === 'number' && parsed.profile_update_interval_hours > 0
-
-        return {
-            intervalEnabled: hasInterval,
-            intervalHours: hasInterval ? String(Math.trunc(parsed.profile_update_interval_hours as number)) : DEFAULT_REFRESH_INTERVAL_HOURS,
-            updateAlways: parsed.update_always === true,
-        }
-    } catch {
-        return defaultRefreshPolicyDraft()
-    }
-}
+const subscriptionDefaultsToRefreshPolicyDraft = (defaults: SubscriptionDefaults): RefreshPolicyDraft => ({
+    intervalEnabled: defaults.profile_update_interval_hours != null,
+    intervalHours: defaults.profile_update_interval_hours != null
+        ? String(defaults.profile_update_interval_hours)
+        : DEFAULT_REFRESH_INTERVAL_HOURS,
+    updateAlways: defaults.update_always === true,
+})
 
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
-    const { permissions } = useAuth()
+    const { permissions, token } = useAuth()
+    const queryClient = useQueryClient()
+    const canReadUsers = !!permissions?.can_read_users
     const canWriteUsers = !!permissions?.can_write_users
+    const canManagePanelScopedDefaults = canWriteUsers && !!token
 
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
@@ -79,26 +75,67 @@ export default function Subscriptions() {
 
     const [nameInput, setNameInput] = useState('')
     const [quotaGB, setQuotaGB] = useState('0')
-    const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+    const [selectedProfiles, setSelectedProfiles] = useState<SelectedSubscriptionProfile[]>([])
     const [profileUpdateIntervalEnabled, setProfileUpdateIntervalEnabled] = useState(false)
     const [profileUpdateIntervalHours, setProfileUpdateIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [updateAlways, setUpdateAlways] = useState(false)
-    const [subscriptionDefaults, setSubscriptionDefaults] = useState<RefreshPolicyDraft>(() => loadSubscriptionDefaults())
     const [defaultIntervalEnabled, setDefaultIntervalEnabled] = useState(false)
     const [defaultIntervalHours, setDefaultIntervalHours] = useState(DEFAULT_REFRESH_INTERVAL_HOURS)
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
+    const [userSearch, setUserSearch] = useState('')
+    const [expandedAliasUsers, setExpandedAliasUsers] = useState<Set<string>>(new Set())
+    const [sortKey, setSortKey] = useState<'name' | 'last_request' | 'users' | 'quota'>('name')
+    const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
-    const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions() })
-    const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers() })
+    const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
+    const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers(), enabled: canReadUsers })
     const domainQuery = useQuery({
         queryKey: ['settings-subscription-domain'],
         queryFn: () => api.getSubscriptionDomain(),
         enabled: canWriteUsers,
     })
+    const defaultsQuery = useQuery({
+        queryKey: ['subscription-defaults'],
+        queryFn: () => api.getSubscriptionDefaults(),
+        enabled: canManagePanelScopedDefaults,
+    })
 
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
+    const sortedUsersInfo = [...usersInfo].sort((a, b) => a.name.localeCompare(b.name))
+    const filteredUsers = userSearch.trim()
+        ? sortedUsersInfo.filter(u => {
+            const q = userSearch.toLowerCase()
+            const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
+            return u.name.toLowerCase().includes(q)
+                || alias.toLowerCase().includes(q)
+                || (u.inbound_tags ?? []).some(t => t.toLowerCase().includes(q))
+        })
+        : sortedUsersInfo
     const subDomain = domainQuery.data || window.location.host
+    const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
+    const sortedSubs = [...subs].sort((a, b) => {
+        const dir = sortDir === 'asc' ? 1 : -1
+        switch (sortKey) {
+            case 'last_request':
+                return ((a.last_request_at || 0) - (b.last_request_at || 0)) * dir
+            case 'users':
+                return ((a.users?.length || 0) - (b.users?.length || 0)) * dir
+            case 'quota': {
+                const aLimit = a.quota_limit || 0
+                const bLimit = b.quota_limit || 0
+                const aRatio = aLimit ? ((a.used_bytes || 0) / aLimit) : 0
+                const bRatio = bLimit ? ((b.used_bytes || 0) / bLimit) : 0
+                if (Math.abs(aRatio - bRatio) < 0.0001) {
+                    return ((a.used_bytes || 0) - (b.used_bytes || 0)) * dir
+                }
+                return (aRatio - bRatio) * dir
+            }
+            case 'name':
+            default:
+                return a.name.localeCompare(b.name) * dir
+        }
+    })
 
     const applyRefreshPolicyDraft = (draft: RefreshPolicyDraft) => {
         setProfileUpdateIntervalEnabled(draft.intervalEnabled)
@@ -107,35 +144,61 @@ export default function Subscriptions() {
     }
 
     const openCreate = () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         setNameInput('')
         setQuotaGB('0')
-        setSelectedUsers([])
-        applyRefreshPolicyDraft(subscriptionDefaults)
+        setSelectedProfiles(hydrateSubscriptionProfileAliases([]))
+        setUserSearch('')
+        setExpandedAliasUsers(new Set())
+        applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
         setModalState({ type: 'create' })
     }
 
     const openEdit = (sub: Subscription) => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         setNameInput(sub.name)
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
-        setSelectedUsers(sub.users || [])
+        setUserSearch('')
+        const drafts = getSubscriptionProfileDrafts(sub)
+        setSelectedProfiles(drafts)
+        setExpandedAliasUsers(new Set(drafts.filter(p => p.alias).map(p => p.username)))
         setProfileUpdateIntervalEnabled(sub.profile_update_interval_hours != null)
         setProfileUpdateIntervalHours(
             sub.profile_update_interval_hours != null
                 ? String(sub.profile_update_interval_hours)
-                : subscriptionDefaults.intervalHours
+                : (
+                    subscriptionDefaults.profile_update_interval_hours != null
+                        ? String(subscriptionDefaults.profile_update_interval_hours)
+                        : DEFAULT_REFRESH_INTERVAL_HOURS
+                )
         )
         setUpdateAlways(sub.update_always === true)
         setModalState({ type: 'edit', data: sub })
     }
 
     const openDefaults = () => {
-        setDefaultIntervalEnabled(subscriptionDefaults.intervalEnabled)
-        setDefaultIntervalHours(subscriptionDefaults.intervalHours)
-        setDefaultUpdateAlways(subscriptionDefaults.updateAlways)
+        if (!canManagePanelScopedDefaults) {
+            toastError('No permission to manage subscription defaults')
+            return
+        }
+        const refreshDraft = subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults)
+        setDefaultIntervalEnabled(refreshDraft.intervalEnabled)
+        setDefaultIntervalHours(refreshDraft.intervalHours)
+        setDefaultUpdateAlways(refreshDraft.updateAlways)
         setDefaultsModalOpen(true)
     }
 
     const handleSave = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         if (!nameInput.trim()) return toastError('Name is required')
         const quotaLimit = parseGBInput(quotaGB)
         const intervalHours = profileUpdateIntervalEnabled ? parseIntervalHours(profileUpdateIntervalHours) : null
@@ -148,7 +211,8 @@ export default function Subscriptions() {
             name: nameInput.trim(),
             quota_limit: quotaLimit,
             quota_period: 'monthly' as const,
-            users: selectedUsers,
+            users: selectedProfiles.map(profile => profile.username),
+            members: serializeSubscriptionProfileAliases(selectedProfiles),
             profile_update_interval_hours: intervalHours,
             update_always: updateAlways,
         }
@@ -168,32 +232,35 @@ export default function Subscriptions() {
         }
     }
 
-    const handleSaveDefaults = () => {
+    const handleSaveDefaults = async () => {
+        if (!canManagePanelScopedDefaults) {
+            toastError('No permission to manage subscription defaults')
+            return
+        }
         const intervalHours = defaultIntervalEnabled ? parseIntervalHours(defaultIntervalHours) : null
         if (defaultIntervalEnabled && intervalHours == null) {
             return toastError('Default refresh interval must be a whole number greater than zero')
         }
 
-        const nextDefaults: RefreshPolicyDraft = {
-            intervalEnabled: defaultIntervalEnabled,
-            intervalHours: defaultIntervalEnabled ? String(intervalHours) : DEFAULT_REFRESH_INTERVAL_HOURS,
-            updateAlways: defaultUpdateAlways,
-        }
-
-        window.localStorage.setItem(
-            SUBSCRIPTION_DEFAULTS_STORAGE_KEY,
-            JSON.stringify({
+        try {
+            await api.updateSubscriptionDefaults({
                 profile_update_interval_hours: intervalHours,
                 update_always: defaultUpdateAlways,
+                destinations: subscriptionDefaults.destinations,
             })
-        )
-
-        setSubscriptionDefaults(nextDefaults)
-        setDefaultsModalOpen(false)
-        success('Subscription defaults updated')
+            await queryClient.invalidateQueries({ queryKey: ['subscription-defaults'] })
+            setDefaultsModalOpen(false)
+            success('Subscription defaults updated')
+        } catch (err) {
+            toastError('Failed to update subscription defaults: ' + err)
+        }
     }
 
     const handleDelete = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         if (!confirmDelete) return
         try {
             await api.deleteSubscription(confirmDelete.id)
@@ -206,6 +273,10 @@ export default function Subscriptions() {
     }
 
     const handleRegenerate = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         if (!confirmRegenerate) return
         try {
             await api.regenerateSubscriptionToken(confirmRegenerate.id)
@@ -218,9 +289,13 @@ export default function Subscriptions() {
     }
 
     const copyLink = async (token: string) => {
-        const protocol = window.location.protocol
-        const link = `${protocol}//${subDomain}/s/${token}`
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
         try {
+            const protocol = window.location.protocol
+            const link = `${protocol}//${subDomain}/s/${token}`
             if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(link)
             } else {
@@ -245,29 +320,73 @@ export default function Subscriptions() {
         setModalState({ type: 'qr', data: sub })
     }
     const toggleUser = (userName: string) => {
-        setSelectedUsers(prev => prev.includes(userName) ? prev.filter(u => u !== userName) : [...prev, userName])
+        setSelectedProfiles(prev => {
+            const existing = prev.find(profile => profile.username === userName)
+            if (existing) return prev.filter(profile => profile.username !== userName)
+            // Preserve alias from current sub members so re-selecting restores it
+            const savedAlias = modalState.data?.members?.find(m => m.username === userName)?.alias ?? ''
+            return [...prev, { username: userName, alias: savedAlias }]
+        })
+    }
+
+    const updateProfileAlias = (userName: string, alias: string) => {
+        setSelectedProfiles(prev => prev.map(profile => (
+            profile.username === userName
+                ? { ...profile, alias }
+                : profile
+        )))
+    }
+
+    const toggleAlias = (userName: string) => {
+        const isExpanded = expandedAliasUsers.has(userName)
+        if (isExpanded) {
+            updateProfileAlias(userName, '')
+            setExpandedAliasUsers(prev => {
+                const next = new Set(prev)
+                next.delete(userName)
+                return next
+            })
+        } else {
+            setExpandedAliasUsers(prev => {
+                const next = new Set(prev)
+                next.add(userName)
+                return next
+            })
+        }
     }
 
     const getQuotaPill = (sub: Subscription) => {
         const used = sub.used_bytes || 0
         const limit = sub.quota_limit || 0
         if (limit === 0) {
-            // No sub-level quota — show usage as informational
-            return <span className="text-slate-400 text-xs">{formatBytes(used)} used</span>
+            return (
+                <div className="flex flex-col gap-1 min-w-[120px]">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                        <span className="truncate whitespace-nowrap text-slate-300">{formatBytes(used)}</span>
+                        <span className="text-center text-slate-300"></span>
+                        <span className="text-right text-xl leading-none whitespace-nowrap">∞</span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                        <div className="h-full w-full rounded-full bg-slate-700/50" />
+                    </div>
+                </div>
+            )
         }
-        const pct = Math.min(100, Math.round((used / limit) * 100))
+        const rawRatio = used / limit
+        const pct = Math.min(100, Math.round(rawRatio * 100))
         const over = used >= limit
         const barColor = over ? 'bg-red-500' : pct > 80 ? 'bg-yellow-500' : 'bg-emerald-500'
         return (
             <div className="flex flex-col gap-1 min-w-[120px]">
-                <div className="flex justify-between text-xs gap-2">
-                    <span className={over ? 'text-red-400 font-semibold' : 'text-slate-300'}>
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                    <span className={`truncate whitespace-nowrap ${over ? 'text-red-400 font-semibold' : 'text-slate-300'}`}>
                         {formatBytes(used)}
                     </span>
-                    <span className="text-slate-500">/ {formatBytes(limit)}</span>
+                    <span className="px-2 text-center text-slate-300 whitespace-nowrap">{pct}%</span>
+                    <span className="truncate whitespace-nowrap text-right">{formatBytes(limit)}</span>
                 </div>
-                <div className="h-1.5 rounded-full bg-slate-800">
-                    <div className={`h-full rounded-full ${barColor} transition-all`} style={{ width: `${pct}%` }} />
+                <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
+                    <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${Math.min(rawRatio * 100, 100)}%` }} />
                 </div>
             </div>
         )
@@ -292,6 +411,24 @@ export default function Subscriptions() {
             text: formatTimeAgo(lastRequestAt),
             isRecent,
         }
+    }
+
+    const toggleSort = (key: typeof sortKey) => {
+        if (sortKey === key) {
+            setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+        } else {
+            setSortKey(key)
+            setSortDir(['last_request', 'users', 'quota'].includes(key) ? 'desc' : 'asc')
+        }
+    }
+
+    const renderSortIcon = (key: typeof sortKey) => {
+        if (sortKey !== key) {
+            return <ArrowUpDown size={12} className="inline ml-1 text-slate-500" />
+        }
+        return sortDir === 'asc'
+            ? <ArrowUp size={12} className="inline ml-1 text-white" />
+            : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
@@ -321,44 +458,35 @@ export default function Subscriptions() {
                 {helperText && <p className="mt-1 text-xs text-slate-400">{helperText}</p>}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                <label className="flex items-start gap-3 cursor-pointer min-h-[42px]">
-                    <input
-                        type="checkbox"
-                        checked={intervalEnabled}
-                        onChange={e => setIntervalEnabled(e.target.checked)}
-                        className="mt-1 shrink-0"
-                    />
-                    <div className="space-y-1">
-                        <div className="text-sm font-medium text-slate-200">Emit profile-update-interval</div>
-                    </div>
-                </label>
+            <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                    type="checkbox"
+                    checked={intervalEnabled}
+                    onChange={e => setIntervalEnabled(e.target.checked)}
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0"
+                />
+                <div className="flex-1 text-sm font-medium text-slate-200">Emit profile-update-interval</div>
+                <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={intervalHours}
+                    onChange={e => setIntervalHours(e.target.value)}
+                    disabled={!intervalEnabled}
+                    onClick={e => e.stopPropagation()}
+                    className="w-20 bg-slate-950 border border-slate-800 rounded px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="Hours"
+                />
+            </label>
 
-                <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-1">Refresh Interval (hours)</label>
-                    <input
-                        type="number"
-                        min="1"
-                        step="1"
-                        value={intervalHours}
-                        onChange={e => setIntervalHours(e.target.value)}
-                        disabled={!intervalEnabled}
-                        className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                        placeholder="24"
-                    />
-                </div>
-            </div>
-
-            <label className="flex items-start gap-3 cursor-pointer">
+            <label className="flex items-center gap-3 cursor-pointer">
                 <input
                     type="checkbox"
                     checked={updateAlwaysValue}
                     onChange={e => setUpdateAlwaysValue(e.target.checked)}
-                    className="mt-1 shrink-0"
+                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0"
                 />
-                <div className="space-y-1">
-                    <div className="text-sm font-medium text-slate-200">update-always</div>
-                </div>
+                <div className="flex-1 text-sm font-medium text-slate-200">update-always</div>
             </label>
         </div>
     )
@@ -371,7 +499,7 @@ export default function Subscriptions() {
                         onClick={openDefaults}
                         title="Subscription Defaults"
                         className="h-9 w-9"
-                        disabled={!canWriteUsers}
+                        disabled={!canManagePanelScopedDefaults}
                     >
                         <Settings2 size={16} />
                     </ActionIconButton>
@@ -384,27 +512,37 @@ export default function Subscriptions() {
             {/* Desktop table */}
             <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
+                    <table className="w-full min-w-[980px] text-left border-collapse table-fixed">
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                                <th className="p-4 font-semibold">Name</th>
-                                <th className="p-4 font-semibold">Last Request</th>
-                                <th className="p-4 font-semibold">Users</th>
-                                <th className="p-4 font-semibold">Quota</th>
+                                <th className="w-[260px] p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('name')}>
+                                    Name {renderSortIcon('name')}
+                                </th>
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('last_request')}>
+                                    Last Request {renderSortIcon('last_request')}
+                                </th>
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('users')}>
+                                    Users {renderSortIcon('users')}
+                                </th>
+                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
+                                    Quota {renderSortIcon('quota')}
+                                </th>
                                 <th className="p-4 font-semibold text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {subs.length === 0 ? (
+                            {sortedSubs.length === 0 ? (
                                 <tr>
                                     <td colSpan={5} className="p-12 text-center text-slate-500">
                                         <LinkIcon size={48} className="mx-auto mb-4 opacity-20" />
                                         <p>No subscriptions found.</p>
                                     </td>
                                 </tr>
-                            ) : subs.map(sub => (
+                            ) : sortedSubs.map(sub => (
                                 <tr key={sub.id} className="border-b last:border-0 border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                                    <td className="p-4 text-white font-medium">{sub.name}</td>
+                                    <td className="w-[260px] p-4">
+                                        <div className="max-w-[260px] truncate text-white font-medium" title={sub.name}>{sub.name}</div>
+                                    </td>
                                     <td className="p-4">
                                         {(() => {
                                             const lastRequest = getLastRequestMeta(sub)
@@ -416,7 +554,9 @@ export default function Subscriptions() {
                                             )
                                         })()}
                                     </td>
-                                    <td className="p-4 text-slate-400">{sub.users?.length || 0} users</td>
+                                    <td className="p-4">
+                                        <div className="text-slate-400 text-sm">{sub.users?.length || 0} users</div>
+                                    </td>
                                     <td className="p-4">{getQuotaPill(sub)}</td>
                                     <td className="p-4">
                                         <div className="flex items-center justify-end gap-2">
@@ -444,28 +584,20 @@ export default function Subscriptions() {
 
             {/* Mobile cards */}
             <div className="sm:hidden space-y-3">
-                {subs.length === 0 ? (
+                {sortedSubs.length === 0 ? (
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">
                         <LinkIcon size={48} className="mx-auto mb-4 opacity-20" />
                         <p>No subscriptions found.</p>
                     </div>
-                ) : subs.map(sub => (
+                ) : sortedSubs.map(sub => (
                     <div key={sub.id} className="bg-slate-900 border border-slate-800 rounded-xl">
                         {(() => {
                             const lastRequest = getLastRequestMeta(sub)
                             return (
-                                <div className="p-4 space-y-4">
-                                    <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0 flex-1 space-y-1">
-                                            <p className="text-white font-semibold truncate">{sub.name}</p>
-                                            <div className="flex items-center gap-2">
-                                                <div className={`w-2 h-2 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                                <span className={`text-xs ${lastRequest.textClass}`}>
-                                                    {lastRequest.text}
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <div className="flex gap-2">
+                                <div className="p-4 space-y-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="min-w-0 flex-1 text-white font-semibold truncate">{sub.name}</p>
+                                        <div className="flex gap-2 shrink-0">
                                             {canWriteUsers && (
                                                 <>
                                                     {sub.token && (
@@ -487,10 +619,12 @@ export default function Subscriptions() {
                                         </div>
                                     </div>
 
-                                    <div className="text-xs">
-                                        <div className="text-slate-400">
-                                            {sub.users?.length || 0} users
+                                    <div className="flex items-center justify-between gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <div className={`w-2 h-2 rounded-full shrink-0 ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                            <span className={`text-xs ${lastRequest.textClass}`}>{lastRequest.text}</span>
                                         </div>
+                                        <div className="text-xs text-slate-400 shrink-0">{sub.users?.length || 0} users</div>
                                     </div>
 
                                     <div className="bg-slate-950/50 rounded-lg p-3">
@@ -511,13 +645,13 @@ export default function Subscriptions() {
                 footer={
                     <div className="flex gap-3 justify-end w-full">
                         <Button variant="secondary" onClick={() => setModalState({ type: null })}>Cancel</Button>
-                        <Button variant="primary" onClick={handleSave}>Save</Button>
+                        <Button variant="primary" onClick={handleSave} disabled={!canWriteUsers}>Save</Button>
                     </div>
                 }
             >
                 <div className="space-y-4">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="md:col-span-2">
+                    <div className="grid grid-cols-3 gap-3">
+                        <div className="col-span-2">
                             <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
                             <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="" />
                         </div>
@@ -545,15 +679,76 @@ export default function Subscriptions() {
                         setUpdateAlways
                     )}
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-2">Select Users</label>
-                        <div className="border border-slate-800 rounded bg-slate-950 max-h-[300px] overflow-y-auto">
-                            {usersInfo.map(u => (
-                                <label key={u.name} className="flex items-center p-3 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0">
-                                    <input type="checkbox" checked={selectedUsers.includes(u.name)} onChange={() => toggleUser(u.name)} className="mr-3 shrink-0" />
-                                    <div className="flex-1 truncate text-sm text-slate-200">{u.name}</div>
-                                </label>
-                            ))}
-                            {usersInfo.length === 0 && <div className="p-4 text-center text-slate-500 text-sm">No users available</div>}
+                        <input
+                            type="text"
+                            value={userSearch}
+                            onChange={e => setUserSearch(e.target.value)}
+                            placeholder="Select Users"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-t px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 placeholder:text-slate-400"
+                        />
+                        <div className="border border-t-0 border-slate-800 rounded-b bg-slate-950 h-[300px] overflow-y-auto">
+                            {filteredUsers.map(u => {
+                                const isSelected = selectedProfiles.some(p => p.username === u.name)
+                                const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
+                                const aliasExpanded = expandedAliasUsers.has(u.name)
+                                return (
+                                    <div
+                                        key={u.name}
+                                        className="flex items-center gap-3 px-3 py-2 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0"
+                                        onClick={() => toggleUser(u.name)}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            readOnly
+                                            className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0 pointer-events-none self-start mt-1"
+                                        />
+                                        <div className="flex flex-1 min-w-0 items-start gap-2">
+                                            <div className="w-1/2 min-w-0 space-y-1">
+                                                <div className="truncate text-sm text-slate-200">{u.name}</div>
+                                                {isSelected && aliasExpanded && (
+                                                    <input
+                                                        type="text"
+                                                        value={alias}
+                                                        onChange={e => updateProfileAlias(u.name, e.target.value)}
+                                                        onClick={e => e.stopPropagation()}
+                                                        onBlur={() => {
+                                                            if (!alias.trim()) toggleAlias(u.name)
+                                                        }}
+                                                        placeholder="Alias"
+                                                        className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                                                    />
+                                                )}
+                                            </div>
+                                            <div className="w-1/2 flex items-start gap-1">
+                                                <div className="flex-1 flex flex-wrap justify-end gap-1.5">
+                                                    {(u.inbound_tags && u.inbound_tags.length > 0) ? (
+                                                        u.inbound_tags.map(tag => (
+                                                            <Badge key={tag} variant="info" className="max-w-[150px]" title={tag}>{tag}</Badge>
+                                                        ))
+                                                    ) : (
+                                                        <Badge variant="neutral">All</Badge>
+                                                    )}
+                                                </div>
+                                                {isSelected && (
+                                                    <button
+                                                        onClick={e => { e.stopPropagation(); toggleAlias(u.name) }}
+                                                        title={aliasExpanded ? 'Remove alias' : 'Set alias'}
+                                                        className={`shrink-0 p-1 rounded border transition-all ${aliasExpanded ? 'bg-blue-500/15 border-blue-500/50 text-blue-400 hover:bg-blue-500/25' : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:bg-slate-700'}`}
+                                                    >
+                                                        <Tag size={11} />
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                            {filteredUsers.length === 0 && (
+                                <div className="p-4 text-center text-slate-500 text-sm">
+                                    {userSearch.trim() ? 'No users match your search' : 'No users available'}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -566,18 +761,22 @@ export default function Subscriptions() {
                 footer={
                     <div className="flex gap-3 justify-end w-full">
                         <Button variant="secondary" onClick={() => setDefaultsModalOpen(false)}>Cancel</Button>
-                        <Button variant="primary" onClick={handleSaveDefaults}>Save Defaults</Button>
+                        <Button variant="primary" onClick={handleSaveDefaults} disabled={!canManagePanelScopedDefaults}>Save Defaults</Button>
                     </div>
                 }
             >
                 <div className="space-y-4">
+                    {defaultsQuery.isLoading && (
+                        <p className="text-sm text-slate-500">Loading your defaults for this panel account...</p>
+                    )}
                     {renderRefreshPolicyFields(
                         defaultIntervalEnabled,
                         setDefaultIntervalEnabled,
                         defaultIntervalHours,
                         setDefaultIntervalHours,
                         defaultUpdateAlways,
-                        setDefaultUpdateAlways
+                        setDefaultUpdateAlways,
+                        'These are your defaults for the current panel account.'
                     )}
                 </div>
             </Modal>

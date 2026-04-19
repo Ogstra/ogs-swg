@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef } from 'react'
-import type { Dispatch, SetStateAction } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import type { Dispatch, SetStateAction, UIEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, FeatureFlags } from '../../services/api'
+import { useSearchParams } from 'react-router-dom'
+import { api, FeatureFlags, SamplerHistoryEntry, Subscription, SubscriptionRequestHistoryEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
-import { Save, RefreshCw, UserCog, Shield, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
+import { Save, RefreshCw, UserCog, Shield, ShieldAlert, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -15,6 +16,7 @@ import SingboxConfigEditor from '../../components/SingboxConfigEditor'
 import { Tabs } from '../../components/ui/Tabs'
 import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './components/PanelUsers'
+import SecurityTab from './components/SecurityTab'
 import { WireGuardRawConfigModal } from './components/WireGuardRawConfigModal'
 import {
     WG_INTERFACE_DEFAULTS,
@@ -26,17 +28,42 @@ import {
 
 type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
 type DbInfo = { rows: number; sizeMB: number }
-type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string }
+type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; activeUserWindowMinutes: number; detailChartTargetPoints: number }
+type PendingServiceAction = { service: string; action: 'restart' | 'stop' | 'start' }
+const SUBSCRIPTION_HISTORY_PAGE_SIZE = 20
+
+const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
+    defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : 'singbox',
+    refreshMs: prefs?.refresh_ms && prefs.refresh_ms >= 1000 ? prefs.refresh_ms : 10000,
+    defaultRange: prefs?.default_range || '24h',
+    activeUserWindowMinutes: prefs?.active_user_window_minutes && prefs.active_user_window_minutes >= 1 ? prefs.active_user_window_minutes : 5,
+    detailChartTargetPoints: [50, 100, 150, 200].includes(Number(prefs?.detail_chart_target_points))
+        ? Number(prefs?.detail_chart_target_points)
+        : 200,
+})
 
 export default function Settings() {
+    const [searchParams, setSearchParams] = useSearchParams()
+    const queryClient = useQueryClient()
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
     const canWriteSettings = !!permissions?.can_write_settings
     const canWriteConfig = !!permissions?.can_write_config
+    const canReadUsers = !!permissions?.can_read_users
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<{ rows: number; sizeMB: number }>({ rows: 0, sizeMB: 0 })
-    const [samplerHistory, setSamplerHistory] = useState<any[]>([])
+    const [samplerHistory, setSamplerHistory] = useState<SamplerHistoryEntry[]>([])
+    const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
+    const [subscriptionHistoryNextOffset, setSubscriptionHistoryNextOffset] = useState(0)
+    const [subscriptionHistoryHasMore, setSubscriptionHistoryHasMore] = useState(false)
+    const [subscriptionHistoryRefreshing, setSubscriptionHistoryRefreshing] = useState(false)
+    const [subscriptionHistoryLoadingMore, setSubscriptionHistoryLoadingMore] = useState(false)
+    const subscriptionRequestHistoryRef = useRef<SubscriptionRequestHistoryEntry[]>([])
+    const subscriptionHistoryRefreshingRef = useRef(false)
+    const subscriptionHistoryLoadingMoreRef = useRef(false)
+    const [subscriptionHistorySubId, setSubscriptionHistorySubId] = useState('all')
+    const subscriptionHistorySubIdRef = useRef(0)
     const [features, setFeatures] = useState<FeatureFlags>({
         enable_singbox: true,
         enable_wireguard: true,
@@ -50,14 +77,25 @@ export default function Settings() {
         aggregation_enabled: false,
         aggregation_days: 7,
     })
-    const [historyLimit, setHistoryLimit] = useState(10)
+    const [historyLimit, setHistoryLimit] = useState(20)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
+    const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction | null>(null)
+    const [serviceActionLoading, setServiceActionLoading] = useState(false)
+    const [pruneConfirmOpen, setPruneConfirmOpen] = useState(false)
+    const [pruneLoading, setPruneLoading] = useState(false)
     const [publicIP, setPublicIP] = useState<string>('')
     const [subscriptionDomain, setSubscriptionDomain] = useState<string>('')
     const [dashboardPrefs, setDashboardPrefs] = useState<DashboardPrefs>({
         defaultService: 'singbox',
         refreshMs: 10000,
-        defaultRange: '24h'
+        defaultRange: '24h',
+        activeUserWindowMinutes: 5,
+        detailChartTargetPoints: 200,
+    })
+    const dashboardPrefsQuery = useQuery({
+        queryKey: ['dashboard-preferences'],
+        queryFn: () => api.getDashboardPreferences(),
+        placeholderData: previousData => previousData,
     })
     const featuresQuery = useQuery({
         queryKey: ['settings-features'],
@@ -75,6 +113,14 @@ export default function Settings() {
         queryKey: ['settings-sampler-history', historyLimit],
         queryFn: () => api.getSamplerHistory(historyLimit),
         placeholderData: previousData => previousData,
+        refetchInterval: Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000),
+    })
+
+    const subscriptionsQuery = useQuery({
+        queryKey: ['settings-subscriptions-for-history-filter'],
+        queryFn: () => api.getSubscriptions(),
+        enabled: canReadUsers,
+        placeholderData: previousData => previousData,
     })
 
     const publicIPQuery = useQuery({
@@ -90,20 +136,9 @@ export default function Settings() {
     })
 
     useEffect(() => {
-        const savedPrefs = localStorage.getItem('dashboard_prefs')
-        if (savedPrefs) {
-            try {
-                const parsed = JSON.parse(savedPrefs)
-                setDashboardPrefs({
-                    defaultService: parsed.defaultService === 'wireguard' ? 'wireguard' : 'singbox',
-                    refreshMs: parsed.refreshMs && parsed.refreshMs >= 1000 ? parsed.refreshMs : 10000,
-                    defaultRange: parsed.defaultRange || '24h'
-                })
-            } catch {
-                // ignore parse errors
-            }
-        }
-    }, [])
+        if (!dashboardPrefsQuery.data) return
+        setDashboardPrefs(normalizeDashboardPrefs(dashboardPrefsQuery.data))
+    }, [dashboardPrefsQuery.data])
 
     useEffect(() => {
         if (!featuresQuery.data) return
@@ -144,6 +179,83 @@ export default function Settings() {
         setSubscriptionDomain(subDomainQuery.data || '')
     }, [subDomainQuery.data])
 
+    useEffect(() => {
+        subscriptionRequestHistoryRef.current = subscriptionRequestHistory
+    }, [subscriptionRequestHistory])
+
+    const selectedSubscriptionHistorySubId = subscriptionHistorySubId === 'all'
+        ? 0
+        : Number.parseInt(subscriptionHistorySubId, 10) || 0
+
+    useEffect(() => {
+        subscriptionHistorySubIdRef.current = selectedSubscriptionHistorySubId
+    }, [selectedSubscriptionHistorySubId])
+
+    const handleSubscriptionHistorySubChange = useCallback((value: string) => {
+        subscriptionRequestHistoryRef.current = []
+        setSubscriptionRequestHistory([])
+        setSubscriptionHistoryNextOffset(0)
+        setSubscriptionHistoryHasMore(false)
+        setSubscriptionHistorySubId(value)
+    }, [])
+
+    const refreshSubscriptionRequestHistory = useCallback(async () => {
+        if (subscriptionHistoryRefreshingRef.current) return
+        const subID = selectedSubscriptionHistorySubId
+        subscriptionHistoryRefreshingRef.current = true
+        setSubscriptionHistoryRefreshing(true)
+        try {
+            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
+            if (subscriptionHistorySubIdRef.current !== subID) return
+            const incomingIds = new Set(page.items.map(item => item.id))
+            const merged = [
+                ...page.items,
+                ...subscriptionRequestHistoryRef.current.filter(item => !incomingIds.has(item.id)),
+            ]
+            subscriptionRequestHistoryRef.current = merged
+            setSubscriptionRequestHistory(merged)
+            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
+            setSubscriptionHistoryHasMore(page.has_more)
+        } finally {
+            subscriptionHistoryRefreshingRef.current = false
+            setSubscriptionHistoryRefreshing(false)
+        }
+    }, [selectedSubscriptionHistorySubId])
+
+    const loadMoreSubscriptionRequestHistory = useCallback(async () => {
+        if (subscriptionHistoryLoadingMoreRef.current || !subscriptionHistoryHasMore) return
+
+        const offset = subscriptionHistoryNextOffset
+        const subID = selectedSubscriptionHistorySubId
+        subscriptionHistoryLoadingMoreRef.current = true
+        setSubscriptionHistoryLoadingMore(true)
+        try {
+            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, offset, subID)
+            if (subscriptionHistorySubIdRef.current !== subID) return
+            const existingIds = new Set(subscriptionRequestHistoryRef.current.map(item => item.id))
+            const merged = [
+                ...subscriptionRequestHistoryRef.current,
+                ...page.items.filter(item => !existingIds.has(item.id)),
+            ]
+            subscriptionRequestHistoryRef.current = merged
+            setSubscriptionRequestHistory(merged)
+            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
+            setSubscriptionHistoryHasMore(page.has_more)
+        } finally {
+            subscriptionHistoryLoadingMoreRef.current = false
+            setSubscriptionHistoryLoadingMore(false)
+        }
+    }, [selectedSubscriptionHistorySubId, subscriptionHistoryHasMore, subscriptionHistoryNextOffset])
+
+    useEffect(() => {
+        void refreshSubscriptionRequestHistory()
+        const intervalMs = Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000)
+        const interval = window.setInterval(() => {
+            void refreshSubscriptionRequestHistory()
+        }, intervalMs)
+        return () => window.clearInterval(interval)
+    }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, refreshSubscriptionRequestHistory])
+
     const loadFeatures = async () => {
         await featuresQuery.refetch()
     }
@@ -153,7 +265,10 @@ export default function Settings() {
     }
 
     const loadSamplerHistory = async () => {
-        await samplerHistoryQuery.refetch()
+        await Promise.all([
+            samplerHistoryQuery.refetch(),
+            refreshSubscriptionRequestHistory(),
+        ])
     }
 
     const loadAll = async () => {
@@ -257,22 +372,27 @@ export default function Settings() {
             toastError('Retention is disabled')
             return
         }
-        if (!confirm('Prune old samples now?')) return
+        setPruneConfirmOpen(true)
+    }
+
+    const handleConfirmPruneNow = async () => {
+        setPruneLoading(true)
         try {
             const res = await api.pruneNow()
             success(`Pruned ${res.deleted} samples`)
             await loadDbStats()
+            setPruneConfirmOpen(false)
         } catch (err) {
             toastError('Prune failed: ' + err)
+        } finally {
+            setPruneLoading(false)
         }
     }
 
-    const handleServiceAction = async (service: string, action: 'restart' | 'stop' | 'start') => {
-        if (!canWriteConfig) {
-            toastError('No write permission for service control')
-            return
-        }
-        if (!confirm(`Are you sure you want to ${action} ${service}?`)) return
+    const handleConfirmServiceAction = async () => {
+        if (!pendingServiceAction) return
+        const { service, action } = pendingServiceAction
+        setServiceActionLoading(true)
         try {
             if (action === 'restart') {
                 await api.restartService(service)
@@ -283,9 +403,20 @@ export default function Settings() {
             }
             await loadDbStats()
             success(`${service} ${action}ed successfully`)
+            setPendingServiceAction(null)
         } catch (err) {
             toastError(`Failed to ${action} ${service}: ` + err)
+        } finally {
+            setServiceActionLoading(false)
         }
+    }
+
+    const handleServiceAction = (service: string, action: 'restart' | 'stop' | 'start') => {
+        if (!canWriteConfig) {
+            toastError('No write permission for service control')
+            return
+        }
+        setPendingServiceAction({ service, action })
     }
 
     const tabs = [
@@ -324,6 +455,8 @@ export default function Settings() {
                     dashboardPrefs={dashboardPrefs}
                     setDashboardPrefs={setDashboardPrefs}
                     success={success}
+                    toastError={toastError}
+                    queryClient={queryClient}
                 />
             )
         },
@@ -341,12 +474,33 @@ export default function Settings() {
                     handleTogglePause={handleTogglePause}
                     samplerRunning={samplerRunning}
                     handleSaveFeatures={handleSaveFeatures}
-                    loadDbStats={loadDbStats}
+                    loadDatabasePanel={loadAll}
                     historyLimit={historyLimit}
                     setHistoryLimit={setHistoryLimit}
                     samplerHistory={samplerHistory}
+                    subscriptionRequestHistory={subscriptionRequestHistory}
+                    subscriptionHistorySubs={subscriptionsQuery.data || []}
+                    subscriptionHistorySubId={subscriptionHistorySubId}
+                    setSubscriptionHistorySubId={handleSubscriptionHistorySubChange}
+                    subscriptionHistorySubsLoading={subscriptionsQuery.isLoading}
+                    canReadUsers={canReadUsers}
+                    subscriptionHistoryHasMore={subscriptionHistoryHasMore}
+                    subscriptionHistoryRefreshing={subscriptionHistoryRefreshing}
+                    subscriptionHistoryLoadingMore={subscriptionHistoryLoadingMore}
+                    loadMoreSubscriptionRequestHistory={loadMoreSubscriptionRequestHistory}
                 />
             )
+        },
+        {
+            id: 'security',
+            label: <span className="flex items-center gap-2"><ShieldAlert size={16} /> Sub Security</span>,
+            content: (
+                <SecurityTab
+                    canWriteSettings={canWriteSettings}
+                    success={success}
+                    toastError={toastError}
+                />
+            ),
         },
         ...(permissions?.can_read_panel_users ? [{
             id: 'panel-users',
@@ -358,6 +512,19 @@ export default function Settings() {
         if (tab.id === 'wireguard-interfaces') return !!permissions?.can_read_wireguard
         return true
     })
+
+    const validTabIds = tabs.map(tab => tab.id)
+    const requestedTab = searchParams.get('tab') || ''
+    const activeTab = validTabIds.includes(requestedTab) ? requestedTab : tabs[0]?.id
+
+    useEffect(() => {
+        if (!tabs.length || !activeTab) return
+        if (requestedTab === activeTab) return
+
+        const nextParams = new URLSearchParams(searchParams)
+        nextParams.set('tab', activeTab)
+        setSearchParams(nextParams, { replace: true })
+    }, [activeTab, requestedTab, searchParams, setSearchParams, tabs.length])
 
     return (
         <div className="h-full min-h-0 flex flex-col gap-0 sm:gap-6">
@@ -378,6 +545,12 @@ export default function Settings() {
 
             <Tabs
                 tabs={tabs}
+                activeTab={activeTab}
+                onTabChange={(tabId) => {
+                    const nextParams = new URLSearchParams(searchParams)
+                    nextParams.set('tab', tabId)
+                    setSearchParams(nextParams, { replace: true })
+                }}
                 className="flex-1 min-h-0"
                 headerRight={
                     <button
@@ -390,6 +563,37 @@ export default function Settings() {
                     </button>
                 }
             />
+
+            <ConfirmModal
+                isOpen={!!pendingServiceAction}
+                onClose={() => {
+                    if (serviceActionLoading) return
+                    setPendingServiceAction(null)
+                }}
+                onConfirm={handleConfirmServiceAction}
+                title="Confirm service action"
+                message={pendingServiceAction ? `Are you sure you want to ${pendingServiceAction.action} ${pendingServiceAction.service}?` : undefined}
+                confirmLabel={
+                    pendingServiceAction
+                        ? pendingServiceAction.action.charAt(0).toUpperCase() + pendingServiceAction.action.slice(1)
+                        : 'Confirm'
+                }
+                confirmTone={pendingServiceAction?.action === 'stop' ? 'danger' : 'primary'}
+                isLoading={serviceActionLoading}
+            />
+            <ConfirmModal
+                isOpen={pruneConfirmOpen}
+                onClose={() => {
+                    if (pruneLoading) return
+                    setPruneConfirmOpen(false)
+                }}
+                onConfirm={handleConfirmPruneNow}
+                title="Prune old samples?"
+                message="This will delete samples outside the configured retention window."
+                confirmLabel="Prune"
+                confirmTone="danger"
+                isLoading={pruneLoading}
+            />
         </div>
     )
 }
@@ -398,26 +602,45 @@ function DashboardTab({
     dashboardPrefs,
     setDashboardPrefs,
     success,
+    toastError,
+    queryClient,
 }: {
     dashboardPrefs: DashboardPrefs
     setDashboardPrefs: Dispatch<SetStateAction<DashboardPrefs>>
     success: (msg: string) => void
+    toastError: (msg: string) => void
+    queryClient: ReturnType<typeof useQueryClient>
 }) {
-    const handleSave = () => {
+    const handleSave = async () => {
         const normalized = {
             defaultService: dashboardPrefs.defaultService || 'singbox',
             refreshMs: Math.max(1000, Number(dashboardPrefs.refreshMs) || 10000),
-            defaultRange: dashboardPrefs.defaultRange || '24h'
+            defaultRange: dashboardPrefs.defaultRange || '24h',
+            activeUserWindowMinutes: Math.max(1, Number(dashboardPrefs.activeUserWindowMinutes) || 5),
+            detailChartTargetPoints: [50, 100, 150, 200].includes(Number(dashboardPrefs.detailChartTargetPoints))
+                ? Number(dashboardPrefs.detailChartTargetPoints)
+                : 200,
         }
-        setDashboardPrefs(normalized)
-        localStorage.setItem('dashboard_prefs', JSON.stringify(normalized))
-        success('Dashboard preferences saved')
+        try {
+            await api.updateDashboardPreferences({
+                default_service: normalized.defaultService,
+                refresh_ms: normalized.refreshMs,
+                default_range: normalized.defaultRange as StoredDashboardPreferences['default_range'],
+                active_user_window_minutes: normalized.activeUserWindowMinutes,
+                detail_chart_target_points: normalized.detailChartTargetPoints,
+            })
+            setDashboardPrefs(normalized)
+            await queryClient.invalidateQueries({ queryKey: ['dashboard-preferences'] })
+            success('Dashboard preferences saved')
+        } catch (err) {
+            toastError('Failed to save dashboard preferences: ' + err)
+        }
     }
 
     return (
         <div className="space-y-4 sm:space-y-6">
             <Card title="Dashboard Preferences">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <div className="space-y-1">
                         <label className="text-xs font-medium text-slate-400">Default Service</label>
                         <select
@@ -452,6 +675,29 @@ function DashboardTab({
                             <option value="24h">Last 24 Hours</option>
                             <option value="1w">Last Week</option>
                             <option value="1m">Last Month</option>
+                        </select>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-400">Active User Window (minutes)</label>
+                        <input
+                            type="number"
+                            min={1}
+                            value={dashboardPrefs.activeUserWindowMinutes}
+                            onChange={e => setDashboardPrefs(prev => ({ ...prev, activeUserWindowMinutes: Math.max(1, Number(e.target.value) || 5) }))}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                        />
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-xs font-medium text-slate-400">Selected User Chart Samples</label>
+                        <select
+                            value={dashboardPrefs.detailChartTargetPoints}
+                            onChange={e => setDashboardPrefs(prev => ({ ...prev, detailChartTargetPoints: Number(e.target.value) || 200 }))}
+                            className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                        >
+                            <option value={50}>50 samples</option>
+                            <option value={100}>100 samples</option>
+                            <option value={150}>150 samples</option>
+                            <option value={200}>200 samples</option>
                         </select>
                     </div>
                 </div>
@@ -508,8 +754,11 @@ function GeneralTab({
                         <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_singbox ? 'opacity-50' : ''}`}>
                             <div className="flex items-center justify-between">
                                 <div className="font-semibold text-white">sing-box</div>
-                                <Badge variant={serviceStatus.singbox === true ? 'success' : serviceStatus.singbox === false ? 'error' : 'neutral'}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.singbox === true ? 'bg-emerald-500' : serviceStatus.singbox === false ? 'bg-red-500' : 'bg-slate-500'}`} />
+                                <Badge
+                                    variant={serviceStatus.singbox === true ? 'success' : serviceStatus.singbox === false ? 'error' : 'neutral'}
+                                    className="whitespace-nowrap"
+                                >
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${serviceStatus.singbox === true ? 'bg-emerald-500' : serviceStatus.singbox === false ? 'bg-red-500' : 'bg-slate-500'}`} />
                                     {serviceStatus.singbox === true ? 'Running' : serviceStatus.singbox === false ? 'Stopped' : 'Unknown'}
                                 </Badge>
                             </div>
@@ -539,8 +788,11 @@ function GeneralTab({
                         <div className={`p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-4 ${!features.enable_wireguard ? 'opacity-50' : ''}`}>
                             <div className="flex items-center justify-between">
                                 <div className="font-semibold text-white">WireGuard</div>
-                                <Badge variant={serviceStatus.wireguard === true ? 'success' : serviceStatus.wireguard === false ? 'error' : 'neutral'}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${serviceStatus.wireguard === true ? 'bg-emerald-500' : serviceStatus.wireguard === false ? 'bg-red-500' : 'bg-slate-500'}`} />
+                                <Badge
+                                    variant={serviceStatus.wireguard === true ? 'success' : serviceStatus.wireguard === false ? 'error' : 'neutral'}
+                                    className="whitespace-nowrap"
+                                >
+                                    <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${serviceStatus.wireguard === true ? 'bg-emerald-500' : serviceStatus.wireguard === false ? 'bg-red-500' : 'bg-slate-500'}`} />
                                     {serviceStatus.wireguard === true ? 'Running' : serviceStatus.wireguard === false ? 'Stopped' : 'Unknown'}
                                 </Badge>
                             </div>
@@ -619,7 +871,7 @@ function GeneralTab({
             </Card>
 
             {/* Features & Configuration */}
-            <Card
+                <Card
                 title="System Features"
                 action={
                     <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
@@ -917,8 +1169,8 @@ function WireGuardInterfacesTab() {
                         >
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <Badge variant={iface.is_up ? 'success' : 'neutral'}>
-                                        <div className={`w-1.5 h-1.5 rounded-full ${iface.is_up ? 'bg-emerald-500' : 'bg-slate-500'}`} />
+                                    <Badge variant={iface.is_up ? 'success' : 'neutral'} className="whitespace-nowrap">
+                                        <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${iface.is_up ? 'bg-emerald-500' : 'bg-slate-500'}`} />
                                         {iface.is_up ? 'Up' : 'Down'}
                                     </Badge>
                                     <div className="flex gap-1.5">
@@ -1150,10 +1402,20 @@ function DatabaseTab({
     handleTogglePause,
     samplerRunning,
     handleSaveFeatures,
-    loadDbStats,
+    loadDatabasePanel,
     historyLimit,
     setHistoryLimit,
     samplerHistory,
+    subscriptionRequestHistory,
+    subscriptionHistorySubs,
+    subscriptionHistorySubId,
+    setSubscriptionHistorySubId,
+    subscriptionHistorySubsLoading,
+    canReadUsers,
+    subscriptionHistoryHasMore,
+    subscriptionHistoryRefreshing,
+    subscriptionHistoryLoadingMore,
+    loadMoreSubscriptionRequestHistory,
 }: {
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
@@ -1164,38 +1426,285 @@ function DatabaseTab({
     handleTogglePause: () => void
     samplerRunning: boolean
     handleSaveFeatures: () => void
-    loadDbStats: () => Promise<void>
+    loadDatabasePanel: () => Promise<void>
     historyLimit: number
     setHistoryLimit: Dispatch<SetStateAction<number>>
-    samplerHistory: any[]
+    samplerHistory: SamplerHistoryEntry[]
+    subscriptionRequestHistory: SubscriptionRequestHistoryEntry[]
+    subscriptionHistorySubs: Subscription[]
+    subscriptionHistorySubId: string
+    setSubscriptionHistorySubId: (value: string) => void
+    subscriptionHistorySubsLoading: boolean
+    canReadUsers: boolean
+    subscriptionHistoryHasMore: boolean
+    subscriptionHistoryRefreshing: boolean
+    subscriptionHistoryLoadingMore: boolean
+    loadMoreSubscriptionRequestHistory: () => Promise<void>
 }) {
-    const dbCardRef = useRef<HTMLDivElement | null>(null)
-    const [dbCardHeight, setDbCardHeight] = useState<number | null>(null)
+    const [databaseCardHeight, setDatabaseCardHeight] = useState<number | null>(null)
+    const databaseCardRef = useRef<HTMLDivElement | null>(null)
 
     useEffect(() => {
-        const target = dbCardRef.current
-        if (!target || typeof ResizeObserver === 'undefined') return
+        const element = databaseCardRef.current
+        if (!element) return
 
-        const updateHeight = () => setDbCardHeight(target.getBoundingClientRect().height)
+        const updateHeight = () => {
+            if (window.innerWidth < 1024) {
+                setDatabaseCardHeight(null)
+                return
+            }
+            setDatabaseCardHeight(element.getBoundingClientRect().height)
+        }
+
         updateHeight()
-        const observer = new ResizeObserver(updateHeight)
-        observer.observe(target)
+
+        if (typeof ResizeObserver === 'undefined') {
+            window.addEventListener('resize', updateHeight)
+            return () => window.removeEventListener('resize', updateHeight)
+        }
+
+        const observer = new ResizeObserver(() => updateHeight())
+        observer.observe(element)
+
         return () => observer.disconnect()
-    }, [])
+    }, [features, dbInfo.rows, dbInfo.sizeMB, canWriteSettings, samplerRunning])
+
+    const formatHistoryTime = (value?: number | null) => {
+        if (!value || Number.isNaN(value)) return 'Unknown'
+        return new Date(value * 1000).toLocaleTimeString()
+    }
+
+    const formatHistoryDateTime = (value?: number | null) => {
+        if (!value || Number.isNaN(value)) return 'Unknown'
+        return new Date(value * 1000).toLocaleString()
+    }
+
+    const parseClientIdentity = (userAgent?: string) => {
+        const ua = (userAgent || '').trim()
+        if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '', darwinVersion: '', architecture: '' }
+
+        const desktopClientMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z][A-Za-z0-9 _.-]{0,31})\/([A-Za-z0-9._-]{1,64})/)
+        const productMatch = ua.match(/^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})\/([A-Za-z0-9._-]{1,64})/)
+        const desktopClientName = desktopClientMatch && !['mozilla', 'dalvik'].includes(desktopClientMatch[1].toLowerCase()) ? desktopClientMatch[1].trim() : ''
+        const browserMatch = (() => {
+            if (ua.includes('Edg/')) return { name: 'Edge', version: (ua.match(/Edg\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('OPR/')) return { name: 'Opera', version: (ua.match(/OPR\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('Chrome/')) return { name: 'Chrome', version: (ua.match(/Chrome\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('Firefox/')) return { name: 'Firefox', version: (ua.match(/Firefox\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            if (ua.includes('Safari/') && ua.includes('Version/')) return { name: 'Safari', version: (ua.match(/Version\/([0-9A-Za-z._-]+)/)?.[1] || '').trim() }
+            return null
+        })()
+        const clientName = desktopClientName || (productMatch && !['mozilla', 'dalvik'].includes(productMatch[1].toLowerCase()) ? productMatch[1].trim() : '') || browserMatch?.name || ''
+        const clientVersion = desktopClientName && desktopClientMatch ? desktopClientMatch[3].trim() : (clientName && productMatch ? productMatch[2].trim() : '')
+        const resolvedClientVersion = browserMatch?.name ? browserMatch.version : clientVersion
+        const clientPlatform = desktopClientName && desktopClientMatch ? desktopClientMatch[2].trim() : ''
+
+        const appleModelMatch = ua.match(/\b(iPhone\d{1,2},\d+|iPad\d{1,2},\d+|iPod\d{1,2},\d+|MacBook(?:Air|Pro)?\d{1,2},\d+|Mac\d{1,2},\d+)\b/)
+        const samsungModelMatch = ua.match(/\b(SM-[A-Z0-9]+)\b/)
+        const androidModelMatch = ua.match(/Android\s+[0-9][0-9A-Za-z._-]*\s*;\s*([A-Za-z0-9 _.-]{2,64}?)(?:\s+Build\/|[;)])/)
+        const androidVersionMatch = ua.match(/Android\s+([0-9][0-9A-Za-z._-]*)/)
+        const macOSVersionMatch = ua.match(/Mac OS X\s+([0-9_]+)/)
+        const darwinVersionMatch = ua.match(/Darwin\/([0-9.]+)/)
+        const windowsVersionMatch = ua.match(/Windows NT\s+([0-9.]+)/)
+        const architectureMatch = ua.match(/\b(arm64|aarch64|x86_64|amd64)\b/i)
+
+        let deviceModel = appleModelMatch?.[1] || samsungModelMatch?.[1] || ''
+        if (!deviceModel && androidModelMatch?.[1]) {
+            const model = androidModelMatch[1].trim()
+            if (!['wv', 'mobile'].includes(model.toLowerCase())) {
+                deviceModel = model
+            }
+        }
+        if (!deviceModel && clientPlatform) {
+            if (/^(pc|desktop)$/i.test(clientPlatform)) deviceModel = 'PC'
+            else if (/^(mac|macos)$/i.test(clientPlatform)) deviceModel = 'Mac'
+            else if (/^windows$/i.test(clientPlatform)) deviceModel = 'PC'
+            else if (/^linux$/i.test(clientPlatform)) deviceModel = 'PC'
+            else deviceModel = clientPlatform
+        }
+        if (!deviceModel && ua.includes('Macintosh')) {
+            deviceModel = 'Mac'
+        }
+
+        let deviceOS = ''
+        if (deviceModel.startsWith('iPhone') || deviceModel.startsWith('iPod')) deviceOS = 'iOS'
+        else if (deviceModel.startsWith('iPad')) deviceOS = 'iPadOS'
+        else if (deviceModel.startsWith('Mac') || ua.includes('Macintosh')) deviceOS = 'macOS'
+        else if (ua.includes('Android')) deviceOS = 'Android'
+        else if (ua.includes('Windows NT')) deviceOS = 'Windows'
+        else if (/^mac(os)?$/i.test(clientPlatform)) deviceOS = 'macOS'
+        else if (/^windows$/i.test(clientPlatform)) deviceOS = 'Windows'
+        else if (/^linux$/i.test(clientPlatform)) deviceOS = 'Linux'
+        else if (/^android$/i.test(clientPlatform)) deviceOS = 'Android'
+        else if (/^ios$/i.test(clientPlatform)) deviceOS = 'iOS'
+        else if (/^ipados$/i.test(clientPlatform)) deviceOS = 'iPadOS'
+
+        return {
+            clientName,
+            clientVersion: resolvedClientVersion,
+            deviceModel,
+            deviceOS,
+            deviceOSVersion: androidVersionMatch?.[1]?.trim() || (macOSVersionMatch?.[1] || '').replace(/_/g, '.') || windowsVersionMatch?.[1]?.trim() || '',
+            darwinVersion: darwinVersionMatch?.[1]?.trim() || '',
+            architecture: architectureMatch?.[1]?.toLowerCase() || '',
+        }
+    }
+
+    const normalizeVerboseAppleOS = (primary?: string, secondary?: string) => {
+        const normalizeHistoryValue = (value?: string) => {
+            const normalized = (value || '').trim()
+            if (!normalized) return ''
+            if (['0', 'unknown', 'n/a', 'null', 'nil', 'none', '-'].includes(normalized.toLowerCase())) return ''
+            return normalized
+        }
+        const first = normalizeHistoryValue(primary)
+        const second = normalizeHistoryValue(secondary)
+        const parseVerbose = (value: string) => value.match(/^(macOS|iOS|iPadOS)\s+Version\s+([0-9.]+)(?:\s+\(Build\s+([^)]+)\))?$/i)
+        const firstMatch = parseVerbose(first)
+        const secondMatch = parseVerbose(second)
+        const match = firstMatch || secondMatch
+        return {
+            osName: match?.[1] || first || '',
+            osVersion: match?.[2] || second || '',
+            osBuild: match?.[3] || '',
+        }
+    }
+
+    const resolveDisplayedDevice = (run: SubscriptionRequestHistoryEntry) => {
+        const normalizeHistoryValue = (value?: string) => {
+            const normalized = (value || '').trim()
+            if (!normalized) return ''
+            if (['0', 'unknown', 'n/a', 'null', 'nil', 'none', '-'].includes(normalized.toLowerCase())) return ''
+            return normalized
+        }
+        const parsed = parseClientIdentity(run.user_agent)
+        const verboseOS = normalizeVerboseAppleOS(run.device_os, run.device_os_version)
+        const osName = verboseOS.osName || parsed.deviceOS
+        let deviceModel = normalizeHistoryValue(run.device_model) || parsed.deviceModel
+
+        if (osName === 'macOS') {
+            if (!deviceModel || /^(iphone|ipad|ipod)$/i.test(deviceModel)) {
+                deviceModel = parsed.deviceModel || 'Mac'
+            }
+        }
+
+        const osVersion = verboseOS.osVersion || parsed.deviceOSVersion
+        // On Windows, device_model may be "HOSTNAME" or "HOSTNAME/user" — extract both parts
+        let windowsHostname = ''
+        let windowsUser = ''
+        if (run.device_os === 'Windows' && deviceModel && !['pc', 'desktop', 'laptop', 'windows'].includes(deviceModel.toLowerCase())) {
+            const slashIdx = deviceModel.indexOf('/')
+            if (slashIdx !== -1) {
+                windowsHostname = deviceModel.slice(0, slashIdx).trim()
+                windowsUser = deviceModel.slice(slashIdx + 1).trim()
+            } else {
+                windowsHostname = deviceModel
+            }
+        }
+        if (run.device_os === 'Windows') deviceModel = 'Windows'
+
+        return {
+            parsed,
+            deviceModel,
+            windowsHostname,
+            windowsUser,
+            osName,
+            osVersion,
+            osBuild: verboseOS.osBuild,
+        }
+    }
+
+    const formatClientLabel = (run: SubscriptionRequestHistoryEntry) => {
+        const { parsed, deviceModel } = resolveDisplayedDevice(run)
+        const clientName = parsed.clientName || run.user_agent
+        if (deviceModel && clientName) return `${clientName} on ${deviceModel}`
+        if (deviceModel) return deviceModel
+        if (clientName) return clientName
+        return 'Unknown client'
+    }
+
+    const formatDeviceDetails = (run: SubscriptionRequestHistoryEntry) => {
+        const { parsed, osName, osVersion, windowsHostname, windowsUser } = resolveDisplayedDevice(run)
+        const details: string[] = []
+        if (osName && osVersion) details.push(`${osName} ${osVersion}`)
+        else if (osName) details.push(osName)
+        else if (osVersion) details.push(osVersion)
+        if (windowsUser) details.push(windowsUser)
+        if (windowsHostname) details.push(windowsHostname)
+        if (parsed.darwinVersion && parsed.darwinVersion !== osVersion) {
+            details.push(`Darwin ${parsed.darwinVersion}`)
+        }
+        if (osName === 'macOS' && parsed.architecture) {
+            details.push(parsed.architecture)
+        }
+        return details.join(' • ')
+    }
+
+    const formatAppVersion = (run: SubscriptionRequestHistoryEntry) => {
+        const parsed = parseClientIdentity(run.user_agent)
+        const appVersion = (run.app_version || '').trim()
+        if (appVersion && appVersion !== '0') return `App ${appVersion}`
+        if (parsed.clientVersion) return `Build ${parsed.clientVersion}`
+        return ''
+    }
+
+    const getSubscriptionHistoryBadge = (run: SubscriptionRequestHistoryEntry) => {
+        if (Boolean(run.blocked)) {
+            return {
+                label: 'Blocked',
+                className: 'bg-red-900/20 text-red-400 border border-red-900/30',
+            }
+        }
+        if (Boolean(run.served_from_cache)) {
+            return {
+                label: 'Delivered (Cached)',
+                className: 'bg-amber-900/20 text-amber-400 border border-amber-900/30',
+            }
+        }
+        return {
+            label: 'Delivered (Live)',
+            className: 'bg-emerald-900/20 text-emerald-400 border border-emerald-900/30',
+        }
+    }
+
+    const formatBlockedReasonLabel = (reason?: string) => {
+        switch ((reason || '').trim()) {
+            case 'ip_block':
+                return 'IP Block'
+            case 'token_block':
+                return 'Token Block'
+            case 'rate_limit':
+                return 'Rate Limit'
+            case 'ua_browser':
+            case 'ua_filter':
+                return 'Browser UA'
+            case 'ua_social_fetcher':
+                return 'Social/Chat Fetcher'
+            default:
+                return (reason || '').trim()
+        }
+    }
+
+    const handleSubscriptionHistoryScroll = (event: UIEvent<HTMLDivElement>) => {
+        const element = event.currentTarget
+        const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
+        if (remaining < 96 && subscriptionHistoryHasMore && !subscriptionHistoryLoadingMore) {
+            void loadMoreSubscriptionRequestHistory()
+        }
+    }
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-stretch pb-4 sm:pb-0">
-            <div ref={dbCardRef}>
-                <Card
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 items-start pb-4 sm:pb-0">
+            <div ref={databaseCardRef}>
+            <Card
                     title="Database & Retention"
-                    className="h-full flex flex-col"
                     action={
                         <div className="flex gap-2">
                             <Button onClick={handleSaveFeatures} size="sm" icon={<Save size={16} />} iconNoGap disabled={!canWriteSettings}>
                                 <span className="sm:hidden sr-only">Save Changes</span>
                                 <span className="hidden sm:inline">Save Changes</span>
                             </Button>
-                            <Button onClick={loadDbStats} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
+                            <Button onClick={loadDatabasePanel} variant="icon" size="icon" icon={<RefreshCw size={16} />} />
                         </div>
                     }
                 >
@@ -1283,41 +1792,138 @@ function DatabaseTab({
                     </div>
 
                     <div className="space-y-3">
-                        <Button
-                            onClick={handlePruneNow}
-                            disabled={!canWriteSettings || !features.retention_enabled}
-                            variant="secondary"
-                            className="w-full"
-                        >
-                            Prune Database Now
-                        </Button>
                         <div className="flex gap-2">
-                            <Button
-                                onClick={handleTogglePause}
-                                disabled={!canWriteSettings}
-                                variant="secondary"
-                                className={`flex-1 ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
-                            >
-                                {features.sampler_paused ? 'Resume' : 'Pause'}
-                            </Button>
                             <Button
                                 onClick={handleRunSampler}
                                 disabled={!canWriteSettings || samplerRunning}
-                                className="flex-1"
+                                className="flex-[2]"
                                 isLoading={samplerRunning}
                                 variant="primary"
                             >
                                 Run Sampler
                             </Button>
+                            <Button
+                                onClick={handlePruneNow}
+                                disabled={!canWriteSettings || !features.retention_enabled}
+                                variant="secondary"
+                                className="flex-1"
+                            >
+                                Prune
+                            </Button>
+                        </div>
+                        <Button
+                            onClick={handleTogglePause}
+                            disabled={!canWriteSettings}
+                            variant="secondary"
+                            className={`w-full ${features.sampler_paused ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' : 'bg-amber-900/20 text-amber-400 border-amber-900/30'}`}
+                        >
+                            {features.sampler_paused ? 'Resume' : 'Pause'}
+                        </Button>
+                    </div>
+                </Card>
+            </div>
+
+            <div
+                className="min-h-0 h-[480px] lg:h-auto"
+                style={databaseCardHeight ? { height: `${databaseCardHeight}px` } : undefined}
+            >
+                <Card
+                    title="Subscriptions History"
+                    className="flex h-full min-h-[208px] min-h-0 flex-col overflow-hidden"
+                    action={
+                        <div className="flex items-center gap-2">
+                            {subscriptionHistoryRefreshing && <RefreshCw size={12} className="animate-spin" />}
+                            <select
+                                value={subscriptionHistorySubId}
+                                onChange={e => setSubscriptionHistorySubId(e.target.value)}
+                                disabled={!canReadUsers || subscriptionHistorySubsLoading}
+                                className="select-field max-w-[180px] bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                                <option value="all">All subscriptions</option>
+                                {subscriptionHistorySubs.map(sub => (
+                                    <option key={sub.id} value={String(sub.id)}>{sub.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    }
+                >
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        <div
+                            className="h-full min-h-0 space-y-0 overflow-y-auto pr-2 text-sm"
+                            onScroll={handleSubscriptionHistoryScroll}
+                        >
+                            {subscriptionRequestHistory.length === 0 ? (
+                                <p className="text-slate-500 text-xs italic">No history available</p>
+                            ) : (
+                                subscriptionRequestHistory.map((run) => {
+                                    const badge = getSubscriptionHistoryBadge(run)
+                                    const isBlocked = Boolean(run.blocked)
+                                    const blockedReason = formatBlockedReasonLabel(run.block_reason)
+                                    const country = (() => {
+                                        const value = (run.country || '').trim()
+                                        return value && value !== '0' ? value : ''
+                                    })()
+                                    const hwidPrefix = (() => {
+                                        const value = (run.hwid_prefix || '').trim()
+                                        return value && value !== '0' ? value : ''
+                                    })()
+                                    const deviceDetails = formatDeviceDetails(run)
+                                    const appVersion = formatAppVersion(run)
+                                    const extraDetails = [deviceDetails, appVersion, country, hwidPrefix ? `HWID ${hwidPrefix}` : ''].filter(Boolean).join(' • ')
+                                    return (
+                                    <div key={run.id} className="py-2 border-b border-slate-800/50 last:border-0">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                                                    <div className="max-w-[9rem] truncate text-slate-200 text-xs font-medium sm:max-w-[14rem]" title={run.name}>{run.name}</div>
+                                                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${badge.className}`}>
+                                                        {badge.label}
+                                                    </span>
+                                                    {isBlocked && blockedReason && (
+                                                        <span className="min-w-0 truncate text-[10px] text-red-400" title={blockedReason}>
+                                                            {blockedReason}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="max-w-[7.5rem] shrink-0 truncate text-right font-mono text-blue-400 text-xs sm:max-w-[12rem]" title={run.request_ip || '-'}>
+                                                    {run.request_ip || '-'}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0 flex-1 truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
+                                                    {run.user_name || 'No users'}
+                                                </div>
+                                                <div className="shrink-0 text-right text-slate-500 text-[10px]">{formatHistoryDateTime(run.requested_at)}</div>
+                                            </div>
+                                            <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
+                                                {formatClientLabel(run)}
+                                            </div>
+                                            {extraDetails && (
+                                                <div className="truncate text-slate-500 text-[10px]" title={extraDetails}>
+                                                    {extraDetails}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )})
+                            )}
+                            {subscriptionHistoryLoadingMore && (
+                                <div className="flex items-center justify-center gap-2 py-3 text-xs text-slate-500">
+                                    <RefreshCw size={12} className="animate-spin" />
+                                    Loading more
+                                </div>
+                            )}
+                            {!subscriptionHistoryHasMore && subscriptionRequestHistory.length > 0 && (
+                                <div className="py-3 text-center text-[10px] text-slate-600">End of history</div>
+                            )}
                         </div>
                     </div>
                 </Card>
             </div>
 
-            <div style={dbCardHeight ? { height: dbCardHeight } : undefined}>
-                <Card
+            <Card
                     title="Sampler History"
-                    className="h-full flex flex-col"
+                    className="flex h-[480px] flex-col min-h-[312px] lg:col-start-1 lg:h-[416px]"
                     action={
                         <select
                             value={historyLimit}
@@ -1338,17 +1944,17 @@ function DatabaseTab({
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
                                 samplerHistory.map((run, idx) => (
-                                    <div key={idx} className="flex justify-between items-center py-2 border-b border-slate-800/50 last:border-0">
-                                        <div>
+                                    <div key={idx} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
+                                        <div className="min-w-0">
                                             <div className="flex items-center gap-2">
-                                                <div className="text-slate-300 text-xs">{new Date(run.timestamp * 1000).toLocaleTimeString()}</div>
+                                                <div className="text-slate-300 text-xs">{formatHistoryTime(run.timestamp ?? run.ts)}</div>
                                                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
                                                     {run.source === 'wireguard' ? 'WG' : 'Proxy'}
                                                 </span>
                                             </div>
                                             {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
                                         </div>
-                                        <div className="text-right">
+                                        <div className="shrink-0 text-right">
                                             <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
                                             <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
                                         </div>
@@ -1358,7 +1964,6 @@ function DatabaseTab({
                         </div>
                     </div>
                 </Card>
-            </div>
         </div>
     )
 }

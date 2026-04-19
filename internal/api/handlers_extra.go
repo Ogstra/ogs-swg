@@ -10,11 +10,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	sqlcStore "github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
 type ServiceActionRequest struct {
@@ -77,8 +79,15 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if s.shouldDetachServiceAction("restart", req.Service) {
+		var afterSuccess func()
+		if req.Service == "sing-box" {
+			afterSuccess = func() {
+				s.config.ClearSingboxPendingChanges()
+				s.InvalidateSubCache()
+			}
+		}
 		s.writeAcceptedServiceAction(w)
-		s.dispatchDetachedServiceAction("restart", req.Service, s.executor.RestartService, nil)
+		s.dispatchDetachedServiceAction("restart", req.Service, s.executor.RestartService, afterSuccess)
 		return
 	}
 
@@ -89,6 +98,9 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 
 	if req.Service == "wireguard" {
 		s.clearWireGuardPending()
+	} else if req.Service == "sing-box" {
+		s.config.ClearSingboxPendingChanges()
+		s.InvalidateSubCache()
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -533,6 +545,178 @@ func (s *Server) handleSamplerHistory(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(runs)
 }
 
+type subscriptionRequestHistoryPageResponse struct {
+	Items      []sqlcStore.GetSubscriptionRequestHistoryRow `json:"items"`
+	HasMore    bool                                         `json:"has_more"`
+	NextOffset int                                          `json:"next_offset"`
+}
+
+func parseBoundedIntQuery(r *http.Request, key string, fallback, minValue, maxValue int) int {
+	value := fallback
+	if raw := r.URL.Query().Get(key); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			value = parsed
+		}
+	}
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http.Request) {
+	limit := parseBoundedIntQuery(r, "limit", 5, 1, 100)
+	offset := parseBoundedIntQuery(r, "offset", 0, 0, 1_000_000)
+	subID := parseBoundedIntQuery(r, "sub_id", 0, 0, 1_000_000_000)
+	censor := shouldCensorSubscriptionRequestHistory(r)
+	pageRequested := r.URL.Query().Has("offset")
+
+	page, err := s.getSubscriptionRequestHistoryPage(r.Context(), limit, offset, subID, censor)
+	if err != nil {
+		http.Error(w, "Failed to read subscription request history: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if page.HasMore {
+		s.prefetchSubscriptionRequestHistoryPage(limit, page.NextOffset, subID, censor)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if pageRequested {
+		json.NewEncoder(w).Encode(page)
+		return
+	}
+	json.NewEncoder(w).Encode(page.Items)
+}
+
+func (s *Server) getSubscriptionRequestHistoryPage(ctx context.Context, limit, offset, subID int, censor bool) (subscriptionRequestHistoryPageResponse, error) {
+	cacheKey := fmt.Sprintf("subscription-request-history:v2:censor=%t:sub=%d:limit=%d:offset=%d", censor, subID, limit, offset)
+	if offset > 0 {
+		if cached, found := s.cache.Get(cacheKey); found {
+			if page, ok := cached.(subscriptionRequestHistoryPageResponse); ok {
+				return page, nil
+			}
+		}
+	}
+
+	page, err := s.loadSubscriptionRequestHistoryPage(ctx, limit, offset, subID, censor)
+	if err != nil {
+		return subscriptionRequestHistoryPageResponse{}, err
+	}
+	if offset > 0 {
+		s.cache.SetWithTTL(cacheKey, page, 1, 30*time.Second)
+	}
+	return page, nil
+}
+
+func (s *Server) prefetchSubscriptionRequestHistoryPage(limit, offset, subID int, censor bool) {
+	if offset <= 0 {
+		return
+	}
+
+	cacheKey := fmt.Sprintf("subscription-request-history:v2:censor=%t:sub=%d:limit=%d:offset=%d", censor, subID, limit, offset)
+	if _, found := s.cache.Get(cacheKey); found {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		page, err := s.loadSubscriptionRequestHistoryPage(ctx, limit, offset, subID, censor)
+		if err != nil {
+			log.Printf("subscription request history: prefetch failed sub_id=%d offset=%d limit=%d: %v", subID, offset, limit, err)
+			return
+		}
+		s.cache.SetWithTTL(cacheKey, page, 1, 30*time.Second)
+	}()
+}
+
+func (s *Server) loadSubscriptionRequestHistoryPage(ctx context.Context, limit, offset, subID int, censor bool) (subscriptionRequestHistoryPageResponse, error) {
+	rows, err := s.store.Queries.GetSubscriptionRequestHistory(ctx, sqlcStore.GetSubscriptionRequestHistoryParams{
+		SubID:  int64(subID),
+		Limit:  int64(limit + 1),
+		Offset: int64(offset),
+	})
+	if err != nil {
+		return subscriptionRequestHistoryPageResponse{}, err
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	s.prepareSubscriptionRequestHistoryRows(ctx, rows, censor)
+
+	return subscriptionRequestHistoryPageResponse{
+		Items:      rows,
+		HasMore:    hasMore,
+		NextOffset: offset + len(rows),
+	}, nil
+}
+
+func (s *Server) prepareSubscriptionRequestHistoryRows(ctx context.Context, runs []sqlcStore.GetSubscriptionRequestHistoryRow, censor bool) {
+	if s != nil && s.store != nil {
+		currentUsers := make(map[int64]string, len(runs))
+		for i := range runs {
+			runs[i].DeviceModel = resolveSubscriptionDeviceModel(runs[i].DeviceModel)
+			if names, ok := currentUsers[runs[i].SubID]; ok {
+				runs[i].UserName = names
+				continue
+			}
+			users, usersErr := s.store.Queries.GetUsersForSubscription(ctx, runs[i].SubID)
+			if usersErr != nil {
+				log.Printf("subscription request history: failed to resolve current users for sub_id=%d: %v", runs[i].SubID, usersErr)
+				continue
+			}
+			if s.config != nil {
+				filtered := users[:0]
+				for _, user := range users {
+					if strings.TrimSpace(user) == "" {
+						continue
+					}
+					if inbounds, cfgErr := s.config.GetUserInbounds(user); cfgErr == nil && len(inbounds) > 0 {
+						filtered = append(filtered, user)
+					}
+				}
+				users = filtered
+			}
+			names := strings.Join(users, ", ")
+			currentUsers[runs[i].SubID] = names
+			runs[i].UserName = names
+		}
+	}
+	if censor {
+		for i := range runs {
+			runs[i].UserName = "Restricted"
+			if runs[i].RequestIp != "" {
+				runs[i].RequestIp = "***"
+			}
+			runs[i].RequestHost = ""
+			runs[i].RequestPath = ""
+			runs[i].UserAgent = ""
+			runs[i].DeviceModel = ""
+			runs[i].DeviceOs = ""
+			runs[i].DeviceOsVersion = ""
+			runs[i].AppVersion = ""
+			runs[i].Country = ""
+			runs[i].HwidHash = ""
+			runs[i].HwidPrefix = ""
+		}
+	}
+}
+
+func shouldCensorSubscriptionRequestHistory(r *http.Request) bool {
+	perms := getPermissions(r)
+	if perms == nil {
+		return false
+	}
+	return !perms.CanReadLogs || perms.CanReadLogsCensored
+}
+
 func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 	// Respect config values primarily, but prioritize retention settings
 	days := s.config.RetentionDays
@@ -715,6 +899,49 @@ func (s *Server) handleGetPublicIP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"public_ip": s.config.PublicIP})
 }
 
+func (s *Server) dashboardPreferencesPrincipal(r *http.Request) (string, bool) {
+	if username, ok := currentPanelUsername(r); ok {
+		return username, true
+	}
+	if s.config.APIKey != "" && r.Header.Get("X-API-Key") == s.config.APIKey {
+		return "__api_key__", true
+	}
+	return "", false
+}
+
+func (s *Server) handleGetDashboardPreferences(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.dashboardPreferencesPrincipal(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	prefs, err := s.store.GetDashboardPreferences(r.Context(), principal)
+	if err != nil {
+		http.Error(w, "Failed to load dashboard preferences: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(prefs)
+}
+
+func (s *Server) handleUpdateDashboardPreferences(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.dashboardPreferencesPrincipal(r)
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var prefs core.DashboardPreferences
+	if err := json.NewDecoder(r.Body).Decode(&prefs); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.UpdateDashboardPreferences(r.Context(), principal, prefs); err != nil {
+		http.Error(w, "Failed to save dashboard preferences: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleUpdatePublicIP(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -766,8 +993,7 @@ func (s *Server) handleBackupConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	src := s.config.SingboxConfigPath
-	dst := src + ".bak"
-	if err := s.copyConfig(r.Context(), src, dst); err != nil {
+	if err := s.createConfigBackup(r.Context(), src); err != nil {
 		http.Error(w, "Backup failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -831,6 +1057,116 @@ func (s *Server) handleGetBackupMeta(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)
+}
+
+type configBackupEntry struct {
+	Name      string `json:"name"`
+	CreatedAt string `json:"created_at"`
+}
+
+func (s *Server) handleListConfigBackups(w http.ResponseWriter, r *http.Request) {
+	backups, err := s.listConfigBackups(s.config.SingboxConfigPath, 10)
+	if err != nil {
+		http.Error(w, "Failed to list backups: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(backups)
+}
+
+func (s *Server) handleGetConfigBackup(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.URL.Query().Get("name"))
+	if name == "" {
+		http.Error(w, "backup name is required", http.StatusBadRequest)
+		return
+	}
+	content, err := s.readNamedBackup(r.Context(), s.config.SingboxConfigPath, name)
+	if err != nil {
+		if isNotFoundErr(err) {
+			http.Error(w, "Backup not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to read backup: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write(content)
+}
+
+func backupTimestamp() string {
+	return time.Now().UTC().Format("20060102-150405")
+}
+
+func timestampedBackupPath(src string) string {
+	return filepath.Join(filepath.Dir(src), fmt.Sprintf("%s.%s.bak", filepath.Base(src), backupTimestamp()))
+}
+
+func (s *Server) createConfigBackup(ctx context.Context, src string) error {
+	if err := s.copyConfig(ctx, src, timestampedBackupPath(src)); err != nil {
+		return err
+	}
+	return s.copyConfig(ctx, src, src+".bak")
+}
+
+func (s *Server) listConfigBackups(src string, limit int) ([]configBackupEntry, error) {
+	dir := filepath.Dir(src)
+	base := filepath.Base(src)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	backups := make([]configBackupEntry, 0, limit)
+	type backupFile struct {
+		name string
+		when time.Time
+	}
+	files := make([]backupFile, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == base+".bak" {
+			continue
+		}
+		if !strings.HasPrefix(name, base+".") || !strings.HasSuffix(name, ".bak") {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, backupFile{name: name, when: info.ModTime()})
+	}
+
+	sort.Slice(files, func(i, j int) bool { return files[i].when.After(files[j].when) })
+	if limit > 0 && len(files) > limit {
+		files = files[:limit]
+	}
+	for _, file := range files {
+		backups = append(backups, configBackupEntry{
+			Name:      file.name,
+			CreatedAt: file.when.UTC().Format(time.RFC3339),
+		})
+	}
+	return backups, nil
+}
+
+func (s *Server) readNamedBackup(ctx context.Context, src, name string) ([]byte, error) {
+	base := filepath.Base(src)
+	cleanName := filepath.Base(strings.TrimSpace(name))
+	if cleanName == "" || cleanName != name {
+		return nil, os.ErrNotExist
+	}
+	if !strings.HasPrefix(cleanName, base+".") || !strings.HasSuffix(cleanName, ".bak") || cleanName == base+".bak" {
+		return nil, os.ErrNotExist
+	}
+	fullPath := filepath.Join(filepath.Dir(src), cleanName)
+	if s.executor != nil {
+		return s.executor.ReadConfig(ctx, fullPath)
+	}
+	return os.ReadFile(fullPath)
 }
 
 func (s *Server) copyConfig(ctx context.Context, src, dst string) error {

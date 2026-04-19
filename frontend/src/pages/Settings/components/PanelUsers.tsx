@@ -6,6 +6,7 @@ import { Plus, Trash2, RefreshCw, Edit } from 'lucide-react';
 import { ActionIconButton } from '../../../components/ui/ActionIconButton';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
+import { ConfirmModal } from '../../../components/ui/ConfirmModal';
 
 const PERMISSION_GROUPS: {
     id: string
@@ -123,6 +124,7 @@ const PanelUsers: React.FC = () => {
     const [editorPerms, setEditorPerms] = useState<PanelUserPermissions>(emptyPerms());
     const [savingEditor, setSavingEditor] = useState(false);
     const [deletingUser, setDeletingUser] = useState<string | null>(null);
+    const [deleteConfirmUser, setDeleteConfirmUser] = useState<string | null>(null);
 
     const load = async () => {
         setLoading(true);
@@ -140,7 +142,13 @@ const PanelUsers: React.FC = () => {
 
     const handleDelete = async (username: string) => {
         if (!canWritePanelUsers) return;
-        if (!confirm(`Delete panel user "${username}"? This cannot be undone.`)) return;
+        setDeleteConfirmUser(username);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!canWritePanelUsers || !deleteConfirmUser) return;
+        const username = deleteConfirmUser;
+        setDeleteConfirmUser(null);
         setDeletingUser(username);
         try {
             await api.deletePanelUser(username);
@@ -406,6 +414,16 @@ const PanelUsers: React.FC = () => {
                     </div>
                 </div>
             </Modal>
+            <ConfirmModal
+                isOpen={!!deleteConfirmUser}
+                onClose={() => setDeleteConfirmUser(null)}
+                onConfirm={handleConfirmDelete}
+                title="Delete panel user"
+                message={deleteConfirmUser ? `Delete panel user "${deleteConfirmUser}"? This cannot be undone.` : undefined}
+                confirmLabel="Delete"
+                confirmTone="danger"
+                isLoading={!!deleteConfirmUser && deletingUser === deleteConfirmUser}
+            />
         </div>
     );
 };

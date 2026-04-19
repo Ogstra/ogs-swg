@@ -61,6 +61,28 @@ export interface FeatureFlags {
     journalctl_available?: boolean;
 }
 
+export interface ConfigBackupEntry {
+    name: string;
+    created_at: string;
+}
+
+export interface LogSearchParams {
+    query: string;
+    limit?: number;
+    page?: number;
+    from?: string;
+    to?: string;
+    signal?: AbortSignal;
+}
+
+export interface LogSearchStreamEvent {
+    type: 'status' | 'chunk' | 'done' | 'error';
+    message?: string;
+    logs?: string[];
+    matched?: number;
+    truncated?: boolean;
+}
+
 export interface UnifiedChartPoint {
     ts: number;
     up_sb: number;
@@ -95,6 +117,90 @@ export interface DashboardData {
 
 export interface DashboardConsumerChartData {
     chart_data: UnifiedChartPoint[];
+}
+
+export interface DashboardPreferences {
+    default_service: 'singbox' | 'wireguard';
+    refresh_ms: number;
+    default_range: '30m' | '1h' | '6h' | '24h' | '1w' | '1m';
+    active_user_window_minutes: number;
+    detail_chart_target_points: number;
+}
+
+export interface ApplySingboxChangesResponse {
+    success: boolean;
+    message: string;
+    restart_required?: boolean;
+}
+
+export interface SamplerHistoryEntry {
+    ts?: number;
+    timestamp?: number;
+    duration_ms: number;
+    inserted: number;
+    error: string;
+    source: string;
+}
+
+export interface SubscriptionRequestHistoryEntry {
+    id: number;
+    sub_id: number;
+    name: string;
+    user_name: string;
+    request_ip: string;
+    request_host: string;
+    request_path: string;
+    user_agent: string;
+    device_model: string;
+    device_os: string;
+    device_os_version: string;
+    app_version: string;
+    country: string;
+    hwid_hash: string;
+    hwid_prefix: string;
+    requested_at: number;
+    served_from_cache: number;
+    blocked: number;
+    block_reason: string;
+}
+
+export interface SubscriptionRequestHistoryPage {
+    items: SubscriptionRequestHistoryEntry[];
+    has_more: boolean;
+    next_offset: number;
+}
+
+export interface SubscriptionProtectionConfig {
+    max_requests: number;
+    window_seconds: number;
+    ua_filter_enabled: boolean;
+    social_fetchers_block_enabled: boolean;
+}
+
+export type ProtectionRuleType = 'ip_block' | 'token_block' | 'ip_allow';
+
+export interface ProtectionRule {
+    id: number;
+    rule_type: ProtectionRuleType;
+    value: string;
+    note: string;
+    created_at: number;
+}
+
+export interface CreateProtectionRuleRequest {
+    rule_type: ProtectionRuleType;
+    value: string;
+    note: string;
+}
+
+export interface BlockedSubscriptionRequestEntry {
+    id: number;
+    sub_id: number;
+    sub_name: string;
+    request_ip: string;
+    requested_at: number;
+    block_reason: string;
+    user_agent: string;
 }
 
 export interface CreateWireGuardInterfaceRequest {
@@ -152,6 +258,7 @@ export interface Subscription {
     quota_period: string;
     used_bytes: number;
     users: string[];
+    members: SubscriptionMember[];
     profile_update_interval_hours?: number | null;
     update_always?: boolean;
     last_request_at?: number | null;
@@ -159,13 +266,29 @@ export interface Subscription {
     updated_at: number;
 }
 
+export interface SubscriptionMember {
+    username: string;
+    alias: string;
+}
+
 export interface SubscriptionMutationRequest {
     name: string;
     quota_limit: number;
     quota_period: string;
     users: string[];
+    members?: SubscriptionMember[];
     profile_update_interval_hours: number | null;
     update_always: boolean;
+}
+
+export interface SubscriptionDefaults {
+    profile_update_interval_hours: number | null;
+    update_always: boolean;
+    destinations: string[];
+}
+
+export interface SubscriptionDefaultDestinationsResponse {
+    destinations: string[];
 }
 
 
@@ -342,26 +465,65 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update sing-box outbound domain_strategy values');
     },
-    getLogs: async (params?: { q?: string; limit?: number }): Promise<{ logs: string[] }> => {
+    getLogs: async (params?: { q?: string; limit?: number; signal?: AbortSignal }): Promise<{ logs: string[] }> => {
         const query = new URLSearchParams();
         if (params?.q) query.set('q', params.q);
         if (params?.limit) query.set('limit', String(params.limit));
         const url = query.toString() ? `/api/logs?${query.toString()}` : '/api/logs';
-        const res = await fetch(url, { headers: buildHeaders() });
+        const res = await fetch(url, { headers: buildHeaders(), signal: params?.signal });
         await handleResponse(res, 'Failed to fetch logs');
         return res.json();
     },
-    searchLogs: async (query: string, limit?: number, page?: number): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
+    searchLogs: async ({ query, limit, page, from, to, signal }: LogSearchParams): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
         const params = new URLSearchParams({ q: query });
         if (limit) params.set('limit', String(limit));
         if (page) params.set('page', String(page));
-        const res = await fetch(`/api/logs/search?${params.toString()}`, { headers: buildHeaders() });
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const res = await fetch(`/api/logs/search?${params.toString()}`, { headers: buildHeaders(), signal });
         await handleResponse(res, 'Failed to search logs');
         const text = await res.text();
         try {
             return JSON.parse(text);
         } catch {
             return { logs: [text || 'Search returned non-JSON response'] };
+        }
+    },
+    searchLogsStream: async (
+        { query, limit, from, to, signal }: LogSearchParams,
+        onEvent: (event: LogSearchStreamEvent) => void
+    ): Promise<void> => {
+        const params = new URLSearchParams({ q: query });
+        if (limit) params.set('limit', String(limit));
+        if (from) params.set('from', from);
+        if (to) params.set('to', to);
+        const res = await fetch(`/api/logs/search/stream?${params.toString()}`, { headers: buildHeaders(), signal });
+        await handleResponse(res, 'Failed to search logs');
+        if (!res.body) {
+            throw new Error('Streaming response body missing')
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() ?? ''
+
+            for (const line of lines) {
+                const trimmed = line.trim()
+                if (!trimmed) continue
+                onEvent(JSON.parse(trimmed) as LogSearchStreamEvent)
+            }
+        }
+
+        const tail = buffer.trim()
+        if (tail) {
+            onEvent(JSON.parse(tail) as LogSearchStreamEvent)
         }
     },
 
@@ -474,6 +636,26 @@ export const api = {
             headers: buildHeaders()
         });
         await handleResponse(res, 'Failed to fetch WireGuard raw config');
+        return res.text();
+    },
+    getWireGuardConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
+        const res = await fetch('/api/wireguard/config/backups', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard config backups');
+        return res.json();
+    },
+    getWireGuardConfigBackupsForInterface: async (iface: string): Promise<ConfigBackupEntry[]> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backups`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard config backups');
+        return res.json();
+    },
+    getWireGuardConfigBackupContent: async (name: string): Promise<string> => {
+        const res = await fetch(`/api/wireguard/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard backup');
+        return res.text();
+    },
+    getWireGuardConfigBackupContentForInterface: async (iface: string, name: string): Promise<string> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch WireGuard backup');
         return res.text();
     },
     updateWireGuardConfigForInterface: async (iface: string, config: string): Promise<void> => {
@@ -617,6 +799,19 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update features');
     },
+    getDashboardPreferences: async (): Promise<DashboardPreferences> => {
+        const res = await fetch('/api/settings/dashboard-preferences', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch dashboard preferences');
+        return res.json();
+    },
+    updateDashboardPreferences: async (prefs: DashboardPreferences): Promise<void> => {
+        const res = await fetch('/api/settings/dashboard-preferences', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(prefs),
+        });
+        await handleResponse(res, 'Failed to update dashboard preferences');
+    },
     getPublicIP: async (): Promise<string> => {
         const res = await fetch('/api/settings/public-ip', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch public IP');
@@ -714,6 +909,10 @@ export const api = {
         const res = await fetch('/api/wireguard/config/backup', { method: 'POST', headers: buildHeaders() });
         await handleResponse(res, 'Failed to backup WireGuard config');
     },
+    backupWireGuardConfigForInterface: async (iface: string): Promise<void> => {
+        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup`, { method: 'POST', headers: buildHeaders() });
+        await handleResponse(res, 'Failed to backup WireGuard config');
+    },
     restoreWireGuardConfig: async (): Promise<string> => {
         const res = await fetch('/api/wireguard/config/restore', { method: 'POST', headers: buildHeaders() });
         await handleResponse(res, 'Failed to restore WireGuard config');
@@ -723,6 +922,16 @@ export const api = {
         const res = await fetch('/api/config/backup/meta', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to load backup metadata');
         return res.json();
+    },
+    getConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
+        const res = await fetch('/api/config/backups', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch config backups');
+        return res.json();
+    },
+    getConfigBackupContent: async (name: string): Promise<string> => {
+        const res = await fetch(`/api/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch config backup');
+        return res.text();
     },
     updateWireGuardConfig: async (config: string): Promise<void> => {
         const res = await fetch('/api/wireguard/config', {
@@ -757,10 +966,65 @@ export const api = {
         });
         await handleResponse(res, 'Failed to run sampler');
     },
-    getSamplerHistory: async (limit?: number): Promise<any[]> => {
+    getSamplerHistory: async (limit?: number): Promise<SamplerHistoryEntry[]> => {
         const url = limit ? `/api/sampler/history?limit=${limit}` : '/api/sampler/history';
         const res = await fetch(url, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch sampler history');
+        return res.json();
+    },
+    getSubscriptionRequestHistory: async (limit?: number): Promise<SubscriptionRequestHistoryEntry[]> => {
+        const url = limit ? `/api/subscription-requests/history?limit=${limit}` : '/api/subscription-requests/history';
+        const res = await fetch(url, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription request history');
+        return res.json();
+    },
+    getSubscriptionRequestHistoryPage: async (limit: number = 20, offset: number = 0, subId?: number): Promise<SubscriptionRequestHistoryPage> => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+        if (subId && subId > 0) params.set('sub_id', String(subId));
+        const res = await fetch(`/api/subscription-requests/history?${params.toString()}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription request history');
+        return res.json();
+    },
+    getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> => {
+        const res = await fetch('/api/settings/subscription-protection', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription protection settings');
+        return res.json();
+    },
+    updateSubscriptionProtection: async (payload: Partial<SubscriptionProtectionConfig>): Promise<void> => {
+        const res = await fetch('/api/settings/subscription-protection', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload),
+        });
+        await handleResponse(res, 'Failed to update subscription protection settings');
+    },
+    getProtectionRules: async (): Promise<ProtectionRule[]> => {
+        const res = await fetch('/api/settings/protection-rules', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch protection rules');
+        return res.json();
+    },
+    createProtectionRule: async (payload: CreateProtectionRuleRequest): Promise<void> => {
+        const res = await fetch('/api/settings/protection-rules', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload),
+        });
+        await handleResponse(res, 'Failed to create protection rule');
+    },
+    deleteProtectionRule: async (id: number): Promise<void> => {
+        const res = await fetch(`/api/settings/protection-rules/${id}`, {
+            method: 'DELETE',
+            headers: buildHeaders(),
+        });
+        await handleResponse(res, 'Failed to delete protection rule');
+    },
+    getBlockedSubscriptionRequestLog: async (limit: number, offset: number): Promise<BlockedSubscriptionRequestEntry[]> => {
+        const params = new URLSearchParams({
+            limit: String(limit),
+            offset: String(offset),
+        });
+        const res = await fetch(`/api/settings/protection-rules/blocked-log?${params.toString()}`, { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch blocked request log');
         return res.json();
     },
     pruneNow: async (): Promise<{ deleted: number; cutoff: number }> => {
@@ -793,12 +1057,14 @@ export const api = {
         range: string = '24h',
         start?: string,
         end?: string,
+        targetPoints?: number,
     ): Promise<DashboardConsumerChartData> => {
         const params = new URLSearchParams({ mode, key, range });
         if (name) params.append('name', name);
         if (interfaceName) params.append('interface_name', interfaceName);
         if (start) params.append('start', start);
         if (end) params.append('end', end);
+        if (targetPoints && targetPoints > 0) params.append('target_points', String(targetPoints));
         const res = await fetch(`/api/dashboard/consumer-chart?${params.toString()}`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch consumer chart');
         return res.json();
@@ -817,11 +1083,23 @@ export const api = {
         await handleResponse(res, 'Failed to generate self-signed certificate');
         return res.json();
     },
-    applySingboxChanges: async (): Promise<{ success: boolean; message: string }> => {
+    generateRandBase64: async (keyLength: number): Promise<{ value: string }> => {
+        const res = await fetch('/api/tools/rand-base64', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ key_length: keyLength })
+        });
+        await handleResponse(res, 'Failed to generate random base64');
+        return res.json();
+    },
+    applySingboxChanges: async (): Promise<ApplySingboxChangesResponse> => {
         const res = await fetch('/api/singbox/apply', {
             method: 'POST',
             headers: buildHeaders('application/json')
         });
+        if (res.status === 409) {
+            return res.json();
+        }
         await handleResponse(res, 'Failed to apply Sing-box changes');
         return res.json();
     },
@@ -876,6 +1154,25 @@ export const api = {
     getSubscriptions: async (): Promise<Subscription[]> => {
         const res = await fetch('/api/subscriptions', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch subscriptions');
+        return res.json();
+    },
+    getSubscriptionDefaults: async (): Promise<SubscriptionDefaults> => {
+        const res = await fetch('/api/subscriptions/defaults', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription defaults');
+        return res.json();
+    },
+    updateSubscriptionDefaults: async (data: SubscriptionDefaults): Promise<SubscriptionDefaults> => {
+        const res = await fetch('/api/subscriptions/defaults', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(data),
+        });
+        await handleResponse(res, 'Failed to update subscription defaults');
+        return res.json();
+    },
+    getSubscriptionDefaultDestinations: async (): Promise<SubscriptionDefaultDestinationsResponse> => {
+        const res = await fetch('/api/subscriptions/default-destinations', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch subscription destination suggestions');
         return res.json();
     },
     createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> => {

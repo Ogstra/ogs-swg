@@ -25,6 +25,7 @@ interface RawEditorPanelProps {
     saveLabel?: string
     bottomBarExtraDesktop?: ReactNode
     bottomBarExtraMobile?: ReactNode
+    hideCompareOnMobile?: boolean
 }
 
 export function RawEditorPanel({
@@ -44,6 +45,7 @@ export function RawEditorPanel({
     saveLabel = 'Save Changes',
     bottomBarExtraDesktop,
     bottomBarExtraMobile,
+    hideCompareOnMobile = false,
 }: RawEditorPanelProps) {
     const [searchTerm, setSearchTerm] = useState('')
     const [searchCursor, setSearchCursor] = useState(0)
@@ -51,12 +53,29 @@ export function RawEditorPanel({
     const searchInputRef = useRef<HTMLInputElement>(null)
     const shellRef = useRef<HTMLDivElement>(null)
 
-    const hasChanges = value !== originalValue
+    const hasChanges = useMemo(() => value !== originalValue, [value, originalValue])
+    const lineNumbers = useMemo(() => {
+        const count = Math.max(1, (value.match(/\n/g)?.length ?? 0) + 1)
+        return Array.from({ length: count }, (_, index) => index + 1)
+    }, [value])
 
     const highlightCode = (code: string) => {
-        return language === 'ini'
+        const highlighted = language === 'ini'
             ? Prism.highlight(code, Prism.languages.ini, 'ini')
             : Prism.highlight(code, Prism.languages.json, 'json')
+
+        const lines = highlighted.split('\n')
+        return lines.map((line, index) => (
+            <div key={index} className="raw-editor-line">
+                <span className="raw-editor-line-number" aria-hidden="true">
+                    {index + 1}
+                </span>
+                <span
+                    className="raw-editor-line-content"
+                    dangerouslySetInnerHTML={{ __html: line || ' ' }}
+                />
+            </div>
+        ))
     }
 
     const diffLines = useMemo(() => {
@@ -184,7 +203,7 @@ export function RawEditorPanel({
                 <div className={`grid ${bottomBarExtraMobile ? 'grid-cols-4' : 'grid-cols-3'} sm:flex items-center gap-2 w-full sm:w-auto`}>
                     <button
                         onClick={() => setShowDiff(d => !d)}
-                        className="w-full sm:w-auto px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium whitespace-nowrap"
+                        className={`w-full sm:w-auto px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium whitespace-nowrap ${hideCompareOnMobile ? 'hidden sm:inline-flex' : ''}`}
                     >
                         {showDiff ? (
                             <>
@@ -214,7 +233,7 @@ export function RawEditorPanel({
                         Restore
                     </button>
                     {bottomBarExtraMobile && (
-                        <div className="sm:hidden w-full">
+                        <div className="sm:hidden contents">
                             {bottomBarExtraMobile}
                         </div>
                     )}
@@ -245,6 +264,9 @@ export function RawEditorPanel({
                 className="flex-1 overflow-auto custom-scrollbar relative raw-editor-shell"
                 onKeyDown={handleKeyDown}
             >
+                <div className="sr-only" aria-hidden="true">
+                    {lineNumbers.join('\n')}
+                </div>
                 <Editor
                     value={value}
                     onValueChange={onChange}

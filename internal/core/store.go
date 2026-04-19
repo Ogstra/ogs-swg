@@ -79,6 +79,8 @@ type UserMetadata struct {
 	QuotaPeriod   string   `json:"quota_period"`
 	ResetDay      int      `json:"reset_day"`
 	Enabled       bool     `json:"enabled"`
+	Credential    string   `json:"credential,omitempty"`
+	Flow          string   `json:"flow,omitempty"`
 	VmessSecurity string   `json:"vmess_security,omitempty"`
 	VmessAlterID  int      `json:"vmess_alter_id,omitempty"`
 	InboundTags   []string `json:"inbound_tags,omitempty"`
@@ -132,6 +134,8 @@ func (s *Store) initSchema() error {
 		quota_period TEXT DEFAULT 'monthly',
 		reset_day INTEGER DEFAULT 1,
 		enabled INTEGER DEFAULT 1,
+		credential TEXT DEFAULT '',
+		flow TEXT DEFAULT '',
 		vmess_security TEXT DEFAULT '',
 		vmess_alter_id INTEGER DEFAULT 0
 	);
@@ -183,6 +187,20 @@ func (s *Store) initSchema() error {
 		can_read_panel_users INTEGER NOT NULL DEFAULT 0,
 		can_write_panel_users INTEGER NOT NULL DEFAULT 0,
 		can_read_logs INTEGER NOT NULL DEFAULT 0,
+		subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL,
+		subscription_default_update_always INTEGER NOT NULL DEFAULT 0,
+		subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]',
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
+
+	CREATE TABLE IF NOT EXISTS dashboard_preferences (
+		principal TEXT PRIMARY KEY,
+		default_service TEXT NOT NULL DEFAULT 'singbox',
+		refresh_ms INTEGER NOT NULL DEFAULT 10000,
+		default_range TEXT NOT NULL DEFAULT '24h',
+		active_user_window_minutes INTEGER NOT NULL DEFAULT 5,
+		detail_chart_target_points INTEGER NOT NULL DEFAULT 200,
 		created_at INTEGER DEFAULT (strftime('%s','now')),
 		updated_at INTEGER DEFAULT (strftime('%s','now'))
 	);
@@ -226,6 +244,7 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS subscription_users (
 		sub_id INTEGER NOT NULL,
 		user_name TEXT NOT NULL,
+		alias TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (sub_id, user_name),
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
 		FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
@@ -234,13 +253,37 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS subscription_requests (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		sub_id INTEGER NOT NULL,
+		user_name TEXT NOT NULL DEFAULT '',
+		request_ip TEXT NOT NULL DEFAULT '',
+		request_host TEXT NOT NULL DEFAULT '',
+		request_path TEXT NOT NULL DEFAULT '',
+		user_agent TEXT NOT NULL DEFAULT '',
+		device_model TEXT NOT NULL DEFAULT '',
+		device_os TEXT NOT NULL DEFAULT '',
+		device_os_version TEXT NOT NULL DEFAULT '',
+		app_version TEXT NOT NULL DEFAULT '',
+		country TEXT NOT NULL DEFAULT '',
+		hwid_hash TEXT NOT NULL DEFAULT '',
+		hwid_prefix TEXT NOT NULL DEFAULT '',
 		requested_at INTEGER NOT NULL,
 		served_from_cache INTEGER NOT NULL DEFAULT 0,
+		blocked INTEGER NOT NULL DEFAULT 0,
+		block_reason TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS subscription_protection_rules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		rule_type TEXT NOT NULL,
+		value TEXT NOT NULL,
+		note TEXT NOT NULL DEFAULT '',
+		created_at INTEGER DEFAULT (strftime('%s','now'))
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
 		ON subscription_requests(sub_id, requested_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
+		ON subscription_protection_rules(rule_type, value);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
@@ -255,11 +298,24 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add inbound_tags to existing users tables that predate this column.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE users ADD COLUMN inbound_tags TEXT DEFAULT '';")
+	s.db.Exec("ALTER TABLE users ADD COLUMN credential TEXT DEFAULT '';")
+	s.db.Exec("ALTER TABLE users ADD COLUMN flow TEXT DEFAULT '';")
 	// Reset day is now fixed to 1 for all users.
 	s.db.Exec("UPDATE users SET reset_day = 1 WHERE COALESCE(reset_day, 1) != 1;")
 	// Upgrade path: add can_read_logs_censored to existing panel_users tables.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs_censored INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_update_always INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]';")
+	s.db.Exec("UPDATE panel_users SET subscription_default_destinations_json = '[]' WHERE COALESCE(subscription_default_destinations_json, '') = '';")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN default_service TEXT NOT NULL DEFAULT 'singbox';")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN refresh_ms INTEGER NOT NULL DEFAULT 10000;")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN default_range TEXT NOT NULL DEFAULT '24h';")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN active_user_window_minutes INTEGER NOT NULL DEFAULT 5;")
+	s.db.Exec("ALTER TABLE dashboard_preferences ADD COLUMN detail_chart_target_points INTEGER NOT NULL DEFAULT 200;")
+	s.db.Exec(`UPDATE dashboard_preferences SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
+	s.db.Exec(`UPDATE dashboard_preferences SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
@@ -271,6 +327,22 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN profile_update_interval_hours INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN update_always INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("UPDATE subscriptions SET update_always = 0 WHERE update_always IS NULL;")
+	s.db.Exec("ALTER TABLE subscription_users ADD COLUMN alias TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN user_name TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_ip TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_host TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_path TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN user_agent TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN device_model TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN device_os TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN device_os_version TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN app_version TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN country TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN hwid_hash TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN hwid_prefix TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN block_reason TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked ON subscription_requests(blocked, requested_at DESC);")
 	return nil
 }
 
@@ -297,11 +369,72 @@ type PanelUserInfo struct {
 	CreatedAt   int64                `json:"created_at"`
 }
 
+type SubscriptionDefaults struct {
+	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
+	UpdateAlways               bool     `json:"update_always"`
+	Destinations               []string `json:"destinations"`
+}
+
+type DashboardPreferences struct {
+	DefaultService          string `json:"default_service"`
+	RefreshMs               int    `json:"refresh_ms"`
+	DefaultRange            string `json:"default_range"`
+	ActiveUserWindowMinutes int    `json:"active_user_window_minutes"`
+	DetailChartTargetPoints int    `json:"detail_chart_target_points"`
+}
+
+func DefaultDashboardPreferences() DashboardPreferences {
+	return DashboardPreferences{
+		DefaultService:          "singbox",
+		RefreshMs:               10000,
+		DefaultRange:            "24h",
+		ActiveUserWindowMinutes: 5,
+		DetailChartTargetPoints: 200,
+	}
+}
+
+func normalizeDashboardPreferences(p DashboardPreferences) DashboardPreferences {
+	out := DefaultDashboardPreferences()
+	if p.DefaultService == "wireguard" {
+		out.DefaultService = "wireguard"
+	}
+	switch p.DefaultRange {
+	case "30m", "1h", "6h", "24h", "1w", "1m":
+		out.DefaultRange = p.DefaultRange
+	}
+	if p.RefreshMs >= 1000 {
+		out.RefreshMs = p.RefreshMs
+	}
+	if p.ActiveUserWindowMinutes >= 1 && p.ActiveUserWindowMinutes <= 1440 {
+		out.ActiveUserWindowMinutes = p.ActiveUserWindowMinutes
+	}
+	switch p.DetailChartTargetPoints {
+	case 50, 100, 150, 200:
+		out.DetailChartTargetPoints = p.DetailChartTargetPoints
+	}
+	return out
+}
+
 func boolToInt64(b bool) int64 {
 	if b {
 		return 1
 	}
 	return 0
+}
+
+func nullableInt64(value *int64) sql.NullInt64 {
+	if value == nil {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{Int64: *value, Valid: true}
+}
+
+func nullableInt64Ptr(value sql.NullInt64) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	v := value.Int64
+	return &v
 }
 
 // Normalize keeps granular permissions coherent.
@@ -593,6 +726,76 @@ func (s *Store) UpdatePanelUserPermissions(username string, perms PanelUserPermi
 	return err
 }
 
+func (s *Store) GetPanelUserSubscriptionDefaults(ctx context.Context, username string) (SubscriptionDefaults, error) {
+	row, err := s.Queries.GetPanelUserSubscriptionDefaults(ctx, username)
+	if err != nil {
+		return SubscriptionDefaults{}, err
+	}
+
+	defaults := SubscriptionDefaults{
+		ProfileUpdateIntervalHours: nullableInt64Ptr(row.SubscriptionDefaultProfileUpdateIntervalHours),
+		UpdateAlways:               row.SubscriptionDefaultUpdateAlways != 0,
+		Destinations:               []string{},
+	}
+
+	if raw := strings.TrimSpace(row.SubscriptionDefaultDestinationsJson); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &defaults.Destinations); err != nil {
+			return SubscriptionDefaults{}, err
+		}
+	}
+
+	return defaults, nil
+}
+
+func (s *Store) UpdatePanelUserSubscriptionDefaults(ctx context.Context, username string, defaults SubscriptionDefaults) error {
+	destinationsJSON, err := json.Marshal(defaults.Destinations)
+	if err != nil {
+		return err
+	}
+
+	return s.Queries.UpdatePanelUserSubscriptionDefaults(ctx, sqlcStore.UpdatePanelUserSubscriptionDefaultsParams{
+		SubscriptionDefaultProfileUpdateIntervalHours: nullableInt64(defaults.ProfileUpdateIntervalHours),
+		SubscriptionDefaultUpdateAlways:               boolToInt64(defaults.UpdateAlways),
+		SubscriptionDefaultDestinationsJson:           string(destinationsJSON),
+		Username:                                      username,
+	})
+}
+
+func (s *Store) GetDashboardPreferences(ctx context.Context, principal string) (DashboardPreferences, error) {
+	defaults := DefaultDashboardPreferences()
+	row := s.db.QueryRowContext(ctx, `
+		SELECT default_service, refresh_ms, default_range, active_user_window_minutes, detail_chart_target_points
+		FROM dashboard_preferences
+		WHERE principal = ?
+	`, principal)
+
+	var prefs DashboardPreferences
+	if err := row.Scan(&prefs.DefaultService, &prefs.RefreshMs, &prefs.DefaultRange, &prefs.ActiveUserWindowMinutes, &prefs.DetailChartTargetPoints); err != nil {
+		if err == sql.ErrNoRows {
+			return defaults, nil
+		}
+		return defaults, err
+	}
+	return normalizeDashboardPreferences(prefs), nil
+}
+
+func (s *Store) UpdateDashboardPreferences(ctx context.Context, principal string, prefs DashboardPreferences) error {
+	prefs = normalizeDashboardPreferences(prefs)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO dashboard_preferences (
+			principal, default_service, refresh_ms, default_range, active_user_window_minutes, detail_chart_target_points, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+		ON CONFLICT(principal) DO UPDATE SET
+			default_service = excluded.default_service,
+			refresh_ms = excluded.refresh_ms,
+			default_range = excluded.default_range,
+			active_user_window_minutes = excluded.active_user_window_minutes,
+			detail_chart_target_points = excluded.detail_chart_target_points,
+			updated_at = strftime('%s','now')
+	`, principal, prefs.DefaultService, prefs.RefreshMs, prefs.DefaultRange, prefs.ActiveUserWindowMinutes, prefs.DetailChartTargetPoints)
+	return err
+}
+
 func (s *Store) UpdatePanelUsername(oldUsername, newUsername string) error {
 	count, err := s.Queries.CheckPanelUserExists(context.Background(), newUsername)
 	if err != nil {
@@ -601,13 +804,22 @@ func (s *Store) UpdatePanelUsername(oldUsername, newUsername string) error {
 	if count > 0 {
 		return fmt.Errorf("username %s already exists", newUsername)
 	}
-	return s.Queries.UpdatePanelUsername(context.Background(), sqlcStore.UpdatePanelUsernameParams{
+	if err := s.Queries.UpdatePanelUsername(context.Background(), sqlcStore.UpdatePanelUsernameParams{
 		Username:   newUsername,
 		Username_2: oldUsername,
-	})
+	}); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec("UPDATE dashboard_preferences SET principal = ?, updated_at = strftime('%s','now') WHERE principal = ?", newUsername, oldUsername); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Store) DeletePanelUser(username string) error {
+	if _, err := s.db.Exec("DELETE FROM dashboard_preferences WHERE principal = ?", username); err != nil {
+		return err
+	}
 	return s.Queries.DeletePanelUser(context.Background(), username)
 }
 
@@ -1032,7 +1244,8 @@ func (s *Store) CountSamples() (int64, error) {
 	c2, _ := s.Queries.CountWGSamples(context.Background())
 	c3, _ := s.Queries.CountDailyUsage(context.Background())
 	c4, _ := s.Queries.CountWGDailyUsage(context.Background())
-	return c1 + c2 + c3 + c4, nil
+	c5, _ := s.Queries.CountSubscriptionRequests(context.Background())
+	return c1 + c2 + c3 + c4 + c5, nil
 }
 
 type SamplerRun struct {
@@ -1107,6 +1320,14 @@ func (s *Store) SaveUserMetadata(meta UserMetadata) error {
 			Int64: enabled,
 			Valid: true,
 		},
+		Credential: sql.NullString{
+			String: meta.Credential,
+			Valid:  true,
+		},
+		Flow: sql.NullString{
+			String: meta.Flow,
+			Valid:  true,
+		},
 		VmessSecurity: sql.NullString{
 			String: meta.VmessSecurity,
 			Valid:  true,
@@ -1160,6 +1381,8 @@ func (s *Store) GetUserMetadata(email string) (*UserMetadata, error) {
 		QuotaPeriod:   meta.QuotaPeriod.String,
 		ResetDay:      int(meta.ResetDay.Int64),
 		Enabled:       meta.Enabled.Int64 != 0,
+		Credential:    meta.Credential.String,
+		Flow:          meta.Flow.String,
 		VmessSecurity: meta.VmessSecurity.String,
 		VmessAlterID:  int(meta.VmessAlterID.Int64),
 		InboundTags:   inboundTags,
@@ -1265,6 +1488,8 @@ func (s *Store) GetAllUserMetadata() ([]UserMetadata, error) {
 			QuotaPeriod:   meta.QuotaPeriod.String,
 			ResetDay:      int(meta.ResetDay.Int64),
 			Enabled:       meta.Enabled.Int64 != 0,
+			Credential:    meta.Credential.String,
+			Flow:          meta.Flow.String,
 			VmessSecurity: meta.VmessSecurity.String,
 			VmessAlterID:  int(meta.VmessAlterID.Int64),
 			InboundTags:   tags,

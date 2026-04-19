@@ -2,6 +2,7 @@ package api
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -26,23 +27,27 @@ import (
 )
 
 type Server struct {
-	store            *core.Store
-	config           *core.Config
-	executor         core.SystemExecutor
-	now              func() time.Time
-	sampler          *core.StatsSampler
-	pool             *pond.WorkerPool
-	validate         *validator.Validate
-	cache            *ristretto.Cache
-	wgPendingRestart bool
-	wgQRCache        map[string]qrEntry
-	wgQRCacheMutex   sync.RWMutex
-	wgMux            sync.RWMutex
-	wgSamplerTicker  *time.Ticker
-	wgSamplerStop    chan struct{}
-	wgSamplerPaused  bool
-	wgLast           map[string]core.WGSample
-	loginLimiter     *loginLimiter
+	store                *core.Store
+	config               *core.Config
+	executor             core.SystemExecutor
+	now                  func() time.Time
+	sampler              *core.StatsSampler
+	pool                 *pond.WorkerPool
+	validate             *validator.Validate
+	cache                *ristretto.Cache
+	wgPendingRestart     bool
+	wgQRCache            map[string]qrEntry
+	wgQRCacheMutex       sync.RWMutex
+	wgMux                sync.RWMutex
+	wgSamplerTicker      *time.Ticker
+	wgSamplerStop        chan struct{}
+	wgSamplerPaused      bool
+	wgLast               map[string]core.WGSample
+	loginLimiter         *loginLimiter
+	subscriptionLimiter  *subscriptionLimiter
+	protectionRules      *protectionRuleCache
+	blockedRecordDedup   map[string]time.Time
+	blockedRecordDedupMu sync.Mutex
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -59,25 +64,30 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		log.Fatalf("Failed to initialize ristretto cache: %v", err)
 	}
 
-	return &Server{
-		store:            store,
-		config:           config,
-		executor:         executor,
-		now:              time.Now,
-		sampler:          nil,
-		pool:             pond.New(100, 1000, pond.IdleTimeout(30*time.Second)),
-		validate:         validator.New(),
-		cache:            cache,
-		wgPendingRestart: false,
-		wgQRCache:        make(map[string]qrEntry),
-		wgQRCacheMutex:   sync.RWMutex{},
-		wgSamplerStop:    make(chan struct{}),
-		wgSamplerTicker:  time.NewTicker(interval),
-		wgMux:            sync.RWMutex{},
-		wgLast:           make(map[string]core.WGSample),
-		wgSamplerPaused:  false,
-		loginLimiter:     newLoginLimiter(),
+	srv := &Server{
+		store:               store,
+		config:              config,
+		executor:            executor,
+		now:                 time.Now,
+		sampler:             nil,
+		pool:                pond.New(100, 1000, pond.IdleTimeout(30*time.Second)),
+		validate:            validator.New(),
+		cache:               cache,
+		wgPendingRestart:    false,
+		wgQRCache:           make(map[string]qrEntry),
+		wgQRCacheMutex:      sync.RWMutex{},
+		wgSamplerStop:       make(chan struct{}),
+		wgSamplerTicker:     time.NewTicker(interval),
+		wgMux:               sync.RWMutex{},
+		wgLast:              make(map[string]core.WGSample),
+		wgSamplerPaused:     false,
+		loginLimiter:        newLoginLimiter(),
+		subscriptionLimiter: newSubscriptionLimiter(),
+		protectionRules:     newProtectionRuleCache(),
+		blockedRecordDedup:  make(map[string]time.Time),
 	}
+	srv.reloadProtectionRules(context.Background())
+	return srv
 }
 
 type gzipResponseWriter struct {
@@ -87,6 +97,15 @@ type gzipResponseWriter struct {
 
 func (w gzipResponseWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
+}
+
+func (w gzipResponseWriter) Flush() {
+	if flusher, ok := w.Writer.(interface{ Flush() error }); ok {
+		_ = flusher.Flush()
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
 
 func (s *Server) PondMiddleware(next http.Handler) http.Handler {
@@ -202,6 +221,13 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/auth/password", s.secure(s.handleUpdatePassword))
 	protected.HandleFunc("PUT /api/auth/username", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateUsername)))
 
+	protected.HandleFunc("GET /api/settings/subscription-protection", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionProtection)))
+	protected.HandleFunc("PUT /api/settings/subscription-protection", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateSubscriptionProtection)))
+	protected.HandleFunc("GET /api/settings/protection-rules", s.secure(s.requirePerm(canReadSettings, s.handleGetProtectionRules)))
+	protected.HandleFunc("POST /api/settings/protection-rules", s.secure(s.requirePerm(canWriteSettings, s.handleCreateProtectionRule)))
+	protected.HandleFunc("DELETE /api/settings/protection-rules/{id}", s.secure(s.requirePerm(canWriteSettings, s.handleDeleteProtectionRule)))
+	protected.HandleFunc("GET /api/settings/protection-rules/blocked-log", s.secure(s.requirePerm(canReadSettings, s.handleGetBlockedLog)))
+
 	// VPN Users
 	protected.HandleFunc("GET /api/users", s.secure(s.requirePerm(canReadUsers, s.handleGetUsers)))
 	protected.HandleFunc("POST /api/users", s.secure(s.requirePerm(canWriteUsers, s.handleCreateUser)))
@@ -219,6 +245,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/report/summary", s.secure(s.requirePerm(canReadUsers, s.handleGetReportSummary)))
 	protected.HandleFunc("GET /api/logs", s.secure(s.requirePerm(canReadLogs, s.handleGetLogs)))
 	protected.HandleFunc("GET /api/logs/search", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogs)))
+	protected.HandleFunc("GET /api/logs/search/stream", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogsStream)))
 	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
 	protected.HandleFunc("GET /api/dashboard/consumer-chart", s.secure(s.handleGetDashboardConsumerChart))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
@@ -236,6 +263,8 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/wireguard/config", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardConfig)))
 	protected.HandleFunc("POST /api/wireguard/config/backup", s.secure(s.requirePerm(canWriteWG, s.handleBackupWireGuardConfig)))
 	protected.HandleFunc("POST /api/wireguard/config/restore", s.secure(s.requirePerm(canWriteWG, s.handleRestoreWireGuardConfig)))
+	protected.HandleFunc("GET /api/wireguard/config/backups", s.secure(s.requirePerm(canReadWG, s.handleListWireGuardConfigBackups)))
+	protected.HandleFunc("GET /api/wireguard/config/backup", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardConfigBackup)))
 	protected.HandleFunc("GET /api/wireguard/traffic", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTraffic)))
 	protected.HandleFunc("GET /api/wireguard/traffic/series", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTrafficSeries)))
 	protected.HandleFunc("GET /api/wireguard/interfaces", s.secure(s.requirePerm(canReadWG, s.handleListWireGuardInterfaces)))
@@ -251,6 +280,9 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/peer/config", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardPeerConfigForInterface)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/config", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardConfigForInterface)))
 	protected.HandleFunc("PUT /api/wireguard/interfaces/{iface}/config", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardConfigForInterface)))
+	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/config/backup", s.secure(s.requirePerm(canWriteWG, s.handleBackupWireGuardConfigForInterface)))
+	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/config/backups", s.secure(s.requirePerm(canReadWG, s.handleListWireGuardConfigBackupsForInterface)))
+	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/config/backup", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardConfigBackupForInterface)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/traffic", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTrafficForInterface)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/traffic/series", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardTrafficSeriesForInterface)))
 	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/enable", s.secure(s.requirePerm(canWriteWG, s.handleEnableWireGuardInterface)))
@@ -279,20 +311,26 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/config/backup", s.secure(s.requirePerm(canWriteConfig, s.handleBackupConfig)))
 	protected.HandleFunc("POST /api/config/restore", s.secure(s.requirePerm(canWriteConfig, s.handleRestoreConfig)))
 	protected.HandleFunc("GET /api/config/backup/meta", s.secure(s.requirePerm(canReadConfig, s.handleGetBackupMeta)))
+	protected.HandleFunc("GET /api/config/backups", s.secure(s.requirePerm(canReadConfig, s.handleListConfigBackups)))
+	protected.HandleFunc("GET /api/config/backup", s.secure(s.requirePerm(canReadConfig, s.handleGetConfigBackup)))
 	protected.HandleFunc("GET /api/tools/reality-keys", s.secure(s.requirePerm(canWriteConfig, s.handleGenerateRealityKeys)))
 	protected.HandleFunc("POST /api/tools/self-signed-cert", s.secure(s.requirePerm(canWriteConfig, s.handleGenerateSelfSignedCert)))
+	protected.HandleFunc("POST /api/tools/rand-base64", s.secure(s.handleGenerateRandBase64))
 	protected.HandleFunc("GET /api/sysctl", s.secure(s.requirePerm(canReadConfig, s.handleGetSysctl)))
 	protected.HandleFunc("POST /api/sysctl", s.secure(s.requirePerm(canWriteConfig, s.handleApplySysctl)))
 
 	// Settings
 	protected.HandleFunc("GET /api/settings/features", s.secure(s.requirePerm(canReadSettings, s.handleGetFeatures)))
 	protected.HandleFunc("PUT /api/settings/features", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateFeatures)))
+	protected.HandleFunc("GET /api/settings/dashboard-preferences", s.secure(s.requirePerm(canReadSettings, s.handleGetDashboardPreferences)))
+	protected.HandleFunc("PUT /api/settings/dashboard-preferences", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateDashboardPreferences)))
 	protected.HandleFunc("GET /api/settings/public-ip", s.secure(s.requirePerm(canReadSettings, s.handleGetPublicIP)))
 	protected.HandleFunc("PUT /api/settings/public-ip", s.secure(s.requirePerm(canWriteSettings, s.handleUpdatePublicIP)))
 	protected.HandleFunc("GET /api/settings/subscription-domain", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionDomain)))
 	protected.HandleFunc("PUT /api/settings/subscription-domain", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateSubscriptionDomain)))
 	protected.HandleFunc("POST /api/sampler/run", s.secure(s.requirePerm(canWriteSettings, s.handleRunSampler)))
 	protected.HandleFunc("GET /api/sampler/history", s.secure(s.requirePerm(canReadSettings, s.handleSamplerHistory)))
+	protected.HandleFunc("GET /api/subscription-requests/history", s.secure(s.requirePerm(canReadSettings, s.handleSubscriptionRequestHistory)))
 	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.requirePerm(canWriteSettings, s.handlePauseSampler)))
 	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.requirePerm(canWriteSettings, s.handleResumeSampler)))
 	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.handlePruneNow)))
@@ -308,6 +346,9 @@ func (s *Server) Routes() *http.ServeMux {
 	// Subscriptions
 	protected.HandleFunc("GET /api/subscriptions", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscriptions)))
 	protected.HandleFunc("POST /api/subscriptions", s.secure(s.requirePerm(canWriteUsers, s.handleCreateSubscription)))
+	protected.HandleFunc("GET /api/subscriptions/defaults", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscriptionDefaults)))
+	protected.HandleFunc("GET /api/subscriptions/default-destinations", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscriptionDefaultDestinations)))
+	protected.HandleFunc("PUT /api/subscriptions/defaults", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscriptionDefaults)))
 	protected.HandleFunc("GET /api/subscriptions/{id}", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscription)))
 	protected.HandleFunc("PUT /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscription)))
 	protected.HandleFunc("DELETE /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteSubscription)))
@@ -579,8 +620,14 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 		if relPath != "" && relPath != "." {
 			fullPath := filepath.Join(distDir, filepath.FromSlash(relPath))
 			if st, err := os.Stat(fullPath); err == nil && !st.IsDir() {
-				if strings.EqualFold(filepath.Ext(fullPath), ".html") {
+				switch {
+				case strings.EqualFold(filepath.Base(fullPath), "sw.js"):
 					setFrontendDocumentCacheHeaders(w)
+					w.Header().Set("Service-Worker-Allowed", "/")
+				case strings.EqualFold(filepath.Ext(fullPath), ".html"):
+					setFrontendDocumentCacheHeaders(w)
+				case strings.EqualFold(filepath.Ext(fullPath), ".webmanifest"):
+					w.Header().Set("Cache-Control", "public, max-age=3600")
 				}
 				http.ServeFile(w, r, fullPath)
 				return
@@ -712,6 +759,12 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			limit = meta.QuotaLimit
 			period = meta.QuotaPeriod
 			enabled = meta.Enabled
+			if uuid == "" && meta.Credential != "" {
+				uuid = meta.Credential
+			}
+			if flow == "" && meta.Flow != "" {
+				flow = meta.Flow
+			}
 			if vmessSecurity == "" && meta.VmessSecurity != "" {
 				vmessSecurity = meta.VmessSecurity
 			}
@@ -740,8 +793,32 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			enabled = true
 		}
 
-		// If strictly disabled in metadata, but active in config, we still show as enabled=false (logic in handleUpdateUser handles sync)
-		// But in UI we verify state.
+		// Live sing-box state wins over stale metadata for effective enabled status.
+		// This prevents users manually restored to an inbound from staying stuck as
+		// "Disabled" in the UI until the next sampler reconciliation.
+		if isActive {
+			enabled = true
+			if hasMeta && metadataNeedsActiveBackfill(meta, user) {
+				metaToSave := meta
+				metaToSave.Enabled = true
+				if metaToSave.Credential == "" {
+					metaToSave.Credential = user.UUID
+				}
+				if metaToSave.Flow == "" {
+					metaToSave.Flow = user.Flow
+				}
+				if len(metaToSave.InboundTags) == 0 {
+					metaToSave.InboundTags = canonicalInboundTags(user.InboundTags...)
+				}
+				if metaToSave.VmessSecurity == "" {
+					metaToSave.VmessSecurity = user.VmessSecurity
+				}
+				if metaToSave.VmessAlterID == 0 {
+					metaToSave.VmessAlterID = user.VmessAlterID
+				}
+				_ = s.store.SaveUserMetadata(metaToSave)
+			}
+		}
 
 		// Stats calculation for user table indicators:
 		// always show current calendar month usage.
@@ -789,7 +866,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 					subUsed, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), sqlcStore.GetSubscriptionUsageInRangeParams{
 						SubID: sub.ID,
 						Ts:    startOfMonth.Unix(),
-						Ts2:   now.Unix(),
+						Ts_2:  now.Unix(),
 					})
 					subQuota = &SubQuotaInfo{
 						Name:       sub.Name,
@@ -856,6 +933,10 @@ func canonicalInboundTags(tags ...string) []string {
 	return []string{}
 }
 
+func metadataNeedsActiveBackfill(meta core.UserMetadata, user core.UserAccount) bool {
+	return len(meta.InboundTags) == 0 || (meta.Credential == "" && user.UUID != "") || (meta.Flow == "" && user.Flow != "") || (meta.VmessSecurity == "" && user.VmessSecurity != "") || (meta.VmessAlterID == 0 && user.VmessAlterID != 0)
+}
+
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -900,6 +981,8 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		QuotaPeriod:   req.QuotaPeriod,
 		ResetDay:      1,
 		Enabled:       enabled,
+		Credential:    req.UUID,
+		Flow:          req.Flow,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
 		InboundTags:   canonicalInboundTags(req.InboundTag),
@@ -946,7 +1029,11 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.UUID == "" {
-		req.UUID = uuid.NewString()
+		if existingMeta != nil && existingMeta.Credential != "" {
+			req.UUID = existingMeta.Credential
+		} else {
+			req.UUID = uuid.NewString()
+		}
 	}
 
 	// inboundTags tracks which inbound tags to persist in metadata.
@@ -1009,6 +1096,20 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		// Disable path: capture current inbound tags before removing the user.
 		if currentInbounds, err := s.config.GetUserInbounds(originalName); err == nil && len(currentInbounds) > 0 {
 			inboundTags = canonicalInboundTags(currentInbounds[0].Tag)
+			if currentInbounds[0].UUID != "" {
+				req.UUID = currentInbounds[0].UUID
+			} else if currentInbounds[0].Password != "" {
+				req.UUID = currentInbounds[0].Password
+			}
+			if currentInbounds[0].Flow != "" {
+				req.Flow = currentInbounds[0].Flow
+			}
+			if currentInbounds[0].VmessSecurity != "" {
+				req.VmessSecurity = currentInbounds[0].VmessSecurity
+			}
+			if currentInbounds[0].VmessAlterID != 0 {
+				req.VmessAlterID = currentInbounds[0].VmessAlterID
+			}
 		}
 		// If GetUserInbounds failed or returned empty, preserve existing inboundTags from metadata.
 
@@ -1024,6 +1125,8 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		QuotaPeriod:   req.QuotaPeriod,
 		ResetDay:      1,
 		Enabled:       enabled,
+		Credential:    req.UUID,
+		Flow:          req.Flow,
 		VmessSecurity: req.VmessSecurity,
 		VmessAlterID:  req.VmessAlterID,
 		InboundTags:   inboundTags,
@@ -1044,6 +1147,16 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	if originalName != req.Name {
 		s.store.DeleteUserMetadata(originalName)
+	}
+	shouldReconcileQuota := existingMeta == nil ||
+		existingMeta.QuotaLimit != req.QuotaLimit ||
+		existingMeta.QuotaPeriod != req.QuotaPeriod ||
+		!existingMeta.Enabled
+	if shouldReconcileQuota {
+		if err := s.store.ReconcileUserQuotaNow(req.Name, s.config); err != nil {
+			http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	s.cache.Del("api:status")
@@ -1132,6 +1245,8 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 	}
 
 	if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil {
+		meta.Credential = req.UUID
+		meta.Flow = req.Flow
 		if req.VmessSecurity != "" {
 			meta.VmessSecurity = req.VmessSecurity
 		}
@@ -1140,6 +1255,11 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		}
 		meta.InboundTags = canonicalInboundTags(tag)
 		_ = s.store.SaveUserMetadata(*meta)
+	}
+
+	if err := s.store.ReconcileUserQuotaNow(name, s.config); err != nil {
+		http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	s.InvalidateSubCache()
@@ -1176,10 +1296,14 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 			QuotaPeriod:   req.QuotaPeriod,
 			ResetDay:      1,
 			Enabled:       enabled,
+			Credential:    req.UUID,
+			Flow:          req.Flow,
 			VmessSecurity: req.VmessSecurity,
 			VmessAlterID:  req.VmessAlterID,
+			InboundTags:   canonicalInboundTags(req.InboundTag),
 		}
 		s.store.SaveUserMetadata(meta)
+		_ = s.store.ReconcileUserQuotaNow(req.Name, s.config)
 	}
 
 	s.cache.Del("api:status")
@@ -1376,7 +1500,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		if s.executor != nil {
 			lines, err = s.executor.ReadJournal(r.Context(), "sing-box", limit)
 		} else {
-			lines, err = readJournalLines("sing-box", limit)
+			lines, err = readJournalLines(r.Context(), "sing-box", limit)
 		}
 	} else {
 		lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, limit)
@@ -1387,11 +1511,14 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 					lines = linesJ
 					err = nil
 				}
-			} else if linesJ, jErr := readJournalLines("sing-box", limit); jErr == nil {
+			} else if linesJ, jErr := readJournalLines(r.Context(), "sing-box", limit); jErr == nil {
 				lines = linesJ
 				err = nil
 			}
 		}
+	}
+	if errors.Is(err, context.Canceled) {
+		return
 	}
 	if err != nil {
 		log.Printf("handleGetLogs: cannot read logs: %v", err)
@@ -1455,89 +1582,33 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "q is required", http.StatusBadRequest)
 		return
 	}
-	pageSize := 200
-	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 5000 {
-			pageSize = v
-		}
+	timeRange, err := parseLogTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
+	if err != nil {
+		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		return
 	}
-	if ps := r.URL.Query().Get("page_size"); ps != "" {
-		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 5000 {
-			pageSize = v
-		}
-	}
-	page := 1
-	if p := r.URL.Query().Get("page"); p != "" {
-		if v, err := strconv.Atoi(p); err == nil && v > 0 && v <= 1000 {
-			page = v
-		}
-	}
-	effectiveLimit := page * pageSize
-	if effectiveLimit > 5000 {
-		effectiveLimit = 5000
-	}
-
-	var lines []string
-	var err error
-
-	// For censored callers, we must match the query against the censored version of each
-	// line — otherwise a caller could search for a raw IP and find it. We achieve this by
-	// reading ALL lines, censoring them, then doing a manual substring filter. The normal
-	// SearchJournal/searchFileLines path is used only for uncensored callers.
+	page, pageSize, effectiveLimit := parseSearchPageParams(r)
 	censoredSearch := func() bool {
 		p := getPermissions(r)
 		return p != nil && p.CanReadLogsCensored
 	}()
-	compiledQuery := s.compileLogQuery(q)
-	postFilterSearch := censoredSearch || compiledQuery.requiresPostFilter()
-	truncatedToEffectiveLimit := false
-
-	if postFilterSearch {
-		lines, err = s.readAllSearchableLogLines(r.Context())
-		if err == nil {
-			sanitizeLogLines(lines)
-			if censoredSearch {
-				for i, ln := range lines {
-					lines[i] = core.CensorLine(ln)
-				}
-			}
-			lines = filterLogLines(lines, compiledQuery)
-			if len(lines) == 0 && s.config.LogSource == "file" {
-				if journalLines, jErr := s.readAllJournalLogLines(r.Context()); jErr == nil {
-					lines = journalLines
-					sanitizeLogLines(lines)
-					if censoredSearch {
-						for i, ln := range lines {
-							lines[i] = core.CensorLine(ln)
-						}
-					}
-					lines = filterLogLines(lines, compiledQuery)
-				}
-			}
-			lines, truncatedToEffectiveLimit = truncateRecentLogMatches(lines, effectiveLimit)
-		}
-	} else {
-		if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-			if s.executor != nil {
-				lines, err = s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit)
-			} else {
-				lines, err = searchJournalLines("sing-box", q, effectiveLimit)
-			}
-		} else {
-			lines, err = searchFileLines(s.config.AccessLogPath, q, effectiveLimit)
-			if (err != nil || len(lines) == 0) && s.config.LogSource == "file" {
-				// Fallback to journal if file missing/unreadable or no matches
-				if s.executor != nil {
-					if linesJ, jErr := s.executor.SearchJournal(r.Context(), "sing-box", q, effectiveLimit); jErr == nil {
-						lines = linesJ
-						err = nil
-					}
-				} else if linesJ, jErr := searchJournalLines("sing-box", q, effectiveLimit); jErr == nil {
-					lines = linesJ
-					err = nil
-				}
-			}
-		}
+	var chunks [][]string
+	chunkSize := effectiveLimit
+	if chunkSize > 200 {
+		chunkSize = 200
+	}
+	summary, err := s.searchLogsIncrementally(r.Context(), logSearchOptions{
+		query:     s.compileLogQuery(q),
+		timeRange: timeRange,
+		censored:  censoredSearch,
+		limit:     effectiveLimit,
+		chunkSize: chunkSize,
+	}, func(chunk []string, _ int) error {
+		chunks = append(chunks, chunk)
+		return nil
+	}, nil)
+	if errors.Is(err, context.Canceled) {
+		return
 	}
 	if err != nil {
 		log.Printf("handleSearchLogs: cannot search logs: %v", err)
@@ -1547,7 +1618,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	sanitizeLogLines(lines)
+	lines := collectSearchChunks(chunks)
 	start := (page - 1) * pageSize
 	end := start + pageSize
 	if start > len(lines) {
@@ -1557,10 +1628,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		end = len(lines)
 	}
 	paged := lines[start:end]
-	hasMore := truncatedToEffectiveLimit && end == len(lines)
-	if !postFilterSearch {
-		hasMore = len(lines) == effectiveLimit && end == len(lines)
-	}
+	hasMore := summary.truncated && end == len(lines)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -1568,6 +1636,80 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		"page":      page,
 		"page_size": pageSize,
 		"has_more":  hasMore,
+	})
+}
+
+func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		http.Error(w, "q is required", http.StatusBadRequest)
+		return
+	}
+	timeRange, err := parseLogTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
+	if err != nil {
+		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, _, effectiveLimit := parseSearchPageParams(r)
+	censoredSearch := func() bool {
+		p := getPermissions(r)
+		return p != nil && p.CanReadLogsCensored
+	}()
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	writeEvent := func(event map[string]interface{}) error {
+		if err := json.NewEncoder(w).Encode(event); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	summary, err := s.searchLogsIncrementally(r.Context(), logSearchOptions{
+		query:     s.compileLogQuery(q),
+		timeRange: timeRange,
+		censored:  censoredSearch,
+		limit:     effectiveLimit,
+		chunkSize: 100,
+	}, func(chunk []string, matched int) error {
+		return writeEvent(map[string]interface{}{
+			"type":    "chunk",
+			"logs":    chunk,
+			"matched": matched,
+		})
+	}, func(message string, matched int) error {
+		return writeEvent(map[string]interface{}{
+			"type":    "status",
+			"message": message,
+			"matched": matched,
+		})
+	})
+	if errors.Is(err, context.Canceled) {
+		return
+	}
+	if err != nil {
+		log.Printf("handleSearchLogsStream: cannot search logs: %v", err)
+		_ = writeEvent(map[string]interface{}{
+			"type":    "error",
+			"message": "Failed to search logs: " + err.Error(),
+		})
+		return
+	}
+	_ = writeEvent(map[string]interface{}{
+		"type":      "done",
+		"matched":   summary.matched,
+		"truncated": summary.truncated,
 	})
 }
 
@@ -1610,13 +1752,16 @@ func tailFileLines(path string, maxBytes int64, maxLines int) ([]string, error) 
 	return lines, nil
 }
 
-func readJournalLines(unit string, maxLines int) ([]string, error) {
+func readJournalLines(ctx context.Context, unit string, maxLines int) ([]string, error) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		log.Printf("journalctl not found: %v", err)
 		return []string{"(journalctl not available on this system)"}, nil
 	}
-	cmd := exec.Command("journalctl", "-u", unit, "-n", strconv.Itoa(maxLines), "--no-pager")
+	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(maxLines), "--no-pager")
 	out, err := cmd.CombinedOutput()
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {
@@ -1631,7 +1776,7 @@ func readJournalLines(unit string, maxLines int) ([]string, error) {
 	return strings.Split(data, "\n"), nil
 }
 
-func searchJournalLines(unit, query string, maxLines int) ([]string, error) {
+func searchJournalLines(ctx context.Context, unit, query string, maxLines int) ([]string, error) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		log.Printf("journalctl not found: %v", err)
 		return []string{"(journalctl not available on this system)"}, nil
@@ -1639,8 +1784,11 @@ func searchJournalLines(unit, query string, maxLines int) ([]string, error) {
 	// NOTE for search: --merge includes all rotated journal segments (system@*.journal).
 	// Without it, journalctl may only scan the active journal file, missing older entries.
 	// -o cat strips the syslog timestamp prefix so filters match message content only.
-	cmd := exec.Command("journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
+	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
 	out, err := cmd.CombinedOutput()
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {

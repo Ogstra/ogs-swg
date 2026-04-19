@@ -13,10 +13,20 @@ interface TabsProps {
     defaultTab?: string
     className?: string
     headerRight?: React.ReactNode
+    activeTab?: string
+    onTabChange?: (tabId: string) => void
 }
 
-export function Tabs({ tabs, defaultTab, className, headerRight }: TabsProps) {
-    const [activeTab, setActiveTab] = useState(defaultTab || tabs[0]?.id)
+export function Tabs({ tabs, defaultTab, className, headerRight, activeTab: controlledActiveTab, onTabChange }: TabsProps) {
+    const [internalActiveTab, setInternalActiveTab] = useState(defaultTab || tabs[0]?.id)
+    const activeTab = controlledActiveTab ?? internalActiveTab
+
+    const handleTabChange = (tabId: string) => {
+        if (controlledActiveTab === undefined) {
+            setInternalActiveTab(tabId)
+        }
+        onTabChange?.(tabId)
+    }
 
     return (
         <div className={twMerge("w-full h-full min-h-0 flex flex-col", className)}>
@@ -25,7 +35,7 @@ export function Tabs({ tabs, defaultTab, className, headerRight }: TabsProps) {
                     {tabs.map((tab) => (
                         <button
                             key={tab.id}
-                            onClick={() => setActiveTab(tab.id)}
+                            onClick={() => handleTabChange(tab.id)}
                             className={clsx(
                                 "px-6 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap",
                                 activeTab === tab.id

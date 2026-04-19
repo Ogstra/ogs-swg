@@ -3,11 +3,14 @@ package api
 import (
 	"bufio"
 	"context"
+	"errors"
 	"log"
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -17,7 +20,15 @@ var (
 	logUserTermRe       = regexp.MustCompile(`^\[[^\[\]]+\]$`)
 	logUserLineRe       = regexp.MustCompile(`:\s*(\[[^\[\]]+\])\s+inbound(?: packet)? connection\b`)
 	logANSIEscapeRe     = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+	logOffsetTimeRe     = regexp.MustCompile(`([+-]\d{4}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})`)
+	logSlashTimeRe      = regexp.MustCompile(`^(\d{4}/\d{2}/\d{2}\s+\d{2}:\d{2}:\d{2})`)
+	logSyslogTimeRe     = regexp.MustCompile(`^([A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})`)
 )
+
+type logTimeRange struct {
+	from *time.Time
+	to   *time.Time
+}
 
 type logQueryTerm struct {
 	raw      string
@@ -123,6 +134,111 @@ func sanitizeLogLines(lines []string) {
 	for i, line := range lines {
 		lines[i] = sanitizeLogLine(line)
 	}
+}
+
+func filterLogLinesByTimeRange(lines []string, tr logTimeRange, now func() time.Time) []string {
+	if tr.from == nil && tr.to == nil {
+		return lines
+	}
+
+	filtered := make([]string, 0, len(lines))
+	for _, line := range lines {
+		ts, ok := extractLogTimestamp(line, now)
+		if !ok {
+			continue
+		}
+		if tr.from != nil && ts.Before(*tr.from) {
+			continue
+		}
+		if tr.to != nil && ts.After(*tr.to) {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
+}
+
+func extractLogTimestamp(line string, now func() time.Time) (time.Time, bool) {
+	if match := logOffsetTimeRe.FindStringSubmatch(line); len(match) == 2 {
+		ts, err := time.Parse("-0700 2006-01-02 15:04:05", match[1])
+		if err == nil {
+			return ts, true
+		}
+	}
+	if match := logSlashTimeRe.FindStringSubmatch(line); len(match) == 2 {
+		ts, err := time.ParseInLocation("2006/01/02 15:04:05", match[1], time.Local)
+		if err == nil {
+			return ts, true
+		}
+	}
+	if match := logSyslogTimeRe.FindStringSubmatch(line); len(match) == 2 {
+		current := time.Now()
+		if now != nil {
+			current = now()
+		}
+		year := current.Year()
+		ts, err := time.ParseInLocation("Jan 2 15:04:05 2006", match[1]+" "+strconv.Itoa(year), time.Local)
+		if err == nil {
+			return ts, true
+		}
+	}
+	return time.Time{}, false
+}
+
+func parseLogTimeRange(fromRaw, toRaw string) (logTimeRange, error) {
+	from, err := parseLogTimeBound(fromRaw, false)
+	if err != nil {
+		return logTimeRange{}, err
+	}
+	to, err := parseLogTimeBound(toRaw, true)
+	if err != nil {
+		return logTimeRange{}, err
+	}
+	if from != nil && to != nil && from.After(*to) {
+		return logTimeRange{}, errInvalidLogTimeRange
+	}
+	return logTimeRange{from: from, to: to}, nil
+}
+
+var errInvalidLogTimeRange = errors.New("from must be before to")
+
+func parseLogTimeBound(raw string, isEnd bool) (*time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		var (
+			ts  time.Time
+			err error
+		)
+		if strings.Contains(layout, "Z07") {
+			ts, err = time.Parse(layout, raw)
+		} else {
+			ts, err = time.ParseInLocation(layout, raw, time.Local)
+		}
+		if err != nil {
+			continue
+		}
+		if isEnd && (layout == "2006-01-02" || layout == "2006-01-02T15:04") {
+			if layout == "2006-01-02" {
+				ts = ts.Add(24*time.Hour - time.Second)
+			} else {
+				ts = ts.Add(time.Minute - time.Second)
+			}
+		}
+		value := ts
+		return &value, nil
+	}
+	return nil, errors.New("invalid datetime format")
 }
 
 func filterLogLines(lines []string, query compiledLogQuery) []string {
@@ -247,17 +363,20 @@ func (s *Server) readAllJournalLogLines(ctx context.Context) ([]string, error) {
 	if s.executor != nil {
 		return s.executor.ReadAllJournal(ctx, "sing-box")
 	}
-	return readAllJournalLines("sing-box")
+	return readAllJournalLines(ctx, "sing-box")
 }
 
-func readAllJournalLines(unit string) ([]string, error) {
+func readAllJournalLines(ctx context.Context, unit string) ([]string, error) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		log.Printf("journalctl not found: %v", err)
 		return []string{"(journalctl not available on this system)"}, nil
 	}
 
-	cmd := exec.Command("journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
+	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
 	out, err := cmd.CombinedOutput()
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
 		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {

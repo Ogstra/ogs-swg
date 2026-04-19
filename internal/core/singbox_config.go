@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"reflect"
@@ -73,8 +74,7 @@ func (c *Config) writeValidatedSingboxConfigMapLocked(raw map[string]interface{}
 		return err
 	}
 
-	c.SingboxPendingChanges = true
-	return nil
+	return c.afterSingboxConfigWriteLocked(nil)
 }
 
 func decodeInboundRawList(raw json.RawMessage) ([]json.RawMessage, error) {
@@ -296,7 +296,7 @@ func assertExperimentalAllowedChanges(before, after json.RawMessage) error {
 		if key == "v2ray_api" {
 			continue
 		}
-		if !rawMessageEqual(beforeMap[key], afterMap[key]) {
+		if !jsonSemanticallyEqual(beforeMap[key], afterMap[key]) {
 			return fmt.Errorf("subsection %q changed outside allowed scope", key)
 		}
 	}
@@ -462,8 +462,7 @@ func (c *Config) modifySingboxConfig(modifier func(*SingboxConfig) error) error 
 		return err
 	}
 
-	c.SingboxPendingChanges = true
-	return nil
+	return c.afterSingboxConfigWriteLocked(&cfg)
 }
 
 func decodeSingboxInboundMeta(rawInbound json.RawMessage) (SingboxInboundMeta, error) {
@@ -499,6 +498,9 @@ func decodeSingboxInboundUserViews(rawUsers interface{}) []SingboxInboundUserVie
 
 		user := SingboxInboundUserView{}
 		user.Name, _ = userMap["name"].(string)
+		if user.Name == "" {
+			user.Name, _ = userMap["username"].(string)
+		}
 		user.UUID, _ = userMap["uuid"].(string)
 		user.ID, _ = userMap["id"].(string)
 		user.Password, _ = userMap["password"].(string)
@@ -787,8 +789,7 @@ func (c *Config) UpdateSingboxOutboundDomainStrategies(updates []SingboxOutbound
 		return err
 	}
 
-	c.SingboxPendingChanges = true
-	return nil
+	return c.afterSingboxConfigWriteLocked(&cfg)
 }
 
 type UserInboundInfo struct {
@@ -823,6 +824,24 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 			flow := user.Flow
 			switch inbound.Type {
 			case "hysteria2":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
+			case "anytls":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
+			case "naive":
+				result = append(result, UserInboundInfo{
+					Tag:      inbound.Tag,
+					Password: user.Password,
+				})
+				continue
+			case "shadowsocks":
 				result = append(result, UserInboundInfo{
 					Tag:      inbound.Tag,
 					Password: user.Password,
@@ -1021,8 +1040,7 @@ func (c *Config) saveAndReload(rawConfig *SingboxConfig) error {
 		}
 	}
 
-	c.MarkSingboxPending()
-	return nil
+	return c.afterSingboxConfigWriteLocked(rawConfig)
 }
 
 func (c *Config) ValidateConfig(content []byte) error {
@@ -1118,6 +1136,17 @@ func (c *Config) ReloadSingbox() error {
 		return nil
 	}
 
+	raw, err := c.readSingboxConfigLocked()
+	if err == nil {
+		var cfg SingboxConfig
+		if json.Unmarshal(raw, &cfg) == nil &&
+			cfg.Experimental != nil &&
+			cfg.Experimental.ClashAPI != nil &&
+			cfg.Experimental.ClashAPI.ExternalController != "" {
+			return c.reloadViaClashAPI(cfg.Experimental.ClashAPI)
+		}
+	}
+
 	if c.executor != nil {
 		return c.executor.RestartService(context.Background(), "sing-box")
 	}
@@ -1125,6 +1154,40 @@ func (c *Config) ReloadSingbox() error {
 	// Assuming systemd usage
 	cmd := exec.Command("systemctl", "restart", "sing-box")
 	return cmd.Run()
+}
+
+func (c *Config) reloadViaClashAPI(api *ClashAPI) error {
+	body, err := json.Marshal(map[string]string{"path": c.SingboxConfigPath})
+	if err != nil {
+		return fmt.Errorf("clash API reload: marshal request body: %w", err)
+	}
+
+	req, err := http.NewRequest(
+		http.MethodPut,
+		fmt.Sprintf("http://%s/configs?force=false", api.ExternalController),
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return fmt.Errorf("clash API reload: create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if api.Secret != "" {
+		req.Header.Set("Authorization", "Bearer "+api.Secret)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("clash API reload: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("clash API reload: unexpected status %d", resp.StatusCode)
+	}
+
+	return nil
 }
 
 // GetSingboxRouteRules reads the current route.rules array from the config.
@@ -1221,6 +1284,27 @@ func (c *Config) UpsertSingboxRouteRules(newRules []map[string]interface{}) erro
 	if err := c.writeSingboxConfigLocked(data); err != nil {
 		return err
 	}
+	return c.afterSingboxConfigWriteLocked(nil)
+}
+
+func (c *Config) afterSingboxConfigWriteLocked(cfg *SingboxConfig) error {
+	if cfg == nil {
+		raw, err := c.readSingboxConfigLocked()
+		if err == nil {
+			var parsed SingboxConfig
+			if json.Unmarshal(raw, &parsed) == nil {
+				cfg = &parsed
+			}
+		}
+	}
+
+	if cfg != nil && cfg.Experimental != nil && cfg.Experimental.ClashAPI != nil && cfg.Experimental.ClashAPI.ExternalController != "" {
+		if err := c.reloadViaClashAPI(cfg.Experimental.ClashAPI); err == nil {
+			c.SingboxPendingChanges = false
+			return nil
+		}
+	}
+
 	c.SingboxPendingChanges = true
 	return nil
 }

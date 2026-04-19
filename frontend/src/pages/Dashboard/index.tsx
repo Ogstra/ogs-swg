@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, UnifiedChartPoint, Consumer, TrafficStats } from '../../services/api'
+import { api, UnifiedChartPoint, Consumer, TrafficStats, DashboardData, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
+import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { formatBytes } from '../../utils/traffic'
-
-const DASHBOARD_PREF_KEY = 'dashboard_prefs'
+import { useToast } from '../../context/ToastContext'
 
 type DashboardRange = '30m' | '1h' | '6h' | '24h' | '1w' | '1m' | 'custom'
 
@@ -15,6 +15,14 @@ type DashboardPrefs = {
     defaultService?: 'singbox' | 'wireguard'
     refreshMs?: number
     defaultRange?: DashboardRange
+    activeUserWindowMinutes?: number
+    detailChartTargetPoints?: number
+}
+
+type DensifiedChartCache = {
+    cacheKey: string
+    source: UnifiedChartPoint[]
+    dense: UnifiedChartPoint[]
 }
 
 type DashboardRequestWindow =
@@ -34,6 +42,17 @@ const toUnixSeconds = (value: string) => {
 }
 
 const maskedConsumerKey = '********'
+const detailChartInterpolationFactor = 4
+const defaultDetailChartTargetPoints = 200
+const dashboardPrefsStorageKey = 'dashboard:prefs:v1'
+const dashboardSnapshotPrefix = 'dashboard:snapshot:v1:'
+const defaultDashboardPrefs: DashboardPrefs = {
+    defaultService: 'singbox',
+    refreshMs: 10000,
+    defaultRange: '24h',
+    activeUserWindowMinutes: 5,
+    detailChartTargetPoints: defaultDetailChartTargetPoints,
+}
 
 const getConsumerSelectionId = (consumer: Consumer | null | undefined, mode: 'singbox' | 'wireguard') => {
     if (!consumer) return ''
@@ -41,13 +60,145 @@ const getConsumerSelectionId = (consumer: Consumer | null | undefined, mode: 'si
     return `${mode}:${consumer.name}:${consumer.interface_name || ''}:${consumer.flow || ''}`
 }
 
-const loadDashboardPrefs = (): DashboardPrefs => {
+const dashboardPrefsFromApi = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
+    defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : defaultDashboardPrefs.defaultService,
+    refreshMs: prefs?.refresh_ms && prefs.refresh_ms >= 1000 ? prefs.refresh_ms : defaultDashboardPrefs.refreshMs,
+    defaultRange: (prefs?.default_range && ['30m', '1h', '6h', '24h', '1w', '1m'].includes(prefs.default_range))
+        ? prefs.default_range as DashboardRange
+        : defaultDashboardPrefs.defaultRange,
+    activeUserWindowMinutes: prefs?.active_user_window_minutes && prefs.active_user_window_minutes >= 1
+        ? prefs.active_user_window_minutes
+        : defaultDashboardPrefs.activeUserWindowMinutes,
+    detailChartTargetPoints: [50, 100, 150, 200].includes(Number(prefs?.detail_chart_target_points))
+        ? Number(prefs?.detail_chart_target_points)
+        : defaultDashboardPrefs.detailChartTargetPoints,
+})
+
+type DashboardSnapshot = {
+    data: DashboardData
+    savedAt: number
+}
+
+const readStoredDashboardPrefs = (): DashboardPrefs | null => {
+    if (typeof window === 'undefined') return null
     try {
-        const raw = localStorage.getItem(DASHBOARD_PREF_KEY)
-        if (!raw) return {}
-        return JSON.parse(raw)
+        const raw = window.localStorage.getItem(dashboardPrefsStorageKey)
+        return raw ? dashboardPrefsFromApi(JSON.parse(raw)) : null
     } catch {
-        return {}
+        return null
+    }
+}
+
+const writeStoredDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null) => {
+    if (typeof window === 'undefined' || !prefs) return
+    try {
+        window.localStorage.setItem(dashboardPrefsStorageKey, JSON.stringify(prefs))
+    } catch {
+        // Best-effort startup optimization only.
+    }
+}
+
+const dashboardSnapshotKey = (requestWindow: DashboardRequestWindow) => {
+    if (requestWindow.range === 'custom') {
+        return `${dashboardSnapshotPrefix}custom:${requestWindow.startText}:${requestWindow.endText}`
+    }
+    return `${dashboardSnapshotPrefix}${requestWindow.range}`
+}
+
+const readDashboardSnapshot = (key: string): DashboardSnapshot | null => {
+    if (typeof window === 'undefined') return null
+    try {
+        const raw = window.localStorage.getItem(key)
+        if (!raw) return null
+        const parsed = JSON.parse(raw) as DashboardSnapshot
+        return parsed?.data ? parsed : null
+    } catch {
+        return null
+    }
+}
+
+const writeDashboardSnapshot = (key: string, data?: DashboardData) => {
+    if (typeof window === 'undefined' || !data) return
+    try {
+        window.localStorage.setItem(key, JSON.stringify({ data, savedAt: Date.now() }))
+    } catch {
+        // Ignore storage pressure; the network path still works.
+    }
+}
+
+const chartPointsEqual = (left: UnifiedChartPoint, right: UnifiedChartPoint) => (
+    left.ts === right.ts &&
+    left.up_sb === right.up_sb &&
+    left.down_sb === right.down_sb &&
+    left.up_wg === right.up_wg &&
+    left.down_wg === right.down_wg
+)
+
+const interpolateChartPoint = (start: UnifiedChartPoint, end: UnifiedChartPoint, ratio: number): UnifiedChartPoint => ({
+    ts: start.ts + ((end.ts - start.ts) * ratio),
+    up_sb: Math.round(start.up_sb + ((end.up_sb - start.up_sb) * ratio)),
+    down_sb: Math.round(start.down_sb + ((end.down_sb - start.down_sb) * ratio)),
+    up_wg: Math.round(start.up_wg + ((end.up_wg - start.up_wg) * ratio)),
+    down_wg: Math.round(start.down_wg + ((end.down_wg - start.down_wg) * ratio)),
+})
+
+const densifyChartSeries = (points: UnifiedChartPoint[], factor: number): UnifiedChartPoint[] => {
+    if (factor <= 1 || points.length < 2) return points
+
+    const dense: UnifiedChartPoint[] = []
+    for (let i = 0; i < points.length - 1; i += 1) {
+        const current = points[i]
+        const next = points[i + 1]
+        dense.push(current)
+        for (let step = 1; step < factor; step += 1) {
+            dense.push(interpolateChartPoint(current, next, step / factor))
+        }
+    }
+    dense.push(points[points.length - 1])
+    return dense
+}
+
+const densifyChartSeriesIncremental = (
+    points: UnifiedChartPoint[],
+    factor: number,
+    cache: DensifiedChartCache | null,
+    cacheKey: string,
+): DensifiedChartCache => {
+    if (factor <= 1 || points.length < 2) {
+        return { cacheKey, source: points, dense: points }
+    }
+    if (!cache || cache.cacheKey !== cacheKey) {
+        return { cacheKey, source: points, dense: densifyChartSeries(points, factor) }
+    }
+
+    const previous = cache.source
+    const commonLength = Math.min(previous.length, points.length)
+    let firstDiffIndex = -1
+    for (let i = 0; i < commonLength; i += 1) {
+        if (!chartPointsEqual(previous[i], points[i])) {
+            firstDiffIndex = i
+            break
+        }
+    }
+
+    if (firstDiffIndex === -1) {
+        if (previous.length === points.length) {
+            return cache
+        }
+        firstDiffIndex = commonLength
+    }
+
+    if (firstDiffIndex <= 0) {
+        return { cacheKey, source: points, dense: densifyChartSeries(points, factor) }
+    }
+
+    const preservedDenseLength = ((firstDiffIndex - 1) * factor) + 1
+    const prefix = cache.dense.slice(0, preservedDenseLength)
+    const tail = densifyChartSeries(points.slice(firstDiffIndex - 1), factor)
+    return {
+        cacheKey,
+        source: points,
+        dense: prefix.concat(tail.slice(1)),
     }
 }
 
@@ -72,11 +223,13 @@ const WireGuardIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
 )
 
 export default function Dashboard() {
+    const { success, error: toastError } = useToast()
     const queryClient = useQueryClient()
-    const [timeRange, setTimeRange] = useState<DashboardRange>('24h')
-    const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>('singbox')
-    const [refreshInterval, setRefreshInterval] = useState<number>(10000)
-    const [prefsLoaded, setPrefsLoaded] = useState(false)
+    const [initialDashboardPrefs] = useState(() => readStoredDashboardPrefs())
+    const [timeRange, setTimeRange] = useState<DashboardRange>(initialDashboardPrefs?.defaultRange || '24h')
+    const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>(initialDashboardPrefs?.defaultService || 'singbox')
+    const [refreshInterval, setRefreshInterval] = useState<number>(initialDashboardPrefs?.refreshMs || 10000)
+    const [prefsLoaded, setPrefsLoaded] = useState(true)
     const [selectedConsumers, setSelectedConsumers] = useState<Record<'singbox' | 'wireguard', Consumer | null>>({
         singbox: null,
         wireguard: null,
@@ -89,6 +242,12 @@ export default function Dashboard() {
     const [customEnd, setCustomEnd] = useState(formatDateTimeLocalValue(now))
     const chartContainerRef = useRef<HTMLDivElement | null>(null)
     const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
+    const detailChartCacheRef = useRef<DensifiedChartCache | null>(null)
+    const [detailChartTargetPoints, setDetailChartTargetPoints] = useState<number>(initialDashboardPrefs?.detailChartTargetPoints || defaultDetailChartTargetPoints)
+    const [singboxApplyLoading, setSingboxApplyLoading] = useState(false)
+    const [singboxRestartConfirmOpen, setSingboxRestartConfirmOpen] = useState(false)
+    const [singboxRestartLoading, setSingboxRestartLoading] = useState(false)
+    const prefsInitializedRef = useRef(false)
 
     const computeRangeSeconds = (range: string) => {
         const nowSec = Math.floor(Date.now() / 1000)
@@ -104,13 +263,25 @@ export default function Dashboard() {
         }
     }
 
+    const dashboardPrefsQuery = useQuery({
+        queryKey: ['dashboard-preferences'],
+        queryFn: () => api.getDashboardPreferences(),
+        retry: false,
+    })
+
     useEffect(() => {
-        const prefs = loadDashboardPrefs()
-        if (prefs.defaultService === 'wireguard') setChartMode('wireguard')
+        if (prefsInitializedRef.current) return
+        if (dashboardPrefsQuery.isPending) return
+
+        const prefs = dashboardPrefsFromApi(dashboardPrefsQuery.data)
+        writeStoredDashboardPrefs(dashboardPrefsQuery.data)
+        setChartMode(prefs.defaultService || 'singbox')
         if (prefs.defaultRange) setTimeRange(prefs.defaultRange)
         if (prefs.refreshMs && prefs.refreshMs >= 1000) setRefreshInterval(prefs.refreshMs)
+        setDetailChartTargetPoints(prefs.detailChartTargetPoints ?? defaultDetailChartTargetPoints)
+        prefsInitializedRef.current = true
         setPrefsLoaded(true)
-    }, [])
+    }, [dashboardPrefsQuery.data, dashboardPrefsQuery.isPending])
 
     useEffect(() => {
         const el = chartContainerRef.current
@@ -148,6 +319,8 @@ export default function Dashboard() {
         }
         return { range: timeRange }
     }, [timeRange, customRangeState])
+    const dashboardSnapshotStorageKey = useMemo(() => dashboardSnapshotKey(requestWindow), [requestWindow])
+    const dashboardSnapshot = useMemo(() => readDashboardSnapshot(dashboardSnapshotStorageKey), [dashboardSnapshotStorageKey])
 
     const dashboardQuery = useQuery({
         queryKey: requestWindow.range === 'custom'
@@ -158,11 +331,20 @@ export default function Dashboard() {
             : api.getDashboardData(requestWindow.range),
         enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid),
         refetchInterval: refreshInterval,
-        placeholderData: previousData => previousData,
+        placeholderData: previousData => previousData ?? dashboardSnapshot?.data,
     })
 
+    useEffect(() => {
+        if (!dashboardQuery.data || dashboardQuery.isPlaceholderData || dashboardQuery.dataUpdatedAt === 0) return
+        writeDashboardSnapshot(dashboardSnapshotStorageKey, dashboardQuery.data)
+    }, [dashboardQuery.data, dashboardQuery.dataUpdatedAt, dashboardQuery.isPlaceholderData, dashboardSnapshotStorageKey])
+
     const loading = dashboardQuery.isFetching
-    const lastUpdated = dashboardQuery.dataUpdatedAt ? new Date(dashboardQuery.dataUpdatedAt) : new Date()
+    const lastUpdated = dashboardQuery.dataUpdatedAt
+        ? new Date(dashboardQuery.dataUpdatedAt)
+        : dashboardSnapshot?.savedAt
+            ? new Date(dashboardSnapshot.savedAt)
+            : new Date()
     const chartData: UnifiedChartPoint[] = dashboardQuery.data?.chart_data || []
     const chartDomain: [number, number] = useMemo(() => {
         if (chartData.length > 1) {
@@ -209,17 +391,42 @@ export default function Dashboard() {
     }
 
     const handleApplySingboxChanges = async () => {
+        setSingboxApplyLoading(true)
         try {
+            const result = await api.applySingboxChanges()
+            if (result.restart_required) {
+                setSingboxPendingChanges(true)
+                setSingboxRestartConfirmOpen(true)
+                return
+            }
+
             setSingboxPendingChanges(false)
-            await api.applySingboxChanges()
             await Promise.all([
                 dashboardQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
             ])
+            success('Sing-box configuration applied successfully')
         } catch (err) {
             setSingboxPendingChanges(true)
             console.error('Failed to apply Sing-box changes:', err)
-            alert('Failed to apply changes. Please try again.')
+            toastError('Failed to apply changes. Please try again.')
+        } finally {
+            setSingboxApplyLoading(false)
+        }
+    }
+
+    const handleConfirmSingboxRestart = async () => {
+        setSingboxRestartLoading(true)
+        try {
+            await api.restartService('sing-box')
+            setSingboxPendingChanges(false)
+            setSingboxRestartConfirmOpen(false)
+            success('Sing-box restart started')
+        } catch (err) {
+            setSingboxPendingChanges(true)
+            toastError('Failed to restart Sing-box: ' + err)
+        } finally {
+            setSingboxRestartLoading(false)
         }
     }
 
@@ -229,16 +436,31 @@ export default function Dashboard() {
     const selectedConsumerSelectionId = getConsumerSelectionId(selectedConsumer, chartMode)
     const selectedConsumerQuery = useQuery({
         queryKey: requestWindow.range === 'custom'
-            ? ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, requestWindow.range, requestWindow.startText, requestWindow.endText]
-            : ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, requestWindow.range],
+            ? ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, detailChartTargetPoints, requestWindow.range, requestWindow.startText, requestWindow.endText]
+            : ['dashboard-consumer-chart', chartMode, selectedConsumerSelectionId, detailChartTargetPoints, requestWindow.range],
         queryFn: () => requestWindow.range === 'custom'
-            ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range, requestWindow.startText, requestWindow.endText)
-            : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range),
+            ? api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range, requestWindow.startText, requestWindow.endText, detailChartTargetPoints)
+            : api.getDashboardConsumerChart(chartMode, selectedConsumer!.key, selectedConsumer!.name, selectedConsumer!.interface_name, requestWindow.range, undefined, undefined, detailChartTargetPoints),
         enabled: prefsLoaded && (timeRange !== 'custom' || customRangeState.isValid) && !!selectedConsumerSelectionId,
         refetchInterval: selectedConsumer ? refreshInterval : false,
     })
     const detailChartData = selectedConsumerQuery.data?.chart_data || []
-    const activeChartData = selectedConsumer ? detailChartData : chartData
+    const denseDetailChartData = useMemo(() => {
+        if (!selectedConsumer) return detailChartData
+        const rangeKey = requestWindow.range === 'custom'
+            ? `${requestWindow.range}:${requestWindow.startText}:${requestWindow.endText}`
+            : requestWindow.range
+        const cacheKey = `${chartMode}:${selectedConsumerSelectionId}:${rangeKey}:${detailChartInterpolationFactor}`
+        const nextCache = densifyChartSeriesIncremental(
+            detailChartData,
+            detailChartInterpolationFactor,
+            detailChartCacheRef.current,
+            cacheKey,
+        )
+        detailChartCacheRef.current = nextCache
+        return nextCache.dense
+    }, [chartMode, detailChartData, requestWindow, selectedConsumer, selectedConsumerSelectionId])
+    const activeChartData = selectedConsumer ? denseDetailChartData : chartData
 
     useEffect(() => {
         setSelectedConsumers(prev => {
@@ -280,13 +502,14 @@ export default function Dashboard() {
                         <Shield className="text-yellow-500" size={20} />
                         <div>
                             <p className="text-sm font-medium text-yellow-200">Sing-box Configuration Changes Pending</p>
-                            <p className="text-xs text-yellow-300/70 mt-0.5">Changes have been saved but not yet applied. Click "Apply Changes" to restart the service.</p>
+                            <p className="text-xs text-yellow-300/70 mt-0.5">Changes have been saved but not yet applied. Click "Apply Changes" to apply them.</p>
                         </div>
                     </div>
                     <Button
                         onClick={handleApplySingboxChanges}
                         variant="primary"
                         size="sm"
+                        isLoading={singboxApplyLoading}
                         className="whitespace-nowrap bg-yellow-600 hover:bg-yellow-700 text-white"
                     >
                         Apply Changes
@@ -400,7 +623,7 @@ export default function Dashboard() {
                         {status.active_users_singbox_list && status.active_users_singbox_list.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-2">
                                 {status.active_users_singbox_list.map((user: string, idx: number) => (
-                                    <span key={idx} className="text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20" title={user}>
                                         {user}
                                     </span>
                                 ))}
@@ -454,7 +677,7 @@ export default function Dashboard() {
                         {status.active_users_wireguard_list && status.active_users_wireguard_list.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-2">
                                 {status.active_users_wireguard_list.map((peer: string, idx: number) => (
-                                    <span key={idx} className="text-[10px] font-medium bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20">
+                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20" title={peer}>
                                         {peer}
                                     </span>
                                 ))}
@@ -627,10 +850,10 @@ export default function Dashboard() {
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
                                             {i + 1}
                                         </div>
-                                        <div className="min-w-0">
-                                            <div className="truncate font-medium text-sm text-slate-200">{u.name}</div>
+                                        <div className="min-w-0 max-w-[200px]">
+                                            <div className="truncate font-medium text-sm text-slate-200" title={u.name}>{u.name}</div>
                                             {chartMode === 'wireguard' && (
-                                                <div className="truncate text-[10px] text-slate-500">
+                                                <div className="truncate text-[10px] text-slate-500" title={u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}>
                                                     {u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}
                                                 </div>
                                             )}
@@ -645,6 +868,19 @@ export default function Dashboard() {
                     </div>
                 </Card>
             </div>
+            <ConfirmModal
+                isOpen={singboxRestartConfirmOpen}
+                onClose={() => {
+                    if (singboxRestartLoading) return
+                    setSingboxRestartConfirmOpen(false)
+                }}
+                onConfirm={handleConfirmSingboxRestart}
+                title="Restart Sing-box?"
+                message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
+                confirmLabel="Restart"
+                confirmTone="primary"
+                isLoading={singboxRestartLoading}
+            />
         </div >
     )
 }
