@@ -5,7 +5,7 @@
   "inbounds": [
     {
       "type": "vless",
-      "tag": "demo-vless-443",
+      "tag": "demo-vless-reality",
       "listen": "::",
       "listen_port": 443,
       "users": [
@@ -18,54 +18,115 @@
           "name": "user-02",
           "uuid": "22222222-2222-4222-8222-222222222222",
           "flow": "xtls-rprx-vision"
-        },
-        {
-          "name": "user-03",
-          "uuid": "33333333-3333-4333-8333-333333333333",
-          "flow": "xtls-rprx-vision"
-        },
-        {
-          "name": "user-04",
-          "uuid": "44444444-4444-4444-8444-444444444444",
-          "flow": "xtls-rprx-vision"
         }
       ],
-      "transport": {
-        "type": "http",
-        "path": "/demo-http"
+      "tls": {
+        "enabled": true,
+        "server_name": "demo-reality.example.com",
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ],
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "reality-handshake.demo.invalid",
+            "server_port": 443
+          },
+          "public_key": "2py6HKEB4i1u-GSBaabqPWtOQBrHdLQ_nRxLrjAqGno",
+          "short_id": [
+            "a1b2c3d4"
+          ]
+        }
       }
     },
     {
-      "type": "vless",
-      "tag": "demo-vless-8443",
+      "type": "vmess",
+      "tag": "demo-vmess-ws",
       "listen": "::",
       "listen_port": 8443,
       "users": [
         {
-          "name": "user-05",
-          "uuid": "55555555-5555-4555-8555-555555555555",
-          "flow": "xtls-rprx-vision"
+          "name": "user-03",
+          "uuid": "33333333-3333-4333-8333-333333333333",
+          "security": "auto"
         },
         {
-          "name": "user-06",
-          "uuid": "66666666-6666-4666-8666-666666666666",
-          "flow": "xtls-rprx-vision"
-        },
-        {
-          "name": "user-07",
-          "uuid": "77777777-7777-4777-8777-777777777777",
-          "flow": "xtls-rprx-vision"
-        },
-        {
-          "name": "user-08",
-          "uuid": "88888888-8888-4888-8888-888888888888",
-          "flow": "xtls-rprx-vision"
+          "name": "user-04",
+          "uuid": "44444444-4444-4444-8444-444444444444",
+          "security": "auto"
         }
       ],
       "transport": {
         "type": "ws",
-        "path": "/demo-ws"
+        "path": "/demo-vmess"
       }
+    },
+    {
+      "type": "trojan",
+      "tag": "demo-trojan-tls",
+      "listen": "::",
+      "listen_port": 9443,
+      "users": [
+        {
+          "name": "user-05",
+          "password": "demo-trojan-user-05-pass"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "demo-trojan.example.com",
+        "alpn": [
+          "http/1.1"
+        ]
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "demo-hysteria2",
+      "listen": "::",
+      "listen_port": 10443,
+      "users": [
+        {
+          "name": "user-06",
+          "password": "demo-hysteria2-user-06-pass"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "demo-hy2.example.com",
+        "alpn": [
+          "h3"
+        ]
+      },
+      "obfs": {
+        "type": "salamander",
+        "password": "demo-hy2-obfs"
+      },
+      "up_mbps": 100,
+      "down_mbps": 300
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "demo-shadowsocks-2022",
+      "listen": "::",
+      "listen_port": 8388,
+      "network": [
+        "tcp",
+        "udp"
+      ],
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "MDEyMzQ1Njc4OWFiY2RlZg==",
+      "users": [
+        {
+          "name": "user-07",
+          "password": "YWJjZGVmMDEyMzQ1Njc4OQ=="
+        },
+        {
+          "name": "user-08",
+          "password": "ZmVkY2JhOTg3NjU0MzIxMA=="
+        }
+      ]
     }
   ],
   "outbounds": [
@@ -78,13 +139,31 @@
     "rules": [
       {
         "inbound": [
-          "demo-vless-443"
+          "demo-vless-reality"
         ],
         "outbound": "direct"
       },
       {
         "inbound": [
-          "demo-vless-8443"
+          "demo-vmess-ws"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "inbound": [
+          "demo-trojan-tls"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "inbound": [
+          "demo-hysteria2"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "inbound": [
+          "demo-shadowsocks-2022"
         ],
         "outbound": "direct"
       }
@@ -97,8 +176,11 @@
       "stats": {
         "enabled": true,
         "inbounds": [
-          "demo-vless-443",
-          "demo-vless-8443"
+          "demo-vless-reality",
+          "demo-vmess-ws",
+          "demo-trojan-tls",
+          "demo-hysteria2",
+          "demo-shadowsocks-2022"
         ],
         "outbounds": [
           "direct"

@@ -4,6 +4,7 @@ import (
 	"crypto/ecdh"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -195,6 +196,19 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to get user inbounds: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if len(inbounds) == 0 && s.store != nil {
+		if meta, err := s.store.GetUserMetadata(name); err == nil && meta != nil && len(meta.InboundTags) > 0 && strings.TrimSpace(meta.Credential) != "" {
+			for _, tag := range meta.InboundTags {
+				inbounds = append(inbounds, core.UserInboundInfo{
+					Tag:           tag,
+					UUID:          meta.Credential,
+					Flow:          meta.Flow,
+					VmessSecurity: meta.VmessSecurity,
+					VmessAlterID:  meta.VmessAlterID,
+				})
+			}
+		}
+	}
 
 	if len(inbounds) > 0 {
 		tagTypes := map[string]string{}
@@ -315,7 +329,7 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		inbType = "vless"
 	}
 
-	if inbType != "hysteria2" && inbType != "trojan" && userInfo.UUID == "" {
+	if inbType != "hysteria2" && inbType != "trojan" && inbType != "shadowsocks" && inbType != "anytls" && inbType != "naive" && userInfo.UUID == "" {
 		return "", "", fmt.Errorf("User credential missing for inbound")
 	}
 
@@ -373,6 +387,15 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 	case "hysteria2":
 		link, err := buildHysteria2Link(name, userInfo, inboundView, host, port)
 		return link, inbType, err
+	case "shadowsocks":
+		link, err := buildShadowsocksLink(name, userInfo, inboundView, host, port)
+		return link, inbType, err
+	case "anytls":
+		link, err := buildAnyTLSLink(name, userInfo, inboundView, host, port, inboundMeta, sniFallback)
+		return link, inbType, err
+	case "naive":
+		link, err := buildNaiveLink(name, userInfo, inboundView, host, port, inboundMeta, sniFallback)
+		return link, inbType, err
 	default:
 		return "", "", fmt.Errorf("Inbound type is not supported")
 	}
@@ -419,8 +442,20 @@ func isTrustedProxy(remoteAddr string) bool {
 }
 
 func stripPort(host string) string {
-	if strings.Contains(host, ":") {
-		return strings.Split(host, ":")[0]
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
+	}
+	if parsedHost, parsedPort, err := net.SplitHostPort(host); err == nil && parsedPort != "" {
+		return parsedHost
+	}
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		return strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	if strings.Count(host, ":") == 1 {
+		if rawHost, _, ok := strings.Cut(host, ":"); ok {
+			return rawHost
+		}
 	}
 	return host
 }
@@ -588,7 +623,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 			params.Set("packetEncoding", packetEncoding)
 		}
 
-		nameTag := url.QueryEscape("VLESS-" + name)
+		nameTag := url.QueryEscape(name)
 		base := fmt.Sprintf("vless://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
 		if encoded := params.Encode(); encoded != "" {
 			base += "?" + encoded
@@ -631,7 +666,7 @@ func buildVlessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 		params.Set("serviceName", transport.ServiceName)
 	}
 
-	nameTag := url.QueryEscape("VLESS-" + name)
+	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("vless://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
 	if encoded := params.Encode(); encoded != "" {
 		base += "?" + encoded
@@ -680,7 +715,7 @@ func buildTrojanLink(name string, userInfo *core.UserInboundInfo, view *core.Sin
 		params.Set("serviceName", transport.ServiceName)
 	}
 
-	nameTag := url.QueryEscape("TROJAN-" + name)
+	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("trojan://%s@%s:%s", url.QueryEscape(userInfo.UUID), host, port)
 	if encoded := params.Encode(); encoded != "" {
 		base += "?" + encoded
@@ -708,7 +743,7 @@ func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.
 			params.Set("obfs-password", obfsPwd)
 		}
 	}
-	nameTag := url.QueryEscape("HY2-" + name)
+	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("hysteria2://%s@%s:%s",
 		url.QueryEscape(password),
 		host,
@@ -719,6 +754,100 @@ func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.
 	}
 	base += "#" + nameTag
 	return base, nil
+}
+
+func buildAnyTLSLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
+	password := strings.TrimSpace(userInfo.Password)
+	if password == "" {
+		password = strings.TrimSpace(userInfo.UUID)
+	}
+	if password == "" {
+		return "", fmt.Errorf("User password missing for anytls inbound")
+	}
+
+	tls := extractTLSInfo(view)
+	params := url.Values{}
+	if sni := tls.ServerName; sni != "" {
+		params.Set("sni", sni)
+	} else if sniFallback != "" {
+		params.Set("sni", sniFallback)
+	}
+	if alpn := normalizedALPN(tls.ALPN); alpn != "" {
+		params.Set("alpn", alpn)
+	}
+	if shouldAllowInsecure(tls, meta) {
+		params.Set("insecure", "1")
+	}
+
+	nameTag := url.QueryEscape(name)
+	base := fmt.Sprintf("anytls://%s@%s:%s", url.QueryEscape(password), host, port)
+	if encoded := params.Encode(); encoded != "" {
+		base += "?" + encoded
+	}
+	base += "#" + nameTag
+	return base, nil
+}
+
+func buildNaiveLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
+	password := strings.TrimSpace(userInfo.Password)
+	if password == "" {
+		password = strings.TrimSpace(userInfo.UUID)
+	}
+	if password == "" {
+		return "", fmt.Errorf("User password missing for naive inbound")
+	}
+
+	scheme := "naive+https"
+	if network, _ := view.Raw["network"].(string); strings.EqualFold(strings.TrimSpace(network), "udp") {
+		scheme = "naive+quic"
+	}
+	tls := extractTLSInfo(view)
+	params := url.Values{}
+	if sni := tls.ServerName; sni != "" && sni != host {
+		params.Set("sni", sni)
+	} else if sniFallback != "" {
+		params.Set("sni", sniFallback)
+	}
+	if shouldAllowInsecure(tls, meta) {
+		params.Set("insecure", "1")
+	}
+
+	nameTag := url.QueryEscape(name)
+	base := fmt.Sprintf("%s://%s:%s@%s:%s", scheme, url.QueryEscape(name), url.QueryEscape(password), host, port)
+	if encoded := params.Encode(); encoded != "" {
+		base += "?" + encoded
+	}
+	base += "#" + nameTag
+	return base, nil
+}
+
+func buildShadowsocksLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string) (string, error) {
+	password := strings.TrimSpace(userInfo.Password)
+	if password == "" {
+		password = strings.TrimSpace(userInfo.UUID)
+	}
+	if password == "" {
+		return "", fmt.Errorf("User password missing for shadowsocks inbound")
+	}
+
+	method, _ := view.Raw["method"].(string)
+	method = strings.TrimSpace(method)
+	if method == "" {
+		return "", fmt.Errorf("Shadowsocks inbound method missing")
+	}
+
+	// Shadowsocks 2022 multi-user: inbound has a top-level server key that the
+	// client must prepend to the user key ("server_key:user_key").
+	credential := method + ":"
+	if serverKey, _ := view.Raw["password"].(string); strings.TrimSpace(serverKey) != "" {
+		credential += strings.TrimSpace(serverKey) + ":" + password
+	} else {
+		credential += password
+	}
+
+	// SIP002 URI: ss://BASE64(method[:server_key]:user_key)@host:port#tag
+	nameTag := url.QueryEscape(name)
+	return fmt.Sprintf("ss://%s@%s:%s#%s", base64.StdEncoding.EncodeToString([]byte(credential)), host, port, nameTag), nil
 }
 
 func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.SingboxInboundView, host, port string, meta *core.InboundMeta, sniFallback string) (string, error) {
@@ -742,7 +871,7 @@ func buildVmessLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 
 	payload := map[string]string{
 		"v":    "2",
-		"ps":   "VMESS-" + name,
+		"ps":   name,
 		"add":  host,
 		"port": port,
 		"id":   userInfo.UUID,
@@ -1267,6 +1396,17 @@ func (s *Server) handleApplySingboxChanges(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := s.config.ApplySingboxChanges(); err != nil {
+		var restartRequired *core.SingboxRestartRequiredError
+		if errors.As(err, &restartRequired) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":          false,
+				"restart_required": true,
+				"message":          "Sing-box restart required to apply this configuration",
+			})
+			return
+		}
 		http.Error(w, "Failed to apply changes: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

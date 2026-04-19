@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
+import { useToast } from '../../context/ToastContext'
 import { RawEditorPanel } from '../../components/raw/RawEditorPanel'
+import { ConfirmModal } from '../../components/ui/ConfirmModal'
 
 type TabId = 'raw-singbox' | 'raw-wireguard'
 
 export default function RawConfig() {
     const { permissions } = useAuth()
+    const { success, error: toastError } = useToast()
     const canReadConfig = !!permissions?.can_read_config
     const canWriteConfig = !!permissions?.can_write_config
     const canReadWireguard = !!permissions?.can_read_wireguard
@@ -21,6 +24,9 @@ export default function RawConfig() {
     const [originalWireguardConfig, setOriginalWireguardConfig] = useState('')
     const [wireguardInterfaces, setWireguardInterfaces] = useState<string[]>([])
     const [activeWireguardInterface, setActiveWireguardInterface] = useState('')
+    const [availableBackups, setAvailableBackups] = useState<Array<{ name: string; created_at: string }>>([])
+    const [selectedBackupName, setSelectedBackupName] = useState('')
+    const [pendingBackupName, setPendingBackupName] = useState('')
 
     const resolveActiveWireguardInterface = (available: string[], preferred: string) => {
         if (preferred && available.includes(preferred)) {
@@ -49,6 +55,25 @@ export default function RawConfig() {
         }
     }
 
+    const loadAvailableBackups = async (nextTab: TabId = activeTab, nextWireGuardInterface: string = activeWireguardInterface) => {
+        try {
+            if (nextTab === 'raw-singbox') {
+                setAvailableBackups(await api.getConfigBackups())
+                return
+            }
+
+            if (!canReadWireguard || !nextWireGuardInterface) {
+                setAvailableBackups([])
+                return
+            }
+
+            setAvailableBackups(await api.getWireGuardConfigBackupsForInterface(nextWireGuardInterface))
+        } catch (err) {
+            console.error('Failed to load backups', err)
+            setAvailableBackups([])
+        }
+    }
+
     const loadCurrentConfig = async () => {
         if (!canReadConfig) return
         setLoading(true)
@@ -69,6 +94,8 @@ export default function RawConfig() {
                 }
             }
             await loadBackupMeta()
+            await loadAvailableBackups()
+            setSelectedBackupName('')
         } catch (err) {
             console.error('Failed to load config', err)
         } finally {
@@ -117,6 +144,8 @@ export default function RawConfig() {
             }
 
             await loadBackupMeta()
+            await loadAvailableBackups(activeTab, activeWireguardInterface || resolveActiveWireguardInterface(wireguardInterfaces, activeWireguardInterface))
+            setSelectedBackupName('')
         } catch (err) {
             console.error('Failed to load configs', err)
         } finally {
@@ -146,6 +175,21 @@ export default function RawConfig() {
         void loadCurrentConfig()
     }, [activeTab, canReadWireguard, activeWireguardInterface])
 
+    useEffect(() => {
+        if (activeTab === 'raw-singbox') {
+            void loadAvailableBackups('raw-singbox')
+            setSelectedBackupName('')
+            return
+        }
+
+        if (canReadWireguard && activeWireguardInterface) {
+            void loadAvailableBackups('raw-wireguard', activeWireguardInterface)
+        } else {
+            setAvailableBackups([])
+        }
+        setSelectedBackupName('')
+    }, [activeTab, canReadWireguard, activeWireguardInterface])
+
     const handleSave = async () => {
         setSaving(true)
         try {
@@ -155,15 +199,15 @@ export default function RawConfig() {
                 setOriginalSingboxConfig(singboxConfig)
             } else if (canReadWireguard) {
                 if (!activeWireguardInterface) {
-                    alert('Select a WireGuard interface first')
+                    toastError('Select a WireGuard interface first')
                     return
                 }
                 await api.updateWireGuardConfigForInterface(activeWireguardInterface, wireguardConfig)
                 setOriginalWireguardConfig(wireguardConfig)
             }
-            alert('Configuration saved successfully')
+            success('Configuration saved successfully')
         } catch (err: any) {
-            alert(`Failed to save: ${err?.message || err}`)
+            toastError(`Failed to save: ${err?.message || err}`)
         } finally {
             setSaving(false)
         }
@@ -174,33 +218,60 @@ export default function RawConfig() {
             if (activeTab === 'raw-singbox') {
                 await api.backupConfig()
             } else if (canReadWireguard) {
-                await api.backupWireGuardConfig()
+                if (!activeWireguardInterface) {
+                    toastError('Select a WireGuard interface first')
+                    return
+                }
+                await api.backupWireGuardConfigForInterface(activeWireguardInterface)
             }
             await loadBackupMeta()
-            alert('Backup created (.bak)')
+            await loadAvailableBackups()
+            setSelectedBackupName('')
+            success('Backup created')
         } catch (err: any) {
-            alert(`Backup failed: ${err?.message || err}`)
+            toastError(`Backup failed: ${err?.message || err}`)
         }
     }
 
     const handleRestore = async () => {
-        if (!confirm('Restore from backup? This will overwrite current config.')) return
+        try {
+            await loadCurrentConfig()
+            success('Restored live config in editor')
+        } catch (err: any) {
+            toastError(`Restore failed: ${err?.message || err}`)
+        }
+    }
+
+    const loadBackupIntoEditor = async (backupName: string) => {
         try {
             if (activeTab === 'raw-singbox') {
-                const restored = await api.restoreConfig()
-                const normalized = JSON.stringify(restored, null, 2)
-                setSingboxConfig(normalized)
-                setOriginalSingboxConfig(normalized)
+                const content = await api.getConfigBackupContent(backupName)
+                setSingboxConfig(normalizeJson(content))
             } else if (canReadWireguard) {
-                const restored = await api.restoreWireGuardConfig()
-                setWireguardConfig(restored)
-                setOriginalWireguardConfig(restored)
+                if (!activeWireguardInterface) {
+                    toastError('Select a WireGuard interface first')
+                    return
+                }
+                const content = await api.getWireGuardConfigBackupContentForInterface(activeWireguardInterface, backupName)
+                setWireguardConfig(content)
             }
-            await loadBackupMeta()
-            alert('Restored from backup')
+            setSelectedBackupName(backupName)
         } catch (err: any) {
-            alert(`Restore failed: ${err?.message || err}`)
+            toastError(`Failed to load backup: ${err?.message || err}`)
+            setSelectedBackupName('')
         }
+    }
+
+    const handleSelectBackup = async (backupName: string) => {
+        if (!backupName) {
+            setSelectedBackupName('')
+            return
+        }
+        if (currentValue !== currentOriginal) {
+            setPendingBackupName(backupName)
+            return
+        }
+        await loadBackupIntoEditor(backupName)
     }
 
     const currentValue = activeTab === 'raw-singbox' ? singboxConfig : wireguardConfig
@@ -208,6 +279,49 @@ export default function RawConfig() {
     const currentLastBackup = activeTab === 'raw-singbox' ? lastBackup.singbox : lastBackup.wireguard
     const canWriteCurrent = activeTab === 'raw-singbox' ? canWriteConfig : canWriteWireguard
     const mobileTabWidthClass = canReadWireguard ? 'w-1/2 sm:w-auto' : 'w-full sm:w-auto'
+    const liveOptionLabel = availableBackups.length > 0 ? 'Live' : 'Live (no backups yet)'
+    const backupSelector = (
+        <div className="flex items-center gap-2 min-w-0">
+            <span className="hidden sm:inline text-xs font-medium text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                Backups
+            </span>
+            <select
+                value={selectedBackupName}
+                onChange={e => void handleSelectBackup(e.target.value)}
+                className="select-field w-full sm:w-auto h-[38px] min-w-[150px] max-w-[220px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                aria-label="Backup versions"
+            >
+                <option value="">{liveOptionLabel}</option>
+                {availableBackups.map(backup => (
+                    <option key={backup.name} value={backup.name}>
+                        {new Date(backup.created_at).toLocaleString()}
+                    </option>
+                ))}
+            </select>
+        </div>
+    )
+    const wireGuardInterfaceSelector = activeTab === 'raw-wireguard' && canReadWireguard ? (
+        <>
+            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider whitespace-nowrap">
+                Interface
+            </span>
+            <select
+                value={activeWireguardInterface}
+                onChange={e => setActiveWireguardInterface(e.target.value)}
+                className="select-field h-[38px] min-w-[120px] max-w-[180px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors font-mono"
+            >
+                {wireguardInterfaces.length === 0 ? (
+                    <option value="">No interfaces</option>
+                ) : (
+                    wireguardInterfaces.map(iface => (
+                        <option key={iface} value={iface}>
+                            {iface}
+                        </option>
+                    ))
+                )}
+            </select>
+        </>
+    ) : null
 
     if (!canReadConfig) {
         return (
@@ -254,49 +368,69 @@ export default function RawConfig() {
                         language={activeTab === 'raw-singbox' ? 'json' : 'ini'}
                         textareaId={activeTab === 'raw-singbox' ? 'raw-editor-singbox' : 'raw-editor-wireguard'}
                         saveLabel="Save Changes"
-                        bottomBarExtraDesktop={activeTab === 'raw-wireguard' && canReadWireguard ? (
-                            <div className="flex items-center gap-2">
-                                <span className="text-xs font-medium text-slate-400 uppercase tracking-wider whitespace-nowrap">
-                                    Interface
-                                </span>
-                                <select
-                                    value={activeWireguardInterface}
-                                    onChange={e => setActiveWireguardInterface(e.target.value)}
-                                    className="select-field h-[38px] min-w-[120px] max-w-[180px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors font-mono"
-                                >
-                                    {wireguardInterfaces.length === 0 ? (
-                                        <option value="">No interfaces</option>
-                                    ) : (
-                                        wireguardInterfaces.map(iface => (
-                                            <option key={iface} value={iface}>
-                                                {iface}
-                                            </option>
-                                        ))
-                                    )}
-                                </select>
+                        hideCompareOnMobile={activeTab === 'raw-wireguard'}
+                        bottomBarExtraDesktop={
+                            <div className="flex items-center gap-3 min-w-0">
+                                {wireGuardInterfaceSelector}
+                                {backupSelector}
                             </div>
-                        ) : undefined}
-                        bottomBarExtraMobile={activeTab === 'raw-wireguard' && canReadWireguard ? (
-                            <select
-                                value={activeWireguardInterface}
-                                onChange={e => setActiveWireguardInterface(e.target.value)}
-                                className="select-field w-full h-[38px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors font-mono"
-                                aria-label="WireGuard interface"
-                            >
-                                {wireguardInterfaces.length === 0 ? (
-                                    <option value="">No interfaces</option>
-                                ) : (
-                                    wireguardInterfaces.map(iface => (
-                                        <option key={iface} value={iface}>
-                                            {iface}
-                                        </option>
-                                    ))
+                        }
+                        bottomBarExtraMobile={
+                            <>
+                                {activeTab === 'raw-wireguard' && canReadWireguard && (
+                                    <select
+                                        value={activeWireguardInterface}
+                                        onChange={e => setActiveWireguardInterface(e.target.value)}
+                                        className="select-field w-full h-[38px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors font-mono"
+                                        aria-label="WireGuard interface"
+                                    >
+                                        {wireguardInterfaces.length === 0 ? (
+                                            <option value="">No interfaces</option>
+                                        ) : (
+                                            wireguardInterfaces.map(iface => (
+                                                <option key={iface} value={iface}>
+                                                    {iface}
+                                                </option>
+                                            ))
+                                        )}
+                                    </select>
                                 )}
-                            </select>
-                        ) : undefined}
+                                <select
+                                    value={selectedBackupName}
+                                    onChange={e => void handleSelectBackup(e.target.value)}
+                                    className="select-field w-full h-[38px] bg-slate-950 border border-slate-700 rounded-lg px-2 text-sm text-slate-200 outline-none focus:border-blue-500 transition-colors"
+                                    aria-label="Backup versions"
+                                >
+                                    <option value="">{liveOptionLabel}</option>
+                                    {availableBackups.map(backup => (
+                                        <option key={backup.name} value={backup.name}>
+                                            {new Date(backup.created_at).toLocaleString()}
+                                        </option>
+                                    ))}
+                                </select>
+                            </>
+                        }
                     />
                 </div>
             </div>
+            <ConfirmModal
+                isOpen={!!pendingBackupName}
+                title="Unsaved Changes"
+                message="You have unsaved changes in the editor. Loading a backup will replace them in the editor. Continue?"
+                confirmLabel="Load Backup"
+                onConfirm={async () => {
+                    const nextBackup = pendingBackupName
+                    setPendingBackupName('')
+                    if (nextBackup) {
+                        await loadBackupIntoEditor(nextBackup)
+                    }
+                }}
+                onClose={() => {
+                    setPendingBackupName('')
+                    setSelectedBackupName('')
+                }}
+                confirmTone="danger"
+            />
         </div>
     )
 }

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -16,7 +17,8 @@ import (
 // logsExecutorStub overrides ReadJournal and SearchJournal to return controlled lines.
 type logsExecutorStub struct {
 	singboxConfigExecutorStub
-	journalLines []string
+	journalLines    []string
+	walkJournalHits int
 }
 
 func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, limit int) ([]string, error) {
@@ -47,6 +49,24 @@ func (s *logsExecutorStub) SearchJournal(_ context.Context, _ string, query stri
 		}
 	}
 	return result, nil
+}
+
+func (s *logsExecutorStub) WalkJournal(_ context.Context, _ string, newestFirst bool, visit func(string) error) error {
+	s.walkJournalHits++
+	if newestFirst {
+		for i := len(s.journalLines) - 1; i >= 0; i-- {
+			if err := visit(s.journalLines[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, line := range s.journalLines {
+		if err := visit(line); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func containsInsensitive(s, substr string) bool {
@@ -406,6 +426,29 @@ func TestHandleSearchLogs(t *testing.T) {
 	}
 }
 
+func TestParseSubscriptionDefaultDestinations(t *testing.T) {
+	lines := []string{
+		"2026/04/07 10:00:00 [OGS] inbound connection to alpha.example.com:443",
+		"2026/04/07 10:01:00 [OGS] inbound packet connection to resolver.example.net:53",
+		"2026/04/07 10:02:00 [OGS] inbound connection to ALPHA.EXAMPLE.COM:443",
+		"2026/04/07 10:03:00 [OGS] inbound connection to localhost:9090",
+		"2026/04/07 10:04:00 [OGS] inbound connection to [::1]:443",
+		"2026/04/07 10:05:00 [OGS] inbound connection to malformed",
+		"2026/04/07 10:06:00 unrelated line",
+	}
+
+	got := parseSubscriptionDefaultDestinations(lines, 10)
+	want := []string{"alpha.example.com:443", "resolver.example.net:53"}
+	if len(got) != len(want) {
+		t.Fatalf("destinations=%v want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("destinations[%d]=%q want %q (full=%v)", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestHandleGetLogs_UserQueryFollowsConnectionID(t *testing.T) {
 	srv, _ := newLogsTestServer(t, []string{
 		userTaggedLogLine,
@@ -687,6 +730,34 @@ func TestHandleSearchLogs_UserQuerySupportsBracketedUserAndAndOperator(t *testin
 	}
 }
 
+func TestHandleSearchLogs_BracketLiteralWithoutMatchesDoesNotCrash(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		textAndLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BOGS%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if containsInsensitive(joinLines(resp.Logs), "panic") {
+		t.Fatalf("unexpected panic output in response: %v", resp.Logs)
+	}
+}
+
 func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T) {
 	srv, _ := newLogsTestServerWithFileSource(t,
 		[]string{hysteriaUserTaggedLogLine, hysteriaOutboundLogLine},
@@ -716,6 +787,136 @@ func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T
 	}
 	if !containsInsensitive(body, hysteriaOutboundLogLine) {
 		t.Fatalf("expected journal fallback to include correlated outbound line, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleSearchLogs_TimeRangeFiltersEmbeddedTimestamp(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{
+		"-0300 2026-04-08 12:12:29 INFO [1 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to alpha.example:443",
+		"-0300 2026-04-08 13:15:00 INFO [2 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to beta.example:443",
+		"-0300 2026-04-08 14:45:10 INFO [3 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to gamma.example:443",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T13:00:00-03:00&to=2026-04-08T14:00:00-03:00", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, "beta.example") {
+		t.Fatalf("expected middle line in response, got: %v", resp.Logs)
+	}
+	if containsInsensitive(body, "alpha.example") || containsInsensitive(body, "gamma.example") {
+		t.Fatalf("unexpected lines outside range in response, got: %v", resp.Logs)
+	}
+}
+
+func TestHandleSearchLogs_InvalidTimeRangeReturnsBadRequest(t *testing.T) {
+	srv, _ := newLogsTestServer(t, []string{userTaggedLogLine})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T14:00:00-03:00&to=2026-04-08T13:00:00-03:00", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestHandleSearchLogs_UsesIncrementalJournalWalker(t *testing.T) {
+	srv, stub := newLogsTestServer(t, []string{
+		userTaggedLogLine,
+		userOutboundLogLine,
+		otherUserTaggedLogLine,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	if stub.walkJournalHits == 0 {
+		t.Fatalf("expected incremental journal walker to be used")
+	}
+}
+
+func TestHandleSearchLogsStream_EmitsChunksAndDone(t *testing.T) {
+	lines := []string{
+		"2026/04/08 12:00:00 INFO outbound/direct match-one",
+		"2026/04/08 12:00:01 INFO outbound/direct match-two",
+		"2026/04/08 12:00:02 INFO outbound/direct match-three",
+	}
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs/search/stream?q=match&limit=2", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+
+	srv.handleSearchLogsStream(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var events []map[string]interface{}
+	for _, line := range strings.Split(strings.TrimSpace(rr.Body.String()), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var event map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode event %q: %v", line, err)
+		}
+		events = append(events, event)
+	}
+
+	if len(events) < 2 {
+		t.Fatalf("expected at least status/chunk/done events, got %v", events)
+	}
+
+	foundChunk := false
+	foundDone := false
+	for _, event := range events {
+		switch event["type"] {
+		case "chunk":
+			foundChunk = true
+			logs, ok := event["logs"].([]interface{})
+			if !ok || len(logs) == 0 {
+				t.Fatalf("expected chunk logs, got %#v", event["logs"])
+			}
+		case "done":
+			foundDone = true
+			if matched, ok := event["matched"].(float64); !ok || int(matched) != 2 {
+				t.Fatalf("expected matched=2 in done event, got %#v", event["matched"])
+			}
+			if truncated, ok := event["truncated"].(bool); !ok || !truncated {
+				t.Fatalf("expected truncated=true in done event, got %#v", event["truncated"])
+			}
+		}
+	}
+	if !foundChunk {
+		t.Fatalf("expected at least one chunk event, got %v", events)
+	}
+	if !foundDone {
+		t.Fatalf("expected done event, got %v", events)
 	}
 }
 

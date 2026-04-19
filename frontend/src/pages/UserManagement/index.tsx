@@ -11,12 +11,13 @@ import { Modal } from '../../components/ui/Modal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { canSelectInboundUserFlow } from '../../components/singbox/inboundVisibility'
+import { keyLengthForShadowsocksMethod } from '../../utils/shadowsocks'
 import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
-const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2'])
-type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2'
+const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks', 'anytls', 'naive'])
+type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks' | 'anytls' | 'naive'
 
 function bytesToGbString(bytes?: number) {
     return bytes && bytes > 0 ? (bytes / BYTES_PER_GB).toFixed(2) : ''
@@ -31,7 +32,7 @@ function parseGbToBytes(input: string) {
 }
 
 function isPasswordUserType(type: string): boolean {
-    return type === 'trojan' || type === 'hysteria2'
+    return type === 'trojan' || type === 'hysteria2' || type === 'shadowsocks' || type === 'anytls' || type === 'naive'
 }
 
 function generateRandomCredential(type: UserType): string {
@@ -53,7 +54,11 @@ function generateRandomCredential(type: UserType): string {
 }
 
 function formatUserTypeLabel(type: UserType): string {
-    return type === 'hysteria2' ? 'Hysteria2' : type.toUpperCase()
+    if (type === 'shadowsocks') return 'Shadowsocks'
+    if (type === 'hysteria2') return 'Hysteria2'
+    if (type === 'anytls') return 'AnyTLS'
+    if (type === 'naive') return 'Naive'
+    return type.toUpperCase()
 }
 
 export default function UserManagement() {
@@ -64,7 +69,7 @@ export default function UserManagement() {
     const canWriteConfig = !!permissions?.can_write_config
 
     const queryClient = useQueryClient()
-    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan', 'hysteria2']
+    const supportedUserTypes: UserType[] = ['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks', 'anytls', 'naive']
     const [userType, setUserType] = useState<UserType>('vless')
     // Modals state
     const [modalState, setModalState] = useState<{
@@ -86,6 +91,10 @@ export default function UserManagement() {
     const [usageLimitGb, setUsageLimitGb] = useState<string>('0')
     const [usageData, setUsageData] = useState<any[]>([])
     const [loadingUsage, setLoadingUsage] = useState(false)
+    const [credentialLoading, setCredentialLoading] = useState(false)
+    const [singboxApplyLoading, setSingboxApplyLoading] = useState(false)
+    const [singboxRestartConfirmOpen, setSingboxRestartConfirmOpen] = useState(false)
+    const [singboxRestartLoading, setSingboxRestartLoading] = useState(false)
 
     // Create/Edit Form State
     const [newUser, setNewUser] = useState<CreateUserRequest>({
@@ -196,7 +205,6 @@ export default function UserManagement() {
     }
 
     const refreshUsersData = async () => {
-        setSingboxPendingChanges(true)
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['users'] }),
             queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
@@ -229,6 +237,16 @@ export default function UserManagement() {
             if (getFirstInboundTagForType(type)) return type
         }
         return supportedUserTypes[0] || 'vless'
+    }
+
+    const generateCredentialForType = async (type: UserType, inboundTag?: string) => {
+        if (type === 'shadowsocks') {
+            const inbound = getInboundByTag(inboundTag || '')
+            const method = String((inbound as any)?.method || '')
+            const { value } = await api.generateRandBase64(keyLengthForShadowsocksMethod(method))
+            return value
+        }
+        return generateRandomCredential(type)
     }
 
     useEffect(() => {
@@ -413,6 +431,15 @@ export default function UserManagement() {
                         }
                     }))
                 }
+                if (isPasswordUserType(nextType)) {
+                    const first = list[0]
+                    if (first?.password) {
+                        setNewUser(prev => ({
+                            ...prev,
+                            uuid: first.password || prev.uuid,
+                        }))
+                    }
+                }
                 if (nextType === 'vmess') {
                     const first = list[0]
                     if (first) {
@@ -492,21 +519,12 @@ export default function UserManagement() {
                     vmess_alter_id: vmessAlterID,
                     reset_day: 1,
                 }
-                if (!payload.uuid) payload.uuid = generateRandomCredential(userType)
+                if (!payload.uuid) payload.uuid = await generateCredentialForType(userType, inboundTag)
 
                 await api.updateUser(payload)
 
                 if (newUser.enabled !== false) {
                     const originalSet = new Set(originalTags)
-
-                    if (originalSet.has(inboundTag)) {
-                        await api.updateUserInbound(newUser.name, inboundTag, {
-                            uuid: payload.uuid,
-                            flow: selectedFlow,
-                            vmess_security: vmessSecurity,
-                            vmess_alter_id: vmessAlterID,
-                        })
-                    }
 
                     for (const tag of originalTags) {
                         if (tag !== inboundTag) {
@@ -536,7 +554,7 @@ export default function UserManagement() {
                     inbound_tag: inboundTag,
                     flow: selectedFlow,
                 }
-                if (!payload.uuid) payload.uuid = generateRandomCredential(userType)
+                if (!payload.uuid) payload.uuid = await generateCredentialForType(userType, inboundTag)
                 await api.createUser(payload)
                 success(`User created successfully`)
             }
@@ -603,7 +621,7 @@ export default function UserManagement() {
 
                 usersToCreate.push({
                     name: fullName,
-                    uuid: generateRandomCredential((bulkInboundType || 'vless') as UserType),
+                    uuid: await generateCredentialForType((bulkInboundType || 'vless') as UserType, bulkConfig.inbound_tag),
                     flow: bulkFlow,
                     vmess_security: bulkVmessSecurity,
                     vmess_alter_id: bulkVmessAlterID,
@@ -630,9 +648,16 @@ export default function UserManagement() {
             toastError('No write permission for config changes')
             return
         }
+        setSingboxApplyLoading(true)
         try {
+            const result = await api.applySingboxChanges()
+            if (result.restart_required) {
+                setSingboxPendingChanges(true)
+                setSingboxRestartConfirmOpen(true)
+                return
+            }
+
             setSingboxPendingChanges(false)
-            await api.applySingboxChanges()
             await Promise.all([
                 pendingChangesQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
@@ -641,6 +666,23 @@ export default function UserManagement() {
         } catch (err) {
             setSingboxPendingChanges(true)
             toastError('Failed to apply changes. Please try again.')
+        } finally {
+            setSingboxApplyLoading(false)
+        }
+    }
+
+    const handleConfirmSingboxRestart = async () => {
+        setSingboxRestartLoading(true)
+        try {
+            await api.restartService('sing-box')
+            setSingboxPendingChanges(false)
+            setSingboxRestartConfirmOpen(false)
+            success('Sing-box restart started')
+        } catch (err) {
+            setSingboxPendingChanges(true)
+            toastError('Failed to restart Sing-box: ' + err)
+        } finally {
+            setSingboxRestartLoading(false)
         }
     }
 
@@ -654,7 +696,7 @@ export default function UserManagement() {
                         <Users className="text-yellow-500" size={20} />
                         <div>
                             <p className="text-sm font-medium text-yellow-200">Sing-box Configuration Changes Pending</p>
-                            <p className="text-xs text-yellow-300/70 mt-0.5">User changes have been saved but not yet applied. Click "Apply Changes" to restart the service.</p>
+                            <p className="text-xs text-yellow-300/70 mt-0.5">User changes have been saved but not yet applied. Click "Apply Changes" to apply them.</p>
                         </div>
                     </div>
                     <Button
@@ -662,6 +704,7 @@ export default function UserManagement() {
                         variant="primary"
                         size="sm"
                         disabled={!canWriteConfig}
+                        isLoading={singboxApplyLoading}
                         className="whitespace-nowrap bg-yellow-600 hover:bg-yellow-700 text-white"
                     >
                         Apply Changes
@@ -746,7 +789,7 @@ export default function UserManagement() {
                                 <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('last_seen')}>
                                     Last Seen {renderSortIcon('last_seen')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
+                                <th className="w-[260px] p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('user')}>
                                     Name/Alias {renderSortIcon('user')}
                                 </th>
                                 <th className="p-4 min-w-[140px] font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
@@ -821,37 +864,30 @@ export default function UserManagement() {
                                                     </span>
                                                 </div>
                                             </td>
-                                            <td className="p-4">
-                                                <div className="font-semibold text-slate-200 truncate max-w-full">{user.name}</div>
+                                            <td className="w-[260px] p-4">
+                                                <div className="max-w-[260px] font-semibold text-slate-200 truncate" title={user.name}>{user.name}</div>
                                             </td>
                                             <td className="p-4 align-middle">
-                                                {user.quota_limit ? (
-                                                    <div className="w-1/2 min-w-[140px]">
-                                                        <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
-                                                            <span>{formatBytes(user.total)}</span>
-                                                            <span>{formatBytes(user.quota_limit)}</span>
-                                                        </div>
-                                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                                            <div
-                                                                className={`h-full rounded-full transition-all duration-500 ${(user.total / user.quota_limit) > 1 ? 'bg-red-500' :
+                                                <div className="w-1/2 min-w-[140px]">
+                                                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                                                        <span className="truncate whitespace-nowrap">{formatBytes(user.total)}</span>
+                                                        <span className="px-2 text-center text-slate-300 whitespace-nowrap">
+                                                            {user.quota_limit ? `${Math.round((user.total / user.quota_limit) * 100)}%` : ''}
+                                                        </span>
+                                                        <span className="truncate whitespace-nowrap text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
+                                                    </div>
+                                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full rounded-full transition-all duration-500 ${user.quota_limit
+                                                                ? ((user.total / user.quota_limit) > 1 ? 'bg-red-500' :
                                                                     (user.total / user.quota_limit) > 0.8 ? 'bg-amber-500' :
-                                                                        'bg-blue-500'
-                                                                    }`}
-                                                                style={{ width: `${Math.min((user.total / user.quota_limit) * 100, 100)}%` }}
-                                                            />
-                                                        </div>
+                                                                        'bg-blue-500')
+                                                                : 'bg-slate-700/50'
+                                                                }`}
+                                                            style={{ width: `${user.quota_limit ? Math.min((user.total / user.quota_limit) * 100, 100) : 100}%` }}
+                                                        />
                                                     </div>
-                                                ) : (
-                                                    <div className="w-1/2 min-w-[140px]">
-                                                        <div className="flex justify-between text-[10px] mb-1 font-mono text-slate-400">
-                                                            <span>{formatBytes(user.total)}</span>
-                                                            <span className="text-xl leading-none">∞</span>
-                                                        </div>
-                                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                                            <div className="h-full bg-slate-700/50 w-full rounded-full" />
-                                                        </div>
-                                                    </div>
-                                                )}
+                                                </div>
                                             </td>
 
                                             <td className="p-4">
@@ -915,7 +951,7 @@ export default function UserManagement() {
                 </div>
 
                 {/* Mobile List */}
-                <div className="md:hidden divide-y divide-slate-800">
+                <div className="md:hidden space-y-3">
                     {(sortedUsers || []).map(user => {
                         const isExceeded = user.quota_limit ? user.total > user.quota_limit : false
                         const quotaRatio = user.quota_limit ? (user.total / user.quota_limit) : 0
@@ -949,67 +985,65 @@ export default function UserManagement() {
                         }
 
                         return (
-                            <div key={user.name} className="p-4 space-y-4">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="min-w-0 flex-1 space-y-1">
-                                        <div className="font-bold text-slate-200 truncate">{user.name}</div>
-                                        <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                            <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
-                                                {statusText}
-                                            </span>
+                            <div key={user.name} className="bg-slate-900 border border-slate-800 rounded-xl">
+                                <div className="p-4 space-y-3">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-semibold text-white truncate">{user.name}</div>
+                                        </div>
+                                        <div className="flex gap-2 shrink-0">
+                                            <ActionIconButton
+                                                onClick={() => handleEditClick(user)}
+                                                disabled={!canWriteUsers}
+                                                tone="primary"
+                                            >
+                                                <Edit size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton
+                                                onClick={() => openQrModal(user)}
+                                                disabled={!canWriteUsers}
+                                                title="Show QR / Link"
+                                            >
+                                                <QrCodeIcon size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton
+                                                onClick={() => handleDeleteClick(user)}
+                                                disabled={!canWriteUsers}
+                                                tone="danger"
+                                            >
+                                                <Trash2 size={16} />
+                                            </ActionIconButton>
                                         </div>
                                     </div>
-                                    <div className="flex gap-2">
-                                        <ActionIconButton
-                                            onClick={() => handleEditClick(user)}
-                                            disabled={!canWriteUsers}
-                                            tone="primary"
-                                        >
-                                            <Edit size={16} />
-                                        </ActionIconButton>
-                                        <ActionIconButton
-                                            onClick={() => openQrModal(user)}
-                                            disabled={!canWriteUsers}
-                                            title="Show QR / Link"
-                                        >
-                                            <QrCodeIcon size={16} />
-                                        </ActionIconButton>
-                                        <ActionIconButton
-                                            onClick={() => handleDeleteClick(user)}
-                                            disabled={!canWriteUsers}
-                                            tone="danger"
-                                        >
-                                            <Trash2 size={16} />
-                                        </ActionIconButton>
-                                    </div>
-                                </div>
 
-                                <div className="text-xs">
-                                    <div className="flex flex-wrap gap-1.5">
-                                        {(user.inbound_tags && user.inbound_tags.length > 0) ? (
-                                            user.inbound_tags.map(tag => (
-                                                <Badge key={tag} variant="info" className="max-w-[120px] truncate">
-                                                    {tag}
-                                                </Badge>
-                                            ))
-                                        ) : (
-                                            <Badge variant="neutral">All</Badge>
-                                        )}
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                            <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>{statusText}</span>
+                                        </div>
+                                        <div className="flex flex-wrap justify-end gap-1.5">
+                                            {(user.inbound_tags && user.inbound_tags.length > 0) ? (
+                                                user.inbound_tags.map(tag => (
+                                                    <Badge key={tag} variant="info" className="max-w-[200px]" title={tag}>{tag}</Badge>
+                                                ))
+                                            ) : (
+                                                <Badge variant="neutral">All</Badge>
+                                            )}
+                                        </div>
                                     </div>
-                                </div>
 
-                                <div className="bg-slate-950/50 rounded-lg p-3">
-                                    <div className="grid grid-cols-3 items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                                        <span>{formatBytes(user.total)}</span>
-                                        <span className="text-center text-slate-300">{quotaPercent}</span>
-                                        <span className="text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
-                                    </div>
-                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
-                                        <div
-                                            className={`h-full rounded-full transition-all duration-500 ${user.quota_limit ? (quotaRatio > 1 ? 'bg-red-500' : quotaRatio > 0.8 ? 'bg-amber-500' : 'bg-blue-500') : 'bg-slate-700/50'}`}
-                                            style={{ width: `${user.quota_limit ? Math.min(quotaRatio * 100, 100) : 100}%` }}
-                                        />
+                                    <div className="bg-slate-950/50 rounded-lg p-3">
+                                        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
+                                            <span className="truncate whitespace-nowrap">{formatBytes(user.total)}</span>
+                                            <span className="px-2 text-center text-slate-300 whitespace-nowrap">{quotaPercent}</span>
+                                            <span className="truncate whitespace-nowrap text-right">{user.quota_limit ? formatBytes(user.quota_limit) : '∞'}</span>
+                                        </div>
+                                        <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                            <div
+                                                className={`h-full rounded-full transition-all duration-500 ${user.quota_limit ? (quotaRatio > 1 ? 'bg-red-500' : quotaRatio > 0.8 ? 'bg-amber-500' : 'bg-blue-500') : 'bg-slate-700/50'}`}
+                                                style={{ width: `${user.quota_limit ? Math.min(quotaRatio * 100, 100) : 100}%` }}
+                                            />
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1076,10 +1110,21 @@ export default function UserManagement() {
                                     variant="icon"
                                     size="icon"
                                     className="h-[2.625rem] w-[2.625rem] shrink-0 p-0"
-                                    onClick={() => setNewUser({ ...newUser, uuid: generateRandomCredential(userType) })}
+                                    onClick={async () => {
+                                        setCredentialLoading(true)
+                                        try {
+                                            const value = await generateCredentialForType(userType, currentInboundRow.tag)
+                                            setNewUser(prev => ({ ...prev, uuid: value }))
+                                        } catch (err) {
+                                            toastError('Failed to generate credential: ' + err)
+                                        } finally {
+                                            setCredentialLoading(false)
+                                        }
+                                    }}
+                                    disabled={credentialLoading}
                                     title={credentialActionLabel}
                                 >
-                                    <RefreshCw size={16} />
+                                    <RefreshCw size={16} className={credentialLoading ? 'animate-spin' : ''} />
                                 </Button>
                             </div>
                         </div>
@@ -1243,6 +1288,20 @@ export default function UserManagement() {
                 message={confirmDeleteUser ? `This will delete "${confirmDeleteUser.name}".` : 'This action cannot be undone.'}
                 confirmLabel="Delete"
                 confirmTone="danger"
+            />
+
+            <ConfirmModal
+                isOpen={singboxRestartConfirmOpen}
+                onClose={() => {
+                    if (singboxRestartLoading) return
+                    setSingboxRestartConfirmOpen(false)
+                }}
+                onConfirm={handleConfirmSingboxRestart}
+                title="Restart Sing-box?"
+                message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
+                confirmLabel="Restart"
+                confirmTone="primary"
+                isLoading={singboxRestartLoading}
             />
 
             {/* Bulk Create Modal */}

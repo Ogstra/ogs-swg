@@ -22,6 +22,18 @@ type LoginResponse struct {
 	Permissions core.PanelUserPermissions `json:"permissions"`
 }
 
+func currentPanelUsername(r *http.Request) (string, bool) {
+	claims, ok := r.Context().Value(userContextKey).(map[string]interface{})
+	if !ok {
+		return "", false
+	}
+	username, ok := claims["sub"].(string)
+	if !ok || strings.TrimSpace(username) == "" {
+		return "", false
+	}
+	return username, true
+}
+
 func getPasetoKey(secret string) []byte {
 	key := make([]byte, 32)
 	copy(key, []byte(secret))
@@ -100,14 +112,9 @@ func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get username from context (set by AuthMiddleware)
-	claims, ok := r.Context().Value(userContextKey).(map[string]interface{})
+	username, ok := currentPanelUsername(r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	username, ok := claims["sub"].(string)
-	if !ok {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
 		return
 	}
 
@@ -148,14 +155,9 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Get username from context
-	claims, ok := r.Context().Value(userContextKey).(map[string]interface{})
+	currentUsername, ok := currentPanelUsername(r)
 	if !ok {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-	currentUsername, ok := claims["sub"].(string)
-	if !ok {
-		http.Error(w, "Invalid token claims", http.StatusUnauthorized)
 		return
 	}
 

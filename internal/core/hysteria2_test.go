@@ -154,17 +154,17 @@ func TestDecodeTypedInbound_Hysteria2(t *testing.T) {
 	}
 }
 
-// TestIsUserInboundType_Hysteria2 verifies isUserInboundType recognises
-// "hysteria2" case-insensitively and still rejects "shadowsocks". (HY2-02)
-func TestIsUserInboundType_Hysteria2(t *testing.T) {
+// TestIsUserInboundType_Hysteria2AndShadowsocks verifies isUserInboundType
+// recognises both password-based protocols case-insensitively. (HY2-02)
+func TestIsUserInboundType_Hysteria2AndShadowsocks(t *testing.T) {
 	if !isUserInboundType("hysteria2") {
 		t.Error("isUserInboundType(\"hysteria2\") = false; want true")
 	}
 	if !isUserInboundType("HYSTERIA2") {
 		t.Error("isUserInboundType(\"HYSTERIA2\") = false; want true (case insensitive)")
 	}
-	if isUserInboundType("shadowsocks") {
-		t.Error("isUserInboundType(\"shadowsocks\") = true; want false")
+	if !isUserInboundType("shadowsocks") {
+		t.Error("isUserInboundType(\"shadowsocks\") = false; want true")
 	}
 }
 

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS users (
 	quota_period TEXT DEFAULT 'monthly',
 	reset_day INTEGER DEFAULT 1,
 	enabled INTEGER DEFAULT 1,
+	credential TEXT DEFAULT '',
+	flow TEXT DEFAULT '',
 	vmess_security TEXT DEFAULT '',
 	vmess_alter_id INTEGER DEFAULT 0
 );
@@ -70,6 +72,19 @@ CREATE TABLE IF NOT EXISTS panel_users (
 	can_read_panel_users INTEGER NOT NULL DEFAULT 0,
 	can_write_panel_users INTEGER NOT NULL DEFAULT 0,
 	can_read_logs INTEGER NOT NULL DEFAULT 0,
+	subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL,
+	subscription_default_update_always INTEGER NOT NULL DEFAULT 0,
+	subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]',
+	created_at INTEGER DEFAULT (strftime('%s','now')),
+	updated_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
+CREATE TABLE IF NOT EXISTS dashboard_preferences (
+	principal TEXT PRIMARY KEY,
+	default_service TEXT NOT NULL DEFAULT 'singbox',
+	refresh_ms INTEGER NOT NULL DEFAULT 10000,
+	default_range TEXT NOT NULL DEFAULT '24h',
+	detail_chart_target_points INTEGER NOT NULL DEFAULT 200,
 	created_at INTEGER DEFAULT (strftime('%s','now')),
 	updated_at INTEGER DEFAULT (strftime('%s','now'))
 );
@@ -112,7 +127,44 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 CREATE TABLE IF NOT EXISTS subscription_users (
 	sub_id INTEGER NOT NULL,
 	user_name TEXT NOT NULL,
+	alias TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY (sub_id, user_name),
 	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
 	FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS subscription_requests (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	sub_id INTEGER NOT NULL,
+	user_name TEXT NOT NULL DEFAULT '',
+	request_ip TEXT NOT NULL DEFAULT '',
+	request_host TEXT NOT NULL DEFAULT '',
+	request_path TEXT NOT NULL DEFAULT '',
+	user_agent TEXT NOT NULL DEFAULT '',
+	device_model TEXT NOT NULL DEFAULT '',
+	device_os TEXT NOT NULL DEFAULT '',
+	device_os_version TEXT NOT NULL DEFAULT '',
+	app_version TEXT NOT NULL DEFAULT '',
+	country TEXT NOT NULL DEFAULT '',
+	hwid_hash TEXT NOT NULL DEFAULT '',
+	hwid_prefix TEXT NOT NULL DEFAULT '',
+	requested_at INTEGER NOT NULL,
+	served_from_cache INTEGER NOT NULL DEFAULT 0,
+	blocked INTEGER NOT NULL DEFAULT 0,
+	block_reason TEXT NOT NULL DEFAULT '',
+	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS subscription_protection_rules (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	rule_type TEXT NOT NULL,
+	value TEXT NOT NULL,
+	note TEXT NOT NULL DEFAULT '',
+	created_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
+	ON subscription_requests(sub_id, requested_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
+	ON subscription_protection_rules(rule_type, value);

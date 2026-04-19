@@ -13,12 +13,18 @@ import (
 )
 
 type subscriptionMutationRequest struct {
-	Name                       string   `json:"name"`
-	QuotaLimit                 int64    `json:"quota_limit"`
-	QuotaPeriod                string   `json:"quota_period"`
-	Users                      []string `json:"users"`
-	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours,omitempty"`
-	UpdateAlways               *bool    `json:"update_always,omitempty"`
+	Name                       string                      `json:"name"`
+	QuotaLimit                 int64                       `json:"quota_limit"`
+	QuotaPeriod                string                      `json:"quota_period"`
+	Users                      []string                    `json:"users"`
+	Members                    []subscriptionMemberPayload `json:"members,omitempty"`
+	ProfileUpdateIntervalHours *int64                      `json:"profile_update_interval_hours,omitempty"`
+	UpdateAlways               *bool                       `json:"update_always,omitempty"`
+}
+
+type subscriptionMemberPayload struct {
+	Username string `json:"username"`
+	Alias    string `json:"alias"`
 }
 
 type subscriptionCreateResponse struct {
@@ -27,22 +33,222 @@ type subscriptionCreateResponse struct {
 }
 
 type subscriptionDetailResponse struct {
-	ID                         int64    `json:"id"`
-	Token                      *string  `json:"token"`
-	Name                       string   `json:"name"`
-	QuotaLimit                 int64    `json:"quota_limit"`
-	QuotaPeriod                string   `json:"quota_period"`
-	UsedBytes                  int64    `json:"used_bytes"`
-	Users                      []string `json:"users"`
+	ID                         int64                       `json:"id"`
+	Token                      *string                     `json:"token"`
+	Name                       string                      `json:"name"`
+	QuotaLimit                 int64                       `json:"quota_limit"`
+	QuotaPeriod                string                      `json:"quota_period"`
+	UsedBytes                  int64                       `json:"used_bytes"`
+	Users                      []string                    `json:"users"`
+	Members                    []subscriptionMemberPayload `json:"members"`
+	ProfileUpdateIntervalHours *int64                      `json:"profile_update_interval_hours"`
+	UpdateAlways               bool                        `json:"update_always"`
+	LastRequestAt              *int64                      `json:"last_request_at"`
+	CreatedAt                  int64                       `json:"created_at"`
+	UpdatedAt                  int64                       `json:"updated_at"`
+}
+
+type subscriptionDefaultsResponse struct {
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
 	UpdateAlways               bool     `json:"update_always"`
-	LastRequestAt              *int64   `json:"last_request_at"`
-	CreatedAt                  int64    `json:"created_at"`
-	UpdatedAt                  int64    `json:"updated_at"`
+	Destinations               []string `json:"destinations"`
+}
+
+type subscriptionDefaultDestinationsResponse struct {
+	Destinations []string `json:"destinations"`
+}
+
+type loginTestResponse struct {
+	Token string `json:"token"`
 }
 
 func withSubscriptionPerms(r *http.Request, perms *core.PanelUserPermissions) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), permissionsContextKey, perms))
+}
+
+func TestHandleGetSubscriptionDefaults_ReturnsProductDefaultsWhenUserHasNoSavedDefaults(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	createSubscriptionPanelUserForTest(t, dataStore, "alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+
+	rec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/defaults", nil, subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var got subscriptionDefaultsResponse
+	decodeJSONResponse(t, rec, &got)
+	if got.ProfileUpdateIntervalHours != nil {
+		t.Fatalf("profile_update_interval_hours=%v want nil", *got.ProfileUpdateIntervalHours)
+	}
+	if got.UpdateAlways {
+		t.Fatalf("update_always=%v want false", got.UpdateAlways)
+	}
+	if len(got.Destinations) != 0 {
+		t.Fatalf("destinations=%v want empty", got.Destinations)
+	}
+}
+
+func TestHandleUpdateSubscriptionDefaults_PersistsForAuthenticatedPanelUser(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	createSubscriptionPanelUserForTest(t, dataStore, "alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+
+	interval := int64(24)
+	updateRec := performSubscriptionDefaultsRequest(t, server, http.MethodPut, "/api/subscriptions/defaults", subscriptionDefaultsResponse{
+		ProfileUpdateIntervalHours: &interval,
+		UpdateAlways:               true,
+		Destinations:               []string{"edge.example.com:443", "dns.example.net:853"},
+	}, subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret"))
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%q", updateRec.Code, updateRec.Body.String())
+	}
+
+	getRec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/defaults", nil, subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret"))
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%q", getRec.Code, getRec.Body.String())
+	}
+
+	var got subscriptionDefaultsResponse
+	decodeJSONResponse(t, getRec, &got)
+	if got.ProfileUpdateIntervalHours == nil || *got.ProfileUpdateIntervalHours != interval {
+		t.Fatalf("profile_update_interval_hours=%v want %d", got.ProfileUpdateIntervalHours, interval)
+	}
+	if !got.UpdateAlways {
+		t.Fatalf("update_always=%v want true", got.UpdateAlways)
+	}
+	if len(got.Destinations) != 2 || got.Destinations[0] != "edge.example.com:443" || got.Destinations[1] != "dns.example.net:853" {
+		t.Fatalf("destinations=%v want persisted ordered values", got.Destinations)
+	}
+}
+
+func TestSubscriptionDefaultsArePerPanelUser(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	perms := core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true}
+	createSubscriptionPanelUserForTest(t, dataStore, "alice-panel", "secret", perms)
+	createSubscriptionPanelUserForTest(t, dataStore, "bob-panel", "secret", perms)
+
+	aliceInterval := int64(12)
+	aliceHeaders := subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret")
+	bobHeaders := subscriptionAuthHeadersForUser(t, server, "bob-panel", "secret")
+
+	aliceUpdate := performSubscriptionDefaultsRequest(t, server, http.MethodPut, "/api/subscriptions/defaults", subscriptionDefaultsResponse{
+		ProfileUpdateIntervalHours: &aliceInterval,
+		UpdateAlways:               true,
+		Destinations:               []string{"alpha.example.com:443"},
+	}, aliceHeaders)
+	if aliceUpdate.Code != http.StatusOK {
+		t.Fatalf("alice update status=%d body=%q", aliceUpdate.Code, aliceUpdate.Body.String())
+	}
+
+	bobGet := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/defaults", nil, bobHeaders)
+	if bobGet.Code != http.StatusOK {
+		t.Fatalf("bob get status=%d body=%q", bobGet.Code, bobGet.Body.String())
+	}
+
+	var bobDefaults subscriptionDefaultsResponse
+	decodeJSONResponse(t, bobGet, &bobDefaults)
+	if bobDefaults.ProfileUpdateIntervalHours != nil || bobDefaults.UpdateAlways || len(bobDefaults.Destinations) != 0 {
+		t.Fatalf("bob defaults=%+v want untouched product defaults", bobDefaults)
+	}
+
+	bobInterval := int64(48)
+	bobUpdate := performSubscriptionDefaultsRequest(t, server, http.MethodPut, "/api/subscriptions/defaults", subscriptionDefaultsResponse{
+		ProfileUpdateIntervalHours: &bobInterval,
+		UpdateAlways:               false,
+		Destinations:               []string{"beta.example.com:8443"},
+	}, bobHeaders)
+	if bobUpdate.Code != http.StatusOK {
+		t.Fatalf("bob update status=%d body=%q", bobUpdate.Code, bobUpdate.Body.String())
+	}
+
+	aliceGet := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/defaults", nil, aliceHeaders)
+	if aliceGet.Code != http.StatusOK {
+		t.Fatalf("alice get status=%d body=%q", aliceGet.Code, aliceGet.Body.String())
+	}
+
+	var aliceDefaults subscriptionDefaultsResponse
+	decodeJSONResponse(t, aliceGet, &aliceDefaults)
+	if aliceDefaults.ProfileUpdateIntervalHours == nil || *aliceDefaults.ProfileUpdateIntervalHours != aliceInterval {
+		t.Fatalf("alice profile_update_interval_hours=%v want %d", aliceDefaults.ProfileUpdateIntervalHours, aliceInterval)
+	}
+	if !aliceDefaults.UpdateAlways {
+		t.Fatalf("alice update_always=%v want true", aliceDefaults.UpdateAlways)
+	}
+	if len(aliceDefaults.Destinations) != 1 || aliceDefaults.Destinations[0] != "alpha.example.com:443" {
+		t.Fatalf("alice destinations=%v want [alpha.example.com:443]", aliceDefaults.Destinations)
+	}
+}
+
+func TestHandleSubscriptionDefaults_RequirePanelUserToken(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+	server.config.APIKey = "test-api-key"
+
+	t.Run("missing token", func(t *testing.T) {
+		rec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/defaults", nil, nil)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%q want %d", rec.Code, rec.Body.String(), http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("api key auth has no panel identity", func(t *testing.T) {
+		rec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/defaults", nil, map[string]string{
+			"X-API-Key": "test-api-key",
+		})
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status=%d body=%q want %d", rec.Code, rec.Body.String(), http.StatusUnauthorized)
+		}
+	})
+}
+
+func TestHandleGetSubscriptionDefaultDestinations(t *testing.T) {
+	t.Run("returns normalized deduplicated recent destinations", func(t *testing.T) {
+		server, _ := newLogsTestServer(t, []string{
+			"2026/04/07 10:00:00 [OGS] inbound connection to edge.example.com:443",
+			"2026/04/07 10:01:00 [OGS] inbound packet connection to resolver.example.net:53",
+			"2026/04/07 10:02:00 [OGS] inbound connection to EDGE.EXAMPLE.COM:443",
+			"2026/04/07 10:03:00 [OGS] inbound connection to 127.0.0.1:8080",
+			"2026/04/07 10:04:00 outbound/direct connection to ignored.example.org:443",
+			"2026/04/07 10:05:00 [OGS] inbound connection to bad-destination",
+		})
+		server.config.JWTSecret = "subscription-default-destinations-secret"
+		server.store.CreatePanelUser("alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+
+		rec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/default-destinations", nil, subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+
+		var got subscriptionDefaultDestinationsResponse
+		decodeJSONResponse(t, rec, &got)
+		want := []string{"edge.example.com:443", "resolver.example.net:53"}
+		if len(got.Destinations) != len(want) {
+			t.Fatalf("destinations=%v want %v", got.Destinations, want)
+		}
+		for i := range want {
+			if got.Destinations[i] != want[i] {
+				t.Fatalf("destinations[%d]=%q want %q (full=%v)", i, got.Destinations[i], want[i], got.Destinations)
+			}
+		}
+	})
+
+	t.Run("returns empty list when logs unavailable", func(t *testing.T) {
+		server, _ := newLogsTestServer(t, nil)
+		server.config.LogSource = "file"
+		server.config.AccessLogPath = "/nonexistent/subscription-defaults.log"
+		server.config.JWTSecret = "subscription-default-destinations-secret"
+		server.store.CreatePanelUser("alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+
+		rec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/default-destinations", nil, subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret"))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+
+		var got subscriptionDefaultDestinationsResponse
+		decodeJSONResponse(t, rec, &got)
+		if len(got.Destinations) != 0 {
+			t.Fatalf("destinations=%v want empty", got.Destinations)
+		}
+	})
 }
 
 func TestSubscriptionCreateAndGetRefreshPolicyRoundTrip(t *testing.T) {
@@ -281,6 +487,87 @@ func updateSubscriptionForTestBody(t *testing.T, server *Server, id int64, body 
 	}
 }
 
+func TestUpdateSubscription_ReplacesAssignedUsers(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServerWithConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name": "alice", "uuid": "11111111-1111-1111-1111-111111111111"},
+					{"name": "bob", "uuid": "22222222-2222-2222-2222-222222222222"}
+				]
+			}
+		]
+	}`, []string{"test-vless"})
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Replace Users Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice", "bob"},
+	})
+
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:        "Replace Users Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice"},
+	})
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Users) != 1 || got.Users[0] != "alice" {
+		t.Fatalf("users=%v want [alice]", got.Users)
+	}
+}
+
+func TestSubscriptionAliases_RoundTripThroughCreateAndUpdate(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Alias Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Members: []subscriptionMemberPayload{
+			{Username: "alice", Alias: "Alice Phone"},
+			{Username: "bob", Alias: ""},
+		},
+	})
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Users) != 2 || got.Users[0] != "alice" || got.Users[1] != "bob" {
+		t.Fatalf("users=%v want [alice bob]", got.Users)
+	}
+	if len(got.Members) != 2 {
+		t.Fatalf("members=%v want 2 entries", got.Members)
+	}
+	if got.Members[0].Username != "alice" || got.Members[0].Alias != "Alice Phone" {
+		t.Fatalf("first member=%+v want alice/Alice Phone", got.Members[0])
+	}
+	if got.Members[1].Username != "bob" || got.Members[1].Alias != "" {
+		t.Fatalf("second member=%+v want bob/empty alias", got.Members[1])
+	}
+
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:        "Alias Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Members: []subscriptionMemberPayload{
+			{Username: "alice", Alias: "Work iPhone"},
+		},
+	})
+
+	updated := getSubscriptionForTest(t, server, created.ID)
+	if len(updated.Users) != 1 || updated.Users[0] != "alice" {
+		t.Fatalf("updated users=%v want [alice]", updated.Users)
+	}
+	if len(updated.Members) != 1 || updated.Members[0].Alias != "Work iPhone" {
+		t.Fatalf("updated members=%v want alias persisted", updated.Members)
+	}
+}
+
 func newJSONRequest(t *testing.T, method, target string, body any) *http.Request {
 	t.Helper()
 
@@ -300,4 +587,53 @@ func decodeJSONResponse(t *testing.T, rec *httptest.ResponseRecorder, out any) {
 	if err := json.NewDecoder(rec.Body).Decode(out); err != nil {
 		t.Fatalf("decode response: %v body=%q", err, rec.Body.String())
 	}
+}
+
+func createSubscriptionPanelUserForTest(t *testing.T, dataStore *core.Store, username, password string, perms core.PanelUserPermissions) {
+	t.Helper()
+	if err := dataStore.CreatePanelUser(username, password, perms); err != nil {
+		t.Fatalf("CreatePanelUser(%s): %v", username, err)
+	}
+}
+
+func subscriptionAuthHeadersForUser(t *testing.T, server *Server, username, password string) map[string]string {
+	t.Helper()
+
+	rec := httptest.NewRecorder()
+	req := newJSONRequest(t, http.MethodPost, "/api/login", LoginRequest{
+		Username: username,
+		Password: password,
+	})
+	server.handleLogin(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var login loginTestResponse
+	decodeJSONResponse(t, rec, &login)
+	if login.Token == "" {
+		t.Fatalf("login token empty")
+	}
+
+	return map[string]string{
+		"Authorization": "Bearer " + login.Token,
+	}
+}
+
+func performSubscriptionDefaultsRequest(t *testing.T, server *Server, method, target string, body any, headers map[string]string) *httptest.ResponseRecorder {
+	t.Helper()
+
+	var req *http.Request
+	if body == nil {
+		req = httptest.NewRequest(method, target, nil)
+	} else {
+		req = newJSONRequest(t, method, target, body)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
+	}
+
+	rec := httptest.NewRecorder()
+	server.AuthMiddleware(server.Routes()).ServeHTTP(rec, req)
+	return rec
 }

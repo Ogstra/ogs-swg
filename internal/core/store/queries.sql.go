@@ -11,17 +11,19 @@ import (
 )
 
 const addUserToSubscription = `-- name: AddUserToSubscription :exec
-INSERT OR IGNORE INTO subscription_users (sub_id, user_name) VALUES (?, ?)
+INSERT INTO subscription_users (sub_id, user_name, alias) VALUES (?, ?, ?)
+ON CONFLICT(sub_id, user_name) DO UPDATE SET alias = excluded.alias
 `
 
 type AddUserToSubscriptionParams struct {
 	SubID    int64  `json:"sub_id"`
 	UserName string `json:"user_name"`
+	Alias    string `json:"alias"`
 }
 
 // Subscription Users Queries --
 func (q *Queries) AddUserToSubscription(ctx context.Context, arg AddUserToSubscriptionParams) error {
-	_, err := q.db.ExecContext(ctx, addUserToSubscription, arg.SubID, arg.UserName)
+	_, err := q.db.ExecContext(ctx, addUserToSubscription, arg.SubID, arg.UserName, arg.Alias)
 	return err
 }
 
@@ -96,6 +98,17 @@ SELECT COUNT(*) FROM samples
 // Samples Queries --
 func (q *Queries) CountSamples(ctx context.Context) (int64, error) {
 	row := q.db.QueryRowContext(ctx, countSamples)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSubscriptionRequests = `-- name: CountSubscriptionRequests :one
+SELECT COUNT(*) FROM subscription_requests
+`
+
+func (q *Queries) CountSubscriptionRequests(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countSubscriptionRequests)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -246,6 +259,15 @@ DELETE FROM panel_users WHERE username = ?
 
 func (q *Queries) DeletePanelUser(ctx context.Context, username string) error {
 	_, err := q.db.ExecContext(ctx, deletePanelUser, username)
+	return err
+}
+
+const deleteProtectionRule = `-- name: DeleteProtectionRule :exec
+DELETE FROM subscription_protection_rules WHERE id = ?
+`
+
+func (q *Queries) DeleteProtectionRule(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteProtectionRule, id)
 	return err
 }
 
@@ -487,25 +509,56 @@ func (q *Queries) GetAllPanelUsers(ctx context.Context) ([]GetAllPanelUsersRow, 
 	return items, nil
 }
 
+const getAllProtectionRules = `-- name: GetAllProtectionRules :many
+SELECT id, rule_type, value, note, created_at
+FROM subscription_protection_rules
+ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) GetAllProtectionRules(ctx context.Context) ([]SubscriptionProtectionRule, error) {
+	rows, err := q.db.QueryContext(ctx, getAllProtectionRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SubscriptionProtectionRule
+	for rows.Next() {
+		var i SubscriptionProtectionRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.RuleType,
+			&i.Value,
+			&i.Note,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAllSubscriptions = `-- name: GetAllSubscriptions :many
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	(
-		SELECT MAX(sr.requested_at)
-		FROM subscription_requests sr
-		WHERE sr.sub_id = subscriptions.id
-	) AS last_request_at,
-	created_at,
-	updated_at
-FROM subscriptions
-ORDER BY created_at DESC
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+ORDER BY s.created_at DESC
 `
 
 func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
@@ -544,7 +597,7 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, erro
 }
 
 const getAllUsers = `-- name: GetAllUsers :many
-SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users
+SELECT email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id FROM users
 `
 
 func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
@@ -562,6 +615,8 @@ func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
 			&i.QuotaPeriod,
 			&i.ResetDay,
 			&i.Enabled,
+			&i.Credential,
+			&i.Flow,
 			&i.VmessSecurity,
 			&i.VmessAlterID,
 		); err != nil {
@@ -603,6 +658,68 @@ func (q *Queries) GetAllWGPeers(ctx context.Context) ([]GetAllWGPeersRow, error)
 			&i.Alias,
 			&i.LastHandshake,
 			&i.Deleted,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBlockedSubscriptionRequests = `-- name: GetBlockedSubscriptionRequests :many
+SELECT
+	sr.id,
+	sr.sub_id,
+	COALESCE(s.name, '') AS sub_name,
+	sr.request_ip,
+	sr.requested_at,
+	sr.block_reason,
+	sr.user_agent
+FROM subscription_requests sr
+LEFT JOIN subscriptions s ON s.id = sr.sub_id
+WHERE sr.blocked = 1
+ORDER BY sr.requested_at DESC, sr.id DESC
+LIMIT ? OFFSET ?
+`
+
+type GetBlockedSubscriptionRequestsParams struct {
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
+}
+
+type GetBlockedSubscriptionRequestsRow struct {
+	ID          int64  `json:"id"`
+	SubID       int64  `json:"sub_id"`
+	SubName     string `json:"sub_name"`
+	RequestIp   string `json:"request_ip"`
+	RequestedAt int64  `json:"requested_at"`
+	BlockReason string `json:"block_reason"`
+	UserAgent   string `json:"user_agent"`
+}
+
+func (q *Queries) GetBlockedSubscriptionRequests(ctx context.Context, arg GetBlockedSubscriptionRequestsParams) ([]GetBlockedSubscriptionRequestsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getBlockedSubscriptionRequests, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetBlockedSubscriptionRequestsRow
+	for rows.Next() {
+		var i GetBlockedSubscriptionRequestsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubID,
+			&i.SubName,
+			&i.RequestIp,
+			&i.RequestedAt,
+			&i.BlockReason,
+			&i.UserAgent,
 		); err != nil {
 			return nil, err
 		}
@@ -817,9 +934,27 @@ FROM panel_users
 WHERE username = ?
 `
 
-func (q *Queries) GetPanelUser(ctx context.Context, username string) (PanelUser, error) {
+type GetPanelUserRow struct {
+	Username           string        `json:"username"`
+	PasswordHash       string        `json:"password_hash"`
+	CanReadUsers       int64         `json:"can_read_users"`
+	CanWriteUsers      int64         `json:"can_write_users"`
+	CanReadWireguard   int64         `json:"can_read_wireguard"`
+	CanWriteWireguard  int64         `json:"can_write_wireguard"`
+	CanReadConfig      int64         `json:"can_read_config"`
+	CanWriteConfig     int64         `json:"can_write_config"`
+	CanReadSettings    int64         `json:"can_read_settings"`
+	CanWriteSettings   int64         `json:"can_write_settings"`
+	CanReadPanelUsers  int64         `json:"can_read_panel_users"`
+	CanWritePanelUsers int64         `json:"can_write_panel_users"`
+	CanReadLogs        int64         `json:"can_read_logs"`
+	CreatedAt          sql.NullInt64 `json:"created_at"`
+	UpdatedAt          sql.NullInt64 `json:"updated_at"`
+}
+
+func (q *Queries) GetPanelUser(ctx context.Context, username string) (GetPanelUserRow, error) {
 	row := q.db.QueryRowContext(ctx, getPanelUser, username)
-	var i PanelUser
+	var i GetPanelUserRow
 	err := row.Scan(
 		&i.Username,
 		&i.PasswordHash,
@@ -837,6 +972,28 @@ func (q *Queries) GetPanelUser(ctx context.Context, username string) (PanelUser,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const getPanelUserSubscriptionDefaults = `-- name: GetPanelUserSubscriptionDefaults :one
+SELECT
+	subscription_default_profile_update_interval_hours,
+	subscription_default_update_always,
+	subscription_default_destinations_json
+FROM panel_users
+WHERE username = ?
+`
+
+type GetPanelUserSubscriptionDefaultsRow struct {
+	SubscriptionDefaultProfileUpdateIntervalHours sql.NullInt64 `json:"subscription_default_profile_update_interval_hours"`
+	SubscriptionDefaultUpdateAlways               int64         `json:"subscription_default_update_always"`
+	SubscriptionDefaultDestinationsJson           string        `json:"subscription_default_destinations_json"`
+}
+
+func (q *Queries) GetPanelUserSubscriptionDefaults(ctx context.Context, username string) (GetPanelUserSubscriptionDefaultsRow, error) {
+	row := q.db.QueryRowContext(ctx, getPanelUserSubscriptionDefaults, username)
+	var i GetPanelUserSubscriptionDefaultsRow
+	err := row.Scan(&i.SubscriptionDefaultProfileUpdateIntervalHours, &i.SubscriptionDefaultUpdateAlways, &i.SubscriptionDefaultDestinationsJson)
 	return i, err
 }
 
@@ -927,23 +1084,19 @@ func (q *Queries) GetSamplesForUser(ctx context.Context, arg GetSamplesForUserPa
 
 const getSubscriptionByID = `-- name: GetSubscriptionByID :one
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	(
-		SELECT MAX(sr.requested_at)
-		FROM subscription_requests sr
-		WHERE sr.sub_id = subscriptions.id
-	) AS last_request_at,
-	created_at,
-	updated_at
-FROM subscriptions
-WHERE id = ?
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+WHERE s.id = ?
 `
 
 func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error) {
@@ -967,23 +1120,19 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscripti
 
 const getSubscriptionByToken = `-- name: GetSubscriptionByToken :one
 SELECT
-	id,
-	token,
-	name,
-	quota_limit,
-	quota_period,
-	reset_day,
-	profile_update_interval_hours,
-	update_always,
-	(
-		SELECT MAX(sr.requested_at)
-		FROM subscription_requests sr
-		WHERE sr.sub_id = subscriptions.id
-	) AS last_request_at,
-	created_at,
-	updated_at
-FROM subscriptions
-WHERE token = ?
+	s.id,
+	s.token,
+	s.name,
+	s.quota_limit,
+	s.quota_period,
+	s.reset_day,
+	s.profile_update_interval_hours,
+	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
+	s.created_at,
+	s.updated_at
+FROM subscriptions s
+WHERE s.token = ?
 `
 
 func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error) {
@@ -1005,8 +1154,142 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 	return i, err
 }
 
+const getSubscriptionMembers = `-- name: GetSubscriptionMembers :many
+SELECT sub_id, user_name, alias
+FROM subscription_users
+WHERE sub_id = ?
+ORDER BY user_name ASC
+`
+
+func (q *Queries) GetSubscriptionMembers(ctx context.Context, subID int64) ([]SubscriptionUser, error) {
+	rows, err := q.db.QueryContext(ctx, getSubscriptionMembers, subID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SubscriptionUser
+	for rows.Next() {
+		var i SubscriptionUser
+		if err := rows.Scan(&i.SubID, &i.UserName, &i.Alias); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getSubscriptionRequestHistory = `-- name: GetSubscriptionRequestHistory :many
+SELECT
+	sr.id,
+	sr.sub_id,
+	COALESCE(s.name, '') AS name,
+	sr.user_name,
+	sr.request_ip,
+	sr.request_host,
+	sr.request_path,
+	sr.user_agent,
+	sr.device_model,
+	sr.device_os,
+	sr.device_os_version,
+	sr.app_version,
+	sr.country,
+	sr.hwid_hash,
+	sr.hwid_prefix,
+	sr.requested_at,
+	sr.served_from_cache,
+	sr.blocked,
+	sr.block_reason
+FROM subscription_requests sr
+LEFT JOIN subscriptions s ON s.id = sr.sub_id
+WHERE (? = 0 OR sr.sub_id = ?)
+ORDER BY sr.requested_at DESC, sr.id DESC
+LIMIT ? OFFSET ?
+`
+
+type GetSubscriptionRequestHistoryParams struct {
+	SubID  int64 `json:"sub_id"`
+	Limit  int64 `json:"limit"`
+	Offset int64 `json:"offset"`
+}
+
+type GetSubscriptionRequestHistoryRow struct {
+	ID              int64  `json:"id"`
+	SubID           int64  `json:"sub_id"`
+	Name            string `json:"name"`
+	UserName        string `json:"user_name"`
+	RequestIp       string `json:"request_ip"`
+	RequestHost     string `json:"request_host"`
+	RequestPath     string `json:"request_path"`
+	UserAgent       string `json:"user_agent"`
+	DeviceModel     string `json:"device_model"`
+	DeviceOs        string `json:"device_os"`
+	DeviceOsVersion string `json:"device_os_version"`
+	AppVersion      string `json:"app_version"`
+	Country         string `json:"country"`
+	HwidHash        string `json:"hwid_hash"`
+	HwidPrefix      string `json:"hwid_prefix"`
+	RequestedAt     int64  `json:"requested_at"`
+	ServedFromCache int64  `json:"served_from_cache"`
+	Blocked         int64  `json:"blocked"`
+	BlockReason     string `json:"block_reason"`
+}
+
+func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, arg GetSubscriptionRequestHistoryParams) ([]GetSubscriptionRequestHistoryRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSubscriptionRequestHistory,
+		arg.SubID,
+		arg.SubID,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetSubscriptionRequestHistoryRow
+	for rows.Next() {
+		var i GetSubscriptionRequestHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SubID,
+			&i.Name,
+			&i.UserName,
+			&i.RequestIp,
+			&i.RequestHost,
+			&i.RequestPath,
+			&i.UserAgent,
+			&i.DeviceModel,
+			&i.DeviceOs,
+			&i.DeviceOsVersion,
+			&i.AppVersion,
+			&i.Country,
+			&i.HwidHash,
+			&i.HwidPrefix,
+			&i.RequestedAt,
+			&i.ServedFromCache,
+			&i.Blocked,
+			&i.BlockReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSubscriptionUsageInRange = `-- name: GetSubscriptionUsageInRange :one
-SELECT COALESCE(SUM(s.uplink + s.downlink), 0) as total
+SELECT CAST(COALESCE(SUM(s.uplink + s.downlink), 0) AS INTEGER) as total
 FROM samples s
 INNER JOIN subscription_users su ON su.user_name = s.user
 WHERE su.sub_id = ? AND s.ts >= ? AND s.ts < ?
@@ -1015,11 +1298,11 @@ WHERE su.sub_id = ? AND s.ts >= ? AND s.ts < ?
 type GetSubscriptionUsageInRangeParams struct {
 	SubID int64 `json:"sub_id"`
 	Ts    int64 `json:"ts"`
-	Ts2   int64 `json:"ts_2"`
+	Ts_2  int64 `json:"ts_2"`
 }
 
 func (q *Queries) GetSubscriptionUsageInRange(ctx context.Context, arg GetSubscriptionUsageInRangeParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getSubscriptionUsageInRange, arg.SubID, arg.Ts, arg.Ts2)
+	row := q.db.QueryRowContext(ctx, getSubscriptionUsageInRange, arg.SubID, arg.Ts, arg.Ts_2)
 	var total int64
 	err := row.Scan(&total)
 	return total, err
@@ -1035,6 +1318,7 @@ SELECT
 	s.reset_day,
 	s.profile_update_interval_hours,
 	s.update_always,
+	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
 	s.created_at,
 	s.updated_at
 FROM subscriptions s
@@ -1060,6 +1344,7 @@ func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) 
 			&i.ResetDay,
 			&i.ProfileUpdateIntervalHours,
 			&i.UpdateAlways,
+			&i.LastRequestAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -1118,7 +1403,7 @@ func (q *Queries) GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserPa
 }
 
 const getUser = `-- name: GetUser :one
-SELECT email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id FROM users WHERE email = ?
+SELECT email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
@@ -1130,6 +1415,8 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 		&i.QuotaPeriod,
 		&i.ResetDay,
 		&i.Enabled,
+		&i.Credential,
+		&i.Flow,
 		&i.VmessSecurity,
 		&i.VmessAlterID,
 	)
@@ -1323,6 +1610,33 @@ func (q *Queries) InsertDailyUsage(ctx context.Context, arg InsertDailyUsagePara
 	return err
 }
 
+const insertProtectionRule = `-- name: InsertProtectionRule :exec
+INSERT INTO subscription_protection_rules (
+	rule_type,
+	value,
+	note,
+	created_at
+) VALUES (?, ?, ?, ?)
+`
+
+type InsertProtectionRuleParams struct {
+	RuleType  string        `json:"rule_type"`
+	Value     string        `json:"value"`
+	Note      string        `json:"note"`
+	CreatedAt sql.NullInt64 `json:"created_at"`
+}
+
+// Subscription Protection Rules Queries --
+func (q *Queries) InsertProtectionRule(ctx context.Context, arg InsertProtectionRuleParams) error {
+	_, err := q.db.ExecContext(ctx, insertProtectionRule,
+		arg.RuleType,
+		arg.Value,
+		arg.Note,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertSample = `-- name: InsertSample :exec
 INSERT OR IGNORE INTO samples (user, ts, uplink, downlink) VALUES (?, ?, ?, ?)
 `
@@ -1369,17 +1683,68 @@ func (q *Queries) InsertSamplerRun(ctx context.Context, arg InsertSamplerRunPara
 }
 
 const insertSubscriptionRequest = `-- name: InsertSubscriptionRequest :exec
-INSERT INTO subscription_requests (sub_id, requested_at, served_from_cache) VALUES (?, ?, ?)
+INSERT INTO subscription_requests (
+	sub_id,
+	user_name,
+	request_ip,
+	request_host,
+	request_path,
+	user_agent,
+	device_model,
+	device_os,
+	device_os_version,
+	app_version,
+	country,
+	hwid_hash,
+	hwid_prefix,
+	requested_at,
+	served_from_cache,
+	blocked,
+	block_reason
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSubscriptionRequestParams struct {
-	SubID           int64 `json:"sub_id"`
-	RequestedAt     int64 `json:"requested_at"`
-	ServedFromCache int64 `json:"served_from_cache"`
+	SubID           int64  `json:"sub_id"`
+	UserName        string `json:"user_name"`
+	RequestIp       string `json:"request_ip"`
+	RequestHost     string `json:"request_host"`
+	RequestPath     string `json:"request_path"`
+	UserAgent       string `json:"user_agent"`
+	DeviceModel     string `json:"device_model"`
+	DeviceOs        string `json:"device_os"`
+	DeviceOsVersion string `json:"device_os_version"`
+	AppVersion      string `json:"app_version"`
+	Country         string `json:"country"`
+	HwidHash        string `json:"hwid_hash"`
+	HwidPrefix      string `json:"hwid_prefix"`
+	RequestedAt     int64  `json:"requested_at"`
+	ServedFromCache int64  `json:"served_from_cache"`
+	Blocked         int64  `json:"blocked"`
+	BlockReason     string `json:"block_reason"`
 }
 
+// Subscription Requests Queries --
 func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubscriptionRequestParams) error {
-	_, err := q.db.ExecContext(ctx, insertSubscriptionRequest, arg.SubID, arg.RequestedAt, arg.ServedFromCache)
+	_, err := q.db.ExecContext(ctx, insertSubscriptionRequest,
+		arg.SubID,
+		arg.UserName,
+		arg.RequestIp,
+		arg.RequestHost,
+		arg.RequestPath,
+		arg.UserAgent,
+		arg.DeviceModel,
+		arg.DeviceOs,
+		arg.DeviceOsVersion,
+		arg.AppVersion,
+		arg.Country,
+		arg.HwidHash,
+		arg.HwidPrefix,
+		arg.RequestedAt,
+		arg.ServedFromCache,
+		arg.Blocked,
+		arg.BlockReason,
+	)
 	return err
 }
 
@@ -1602,6 +1967,33 @@ func (q *Queries) UpdatePanelUserPermissions(ctx context.Context, arg UpdatePane
 	return err
 }
 
+const updatePanelUserSubscriptionDefaults = `-- name: UpdatePanelUserSubscriptionDefaults :exec
+UPDATE panel_users
+SET
+	subscription_default_profile_update_interval_hours = ?,
+	subscription_default_update_always = ?,
+	subscription_default_destinations_json = ?,
+	updated_at = strftime('%s','now')
+WHERE username = ?
+`
+
+type UpdatePanelUserSubscriptionDefaultsParams struct {
+	SubscriptionDefaultProfileUpdateIntervalHours sql.NullInt64 `json:"subscription_default_profile_update_interval_hours"`
+	SubscriptionDefaultUpdateAlways               int64         `json:"subscription_default_update_always"`
+	SubscriptionDefaultDestinationsJson           string        `json:"subscription_default_destinations_json"`
+	Username                                      string        `json:"username"`
+}
+
+func (q *Queries) UpdatePanelUserSubscriptionDefaults(ctx context.Context, arg UpdatePanelUserSubscriptionDefaultsParams) error {
+	_, err := q.db.ExecContext(ctx, updatePanelUserSubscriptionDefaults,
+		arg.SubscriptionDefaultProfileUpdateIntervalHours,
+		arg.SubscriptionDefaultUpdateAlways,
+		arg.SubscriptionDefaultDestinationsJson,
+		arg.Username,
+	)
+	return err
+}
+
 const updatePanelUsername = `-- name: UpdatePanelUsername :exec
 UPDATE panel_users SET username = ?, updated_at = strftime('%s','now') WHERE username = ?
 `
@@ -1684,13 +2076,15 @@ func (q *Queries) UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaPa
 }
 
 const upsertUser = `-- name: UpsertUser :exec
-INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, vmess_security, vmess_alter_id) 
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO users (email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id) 
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(email) DO UPDATE SET
 	quota_limit = excluded.quota_limit,
 	quota_period = excluded.quota_period,
 	reset_day = excluded.reset_day,
 	enabled = excluded.enabled,
+	credential = excluded.credential,
+	flow = excluded.flow,
 	vmess_security = excluded.vmess_security,
 	vmess_alter_id = excluded.vmess_alter_id
 `
@@ -1701,6 +2095,8 @@ type UpsertUserParams struct {
 	QuotaPeriod   sql.NullString `json:"quota_period"`
 	ResetDay      sql.NullInt64  `json:"reset_day"`
 	Enabled       sql.NullInt64  `json:"enabled"`
+	Credential    sql.NullString `json:"credential"`
+	Flow          sql.NullString `json:"flow"`
 	VmessSecurity sql.NullString `json:"vmess_security"`
 	VmessAlterID  sql.NullInt64  `json:"vmess_alter_id"`
 }
@@ -1713,6 +2109,8 @@ func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
 		arg.QuotaPeriod,
 		arg.ResetDay,
 		arg.Enabled,
+		arg.Credential,
+		arg.Flow,
 		arg.VmessSecurity,
 		arg.VmessAlterID,
 	)

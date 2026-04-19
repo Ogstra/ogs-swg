@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useState, useRef } from 'react'
+import { startTransition, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../../services/api'
-import { Terminal, RefreshCw, Search } from 'lucide-react'
+import { Terminal, RefreshCw, Search, X } from 'lucide-react'
 
 function hasBooleanOperator(query: string): boolean {
     return /\b(AND|OR)\b/i.test(query)
@@ -18,6 +18,20 @@ function filterTailLinesLocally(lines: string[], query: string): string[] {
     return lines.filter(line => line.toLowerCase().includes(trimmed))
 }
 
+function toOffsetDateTime(value: string): string | undefined {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+    const date = new Date(trimmed)
+    if (Number.isNaN(date.getTime())) return undefined
+
+    const offsetMinutes = -date.getTimezoneOffset()
+    const sign = offsetMinutes >= 0 ? '+' : '-'
+    const absMinutes = Math.abs(offsetMinutes)
+    const hours = String(Math.floor(absMinutes / 60)).padStart(2, '0')
+    const minutes = String(absMinutes % 60).padStart(2, '0')
+    return `${trimmed}:00${sign}${hours}:${minutes}`
+}
+
 export default function LogViewer() {
     const [lines, setLines] = useState<string[]>([])
     const [tailRawLines, setTailRawLines] = useState<string[]>([])
@@ -31,8 +45,12 @@ export default function LogViewer() {
     const [autoScroll, setAutoScroll] = useState(true)
     const [searchLimit, setSearchLimit] = useState(500)
     const [searching, setSearching] = useState(false)
+    const [searchStatus, setSearchStatus] = useState<string>('')
+    const [searchFrom, setSearchFrom] = useState<string>('')
+    const [searchTo, setSearchTo] = useState<string>('')
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
+    const searchAbortRef = useRef<AbortController | null>(null)
     const demoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
     const backendTailQuery = shouldUseServerTailQuery(query) ? query.trim() : ''
 
@@ -74,6 +92,12 @@ export default function LogViewer() {
     }, [viewMode])
 
     useEffect(() => {
+        return () => {
+            searchAbortRef.current?.abort()
+        }
+    }, [])
+
+    useEffect(() => {
         if (viewMode !== 'tail') return
         fetchLogs(true, query)
         const interval = setInterval(() => {
@@ -111,17 +135,85 @@ export default function LogViewer() {
             setViewMode('search')
             return
         }
+        searchAbortRef.current?.abort()
+        const controller = new AbortController()
+        searchAbortRef.current = controller
         setSearching(true)
+        setLines([])
+        setViewMode('search')
+        setSearchStatus('Searching logs...')
+        let completed = false
+        let matchedCount = 0
+        let truncated = false
         try {
-            const res = await api.searchLogs(q, searchLimit, 1)
-            setLines(res.logs || [])
-            setViewMode('search')
+            await api.searchLogsStream({
+                query: q,
+                limit: searchLimit,
+                from: toOffsetDateTime(searchFrom),
+                to: toOffsetDateTime(searchTo),
+                signal: controller.signal,
+            }, event => {
+                if (searchAbortRef.current !== controller) return
+                if (completed && event.type !== 'error') return
+                if (event.type === 'status') {
+                    matchedCount = event.matched ?? matchedCount
+                    if (!completed) {
+                        setSearchStatus(event.message || 'Searching logs...')
+                    }
+                    return
+                }
+                if (event.type === 'chunk') {
+                    matchedCount = event.matched ?? matchedCount
+                    const nextLines = [...(event.logs || [])].reverse()
+                    startTransition(() => {
+                        setLines(prev => [...nextLines, ...prev])
+                    })
+                    if (!completed) {
+                        setSearchStatus(`Found ${event.matched ?? 0} lines...`)
+                    }
+                    return
+                }
+                if (event.type === 'done') {
+                    completed = true
+                    matchedCount = event.matched ?? matchedCount
+                    truncated = event.truncated === true
+                    const suffix = truncated ? ' (limit reached)' : ''
+                    setSearchStatus(`Showing ${event.matched ?? 0} lines${suffix}`)
+                    return
+                }
+                if (event.type === 'error') {
+                    completed = true
+                    setLines([event.message || 'Search failed'])
+                    setSearchStatus('Search failed')
+                }
+            })
         } catch (err: any) {
+            if (err?.name === 'AbortError') {
+                if (searchAbortRef.current === controller) {
+                    setSearchStatus('Search cancelled')
+                }
+                return
+            }
             setLines([`Search failed: ${err.message}`])
             setViewMode('search')
+            setSearchStatus('Search failed')
         } finally {
-            setSearching(false)
+            if (searchAbortRef.current === controller) {
+                searchAbortRef.current = null
+                if (!completed && matchedCount > 0) {
+                    const suffix = truncated || matchedCount >= searchLimit ? ' (limit reached)' : ''
+                    setSearchStatus(`Showing ${matchedCount} lines${suffix}`)
+                }
+                setSearching(false)
+            }
         }
+    }
+
+    const handleCancelSearch = () => {
+        searchAbortRef.current?.abort()
+        searchAbortRef.current = null
+        setSearching(false)
+        setSearchStatus('Search cancelled')
     }
 
     return (
@@ -197,10 +289,14 @@ export default function LogViewer() {
                                 className="select-field h-[38px] w-[100px] sm:hidden bg-slate-950 border border-slate-700 rounded-lg px-2 text-xs text-slate-300 outline-none focus:border-blue-500"
                                 aria-label="Search limit"
                             >
-                                <option value={100}>100 limit</option>
-                                <option value={500}>500 limit</option>
-                                <option value={1000}>1kb limit</option>
-                                <option value={5000}>5kb limit</option>
+                                <option value={100}>100 lines</option>
+                                <option value={500}>500 lines</option>
+                                <option value={1000}>1k lines</option>
+                                <option value={5000}>5k lines</option>
+                                <option value={10000}>10k lines</option>
+                                <option value={25000}>25k lines</option>
+                                <option value={50000}>50k lines</option>
+                                <option value={100000}>100k lines</option>
                             </select>
                             <select
                                 value={searchLimit}
@@ -210,8 +306,12 @@ export default function LogViewer() {
                             >
                                 <option value={100}>100</option>
                                 <option value={500}>500</option>
-                                <option value={1000}>1kb</option>
-                                <option value={5000}>5kb</option>
+                                <option value={1000}>1k</option>
+                                <option value={5000}>5k</option>
+                                <option value={10000}>10k</option>
+                                <option value={25000}>25k</option>
+                                <option value={50000}>50k</option>
+                                <option value={100000}>100k</option>
                             </select>
                         </div>
                     )}
@@ -244,7 +344,7 @@ export default function LogViewer() {
             </div>
 
             {/* Controls */}
-            <div className={`bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-4 items-center shadow-sm ${viewMode === 'tail' ? 'flex-wrap' : 'flex-nowrap'}`}>
+            <div className={`bg-slate-900 border border-slate-800 rounded-xl p-3 flex gap-4 items-center shadow-sm ${viewMode === 'tail' ? 'flex-wrap' : 'flex-nowrap flex-wrap'}`}>
                 {viewMode === 'tail' ? (
                     <>
                         <div className="flex-1 min-w-0 relative">
@@ -288,15 +388,44 @@ export default function LogViewer() {
                             />
                         </div>
 
+                        <input
+                            type="datetime-local"
+                            value={searchFrom}
+                            onChange={e => setSearchFrom(e.target.value)}
+                            className="hidden sm:block h-[38px] min-w-[190px] bg-slate-950 border border-slate-700 rounded-lg px-3 text-sm text-slate-200 outline-none focus:border-blue-500"
+                            aria-label="Search from"
+                        />
+
+                        <input
+                            type="datetime-local"
+                            value={searchTo}
+                            onChange={e => setSearchTo(e.target.value)}
+                            className="hidden sm:block h-[38px] min-w-[190px] bg-slate-950 border border-slate-700 rounded-lg px-3 text-sm text-slate-200 outline-none focus:border-blue-500"
+                            aria-label="Search to"
+                        />
+
                         <div className="flex items-center gap-3 shrink-0">
                             <button
                                 onClick={() => handleSearch()}
                                 disabled={searching}
                                 className="h-[38px] px-4 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-50"
+                                aria-label={searching ? 'Searching' : 'Search'}
+                                title={searching ? 'Searching' : 'Search'}
                             >
                                 {searching ? <RefreshCw size={14} className="animate-spin" /> : <Search size={14} />}
-                                {searching ? 'Searching...' : 'Search'}
+                                <span className="hidden sm:inline">{searching ? 'Searching...' : 'Search'}</span>
                             </button>
+                            {searching && (
+                                <button
+                                    onClick={handleCancelSearch}
+                                    className="h-[38px] px-4 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-colors border border-slate-700 flex items-center gap-2"
+                                    aria-label="Cancel search"
+                                    title="Cancel search"
+                                >
+                                    <X size={14} />
+                                    <span className="hidden sm:inline">Cancel</span>
+                                </button>
+                            )}
                         </div>
                     </>
                 )}
@@ -311,6 +440,7 @@ export default function LogViewer() {
                     </div>
                     <div className="flex items-center gap-4 text-[10px] text-slate-500 font-medium uppercase tracking-wider">
                         <span>{lines.length} lines</span>
+                        {viewMode === 'search' && searchStatus && <span className="text-slate-400 normal-case tracking-normal">{searchStatus}</span>}
                         <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors">
                             <input
                                 type="checkbox"
@@ -324,7 +454,7 @@ export default function LogViewer() {
                 </div>
 
                 <div
-                    className="flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm custom-scrollbar bg-black/20"
+                    className="logs-scrollbar flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm bg-black/20"
                     ref={containerRef}
                     onScroll={handleScroll}
                 >

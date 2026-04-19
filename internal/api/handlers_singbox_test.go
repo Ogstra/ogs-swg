@@ -88,6 +88,38 @@ func newSingboxHandlerTestServer(initialJSON string) (*Server, *singboxConfigExe
 	return NewServer(nil, cfg, stub), stub
 }
 
+func TestHandleApplySingboxChanges_ReturnsRestartRequired(t *testing.T) {
+	server, _ := newSingboxHandlerTestServer(`{}`)
+	server.config.MarkSingboxPending()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/singbox/apply", nil)
+	rec := httptest.NewRecorder()
+
+	server.handleApplySingboxChanges(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Success         bool   `json:"success"`
+		RestartRequired bool   `json:"restart_required"`
+		Message         string `json:"message"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Success {
+		t.Fatalf("success=true, want false")
+	}
+	if !body.RestartRequired {
+		t.Fatalf("restart_required=false, want true")
+	}
+	if !server.config.GetSingboxPendingChanges() {
+		t.Fatalf("pending changes cleared before confirmed restart")
+	}
+}
+
 func newSingboxHandlerTestServerWithStore(t *testing.T, initialJSON string) (*Server, *singboxConfigExecutorStub, *core.Store) {
 	return newSingboxHandlerTestServerWithStoreAndManagedInbounds(t, initialJSON, []string{"test-vless"})
 }
@@ -484,6 +516,70 @@ func TestBuildVlessLink_NonDirectTransportOmitsXUDP(t *testing.T) {
 	}
 }
 
+func TestBuildVlessLink_RecommendedTransportVariants(t *testing.T) {
+	testCases := []struct {
+		name            string
+		transport       map[string]interface{}
+		wantType        string
+		wantPath        string
+		wantServiceName string
+	}{
+		{
+			name:            "grpc tls",
+			transport:       map[string]interface{}{"type": "grpc", "service_name": "svc-vless"},
+			wantType:        "grpc",
+			wantServiceName: "svc-vless",
+		},
+		{
+			name:      "httpupgrade tls",
+			transport: map[string]interface{}{"type": "httpupgrade", "path": "/upgrade"},
+			wantType:  "httpupgrade",
+			wantPath:  "/upgrade",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			view := &core.SingboxInboundView{
+				Type: "vless",
+				TLS: &core.TLSConfig{
+					Enabled:    true,
+					ServerName: "example.com",
+					ALPN:       []string{"h2", "http/1.1"},
+				},
+				Raw: map[string]interface{}{
+					"transport": tc.transport,
+				},
+			}
+			user := &core.UserInboundInfo{UUID: "11111111-1111-1111-1111-111111111111"}
+
+			link, err := buildVlessLink("alice", user, view, "1.2.3.4", "443", nil, "")
+			if err != nil {
+				t.Fatalf("buildVlessLink() error = %v", err)
+			}
+			u, err := url.Parse(link)
+			if err != nil {
+				t.Fatalf("parse link: %v", err)
+			}
+			if got := u.Query().Get("security"); got != "tls" {
+				t.Fatalf("security = %q; want tls", got)
+			}
+			if got := u.Query().Get("type"); got != tc.wantType {
+				t.Fatalf("type = %q; want %q", got, tc.wantType)
+			}
+			if got := u.Query().Get("path"); got != tc.wantPath {
+				t.Fatalf("path = %q; want %q", got, tc.wantPath)
+			}
+			if got := u.Query().Get("serviceName"); got != tc.wantServiceName {
+				t.Fatalf("serviceName = %q; want %q", got, tc.wantServiceName)
+			}
+			if got := u.Query().Get("packetEncoding"); got != "" {
+				t.Fatalf("packetEncoding = %q; want empty", got)
+			}
+		})
+	}
+}
+
 func TestBuildTrojanLink_IncludesALPN(t *testing.T) {
 	view := &core.SingboxInboundView{
 		Type: "trojan",
@@ -507,6 +603,67 @@ func TestBuildTrojanLink_IncludesALPN(t *testing.T) {
 	}
 	if got := u.Query().Get("alpn"); got != "h2" {
 		t.Fatalf("alpn = %q; want %q", got, "h2")
+	}
+}
+
+func TestBuildTrojanLink_RecommendedTransportVariants(t *testing.T) {
+	testCases := []struct {
+		name            string
+		transport       map[string]interface{}
+		wantType        string
+		wantPath        string
+		wantServiceName string
+	}{
+		{
+			name:            "grpc tls",
+			transport:       map[string]interface{}{"type": "grpc", "service_name": "svc-trojan"},
+			wantType:        "grpc",
+			wantServiceName: "svc-trojan",
+		},
+		{
+			name:      "httpupgrade tls",
+			transport: map[string]interface{}{"type": "httpupgrade", "path": "/trojan-up"},
+			wantType:  "httpupgrade",
+			wantPath:  "/trojan-up",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			view := &core.SingboxInboundView{
+				Type: "trojan",
+				TLS: &core.TLSConfig{
+					Enabled:    true,
+					ServerName: "example.com",
+					ALPN:       []string{"h2"},
+				},
+				Raw: map[string]interface{}{
+					"transport": tc.transport,
+				},
+			}
+			user := &core.UserInboundInfo{UUID: "secret-password"}
+
+			link, err := buildTrojanLink("alice", user, view, "1.2.3.4", "443", nil, "")
+			if err != nil {
+				t.Fatalf("buildTrojanLink() error = %v", err)
+			}
+			u, err := url.Parse(link)
+			if err != nil {
+				t.Fatalf("parse link: %v", err)
+			}
+			if got := u.Query().Get("security"); got != "tls" {
+				t.Fatalf("security = %q; want tls", got)
+			}
+			if got := u.Query().Get("type"); got != tc.wantType {
+				t.Fatalf("type = %q; want %q", got, tc.wantType)
+			}
+			if got := u.Query().Get("path"); got != tc.wantPath {
+				t.Fatalf("path = %q; want %q", got, tc.wantPath)
+			}
+			if got := u.Query().Get("serviceName"); got != tc.wantServiceName {
+				t.Fatalf("serviceName = %q; want %q", got, tc.wantServiceName)
+			}
+		})
 	}
 }
 
@@ -543,6 +700,81 @@ func TestBuildVmessLink_IncludesALPN(t *testing.T) {
 	}
 	if got := payload["alpn"]; got != "h2,http/1.1" {
 		t.Fatalf("payload alpn = %q; want %q", got, "h2,http/1.1")
+	}
+}
+
+func TestBuildVmessLink_RecommendedTransportVariants(t *testing.T) {
+	testCases := []struct {
+		name         string
+		transport    map[string]interface{}
+		wantNet      string
+		wantPath     string
+		wantTLS      string
+		wantSecurity string
+	}{
+		{
+			name:         "tcp tls",
+			transport:    nil,
+			wantNet:      "tcp",
+			wantTLS:      "tls",
+			wantSecurity: "auto",
+		},
+		{
+			name:         "grpc tls",
+			transport:    map[string]interface{}{"type": "grpc", "service_name": "svc-vmess"},
+			wantNet:      "grpc",
+			wantPath:     "svc-vmess",
+			wantTLS:      "tls",
+			wantSecurity: "auto",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := map[string]interface{}{}
+			if tc.transport != nil {
+				raw["transport"] = tc.transport
+			}
+			view := &core.SingboxInboundView{
+				Type: "vmess",
+				TLS: &core.TLSConfig{
+					Enabled:    true,
+					ServerName: "example.com",
+				},
+				Raw: raw,
+			}
+			user := &core.UserInboundInfo{
+				UUID:          "11111111-1111-1111-1111-111111111111",
+				VmessSecurity: "auto",
+			}
+
+			link, err := buildVmessLink("alice", user, view, "1.2.3.4", "443", nil, "")
+			if err != nil {
+				t.Fatalf("buildVmessLink() error = %v", err)
+			}
+
+			rawPayload := strings.TrimPrefix(link, "vmess://")
+			decoded, err := base64.StdEncoding.DecodeString(rawPayload)
+			if err != nil {
+				t.Fatalf("decode vmess: %v", err)
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(decoded, &payload); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			if got := payload["net"]; got != tc.wantNet {
+				t.Fatalf("payload net = %q; want %q", got, tc.wantNet)
+			}
+			if got := payload["path"]; got != tc.wantPath {
+				t.Fatalf("payload path = %q; want %q", got, tc.wantPath)
+			}
+			if got := payload["tls"]; got != tc.wantTLS {
+				t.Fatalf("payload tls = %q; want %q", got, tc.wantTLS)
+			}
+			if got := payload["scy"]; got != tc.wantSecurity {
+				t.Fatalf("payload scy = %q; want %q", got, tc.wantSecurity)
+			}
+		})
 	}
 }
 
@@ -1006,8 +1238,8 @@ func TestBuildHysteria2Link_Basic(t *testing.T) {
 	if !strings.HasPrefix(link, "hysteria2://s3cr3t@1.2.3.4:443") {
 		t.Errorf("link = %q; want prefix hysteria2://s3cr3t@1.2.3.4:443", link)
 	}
-	if !strings.HasSuffix(link, "#HY2-alice") {
-		t.Errorf("link = %q; want suffix #HY2-alice", link)
+	if !strings.HasSuffix(link, "#alice") {
+		t.Errorf("link = %q; want suffix #alice", link)
 	}
 	if strings.Contains(link, "sni=") {
 		t.Errorf("link should not contain sni=; got %q", link)
@@ -1099,6 +1331,188 @@ func TestBuildHysteria2Link_EmptyPassword(t *testing.T) {
 	if err == nil {
 		t.Fatal("buildHysteria2Link() expected error for empty password; got nil")
 	}
+}
+
+func TestBuildShadowsocksLink(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "shadowsocks",
+		Raw: map[string]interface{}{
+			"method": "2022-blake3-aes-128-gcm",
+		},
+	}
+	user := &core.UserInboundInfo{Password: "shadow-secret"}
+
+	link, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildShadowsocksLink() error = %v", err)
+	}
+
+	// Must be a valid ss:// SIP002 URI: ss://BASE64(method:password)@host:port#tag
+	if !strings.HasPrefix(link, "ss://") {
+		t.Fatalf("link = %q; want ss:// prefix", link)
+	}
+	// Split off fragment
+	withoutFragment, fragment, _ := strings.Cut(link, "#")
+	wantFragment := url.QueryEscape("alice")
+	if fragment != wantFragment {
+		t.Errorf("fragment = %q; want %q", fragment, wantFragment)
+	}
+	// Split userinfo from host
+	rest := strings.TrimPrefix(withoutFragment, "ss://")
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx < 0 {
+		t.Fatalf("link missing @: %q", link)
+	}
+	userinfo, hostport := rest[:atIdx], rest[atIdx+1:]
+	if hostport != "1.2.3.4:443" {
+		t.Errorf("hostport = %q; want %q", hostport, "1.2.3.4:443")
+	}
+	decoded, err := base64.StdEncoding.DecodeString(userinfo)
+	if err != nil {
+		t.Fatalf("base64 decode userinfo %q: %v", userinfo, err)
+	}
+	want := "2022-blake3-aes-128-gcm:shadow-secret"
+	if string(decoded) != want {
+		t.Errorf("decoded userinfo = %q; want %q", string(decoded), want)
+	}
+}
+
+func TestBuildShadowsocksLink_2022MultiUser_IncludesServerKey(t *testing.T) {
+	// Shadowsocks 2022 multi-user: inbound has top-level server password.
+	// Client needs "server_key:user_key" so sing-box can authenticate.
+	view := &core.SingboxInboundView{
+		Type: "shadowsocks",
+		Raw: map[string]interface{}{
+			"method":   "2022-blake3-aes-128-gcm",
+			"password": "server-key-base64",
+		},
+	}
+	user := &core.UserInboundInfo{Password: "user-key-base64"}
+
+	link, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildShadowsocksLink() error = %v", err)
+	}
+
+	withoutFragment, _, _ := strings.Cut(link, "#")
+	rest := strings.TrimPrefix(withoutFragment, "ss://")
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx < 0 {
+		t.Fatalf("link missing @: %q", link)
+	}
+	userinfo := rest[:atIdx]
+	decoded, err := base64.StdEncoding.DecodeString(userinfo)
+	if err != nil {
+		t.Fatalf("base64 decode userinfo %q: %v", userinfo, err)
+	}
+	want := "2022-blake3-aes-128-gcm:server-key-base64:user-key-base64"
+	if string(decoded) != want {
+		t.Errorf("decoded userinfo = %q; want %q", string(decoded), want)
+	}
+}
+
+func TestBuildShadowsocksLink_RecommendedMethods(t *testing.T) {
+	methods := []string{
+		"2022-blake3-aes-256-gcm",
+		"2022-blake3-chacha20-poly1305",
+		"aes-128-gcm",
+		"aes-256-gcm",
+		"chacha20-ietf-poly1305",
+	}
+
+	for _, method := range methods {
+		t.Run(method, func(t *testing.T) {
+			view := &core.SingboxInboundView{
+				Type: "shadowsocks",
+				Raw: map[string]interface{}{
+					"method": method,
+				},
+			}
+			user := &core.UserInboundInfo{Password: "shadow-secret"}
+
+			link, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
+			if err != nil {
+				t.Fatalf("buildShadowsocksLink() error = %v", err)
+			}
+
+			withoutFragment, _, _ := strings.Cut(link, "#")
+			rest := strings.TrimPrefix(withoutFragment, "ss://")
+			atIdx := strings.LastIndex(rest, "@")
+			if atIdx < 0 {
+				t.Fatalf("link missing @: %q", link)
+			}
+			userinfo := rest[:atIdx]
+			decoded, err := base64.StdEncoding.DecodeString(userinfo)
+			if err != nil {
+				t.Fatalf("base64 decode userinfo %q: %v", userinfo, err)
+			}
+			want := method + ":shadow-secret"
+			if string(decoded) != want {
+				t.Errorf("decoded userinfo = %q; want %q", string(decoded), want)
+			}
+		})
+	}
+}
+
+func TestHandleGetUserInbounds_ShadowsocksRedaction(t *testing.T) {
+	const ssConfig = `{"inbounds":[{"type":"shadowsocks","tag":"ss-in","listen":"::","listen_port":8443,"method":"2022-blake3-aes-128-gcm","users":[{"name":"alice","password":"s3cr3t"}]}]}`
+
+	server, _ := newSingboxHandlerTestServer(ssConfig)
+
+	withPerms := func(perms core.PanelUserPermissions) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/api/users/alice/inbounds", nil)
+		req.SetPathValue("name", "alice")
+		ctx := context.WithValue(req.Context(), permissionsContextKey, &perms)
+		return req.WithContext(ctx)
+	}
+
+	decodeInbounds := func(t *testing.T, rec *httptest.ResponseRecorder) []core.UserInboundInfo {
+		t.Helper()
+		var inbounds []core.UserInboundInfo
+		if err := json.NewDecoder(rec.Body).Decode(&inbounds); err != nil {
+			t.Fatalf("decode inbounds: %v body=%q", err, rec.Body.String())
+		}
+		return inbounds
+	}
+
+	t.Run("read-only masks Shadowsocks password", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.handleGetUserInbounds(rec, withPerms(core.PanelUserPermissions{
+			CanReadUsers:  true,
+			CanWriteUsers: false,
+		}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+		inbounds := decodeInbounds(t, rec)
+		if len(inbounds) == 0 {
+			t.Fatal("expected at least one inbound; got none")
+		}
+		if got := inbounds[0].Password; got != maskedValue {
+			t.Errorf("password = %q; want %q (masked)", got, maskedValue)
+		}
+		if got := inbounds[0].UUID; got != "" {
+			t.Errorf("uuid = %q; want empty", got)
+		}
+	})
+
+	t.Run("write-capable preserves plaintext password", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		server.handleGetUserInbounds(rec, withPerms(core.PanelUserPermissions{
+			CanReadUsers:  true,
+			CanWriteUsers: true,
+		}))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+		}
+		inbounds := decodeInbounds(t, rec)
+		if len(inbounds) == 0 {
+			t.Fatal("expected at least one inbound; got none")
+		}
+		if got := inbounds[0].Password; got != "s3cr3t" {
+			t.Errorf("password = %q; want %q (plaintext)", got, "s3cr3t")
+		}
+	})
 }
 
 func TestHandleGetUserInbounds_Hysteria2Redaction(t *testing.T) {
