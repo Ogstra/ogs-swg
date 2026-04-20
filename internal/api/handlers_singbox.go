@@ -1193,6 +1193,8 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	affectedUsers := usersForDeletedInbound(s.config, tag)
+
 	if err := s.config.DeleteSingboxInbound(tag); err != nil {
 		http.Error(w, "Failed to delete inbound: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1200,9 +1202,40 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	if s.store != nil {
 		_ = s.store.DeleteInboundMeta(tag)
+		for _, user := range affectedUsers {
+			if err := s.removeUserFromSubscriptionsIfUnassigned(user); err != nil {
+				http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 	}
 
+	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
+}
+
+func usersForDeletedInbound(cfg *core.Config, tag string) []string {
+	if cfg == nil {
+		return nil
+	}
+	view, err := cfg.GetSingboxInboundView(tag)
+	if err != nil || view == nil {
+		return nil
+	}
+	users := make([]string, 0, len(view.Users))
+	seen := make(map[string]struct{}, len(view.Users))
+	for _, user := range view.Users {
+		name := strings.TrimSpace(user.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		users = append(users, name)
+	}
+	return users
 }
 
 func popInboundLinkMeta(inbound map[string]interface{}) (int, bool, *bool, bool, error) {

@@ -1393,6 +1393,10 @@ func (s *Store) DeleteUserMetadata(email string) error {
 	return s.Queries.DeleteUser(context.Background(), email)
 }
 
+func (s *Store) RemoveUserFromSubscriptions(email string) error {
+	return s.Queries.RemoveUserFromAllSubscriptions(context.Background(), strings.TrimSpace(email))
+}
+
 func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
 	oldName = strings.TrimSpace(oldName)
 	newName = strings.TrimSpace(newName)
