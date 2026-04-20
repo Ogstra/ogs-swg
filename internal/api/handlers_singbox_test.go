@@ -1578,3 +1578,120 @@ func TestHandleGetUserInbounds_Hysteria2Redaction(t *testing.T) {
 		}
 	})
 }
+
+func TestDeleteUserRemovesSubscriptionMembership(t *testing.T) {
+	server, _, _ := newSingboxHandlerTestServerWithStore(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name": "alice", "uuid": "11111111-1111-1111-1111-111111111111"},
+					{"name": "bob", "uuid": "22222222-2222-2222-2222-222222222222"}
+				]
+			}
+		]
+	}`)
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Cleanup Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice", "bob"},
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/users?name=alice", nil)
+	rec := httptest.NewRecorder()
+	server.handleDeleteUser(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Users) != 1 || got.Users[0] != "bob" {
+		t.Fatalf("subscription users=%v want [bob]", got.Users)
+	}
+}
+
+func TestRemoveUserFromInboundRemovesSubscriptionMembershipWhenUnassigned(t *testing.T) {
+	server, _, _ := newSingboxHandlerTestServerWithStore(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name": "alice", "uuid": "11111111-1111-1111-1111-111111111111"}
+				]
+			}
+		]
+	}`)
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Inbound Cleanup Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice"},
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/users/alice/inbounds/test-vless", nil)
+	req.SetPathValue("name", "alice")
+	req.SetPathValue("tag", "test-vless")
+	rec := httptest.NewRecorder()
+	server.handleRemoveUserFromInbound(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("remove status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Users) != 0 {
+		t.Fatalf("subscription users=%v want empty", got.Users)
+	}
+}
+
+func TestDeleteInboundRemovesOnlyUnassignedUsersFromSubscriptions(t *testing.T) {
+	server, _, _ := newSingboxHandlerTestServerWithStoreAndManagedInbounds(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [
+					{"name": "alice", "uuid": "11111111-1111-1111-1111-111111111111"}
+				]
+			},
+			{
+				"type": "vmess",
+				"tag": "test-vmess",
+				"listen": "0.0.0.0",
+				"listen_port": 8443,
+				"users": [
+					{"name": "bob", "uuid": "22222222-2222-2222-2222-222222222222"}
+				]
+			}
+		]
+	}`, []string{"test-vless", "test-vmess"})
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Inbound Delete Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice", "bob"},
+	})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/singbox/inbound?tag=test-vless", nil)
+	rec := httptest.NewRecorder()
+	server.handleDeleteSingboxInbound(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete inbound status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if len(got.Users) != 1 || got.Users[0] != "bob" {
+		t.Fatalf("subscription users=%v want [bob]", got.Users)
+	}
+}

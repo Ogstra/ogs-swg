@@ -1837,6 +1837,15 @@ func (q *Queries) RegenerateSubscriptionToken(ctx context.Context, arg Regenerat
 	return err
 }
 
+const removeUserFromAllSubscriptions = `-- name: RemoveUserFromAllSubscriptions :exec
+DELETE FROM subscription_users WHERE user_name = ?
+`
+
+func (q *Queries) RemoveUserFromAllSubscriptions(ctx context.Context, userName string) error {
+	_, err := q.db.ExecContext(ctx, removeUserFromAllSubscriptions, userName)
+	return err
+}
+
 const removeUserFromSubscription = `-- name: RemoveUserFromSubscription :exec
 DELETE FROM subscription_users WHERE sub_id = ? AND user_name = ?
 `

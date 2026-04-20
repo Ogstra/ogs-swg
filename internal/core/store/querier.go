@@ -86,6 +86,7 @@ type Querier interface {
 	PruneSubscriptionRequestsOlderThan(ctx context.Context, requestedAt int64) error
 	PruneWGSamplesOlderThan(ctx context.Context, ts int64) error
 	RegenerateSubscriptionToken(ctx context.Context, arg RegenerateSubscriptionTokenParams) error
+	RemoveUserFromAllSubscriptions(ctx context.Context, userName string) error
 	RemoveUserFromSubscription(ctx context.Context, arg RemoveUserFromSubscriptionParams) error
 	RenameInboundMeta(ctx context.Context, arg RenameInboundMetaParams) error
 	TruncateSamples(ctx context.Context) error

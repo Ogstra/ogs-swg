@@ -419,6 +419,9 @@ ON CONFLICT(sub_id, user_name) DO UPDATE SET alias = excluded.alias;
 -- name: RemoveUserFromSubscription :exec
 DELETE FROM subscription_users WHERE sub_id = ? AND user_name = ?;
 
+-- name: RemoveUserFromAllSubscriptions :exec
+DELETE FROM subscription_users WHERE user_name = ?;
+
 -- name: ClearSubscriptionUsers :exec
 DELETE FROM subscription_users WHERE sub_id = ?;
 

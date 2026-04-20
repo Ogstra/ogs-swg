@@ -1179,6 +1179,11 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := s.store.RemoveUserFromSubscriptions(name); err != nil {
+		http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if err := s.store.DeleteUserMetadata(name); err != nil {
 		http.Error(w, "Failed to delete metadata: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -1207,9 +1212,31 @@ func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Note: We don't delete metadata here since user might still exist in other inbounds
+	if err := s.removeUserFromSubscriptionsIfUnassigned(name); err != nil {
+		http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) removeUserFromSubscriptionsIfUnassigned(name string) error {
+	if s.store == nil || s.config == nil {
+		return nil
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	inbounds, err := s.config.GetUserInbounds(name)
+	if err != nil {
+		return err
+	}
+	if len(inbounds) > 0 {
+		return nil
+	}
+	return s.store.RemoveUserFromSubscriptions(name)
 }
 
 func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Request) {
