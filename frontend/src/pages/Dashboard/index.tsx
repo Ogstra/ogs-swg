@@ -875,6 +875,7 @@ export default function Dashboard() {
                     setSingboxRestartConfirmOpen(false)
                 }}
                 onConfirm={handleConfirmSingboxRestart}
+                onLater={() => setSingboxRestartConfirmOpen(false)}
                 title="Restart Sing-box?"
                 message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
                 confirmLabel="Restart"
