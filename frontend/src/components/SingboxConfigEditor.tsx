@@ -768,18 +768,20 @@ function RulesTab({
                                         </button>
                                         {rule.kind === 'auth_user' && rule.authUsers.length === 0 && <p className="text-xs text-amber-400">At least one user is required.</p>}
                                         {rule.kind === 'rule_set' && rule.ruleSets.length === 0 && <p className="text-xs text-amber-400">At least one rule set is required.</p>}
-                                        {rule.kind === 'auth_user' && rule.ruleSets.length > 0 && (
+                                        {rule.kind === 'auth_user' && (
                                             <div className="space-y-1 pt-2">
                                                 <div className="flex items-center justify-between gap-2">
-                                                    <label className="text-xs font-medium text-slate-400">Rule sets</label>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => updateRule(idx, { ruleSets: [] })}
-                                                        disabled={!canWrite}
-                                                        className="text-xs text-slate-400 hover:text-white disabled:opacity-60"
-                                                    >
-                                                        Remove
-                                                    </button>
+                                                    <label className="text-xs font-medium text-slate-400">Rule sets (optional)</label>
+                                                    {rule.ruleSets.length > 0 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => updateRule(idx, { ruleSets: [] })}
+                                                            disabled={!canWrite}
+                                                            className="text-xs text-slate-400 hover:text-white disabled:opacity-60"
+                                                        >
+                                                            Clear
+                                                        </button>
+                                                    )}
                                                 </div>
                                                 <button
                                                     type="button"
@@ -790,16 +792,6 @@ function RulesTab({
                                                     {rule.ruleSets.length ? rule.ruleSets.join(', ') : 'Select rule sets'}
                                                 </button>
                                             </div>
-                                        )}
-                                        {rule.kind === 'auth_user' && rule.ruleSets.length === 0 && (
-                                            <button
-                                                type="button"
-                                                onClick={() => setSelectionModal({ idx, type: 'rule_set' })}
-                                                disabled={!canWrite}
-                                                className="mt-2 text-xs font-medium text-blue-400 hover:text-blue-300 disabled:opacity-60"
-                                            >
-                                                Add rule set condition
-                                            </button>
                                         )}
                                     </>
                                 )}
