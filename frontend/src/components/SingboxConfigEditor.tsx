@@ -217,6 +217,12 @@ export default function SingboxConfigEditor() {
             return keys.every(k => allowed.has(k)) && inboundOk
         }
 
+        if ('rule_set' in rule) {
+            const allowed = new Set(['rule_set', 'auth_user', 'outbound', 'ip_version'])
+            const authUsersOk = !('auth_user' in rule) || normalizeStringArray(rule.auth_user).length > 0
+            return keys.every(k => allowed.has(k)) && normalizeStringArray(rule.rule_set).length > 0 && authUsersOk
+        }
+
         if ('auth_user' in rule) {
             const allowed = new Set(['auth_user', 'rule_set', 'action', 'outbound', 'ip_version'])
             const actionOk = rule.action === undefined || rule.action === 'route'
@@ -225,28 +231,10 @@ export default function SingboxConfigEditor() {
             return keys.every(k => allowed.has(k)) && actionOk && authUsersOk && ruleSetsOk
         }
 
-        if ('rule_set' in rule) {
-            const allowed = new Set(['rule_set', 'auth_user', 'outbound', 'ip_version'])
-            const authUsersOk = !('auth_user' in rule) || normalizeStringArray(rule.auth_user).length > 0
-            return keys.every(k => allowed.has(k)) && normalizeStringArray(rule.rule_set).length > 0 && authUsersOk
-        }
-
         return false
     }
 
     const toEditableRule = (rule: any): EditableRouteRule => {
-        if ('auth_user' in rule) {
-            const ruleSets = normalizeStringArray(rule.rule_set)
-            return {
-                kind: 'auth_user',
-                inbound: '',
-                authUsers: normalizeStringArray(rule.auth_user),
-                ruleSets,
-                outbound: String(rule.outbound || '').trim(),
-                ipVersion: rule.ip_version === 4 || rule.ip_version === 6 ? String(rule.ip_version) : '',
-                actionRoute: rule.action === 'route',
-            }
-        }
         if ('rule_set' in rule) {
             return {
                 kind: 'rule_set',
@@ -256,6 +244,17 @@ export default function SingboxConfigEditor() {
                 outbound: String(rule.outbound || '').trim(),
                 ipVersion: rule.ip_version === 4 || rule.ip_version === 6 ? String(rule.ip_version) : '',
                 actionRoute: false,
+            }
+        }
+        if ('auth_user' in rule) {
+            return {
+                kind: 'auth_user',
+                inbound: '',
+                authUsers: normalizeStringArray(rule.auth_user),
+                ruleSets: normalizeStringArray(rule.rule_set),
+                outbound: String(rule.outbound || '').trim(),
+                ipVersion: rule.ip_version === 4 || rule.ip_version === 6 ? String(rule.ip_version) : '',
+                actionRoute: rule.action === 'route',
             }
         }
         return {
@@ -271,17 +270,20 @@ export default function SingboxConfigEditor() {
 
     const fromEditableRule = (rule: EditableRouteRule) => {
         const obj: any = { outbound: rule.outbound.trim() }
+        if (rule.kind === 'rule_set') {
+            obj.rule_set = uniqueSorted(rule.ruleSets)
+            if (rule.authUsers.length > 0) {
+                obj.auth_user = uniqueSorted(rule.authUsers)
+            }
+        }
         if (rule.kind === 'auth_user') {
             obj.auth_user = uniqueSorted(rule.authUsers)
+            if (rule.ruleSets.length > 0) {
+                obj.rule_set = uniqueSorted(rule.ruleSets)
+            }
             if (rule.actionRoute) {
                 obj.action = 'route'
             }
-        }
-        if (rule.kind === 'rule_set' && rule.authUsers.length > 0) {
-            obj.auth_user = uniqueSorted(rule.authUsers)
-        }
-        if ((rule.kind === 'rule_set' || rule.kind === 'auth_user') && rule.ruleSets.length > 0) {
-            obj.rule_set = uniqueSorted(rule.ruleSets)
         }
         if (rule.kind === 'inbound') {
             obj.inbound = [rule.inbound]
@@ -359,11 +361,10 @@ export default function SingboxConfigEditor() {
             const parsed = JSON.parse(raw)
             const route = parsed.route || {}
             const existing = Array.isArray(route.rules) ? route.rules : []
-            const preserved = existing.filter((r: any) => !isEditableRule(r))
-            const nextRules = [
-                ...preserved,
-                ...rules.map(fromEditableRule)
-            ]
+            const editableQueue = [...rules.map(fromEditableRule)]
+            const nextRules = existing.map((r: any) => isEditableRule(r) ? editableQueue.shift() ?? r : r)
+            // Append any remaining editable rules (newly added ones not yet in existing)
+            editableQueue.forEach(r => nextRules.push(r))
             parsed.route = route
             parsed.route.rules = nextRules
             await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
@@ -814,32 +815,35 @@ function RulesTab({
                             </div>
                         </div>
                         {(rule.kind === 'auth_user' || rule.kind === 'rule_set') && (
-                            <div className="space-y-1 pt-1 border-t border-slate-800">
-                                <div className="flex items-center justify-between gap-2">
-                                    <label className="text-xs font-medium text-slate-400">
-                                        {rule.kind === 'auth_user' ? 'Rule sets (optional)' : 'Auth users (optional)'}
-                                    </label>
-                                    {(rule.kind === 'auth_user' ? rule.ruleSets.length : rule.authUsers.length) > 0 && (
-                                        <button
-                                            type="button"
-                                            onClick={() => updateRule(idx, rule.kind === 'auth_user' ? { ruleSets: [] } : { authUsers: [] })}
-                                            disabled={!canWrite}
-                                            className="text-xs text-slate-400 hover:text-white disabled:opacity-60"
-                                        >
-                                            Clear
-                                        </button>
-                                    )}
+                            <div className="grid grid-cols-1 md:grid-cols-[2fr_5fr_5fr_2fr_auto] gap-3 pt-1 border-t border-slate-800">
+                                <div className="hidden md:block" />
+                                <div className="space-y-1">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <label className="text-xs font-medium text-slate-400">
+                                            {rule.kind === 'auth_user' ? 'Rule sets (optional)' : 'Auth users (optional)'}
+                                        </label>
+                                        {(rule.kind === 'auth_user' ? rule.ruleSets.length : rule.authUsers.length) > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => updateRule(idx, rule.kind === 'auth_user' ? { ruleSets: [] } : { authUsers: [] })}
+                                                disabled={!canWrite}
+                                                className="text-xs text-slate-400 hover:text-white disabled:opacity-60"
+                                            >
+                                                Clear
+                                            </button>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setSelectionModal({ idx, type: rule.kind === 'auth_user' ? 'rule_set' : 'auth_user' })}
+                                        disabled={!canWrite}
+                                        className="w-full min-h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-left text-sm text-white outline-none hover:border-blue-500/50 disabled:opacity-60"
+                                    >
+                                        {rule.kind === 'auth_user'
+                                            ? rule.ruleSets.length ? rule.ruleSets.join(', ') : 'Select rule sets'
+                                            : rule.authUsers.length ? rule.authUsers.join(', ') : 'Select users'}
+                                    </button>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => setSelectionModal({ idx, type: rule.kind === 'auth_user' ? 'rule_set' : 'auth_user' })}
-                                    disabled={!canWrite}
-                                    className="w-full min-h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-left text-sm text-white outline-none hover:border-blue-500/50 disabled:opacity-60"
-                                >
-                                    {rule.kind === 'auth_user'
-                                        ? rule.ruleSets.length ? rule.ruleSets.join(', ') : 'Select rule sets'
-                                        : rule.authUsers.length ? rule.authUsers.join(', ') : 'Select users'}
-                                </button>
                             </div>
                         )}
                     </Card>
