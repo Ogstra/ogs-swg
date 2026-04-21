@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
 import {
@@ -84,6 +84,7 @@ export default function Subscriptions() {
     const [defaultUpdateAlways, setDefaultUpdateAlways] = useState(false)
     const [userSearch, setUserSearch] = useState('')
     const [expandedAliasUsers, setExpandedAliasUsers] = useState<Set<string>>(new Set())
+    const [draggedProfile, setDraggedProfile] = useState<string | null>(null)
     const [sortKey, setSortKey] = useState<'name' | 'last_request' | 'users' | 'quota'>('name')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
@@ -103,7 +104,8 @@ export default function Subscriptions() {
     const subs = subsQuery.data || []
     const usersInfo = usersQuery.data || []
     const sortedUsersInfo = [...usersInfo].sort((a, b) => a.name.localeCompare(b.name))
-    const filteredUsers = userSearch.trim()
+    const selectedProfileIndex = new Map(selectedProfiles.map((profile, index) => [profile.username, index]))
+    const filteredUsers = (userSearch.trim()
         ? sortedUsersInfo.filter(u => {
             const q = userSearch.toLowerCase()
             const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
@@ -112,6 +114,14 @@ export default function Subscriptions() {
                 || (u.inbound_tags ?? []).some(t => t.toLowerCase().includes(q))
         })
         : sortedUsersInfo
+    ).sort((a, b) => {
+        const aSelectedIndex = selectedProfileIndex.get(a.name)
+        const bSelectedIndex = selectedProfileIndex.get(b.name)
+        if (aSelectedIndex != null && bSelectedIndex != null) return aSelectedIndex - bSelectedIndex
+        if (aSelectedIndex != null) return -1
+        if (bSelectedIndex != null) return 1
+        return 0
+    })
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const sortedSubs = [...subs].sort((a, b) => {
@@ -335,6 +345,20 @@ export default function Subscriptions() {
                 ? { ...profile, alias }
                 : profile
         )))
+    }
+
+    const moveSelectedProfile = (fromUserName: string, toUserName: string) => {
+        if (fromUserName === toUserName) return
+        setSelectedProfiles(prev => {
+            const fromIndex = prev.findIndex(profile => profile.username === fromUserName)
+            const toIndex = prev.findIndex(profile => profile.username === toUserName)
+            if (fromIndex < 0 || toIndex < 0) return prev
+
+            const next = [...prev]
+            const [moved] = next.splice(fromIndex, 1)
+            next.splice(toIndex, 0, moved)
+            return next
+        })
     }
 
     const toggleAlias = (userName: string) => {
@@ -691,12 +715,44 @@ export default function Subscriptions() {
                                 const isSelected = selectedProfiles.some(p => p.username === u.name)
                                 const alias = selectedProfiles.find(p => p.username === u.name)?.alias ?? ''
                                 const aliasExpanded = expandedAliasUsers.has(u.name)
+                                const isDragging = draggedProfile === u.name
                                 return (
                                     <div
                                         key={u.name}
-                                        className="flex items-center gap-3 px-3 py-2 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0"
+                                        draggable={isSelected}
+                                        onDragStart={e => {
+                                            if (!isSelected) return
+                                            setDraggedProfile(u.name)
+                                            e.dataTransfer.effectAllowed = 'move'
+                                            e.dataTransfer.setData('text/plain', u.name)
+                                        }}
+                                        onDragOver={e => {
+                                            if (!draggedProfile || !isSelected) return
+                                            e.preventDefault()
+                                            e.dataTransfer.dropEffect = 'move'
+                                        }}
+                                        onDrop={e => {
+                                            e.preventDefault()
+                                            const source = e.dataTransfer.getData('text/plain') || draggedProfile
+                                            if (source) moveSelectedProfile(source, u.name)
+                                            setDraggedProfile(null)
+                                        }}
+                                        onDragEnd={() => setDraggedProfile(null)}
+                                        className={`flex items-center gap-3 px-3 py-2 hover:bg-slate-900 cursor-pointer border-b border-slate-800 last:border-0 transition-colors ${isSelected ? 'bg-slate-900/50' : ''} ${isDragging ? 'opacity-50' : ''} ${draggedProfile && isSelected && !isDragging ? 'border-blue-500/40' : ''}`}
                                         onClick={() => toggleUser(u.name)}
                                     >
+                                        {isSelected ? (
+                                            <button
+                                                type="button"
+                                                title="Reorder profile"
+                                                className="shrink-0 p-1 -ml-1 rounded text-slate-500 hover:text-slate-200 cursor-grab active:cursor-grabbing"
+                                                onClick={e => e.stopPropagation()}
+                                            >
+                                                <GripVertical size={16} />
+                                            </button>
+                                        ) : (
+                                            <div className="w-5 shrink-0" />
+                                        )}
                                         <input
                                             type="checkbox"
                                             checked={isSelected}
