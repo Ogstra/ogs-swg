@@ -861,8 +861,6 @@ function RulesTab({
                     options={selectionModal.type === 'auth_user' ? availableAuthUsers : availableRuleSets}
                     selected={selectionModal.type === 'auth_user' ? activeSelectionRule.authUsers : activeSelectionRule.ruleSets}
                     emptyText={selectionModal.type === 'auth_user' ? 'No users found.' : 'No rule sets found.'}
-                    allowCustom={selectionModal.type === 'auth_user'}
-                    customPlaceholder="Add user"
                     onClose={() => setSelectionModal(null)}
                     onApply={selected => applySelection(selectionModal.idx, selectionModal.type, selected)}
                 />
@@ -877,8 +875,6 @@ function RuleValueModal({
     options,
     selected,
     emptyText,
-    allowCustom = false,
-    customPlaceholder = 'Add value',
     onClose,
     onApply,
 }: {
@@ -887,30 +883,24 @@ function RuleValueModal({
     options: string[]
     selected: string[]
     emptyText: string
-    allowCustom?: boolean
-    customPlaceholder?: string
     onClose: () => void
     onApply: (selected: string[]) => void
 }) {
     const [draft, setDraft] = useState<string[]>(selected)
-    const [customValue, setCustomValue] = useState('')
+    const [search, setSearch] = useState('')
     const allOptions = uniqueSorted([...options, ...draft])
+    const filteredOptions = search.trim()
+        ? allOptions.filter(o => o.toLowerCase().includes(search.toLowerCase()))
+        : allOptions
 
     useEffect(() => {
         if (!isOpen) return
         setDraft(selected)
-        setCustomValue('')
+        setSearch('')
     }, [isOpen, selected])
 
     const toggle = (value: string) => {
         setDraft(prev => prev.includes(value) ? prev.filter(item => item !== value) : uniqueSorted([...prev, value]))
-    }
-
-    const addCustom = () => {
-        const value = customValue.trim()
-        if (!value) return
-        setDraft(prev => uniqueSorted([...prev, value]))
-        setCustomValue('')
     }
 
     return (
@@ -926,33 +916,22 @@ function RuleValueModal({
                 </>
             }
         >
-            <div className="space-y-4">
-                {allowCustom && (
-                    <div className="flex gap-2">
-                        <input
-                            value={customValue}
-                            onChange={e => setCustomValue(e.target.value)}
-                            onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                    e.preventDefault()
-                                    addCustom()
-                                }
-                            }}
-                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
-                            placeholder={customPlaceholder}
-                        />
-                        <Button variant="secondary" onClick={addCustom}>Add</Button>
-                    </div>
-                )}
-
-                {allOptions.length === 0 ? (
-                    <div className="text-sm text-slate-400">{emptyText}</div>
+            <div>
+                <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder="Search..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-t px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 placeholder:text-slate-400"
+                />
+                {filteredOptions.length === 0 ? (
+                    <div className="border border-t-0 border-slate-800 rounded-b bg-slate-950 p-3 text-sm text-slate-400">{emptyText}</div>
                 ) : (
-                    <div className="max-h-[360px] overflow-y-auto custom-scrollbar space-y-2">
-                        {allOptions.map(option => (
+                    <div className="border border-t-0 border-slate-800 rounded-b bg-slate-950 max-h-[360px] overflow-y-auto custom-scrollbar">
+                        {filteredOptions.map(option => (
                             <label
                                 key={option}
-                                className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm text-slate-200"
+                                className="flex items-center gap-3 border-b border-slate-800 last:border-b-0 p-3 text-sm text-slate-200 cursor-pointer hover:bg-slate-900/50"
                             >
                                 <input
                                     type="checkbox"
