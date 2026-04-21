@@ -245,6 +245,7 @@ func (s *Store) initSchema() error {
 		sub_id INTEGER NOT NULL,
 		user_name TEXT NOT NULL,
 		alias TEXT NOT NULL DEFAULT '',
+		position INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (sub_id, user_name),
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
 		FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE
@@ -328,6 +329,7 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN update_always INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("UPDATE subscriptions SET update_always = 0 WHERE update_always IS NULL;")
 	s.db.Exec("ALTER TABLE subscription_users ADD COLUMN alias TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscription_users ADD COLUMN position INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN user_name TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_ip TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN request_host TEXT NOT NULL DEFAULT '';")
