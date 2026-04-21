@@ -67,6 +67,8 @@ export default function SingboxConfigEditor() {
     const [availableAuthUsers, setAvailableAuthUsers] = useState<string[]>([])
     const [availableRuleSets, setAvailableRuleSets] = useState<string[]>([])
     const [preservedRulesCount, setPreservedRulesCount] = useState(0)
+    const [rulesRestartConfirmOpen, setRulesRestartConfirmOpen] = useState(false)
+    const [rulesRestartLoading, setRulesRestartLoading] = useState(false)
     const [outbounds, setOutbounds] = useState<SingboxOutboundView[]>([])
     const [outboundsLoading, setOutboundsLoading] = useState(false)
     const [outboundsSaving, setOutboundsSaving] = useState(false)
@@ -368,13 +370,31 @@ export default function SingboxConfigEditor() {
             parsed.route = route
             parsed.route.rules = nextRules
             await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
-            success('Rules saved')
+            const applyResult = await api.applySingboxChanges()
+            if (applyResult.restart_required) {
+                setRulesRestartConfirmOpen(true)
+            } else {
+                success('Rules saved')
+            }
             await loadRules()
         } catch (err: any) {
             console.error('Failed to save rules', err)
             toastError('Failed to save rules')
         } finally {
             setRulesSaving(false)
+        }
+    }
+
+    const handleConfirmRulesRestart = async () => {
+        setRulesRestartLoading(true)
+        try {
+            await api.restartService('sing-box')
+            setRulesRestartConfirmOpen(false)
+            success('Sing-box restart started')
+        } catch (err) {
+            toastError('Failed to restart Sing-box: ' + err)
+        } finally {
+            setRulesRestartLoading(false)
         }
     }
 
@@ -479,6 +499,16 @@ export default function SingboxConfigEditor() {
                 message="This will overwrite the current config in the editor with the last backup."
                 confirmLabel="Restore"
                 confirmTone="danger"
+            />
+            <ConfirmModal
+                isOpen={rulesRestartConfirmOpen}
+                onClose={() => { if (!rulesRestartLoading) setRulesRestartConfirmOpen(false) }}
+                onConfirm={handleConfirmRulesRestart}
+                title="Restart Sing-box?"
+                message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
+                confirmLabel="Restart"
+                confirmTone="primary"
+                isLoading={rulesRestartLoading}
             />
         </div>
     )
