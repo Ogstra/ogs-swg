@@ -93,8 +93,6 @@ export default function UserManagement() {
     const [loadingUsage, setLoadingUsage] = useState(false)
     const [credentialLoading, setCredentialLoading] = useState(false)
     const [singboxApplyLoading, setSingboxApplyLoading] = useState(false)
-    const [singboxRestartConfirmOpen, setSingboxRestartConfirmOpen] = useState(false)
-    const [singboxRestartLoading, setSingboxRestartLoading] = useState(false)
 
     // Create/Edit Form State
     const [newUser, setNewUser] = useState<CreateUserRequest>({
@@ -652,9 +650,10 @@ export default function UserManagement() {
         try {
             const result = await api.applySingboxChanges()
             if (result.restart_required) {
-                setSingboxPendingChanges(true)
-                setSingboxRestartConfirmOpen(true)
-                return
+                await api.restartService('sing-box')
+                success('Sing-box restart started')
+            } else {
+                success('Sing-box configuration applied successfully')
             }
 
             setSingboxPendingChanges(false)
@@ -662,7 +661,6 @@ export default function UserManagement() {
                 pendingChangesQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
             ])
-            success('Sing-box configuration applied successfully')
         } catch (err) {
             setSingboxPendingChanges(true)
             toastError('Failed to apply changes. Please try again.')
@@ -671,20 +669,6 @@ export default function UserManagement() {
         }
     }
 
-    const handleConfirmSingboxRestart = async () => {
-        setSingboxRestartLoading(true)
-        try {
-            await api.restartService('sing-box')
-            setSingboxPendingChanges(false)
-            setSingboxRestartConfirmOpen(false)
-            success('Sing-box restart started')
-        } catch (err) {
-            setSingboxPendingChanges(true)
-            toastError('Failed to restart Sing-box: ' + err)
-        } finally {
-            setSingboxRestartLoading(false)
-        }
-    }
 
 
     return (
@@ -1290,20 +1274,6 @@ export default function UserManagement() {
                 confirmTone="danger"
             />
 
-            <ConfirmModal
-                isOpen={singboxRestartConfirmOpen}
-                onClose={() => {
-                    if (singboxRestartLoading) return
-                    setSingboxRestartConfirmOpen(false)
-                }}
-                onConfirm={handleConfirmSingboxRestart}
-                onLater={() => setSingboxRestartConfirmOpen(false)}
-                title="Restart Sing-box?"
-                message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
-                confirmLabel="Restart"
-                confirmTone="primary"
-                isLoading={singboxRestartLoading}
-            />
 
             {/* Bulk Create Modal */}
             <Modal
