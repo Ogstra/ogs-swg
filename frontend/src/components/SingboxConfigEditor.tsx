@@ -226,8 +226,9 @@ export default function SingboxConfigEditor() {
         }
 
         if ('rule_set' in rule) {
-            const allowed = new Set(['rule_set', 'outbound', 'ip_version'])
-            return keys.every(k => allowed.has(k)) && normalizeStringArray(rule.rule_set).length > 0
+            const allowed = new Set(['rule_set', 'auth_user', 'outbound', 'ip_version'])
+            const authUsersOk = !('auth_user' in rule) || normalizeStringArray(rule.auth_user).length > 0
+            return keys.every(k => allowed.has(k)) && normalizeStringArray(rule.rule_set).length > 0 && authUsersOk
         }
 
         return false
@@ -250,7 +251,7 @@ export default function SingboxConfigEditor() {
             return {
                 kind: 'rule_set',
                 inbound: '',
-                authUsers: [],
+                authUsers: normalizeStringArray(rule.auth_user),
                 ruleSets: normalizeStringArray(rule.rule_set),
                 outbound: String(rule.outbound || '').trim(),
                 ipVersion: rule.ip_version === 4 || rule.ip_version === 6 ? String(rule.ip_version) : '',
@@ -275,6 +276,9 @@ export default function SingboxConfigEditor() {
             if (rule.actionRoute) {
                 obj.action = 'route'
             }
+        }
+        if (rule.kind === 'rule_set' && rule.authUsers.length > 0) {
+            obj.auth_user = uniqueSorted(rule.authUsers)
         }
         if ((rule.kind === 'rule_set' || rule.kind === 'auth_user') && rule.ruleSets.length > 0) {
             obj.rule_set = uniqueSorted(rule.ruleSets)
@@ -768,31 +772,6 @@ function RulesTab({
                                         </button>
                                         {rule.kind === 'auth_user' && rule.authUsers.length === 0 && <p className="text-xs text-amber-400">At least one user is required.</p>}
                                         {rule.kind === 'rule_set' && rule.ruleSets.length === 0 && <p className="text-xs text-amber-400">At least one rule set is required.</p>}
-                                        {rule.kind === 'auth_user' && (
-                                            <div className="space-y-1 pt-2">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <label className="text-xs font-medium text-slate-400">Rule sets (optional)</label>
-                                                    {rule.ruleSets.length > 0 && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => updateRule(idx, { ruleSets: [] })}
-                                                            disabled={!canWrite}
-                                                            className="text-xs text-slate-400 hover:text-white disabled:opacity-60"
-                                                        >
-                                                            Clear
-                                                        </button>
-                                                    )}
-                                                </div>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => setSelectionModal({ idx, type: 'rule_set' })}
-                                                    disabled={!canWrite}
-                                                    className="w-full min-h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-left text-sm text-white outline-none hover:border-blue-500/50 disabled:opacity-60"
-                                                >
-                                                    {rule.ruleSets.length ? rule.ruleSets.join(', ') : 'Select rule sets'}
-                                                </button>
-                                            </div>
-                                        )}
                                     </>
                                 )}
                             </div>
@@ -834,6 +813,35 @@ function RulesTab({
                                 </button>
                             </div>
                         </div>
+                        {(rule.kind === 'auth_user' || rule.kind === 'rule_set') && (
+                            <div className="space-y-1 pt-1 border-t border-slate-800">
+                                <div className="flex items-center justify-between gap-2">
+                                    <label className="text-xs font-medium text-slate-400">
+                                        {rule.kind === 'auth_user' ? 'Rule sets (optional)' : 'Auth users (optional)'}
+                                    </label>
+                                    {(rule.kind === 'auth_user' ? rule.ruleSets.length : rule.authUsers.length) > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => updateRule(idx, rule.kind === 'auth_user' ? { ruleSets: [] } : { authUsers: [] })}
+                                            disabled={!canWrite}
+                                            className="text-xs text-slate-400 hover:text-white disabled:opacity-60"
+                                        >
+                                            Clear
+                                        </button>
+                                    )}
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setSelectionModal({ idx, type: rule.kind === 'auth_user' ? 'rule_set' : 'auth_user' })}
+                                    disabled={!canWrite}
+                                    className="w-full min-h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-left text-sm text-white outline-none hover:border-blue-500/50 disabled:opacity-60"
+                                >
+                                    {rule.kind === 'auth_user'
+                                        ? rule.ruleSets.length ? rule.ruleSets.join(', ') : 'Select rule sets'
+                                        : rule.authUsers.length ? rule.authUsers.join(', ') : 'Select users'}
+                                </button>
+                            </div>
+                        )}
                     </Card>
                 ))}
             </div>
