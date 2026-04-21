@@ -312,13 +312,8 @@ func TestUpdateUserRouteTagMembership_BatchesWritePreservesFieldsAndZeroAssignee
 	if tracker.restartCalled {
 		t.Fatalf("RestartService called during route-tag membership update")
 	}
-	select {
-	case <-serverRequests:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for Clash API reload")
-	}
-	if cfg.GetSingboxPendingChanges() {
-		t.Fatalf("pending changes = true; want false after Clash API reload")
+	if !cfg.GetSingboxPendingChanges() {
+		t.Fatalf("pending changes = false; want true after config write (restart required)")
 	}
 
 	rules := readRouteRulesFromStub(t, stub)
@@ -672,42 +667,26 @@ func TestReloadSingbox_UsesClashAPIWhenConfigured(t *testing.T) {
 	}
 }
 
-func TestApplySingboxChanges_UsesClashAPIWhenConfigured(t *testing.T) {
-	requestReceived := make(chan *http.Request, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestReceived <- r
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	fixtureJSON := `{
-		"experimental": {
-			"clash_api": {
-				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `"
-			}
-		}
-	}`
-
-	cfg, stub := newTestConfig(t, fixtureJSON)
+func TestApplySingboxChanges_AlwaysRequiresRestart(t *testing.T) {
+	cfg, stub := newTestConfig(t, `{"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"}}}`)
 	cfg.EnableSingbox = true
 	cfg.MarkSingboxPending()
 	tracker := &reloadTrackingExecutor{stubExecutor: stub}
 	cfg.SetExecutor(tracker)
 
-	if err := cfg.ApplySingboxChanges(); err != nil {
-		t.Fatalf("ApplySingboxChanges: %v", err)
+	err := cfg.ApplySingboxChanges()
+	var restartRequired *SingboxRestartRequiredError
+	if !errors.As(err, &restartRequired) {
+		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
 	}
-
-	select {
-	case <-requestReceived:
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for Clash API request")
-	}
-	if cfg.GetSingboxPendingChanges() {
-		t.Fatalf("GetSingboxPendingChanges() = true, want false after successful Clash API apply")
+	if restartRequired.Reason != "restart_required" {
+		t.Fatalf("restart reason = %q, want restart_required", restartRequired.Reason)
 	}
 	if tracker.restartCalled {
-		t.Fatalf("RestartService called during Clash API apply")
+		t.Fatalf("RestartService called before explicit confirmation")
+	}
+	if !cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = false, want true until confirmed restart")
 	}
 }
 
@@ -723,8 +702,8 @@ func TestApplySingboxChanges_RequiresRestartWhenNoClashAPI(t *testing.T) {
 	if !errors.As(err, &restartRequired) {
 		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
 	}
-	if restartRequired.Reason != "clash_api_not_configured" {
-		t.Fatalf("restart reason = %q, want clash_api_not_configured", restartRequired.Reason)
+	if restartRequired.Reason != "restart_required" {
+		t.Fatalf("restart reason = %q, want restart_required", restartRequired.Reason)
 	}
 	if tracker.restartCalled {
 		t.Fatalf("RestartService called before explicit confirmation")
@@ -754,8 +733,8 @@ func TestApplySingboxChanges_RequiresRestartWhenClashAPIFails(t *testing.T) {
 	if !errors.As(err, &restartRequired) {
 		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
 	}
-	if restartRequired.Reason != "clash_api_reload_failed" {
-		t.Fatalf("restart reason = %q, want clash_api_reload_failed", restartRequired.Reason)
+	if restartRequired.Reason != "restart_required" {
+		t.Fatalf("restart reason = %q, want restart_required", restartRequired.Reason)
 	}
 	if tracker.restartCalled {
 		t.Fatalf("RestartService called before explicit confirmation")
@@ -765,29 +744,19 @@ func TestApplySingboxChanges_RequiresRestartWhenClashAPIFails(t *testing.T) {
 	}
 }
 
-func TestAddUser_ClearsPendingChangesWhenClashAPIReloadSucceeds(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
+func TestAddUser_AlwaysMarksPendingAfterWrite(t *testing.T) {
 	fixtureJSON := `{
 		"inbounds": [
 			{"type":"vless","tag":"test-vless","listen":"0.0.0.0","listen_port":10001,"users":[]}
-		],
-		"experimental": {
-			"clash_api": {
-				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `"
-			}
-		}
+		]
 	}`
 
 	cfg, _ := newTestConfig(t, fixtureJSON)
 	if err := cfg.AddUser("alice", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "", "test-vless", "", 0); err != nil {
 		t.Fatalf("AddUser: %v", err)
 	}
-	if cfg.GetSingboxPendingChanges() {
-		t.Fatalf("GetSingboxPendingChanges() = true, want false after successful Clash API reload")
+	if !cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = false, want true after AddUser (restart required)")
 	}
 }
 
