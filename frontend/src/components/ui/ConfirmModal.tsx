@@ -6,10 +6,12 @@ interface ConfirmModalProps {
     isOpen: boolean
     onClose: () => void
     onConfirm: () => void | Promise<void>
+    onLater?: () => void
     title: string
     message?: string
     confirmLabel?: string
     cancelLabel?: string
+    laterLabel?: string
     confirmTone?: 'primary' | 'danger'
     isLoading?: boolean
     children?: React.ReactNode
@@ -19,10 +21,12 @@ export function ConfirmModal({
     isOpen,
     onClose,
     onConfirm,
+    onLater,
     title,
     message,
     confirmLabel = 'Confirm',
     cancelLabel = 'Cancel',
+    laterLabel = 'Later',
     confirmTone = 'danger',
     isLoading = false,
     children,
@@ -38,6 +42,11 @@ export function ConfirmModal({
                     <Button variant="ghost" onClick={onClose} disabled={isLoading}>
                         {cancelLabel}
                     </Button>
+                    {onLater && (
+                        <Button variant="secondary" onClick={onLater} disabled={isLoading}>
+                            {laterLabel}
+                        </Button>
+                    )}
                     <Button
                         variant={confirmTone === 'danger' ? 'danger' : 'primary'}
                         onClick={onConfirm}

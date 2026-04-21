@@ -69,6 +69,7 @@ export default function SingboxConfigEditor() {
     const [preservedRulesCount, setPreservedRulesCount] = useState(0)
     const [rulesRestartConfirmOpen, setRulesRestartConfirmOpen] = useState(false)
     const [rulesRestartLoading, setRulesRestartLoading] = useState(false)
+    const [rulesRestartPending, setRulesRestartPending] = useState(false)
     const [outbounds, setOutbounds] = useState<SingboxOutboundView[]>([])
     const [outboundsLoading, setOutboundsLoading] = useState(false)
     const [outboundsSaving, setOutboundsSaving] = useState(false)
@@ -372,6 +373,7 @@ export default function SingboxConfigEditor() {
             await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
             const applyResult = await api.applySingboxChanges()
             if (applyResult.restart_required) {
+                setRulesRestartPending(true)
                 setRulesRestartConfirmOpen(true)
             } else {
                 success('Rules saved')
@@ -390,6 +392,7 @@ export default function SingboxConfigEditor() {
         try {
             await api.restartService('sing-box')
             setRulesRestartConfirmOpen(false)
+            setRulesRestartPending(false)
             success('Sing-box restart started')
         } catch (err) {
             toastError('Failed to restart Sing-box: ' + err)
@@ -474,6 +477,8 @@ export default function SingboxConfigEditor() {
                                     canWrite={canWriteConfig}
                                     reload={loadRules}
                                     save={saveRules}
+                                    pendingRestart={rulesRestartPending}
+                                    onRestartClick={() => setRulesRestartConfirmOpen(true)}
                                 />
                             )}
                             {activeTab === 'outbounds' && (
@@ -504,6 +509,7 @@ export default function SingboxConfigEditor() {
                 isOpen={rulesRestartConfirmOpen}
                 onClose={() => { if (!rulesRestartLoading) setRulesRestartConfirmOpen(false) }}
                 onConfirm={handleConfirmRulesRestart}
+                onLater={() => setRulesRestartConfirmOpen(false)}
                 title="Restart Sing-box?"
                 message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
                 confirmLabel="Restart"
@@ -671,6 +677,8 @@ function RulesTab({
     canWrite,
     reload,
     save,
+    pendingRestart,
+    onRestartClick,
 }: {
     rules: EditableRouteRule[]
     setRules: React.Dispatch<React.SetStateAction<EditableRouteRule[]>>
@@ -684,6 +692,8 @@ function RulesTab({
     canWrite: boolean
     reload: () => void
     save: () => void
+    pendingRestart?: boolean
+    onRestartClick?: () => void
 }) {
     const [selectionModal, setSelectionModal] = useState<{ idx: number; type: 'auth_user' | 'rule_set' } | null>(null)
 
@@ -739,6 +749,14 @@ function RulesTab({
                 >
                     {loading ? 'Refreshing...' : 'Refresh'}
                 </button>
+                {pendingRestart && (
+                    <button
+                        onClick={onRestartClick}
+                        className="px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/40 text-amber-400 hover:bg-amber-500/20 transition-colors text-sm font-medium"
+                    >
+                        Pending restart
+                    </button>
+                )}
                 <button
                     onClick={save}
                     disabled={!canWrite || saving || hasInvalid}
