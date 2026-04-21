@@ -5,7 +5,6 @@ import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
-import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { formatBytes } from '../../utils/traffic'
 import { useToast } from '../../context/ToastContext'
 
@@ -245,8 +244,6 @@ export default function Dashboard() {
     const detailChartCacheRef = useRef<DensifiedChartCache | null>(null)
     const [detailChartTargetPoints, setDetailChartTargetPoints] = useState<number>(initialDashboardPrefs?.detailChartTargetPoints || defaultDetailChartTargetPoints)
     const [singboxApplyLoading, setSingboxApplyLoading] = useState(false)
-    const [singboxRestartConfirmOpen, setSingboxRestartConfirmOpen] = useState(false)
-    const [singboxRestartLoading, setSingboxRestartLoading] = useState(false)
     const prefsInitializedRef = useRef(false)
 
     const computeRangeSeconds = (range: string) => {
@@ -395,9 +392,10 @@ export default function Dashboard() {
         try {
             const result = await api.applySingboxChanges()
             if (result.restart_required) {
-                setSingboxPendingChanges(true)
-                setSingboxRestartConfirmOpen(true)
-                return
+                await api.restartService('sing-box')
+                success('Sing-box restart started')
+            } else {
+                success('Sing-box configuration applied successfully')
             }
 
             setSingboxPendingChanges(false)
@@ -405,7 +403,6 @@ export default function Dashboard() {
                 dashboardQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
             ])
-            success('Sing-box configuration applied successfully')
         } catch (err) {
             setSingboxPendingChanges(true)
             console.error('Failed to apply Sing-box changes:', err)
@@ -415,20 +412,6 @@ export default function Dashboard() {
         }
     }
 
-    const handleConfirmSingboxRestart = async () => {
-        setSingboxRestartLoading(true)
-        try {
-            await api.restartService('sing-box')
-            setSingboxPendingChanges(false)
-            setSingboxRestartConfirmOpen(false)
-            success('Sing-box restart started')
-        } catch (err) {
-            setSingboxPendingChanges(true)
-            toastError('Failed to restart Sing-box: ' + err)
-        } finally {
-            setSingboxRestartLoading(false)
-        }
-    }
 
     // Derived values for UI
     const topConsumers = (topConsumersMap[chartMode] || []).slice(0, 20)
@@ -868,20 +851,6 @@ export default function Dashboard() {
                     </div>
                 </Card>
             </div>
-            <ConfirmModal
-                isOpen={singboxRestartConfirmOpen}
-                onClose={() => {
-                    if (singboxRestartLoading) return
-                    setSingboxRestartConfirmOpen(false)
-                }}
-                onConfirm={handleConfirmSingboxRestart}
-                onLater={() => setSingboxRestartConfirmOpen(false)}
-                title="Restart Sing-box?"
-                message="These configuration changes cannot be hot-reloaded through Clash API. Restart Sing-box to apply them."
-                confirmLabel="Restart"
-                confirmTone="primary"
-                isLoading={singboxRestartLoading}
-            />
         </div >
     )
 }
