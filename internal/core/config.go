@@ -1132,8 +1132,9 @@ func (c *Config) getSingboxClashAPILocked() (*ClashAPI, error) {
 	return cfg.Experimental.ClashAPI, nil
 }
 
-// ApplySingboxChanges applies pending Sing-box configuration changes without an implicit service restart.
-// If Clash API cannot hot-reload the config, callers must confirm and perform a restart explicitly.
+// ApplySingboxChanges applies pending Sing-box configuration changes.
+// Since the Clash API PUT /configs does not reliably reload inbound users or route rules,
+// changes always require a full service restart via systemctl.
 func (c *Config) ApplySingboxChanges() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1147,20 +1148,7 @@ func (c *Config) ApplySingboxChanges() error {
 		return nil
 	}
 
-	api, err := c.getSingboxClashAPILocked()
-	if err != nil {
-		return err
-	}
-	if api == nil {
-		return &SingboxRestartRequiredError{Reason: "clash_api_not_configured"}
-	}
-
-	if err := c.reloadViaClashAPI(api); err != nil {
-		return &SingboxRestartRequiredError{Reason: "clash_api_reload_failed", Err: err}
-	}
-
-	c.SingboxPendingChanges = false
-	return nil
+	return &SingboxRestartRequiredError{Reason: "restart_required"}
 }
 
 func (c *Config) SyncInboundsFromSingbox() error {

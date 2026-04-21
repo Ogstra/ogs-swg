@@ -1647,24 +1647,7 @@ func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []in
 	return resolveUserRouteTagsFromRules(userName, tags, updatedRules)
 }
 
-func (c *Config) afterSingboxConfigWriteLocked(cfg *SingboxConfig) error {
-	if cfg == nil {
-		raw, err := c.readSingboxConfigLocked()
-		if err == nil {
-			var parsed SingboxConfig
-			if json.Unmarshal(raw, &parsed) == nil {
-				cfg = &parsed
-			}
-		}
-	}
-
-	if cfg != nil && cfg.Experimental != nil && cfg.Experimental.ClashAPI != nil && cfg.Experimental.ClashAPI.ExternalController != "" {
-		if err := c.reloadViaClashAPI(cfg.Experimental.ClashAPI); err == nil {
-			c.SingboxPendingChanges = false
-			return nil
-		}
-	}
-
+func (c *Config) afterSingboxConfigWriteLocked(_ *SingboxConfig) error {
 	c.SingboxPendingChanges = true
 	return nil
 }
