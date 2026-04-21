@@ -285,6 +285,16 @@ func (s *Store) initSchema() error {
 		ON subscription_requests(sub_id, requested_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
 		ON subscription_protection_rules(rule_type, value);
+
+	CREATE TABLE IF NOT EXISTS user_route_tags (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		color TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		rule_match_json TEXT NOT NULL,
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
@@ -383,6 +393,16 @@ type DashboardPreferences struct {
 	DefaultRange            string `json:"default_range"`
 	ActiveUserWindowMinutes int    `json:"active_user_window_minutes"`
 	DetailChartTargetPoints int    `json:"detail_chart_target_points"`
+}
+
+type UserRouteTag struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Color         string `json:"color"`
+	Description   string `json:"description"`
+	RuleMatchJSON string `json:"rule_match_json"`
+	CreatedAt     int64  `json:"created_at"`
+	UpdatedAt     int64  `json:"updated_at"`
 }
 
 func DefaultDashboardPreferences() DashboardPreferences {
@@ -796,6 +816,83 @@ func (s *Store) UpdateDashboardPreferences(ctx context.Context, principal string
 			updated_at = strftime('%s','now')
 	`, principal, prefs.DefaultService, prefs.RefreshMs, prefs.DefaultRange, prefs.ActiveUserWindowMinutes, prefs.DetailChartTargetPoints)
 	return err
+}
+
+func userRouteTagFromSQL(row sqlcStore.UserRouteTag) UserRouteTag {
+	return UserRouteTag{
+		ID:            row.ID,
+		Name:          row.Name,
+		Color:         row.Color,
+		Description:   row.Description,
+		RuleMatchJSON: row.RuleMatchJson,
+		CreatedAt:     row.CreatedAt.Int64,
+		UpdatedAt:     row.UpdatedAt.Int64,
+	}
+}
+
+func normalizeUserRouteTagInput(name, color, description string) (string, string, string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", "", fmt.Errorf("route tag name is required")
+	}
+	return name, strings.TrimSpace(color), strings.TrimSpace(description), nil
+}
+
+func (s *Store) CreateUserRouteTag(name, color, description, ruleMatchJSON string) (UserRouteTag, error) {
+	name, color, description, err := normalizeUserRouteTagInput(name, color, description)
+	if err != nil {
+		return UserRouteTag{}, err
+	}
+
+	row, err := s.Queries.CreateUserRouteTag(context.Background(), sqlcStore.CreateUserRouteTagParams{
+		Name:          name,
+		Color:         color,
+		Description:   description,
+		RuleMatchJson: ruleMatchJSON,
+	})
+	if err != nil {
+		return UserRouteTag{}, err
+	}
+	return userRouteTagFromSQL(row), nil
+}
+
+func (s *Store) UpdateUserRouteTag(tag UserRouteTag) error {
+	name, color, description, err := normalizeUserRouteTagInput(tag.Name, tag.Color, tag.Description)
+	if err != nil {
+		return err
+	}
+	return s.Queries.UpdateUserRouteTag(context.Background(), sqlcStore.UpdateUserRouteTagParams{
+		Name:          name,
+		Color:         color,
+		Description:   description,
+		RuleMatchJson: tag.RuleMatchJSON,
+		ID:            tag.ID,
+	})
+}
+
+func (s *Store) DeleteUserRouteTag(id int64) error {
+	return s.Queries.DeleteUserRouteTag(context.Background(), id)
+}
+
+func (s *Store) GetUserRouteTag(id int64) (*UserRouteTag, error) {
+	row, err := s.Queries.GetUserRouteTag(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	tag := userRouteTagFromSQL(row)
+	return &tag, nil
+}
+
+func (s *Store) ListUserRouteTags() ([]UserRouteTag, error) {
+	rows, err := s.Queries.ListUserRouteTags(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	tags := make([]UserRouteTag, 0, len(rows))
+	for _, row := range rows {
+		tags = append(tags, userRouteTagFromSQL(row))
+	}
+	return tags, nil
 }
 
 func (s *Store) UpdatePanelUsername(oldUsername, newUsername string) error {

@@ -169,3 +169,13 @@ CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
 
 CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
 	ON subscription_protection_rules(rule_type, value);
+
+CREATE TABLE IF NOT EXISTS user_route_tags (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL UNIQUE,
+	color TEXT NOT NULL DEFAULT '',
+	description TEXT NOT NULL DEFAULT '',
+	rule_match_json TEXT NOT NULL,
+	created_at INTEGER DEFAULT (strftime('%s','now')),
+	updated_at INTEGER DEFAULT (strftime('%s','now'))
+);
