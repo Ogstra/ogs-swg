@@ -1287,6 +1287,366 @@ func (c *Config) UpsertSingboxRouteRules(newRules []map[string]interface{}) erro
 	return c.afterSingboxConfigWriteLocked(nil)
 }
 
+type RouteTagRuleResolution struct {
+	Index        int
+	Rule         map[string]interface{}
+	AuthUsers    []string
+	Broken       bool
+	BrokenReason string
+}
+
+func copyStringInterfaceMap(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return nil
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		out := make(map[string]interface{}, len(in))
+		for k, v := range in {
+			out[k] = v
+		}
+		return out
+	}
+	var out map[string]interface{}
+	if err := json.Unmarshal(data, &out); err != nil {
+		out = make(map[string]interface{}, len(in))
+		for k, v := range in {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func normalizeAuthUsers(value interface{}) ([]string, error) {
+	rawValues := []interface{}{}
+	switch v := value.(type) {
+	case string:
+		rawValues = append(rawValues, v)
+	case []interface{}:
+		rawValues = v
+	case []string:
+		for _, item := range v {
+			rawValues = append(rawValues, item)
+		}
+	default:
+		return nil, fmt.Errorf("auth_user must be a string or string array")
+	}
+
+	seen := make(map[string]struct{}, len(rawValues))
+	out := make([]string, 0, len(rawValues))
+	for _, raw := range rawValues {
+		user, ok := raw.(string)
+		if !ok {
+			return nil, fmt.Errorf("auth_user must contain only strings")
+		}
+		user = strings.TrimSpace(user)
+		if user == "" {
+			continue
+		}
+		if _, exists := seen[user]; exists {
+			continue
+		}
+		seen[user] = struct{}{}
+		out = append(out, user)
+	}
+	return out, nil
+}
+
+func containsRouteTagString(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func CanonicalRouteTagRuleMatch(rule map[string]interface{}) (string, error) {
+	if rule == nil {
+		return "", fmt.Errorf("route rule is required")
+	}
+	action, hasAction := rule["action"]
+	if hasAction {
+		actionString, ok := action.(string)
+		if !ok || strings.TrimSpace(actionString) != "route" {
+			return "", fmt.Errorf("route tag rule incompatible: action must be route")
+		}
+	}
+	outbound, ok := rule["outbound"].(string)
+	if !ok || strings.TrimSpace(outbound) == "" {
+		return "", fmt.Errorf("route tag rule incompatible: outbound is required")
+	}
+	authUser, ok := rule["auth_user"]
+	if !ok {
+		return "", fmt.Errorf("route tag rule incompatible: auth_user is required")
+	}
+	if _, err := normalizeAuthUsers(authUser); err != nil {
+		return "", fmt.Errorf("route tag rule incompatible: %w", err)
+	}
+
+	copyRule := copyStringInterfaceMap(rule)
+	delete(copyRule, "auth_user")
+	data, err := json.Marshal(copyRule)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func routeRulesFromRawConfig(raw map[string]interface{}) ([]map[string]interface{}, error) {
+	route, _ := raw["route"].(map[string]interface{})
+	if route == nil {
+		return []map[string]interface{}{}, nil
+	}
+	rulesRaw, _ := route["rules"].([]interface{})
+	rules := make([]map[string]interface{}, 0, len(rulesRaw))
+	for _, rawRule := range rulesRaw {
+		rule, ok := rawRule.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+func compactJSONString(input string) (string, error) {
+	var out bytes.Buffer
+	if err := json.Compact(&out, []byte(strings.TrimSpace(input))); err != nil {
+		return "", err
+	}
+	return out.String(), nil
+}
+
+func resolveRouteTagRuleFromRules(ruleMatchJSON string, rules []map[string]interface{}) (RouteTagRuleResolution, error) {
+	needle, err := compactJSONString(ruleMatchJSON)
+	if err != nil {
+		return RouteTagRuleResolution{}, err
+	}
+
+	matches := []RouteTagRuleResolution{}
+	for i, rule := range rules {
+		canonical, err := CanonicalRouteTagRuleMatch(rule)
+		if err != nil {
+			continue
+		}
+		if canonical != needle {
+			continue
+		}
+		authUsers, err := normalizeAuthUsers(rule["auth_user"])
+		if err != nil {
+			continue
+		}
+		matches = append(matches, RouteTagRuleResolution{
+			Index:     i,
+			Rule:      copyStringInterfaceMap(rule),
+			AuthUsers: authUsers,
+		})
+	}
+
+	switch len(matches) {
+	case 0:
+		return RouteTagRuleResolution{Index: -1, Broken: true, BrokenReason: "route_rule_not_found"}, nil
+	case 1:
+		return matches[0], nil
+	default:
+		return RouteTagRuleResolution{Index: -1, Broken: true, BrokenReason: "route_rule_ambiguous"}, nil
+	}
+}
+
+func (c *Config) ResolveRouteTagRule(ruleMatchJSON string) (RouteTagRuleResolution, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	raw, err := c.readSingboxConfigMapLocked()
+	if err != nil {
+		return RouteTagRuleResolution{}, err
+	}
+	rules, err := routeRulesFromRawConfig(raw)
+	if err != nil {
+		return RouteTagRuleResolution{}, err
+	}
+	return resolveRouteTagRuleFromRules(ruleMatchJSON, rules)
+}
+
+func resolveUserRouteTagsFromRules(userName string, tags []UserRouteTag, rules []map[string]interface{}) ([]UserRouteTag, error) {
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return []UserRouteTag{}, nil
+	}
+	assigned := make([]UserRouteTag, 0, len(tags))
+	for _, tag := range tags {
+		resolution, err := resolveRouteTagRuleFromRules(tag.RuleMatchJSON, rules)
+		if err != nil {
+			return nil, err
+		}
+		if resolution.Broken {
+			continue
+		}
+		if containsRouteTagString(resolution.AuthUsers, userName) {
+			assigned = append(assigned, tag)
+		}
+	}
+	return assigned, nil
+}
+
+func (c *Config) ResolveUserRouteTags(userName string, tags []UserRouteTag) ([]UserRouteTag, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	raw, err := c.readSingboxConfigMapLocked()
+	if err != nil {
+		return nil, err
+	}
+	rules, err := routeRulesFromRawConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	return resolveUserRouteTagsFromRules(userName, tags, rules)
+}
+
+func dedupeRouteTagIDs(ids []int64) []int64 {
+	seen := make(map[int64]struct{}, len(ids))
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func routeTagByID(tags []UserRouteTag) map[int64]UserRouteTag {
+	out := make(map[int64]UserRouteTag, len(tags))
+	for _, tag := range tags {
+		out[tag.ID] = tag
+	}
+	return out
+}
+
+func addAuthUser(users []string, userName string) []string {
+	if containsRouteTagString(users, userName) {
+		return users
+	}
+	return append(users, userName)
+}
+
+func removeAuthUser(users []string, userName string) []string {
+	out := make([]string, 0, len(users))
+	for _, user := range users {
+		if user != userName {
+			out = append(out, user)
+		}
+	}
+	return out
+}
+
+func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []int64, tags []UserRouteTag) ([]UserRouteTag, error) {
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return nil, fmt.Errorf("user name is required")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	raw, err := c.readSingboxConfigMapLocked()
+	if err != nil {
+		return nil, err
+	}
+	rules, err := routeRulesFromRawConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	tagsByID := routeTagByID(tags)
+	currentTags, err := resolveUserRouteTagsFromRules(userName, tags, rules)
+	if err != nil {
+		return nil, err
+	}
+
+	currentSet := make(map[int64]struct{}, len(currentTags))
+	for _, tag := range currentTags {
+		currentSet[tag.ID] = struct{}{}
+	}
+	targetSet := make(map[int64]struct{}, len(targetTagIDs))
+	for _, id := range dedupeRouteTagIDs(targetTagIDs) {
+		targetSet[id] = struct{}{}
+	}
+
+	changedSet := map[int64]struct{}{}
+	for id := range currentSet {
+		if _, ok := targetSet[id]; !ok {
+			changedSet[id] = struct{}{}
+		}
+	}
+	for id := range targetSet {
+		if _, ok := currentSet[id]; !ok {
+			changedSet[id] = struct{}{}
+		}
+	}
+	if len(changedSet) == 0 {
+		return currentTags, nil
+	}
+
+	for id := range changedSet {
+		tag, ok := tagsByID[id]
+		if !ok {
+			return nil, fmt.Errorf("route tag needs relink: tag %d missing", id)
+		}
+		resolution, err := resolveRouteTagRuleFromRules(tag.RuleMatchJSON, rules)
+		if err != nil {
+			return nil, err
+		}
+		if resolution.Broken {
+			return nil, fmt.Errorf("route tag needs relink: tag %d %s", id, resolution.BrokenReason)
+		}
+		nextUsers := resolution.AuthUsers
+		if _, shouldHave := targetSet[id]; shouldHave {
+			nextUsers = addAuthUser(nextUsers, userName)
+		} else {
+			nextUsers = removeAuthUser(nextUsers, userName)
+		}
+		rules[resolution.Index]["auth_user"] = nextUsers
+	}
+
+	route, _ := raw["route"].(map[string]interface{})
+	if route == nil {
+		route = map[string]interface{}{}
+	}
+	mergedRules := make([]interface{}, len(rules))
+	for i, rule := range rules {
+		mergedRules[i] = rule
+	}
+	route["rules"] = mergedRules
+	raw["route"] = route
+
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	if err := c.ValidateConfig(data); err != nil {
+		return nil, fmt.Errorf("sing-box validation failed: %v", err)
+	}
+	if err := c.writeSingboxConfigLocked(data); err != nil {
+		return nil, err
+	}
+	if err := c.afterSingboxConfigWriteLocked(nil); err != nil {
+		return nil, err
+	}
+
+	updatedRules, err := routeRulesFromRawConfig(raw)
+	if err != nil {
+		return nil, err
+	}
+	return resolveUserRouteTagsFromRules(userName, tags, updatedRules)
+}
+
 func (c *Config) afterSingboxConfigWriteLocked(cfg *SingboxConfig) error {
 	if cfg == nil {
 		raw, err := c.readSingboxConfigLocked()

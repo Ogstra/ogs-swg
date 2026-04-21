@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +16,12 @@ import (
 type reloadTrackingExecutor struct {
 	*stubExecutor
 	restartCalled bool
+	writeCount    int
+}
+
+func (r *reloadTrackingExecutor) WriteConfig(ctx context.Context, path string, content []byte, mode os.FileMode) error {
+	r.writeCount++
+	return r.stubExecutor.WriteConfig(ctx, path, content, mode)
 }
 
 func (r *reloadTrackingExecutor) RestartService(_ context.Context, _ string) error {
@@ -46,6 +53,329 @@ func readInboundByTagFromStub(t *testing.T, stub *stubExecutor, tag string) map[
 
 	t.Fatalf("inbound %q not found", tag)
 	return nil
+}
+
+func readRouteRulesFromStub(t *testing.T, stub *stubExecutor) []map[string]interface{} {
+	t.Helper()
+
+	var top map[string]interface{}
+	if err := json.Unmarshal(stub.data, &top); err != nil {
+		t.Fatalf("unmarshal stub config: %v", err)
+	}
+	route, ok := top["route"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("route missing or wrong type: %#v", top["route"])
+	}
+	rawRules, ok := route["rules"].([]interface{})
+	if !ok {
+		t.Fatalf("route.rules missing or wrong type: %#v", route["rules"])
+	}
+	rules := make([]map[string]interface{}, 0, len(rawRules))
+	for _, rawRule := range rawRules {
+		rule, ok := rawRule.(map[string]interface{})
+		if !ok {
+			t.Fatalf("route rule wrong type: %#v", rawRule)
+		}
+		rules = append(rules, rule)
+	}
+	return rules
+}
+
+func TestCanonicalRouteTagRuleMatch_StableAcrossAuthUserFormsAndMembership(t *testing.T) {
+	baseRule := map[string]interface{}{
+		"action":     "route",
+		"rule_set":   []interface{}{"geoip-test"},
+		"outbound":   "premium",
+		"ip_version": float64(4),
+		"x-extra":    map[string]interface{}{"mode": "keep"},
+		"auth_user":  []interface{}{"alice", "bob"},
+	}
+
+	canonical, err := CanonicalRouteTagRuleMatch(baseRule)
+	if err != nil {
+		t.Fatalf("CanonicalRouteTagRuleMatch: %v", err)
+	}
+	if strings.Contains(canonical, "auth_user") {
+		t.Fatalf("canonical match %q contains auth_user", canonical)
+	}
+
+	variants := []map[string]interface{}{
+		{
+			"action":     "route",
+			"rule_set":   []interface{}{"geoip-test"},
+			"outbound":   "premium",
+			"ip_version": float64(4),
+			"x-extra":    map[string]interface{}{"mode": "keep"},
+			"auth_user":  "alice",
+		},
+		{
+			"action":     "route",
+			"rule_set":   []interface{}{"geoip-test"},
+			"outbound":   "premium",
+			"ip_version": float64(4),
+			"x-extra":    map[string]interface{}{"mode": "keep"},
+			"auth_user":  []interface{}{},
+		},
+	}
+	for _, variant := range variants {
+		got, err := CanonicalRouteTagRuleMatch(variant)
+		if err != nil {
+			t.Fatalf("CanonicalRouteTagRuleMatch variant: %v", err)
+		}
+		if got != canonical {
+			t.Fatalf("canonical variant = %q; want %q", got, canonical)
+		}
+	}
+}
+
+func TestCanonicalRouteTagRuleMatch_RejectsIncompatibleRules(t *testing.T) {
+	tests := []struct {
+		name string
+		rule map[string]interface{}
+	}{
+		{
+			name: "missing auth_user",
+			rule: map[string]interface{}{
+				"action":   "route",
+				"outbound": "premium",
+			},
+		},
+		{
+			name: "non-route action",
+			rule: map[string]interface{}{
+				"action":    "reject",
+				"outbound":  "premium",
+				"auth_user": []interface{}{"alice"},
+			},
+		},
+		{
+			name: "empty outbound",
+			rule: map[string]interface{}{
+				"action":    "route",
+				"outbound":  "",
+				"auth_user": []interface{}{"alice"},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := CanonicalRouteTagRuleMatch(tt.rule)
+			if err == nil {
+				t.Fatal("CanonicalRouteTagRuleMatch returned nil error for incompatible rule")
+			}
+			if !strings.Contains(err.Error(), "incompatible") {
+				t.Fatalf("error = %q; want incompatible reason", err)
+			}
+		})
+	}
+}
+
+func TestResolveRouteTagRule_BrokenStates(t *testing.T) {
+	rule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geoip-test"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{"alice"},
+	}
+	matchJSON, err := CanonicalRouteTagRuleMatch(rule)
+	if err != nil {
+		t.Fatalf("CanonicalRouteTagRuleMatch: %v", err)
+	}
+
+	cfg, _ := newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","rule_set":["other"],"outbound":"direct","auth_user":["alice"]}
+			]
+		}
+	}`)
+	resolution, err := cfg.ResolveRouteTagRule(matchJSON)
+	if err != nil {
+		t.Fatalf("ResolveRouteTagRule: %v", err)
+	}
+	if !resolution.Broken || resolution.BrokenReason != "route_rule_not_found" {
+		t.Fatalf("resolution = %#v; want route_rule_not_found", resolution)
+	}
+
+	cfg, _ = newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","rule_set":["geoip-test"],"outbound":"premium","auth_user":"alice"},
+				{"action":"route","rule_set":["geoip-test"],"outbound":"premium","auth_user":[]}
+			]
+		}
+	}`)
+	resolution, err = cfg.ResolveRouteTagRule(matchJSON)
+	if err != nil {
+		t.Fatalf("ResolveRouteTagRule ambiguous: %v", err)
+	}
+	if !resolution.Broken || resolution.BrokenReason != "route_rule_ambiguous" {
+		t.Fatalf("resolution = %#v; want route_rule_ambiguous", resolution)
+	}
+}
+
+func TestResolveUserRouteTags_DerivesFromAuthUserArrays(t *testing.T) {
+	premiumRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geoip-premium"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{"alice", "bob"},
+	}
+	streamingRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geosite-streaming"},
+		"outbound":  "streaming",
+		"auth_user": []interface{}{"carol"},
+	}
+	premiumMatch, _ := CanonicalRouteTagRuleMatch(premiumRule)
+	streamingMatch, _ := CanonicalRouteTagRuleMatch(streamingRule)
+	cfg, _ := newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","rule_set":["geoip-premium"],"outbound":"premium","auth_user":["alice","bob"]},
+				{"action":"route","rule_set":["geosite-streaming"],"outbound":"streaming","auth_user":["carol"]}
+			]
+		}
+	}`)
+
+	assigned, err := cfg.ResolveUserRouteTags("alice", []UserRouteTag{
+		{ID: 1, Name: "Premium", RuleMatchJSON: premiumMatch},
+		{ID: 2, Name: "Streaming", RuleMatchJSON: streamingMatch},
+		{ID: 3, Name: "Broken", RuleMatchJSON: `{"outbound":"missing"}`},
+	})
+	if err != nil {
+		t.Fatalf("ResolveUserRouteTags: %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].ID != 1 {
+		t.Fatalf("assigned = %#v; want only premium tag", assigned)
+	}
+}
+
+func TestUpdateUserRouteTagMembership_BatchesWritePreservesFieldsAndZeroAssignee(t *testing.T) {
+	serverRequests := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverRequests <- struct{}{}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	premiumRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geoip-premium"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{"alice"},
+		"x-extra":   map[string]interface{}{"preserve": true},
+	}
+	streamingRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geosite-streaming"},
+		"outbound":  "streaming",
+		"auth_user": []interface{}{},
+	}
+	premiumMatch, _ := CanonicalRouteTagRuleMatch(premiumRule)
+	streamingMatch, _ := CanonicalRouteTagRuleMatch(streamingRule)
+
+	fixtureJSON := `{
+		"route": {
+			"auto_detect_interface": true,
+			"rules": [
+				{"action":"route","rule_set":["geoip-premium"],"outbound":"premium","auth_user":["alice"],"x-extra":{"preserve":true}},
+				{"action":"route","rule_set":["geosite-streaming"],"outbound":"streaming","auth_user":[]},
+				{"action":"route","inbound":["mixed-in"],"outbound":"direct","x-unrelated":"keep"}
+			]
+		},
+		"experimental": {
+			"clash_api": {
+				"external_controller": "` + strings.TrimPrefix(server.URL, "http://") + `"
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+	tags := []UserRouteTag{
+		{ID: 1, Name: "Premium", RuleMatchJSON: premiumMatch},
+		{ID: 2, Name: "Streaming", RuleMatchJSON: streamingMatch},
+	}
+
+	assigned, err := cfg.UpdateUserRouteTagMembership("alice", []int64{2}, tags)
+	if err != nil {
+		t.Fatalf("UpdateUserRouteTagMembership: %v", err)
+	}
+	if len(assigned) != 1 || assigned[0].ID != 2 {
+		t.Fatalf("assigned = %#v; want streaming only", assigned)
+	}
+	if tracker.writeCount != 1 {
+		t.Fatalf("writeCount = %d; want one config write", tracker.writeCount)
+	}
+	if tracker.restartCalled {
+		t.Fatalf("RestartService called during route-tag membership update")
+	}
+	select {
+	case <-serverRequests:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for Clash API reload")
+	}
+	if cfg.GetSingboxPendingChanges() {
+		t.Fatalf("pending changes = true; want false after Clash API reload")
+	}
+
+	rules := readRouteRulesFromStub(t, stub)
+	premiumAuth, ok := rules[0]["auth_user"].([]interface{})
+	if !ok || len(premiumAuth) != 0 {
+		t.Fatalf("premium auth_user = %#v; want empty array", rules[0]["auth_user"])
+	}
+	if _, ok := rules[0]["x-extra"]; !ok {
+		t.Fatalf("x-extra missing from linked rule after update")
+	}
+	streamingAuth, ok := rules[1]["auth_user"].([]interface{})
+	if !ok || len(streamingAuth) != 1 || streamingAuth[0] != "alice" {
+		t.Fatalf("streaming auth_user = %#v; want [alice]", rules[1]["auth_user"])
+	}
+	if rules[2]["x-unrelated"] != "keep" {
+		t.Fatalf("unrelated route changed: %#v", rules[2])
+	}
+	route, ok := func() (map[string]interface{}, bool) {
+		var top map[string]interface{}
+		if err := json.Unmarshal(stub.data, &top); err != nil {
+			t.Fatalf("unmarshal stub data: %v", err)
+		}
+		route, ok := top["route"].(map[string]interface{})
+		return route, ok
+	}()
+	if !ok || route["auto_detect_interface"] != true {
+		t.Fatalf("route-level fields changed: %#v", route)
+	}
+}
+
+func TestUpdateUserRouteTagMembership_ReturnsRelinkErrorBeforeWrite(t *testing.T) {
+	rule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geoip-premium"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{},
+	}
+	matchJSON, _ := CanonicalRouteTagRuleMatch(rule)
+	cfg, stub := newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","rule_set":["geoip-premium"],"outbound":"premium","auth_user":[]}
+			]
+		}
+	}`)
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	_, err := cfg.UpdateUserRouteTagMembership("alice", []int64{1, 2}, []UserRouteTag{
+		{ID: 1, Name: "Premium", RuleMatchJSON: matchJSON},
+	})
+	if err == nil || !strings.Contains(err.Error(), "route tag needs relink") {
+		t.Fatalf("error = %v; want route tag needs relink", err)
+	}
+	if tracker.writeCount != 0 {
+		t.Fatalf("writeCount = %d; want no write before relink error", tracker.writeCount)
+	}
 }
 
 func TestUpdateSingboxInbound_SanitizedWriteRemovesGhostFields(t *testing.T) {
