@@ -136,6 +136,16 @@ type SubscriptionUser struct {
 	Position int64  `json:"position"`
 }
 
+type UserRouteTag struct {
+	ID            int64         `json:"id"`
+	Name          string        `json:"name"`
+	Color         string        `json:"color"`
+	Description   string        `json:"description"`
+	RuleMatchJson string        `json:"rule_match_json"`
+	CreatedAt     sql.NullInt64 `json:"created_at"`
+	UpdatedAt     sql.NullInt64 `json:"updated_at"`
+}
+
 type User struct {
 	Email         string         `json:"email"`
 	QuotaLimit    sql.NullInt64  `json:"quota_limit"`

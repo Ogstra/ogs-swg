@@ -209,6 +209,40 @@ func (q *Queries) CreatePanelUser(ctx context.Context, arg CreatePanelUserParams
 	return err
 }
 
+const createUserRouteTag = `-- name: CreateUserRouteTag :one
+INSERT INTO user_route_tags (name, color, description, rule_match_json)
+VALUES (?, ?, ?, ?)
+RETURNING id, name, color, description, rule_match_json, created_at, updated_at
+`
+
+type CreateUserRouteTagParams struct {
+	Name          string `json:"name"`
+	Color         string `json:"color"`
+	Description   string `json:"description"`
+	RuleMatchJson string `json:"rule_match_json"`
+}
+
+// User Route Tags --
+func (q *Queries) CreateUserRouteTag(ctx context.Context, arg CreateUserRouteTagParams) (UserRouteTag, error) {
+	row := q.db.QueryRowContext(ctx, createUserRouteTag,
+		arg.Name,
+		arg.Color,
+		arg.Description,
+		arg.RuleMatchJson,
+	)
+	var i UserRouteTag
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Color,
+		&i.Description,
+		&i.RuleMatchJson,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createSubscription = `-- name: CreateSubscription :one
 INSERT INTO subscriptions (
 	token,
@@ -289,6 +323,15 @@ DELETE FROM users WHERE email = ?
 
 func (q *Queries) DeleteUser(ctx context.Context, email string) error {
 	_, err := q.db.ExecContext(ctx, deleteUser, email)
+	return err
+}
+
+const deleteUserRouteTag = `-- name: DeleteUserRouteTag :exec
+DELETE FROM user_route_tags WHERE id = ?
+`
+
+func (q *Queries) DeleteUserRouteTag(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteUserRouteTag, id)
 	return err
 }
 
@@ -622,6 +665,43 @@ func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
 			&i.Flow,
 			&i.VmessSecurity,
 			&i.VmessAlterID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUserRouteTags = `-- name: ListUserRouteTags :many
+SELECT id, name, color, description, rule_match_json, created_at, updated_at
+FROM user_route_tags
+ORDER BY name ASC
+`
+
+func (q *Queries) ListUserRouteTags(ctx context.Context) ([]UserRouteTag, error) {
+	rows, err := q.db.QueryContext(ctx, listUserRouteTags)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UserRouteTag
+	for rows.Next() {
+		var i UserRouteTag
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Color,
+			&i.Description,
+			&i.RuleMatchJson,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1426,6 +1506,27 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 	return i, err
 }
 
+const getUserRouteTag = `-- name: GetUserRouteTag :one
+SELECT id, name, color, description, rule_match_json, created_at, updated_at
+FROM user_route_tags
+WHERE id = ?
+`
+
+func (q *Queries) GetUserRouteTag(ctx context.Context, id int64) (UserRouteTag, error) {
+	row := q.db.QueryRowContext(ctx, getUserRouteTag, id)
+	var i UserRouteTag
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Color,
+		&i.Description,
+		&i.RuleMatchJson,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUsersForSubscription = `-- name: GetUsersForSubscription :many
 SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY position ASC, user_name ASC
 `
@@ -2051,6 +2152,36 @@ func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscription
 		arg.ResetDay,
 		arg.ProfileUpdateIntervalHours,
 		arg.UpdateAlways,
+		arg.ID,
+	)
+	return err
+}
+
+const updateUserRouteTag = `-- name: UpdateUserRouteTag :exec
+UPDATE user_route_tags
+SET
+	name = ?,
+	color = ?,
+	description = ?,
+	rule_match_json = ?,
+	updated_at = strftime('%s','now')
+WHERE id = ?
+`
+
+type UpdateUserRouteTagParams struct {
+	Name          string `json:"name"`
+	Color         string `json:"color"`
+	Description   string `json:"description"`
+	RuleMatchJson string `json:"rule_match_json"`
+	ID            int64  `json:"id"`
+}
+
+func (q *Queries) UpdateUserRouteTag(ctx context.Context, arg UpdateUserRouteTagParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserRouteTag,
+		arg.Name,
+		arg.Color,
+		arg.Description,
+		arg.RuleMatchJson,
 		arg.ID,
 	)
 	return err

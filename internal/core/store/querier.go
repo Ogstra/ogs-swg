@@ -29,11 +29,14 @@ type Querier interface {
 	CreatePanelUser(ctx context.Context, arg CreatePanelUserParams) error
 	// Subscriptions Queries --
 	CreateSubscription(ctx context.Context, arg CreateSubscriptionParams) (int64, error)
+	// User Route Tags --
+	CreateUserRouteTag(ctx context.Context, arg CreateUserRouteTagParams) (UserRouteTag, error)
 	DeleteInboundMeta(ctx context.Context, tag string) error
 	DeletePanelUser(ctx context.Context, username string) error
 	DeleteProtectionRule(ctx context.Context, id int64) error
 	DeleteSubscription(ctx context.Context, id int64) error
 	DeleteUser(ctx context.Context, email string) error
+	DeleteUserRouteTag(ctx context.Context, id int64) error
 	GetActiveUserCount(ctx context.Context, ts int64) (int64, error)
 	GetActiveUserCountWithThreshold(ctx context.Context, arg GetActiveUserCountWithThresholdParams) (int64, error)
 	GetActiveUsersWithThreshold(ctx context.Context, arg GetActiveUsersWithThresholdParams) ([]GetActiveUsersWithThresholdRow, error)
@@ -66,11 +69,13 @@ type Querier interface {
 	GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error)
 	GetTrafficPerUser(ctx context.Context, arg GetTrafficPerUserParams) ([]GetTrafficPerUserRow, error)
 	GetUser(ctx context.Context, email string) (User, error)
+	GetUserRouteTag(ctx context.Context, id int64) (UserRouteTag, error)
 	GetUsersForSubscription(ctx context.Context, subID int64) ([]string, error)
 	GetWGBoundarySamples(ctx context.Context, arg GetWGBoundarySamplesParams) ([]GetWGBoundarySamplesRow, error)
 	// Note: the descending query will need its own query name
 	GetWGLastBoundarySample(ctx context.Context, arg GetWGLastBoundarySampleParams) ([]GetWGLastBoundarySampleRow, error)
 	GetWGTrafficSeries(ctx context.Context, arg GetWGTrafficSeriesParams) ([]GetWGTrafficSeriesRow, error)
+	ListUserRouteTags(ctx context.Context) ([]UserRouteTag, error)
 	// Daily Usage --
 	InsertDailyUsage(ctx context.Context, arg InsertDailyUsageParams) error
 	// Subscription Protection Rules Queries --
@@ -97,6 +102,7 @@ type Querier interface {
 	UpdatePanelUserSubscriptionDefaults(ctx context.Context, arg UpdatePanelUserSubscriptionDefaultsParams) error
 	UpdatePanelUsername(ctx context.Context, arg UpdatePanelUsernameParams) error
 	UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error
+	UpdateUserRouteTag(ctx context.Context, arg UpdateUserRouteTagParams) error
 	UpdateWGPeerHandshake(ctx context.Context, arg UpdateWGPeerHandshakeParams) error
 	// InboundMeta Queries --
 	UpsertInboundMeta(ctx context.Context, arg UpsertInboundMetaParams) error

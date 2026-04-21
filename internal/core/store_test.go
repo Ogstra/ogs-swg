@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -117,6 +118,79 @@ func TestFullPanelUserPermissions_IncludesCensored(t *testing.T) {
 	p := fullPanelUserPermissions()
 	if !p.CanReadLogsCensored {
 		t.Errorf("fullPanelUserPermissions().CanReadLogsCensored = false; want true")
+	}
+}
+
+func TestUserRouteTagDefinitions_CreateRenameListDelete(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	var tableName string
+	if err := store.db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user_route_tags'").Scan(&tableName); err != nil {
+		t.Fatalf("user_route_tags table missing: %v", err)
+	}
+	var assignmentsCount int
+	if err := store.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'user_route_tag_assignments'").Scan(&assignmentsCount); err != nil {
+		t.Fatalf("assignment table check: %v", err)
+	}
+	if assignmentsCount != 0 {
+		t.Fatalf("user_route_tag_assignments table exists; want definition-only storage")
+	}
+
+	ruleMatchJSON := `{"action":"route","outbound":"premium","protocol":["tcp"]}`
+	tag, err := store.CreateUserRouteTag("  Premium ", " #00aa00 ", "  Fast route ", ruleMatchJSON)
+	if err != nil {
+		t.Fatalf("CreateUserRouteTag: %v", err)
+	}
+	if tag.ID == 0 {
+		t.Fatal("CreateUserRouteTag returned ID 0")
+	}
+	if tag.Name != "Premium" || tag.Color != "#00aa00" || tag.Description != "Fast route" || tag.RuleMatchJSON != ruleMatchJSON {
+		t.Fatalf("CreateUserRouteTag returned %#v", tag)
+	}
+
+	listed, err := store.ListUserRouteTags()
+	if err != nil {
+		t.Fatalf("ListUserRouteTags: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != tag.ID {
+		t.Fatalf("ListUserRouteTags = %#v; want created tag", listed)
+	}
+
+	tag.Name = "Renamed Premium"
+	tag.Color = " #111111 "
+	tag.Description = " Renamed only "
+	if err := store.UpdateUserRouteTag(tag); err != nil {
+		t.Fatalf("UpdateUserRouteTag: %v", err)
+	}
+	got, err := store.GetUserRouteTag(tag.ID)
+	if err != nil {
+		t.Fatalf("GetUserRouteTag: %v", err)
+	}
+	if got.ID != tag.ID {
+		t.Fatalf("renamed tag ID = %d; want stable ID %d", got.ID, tag.ID)
+	}
+	if got.Name != "Renamed Premium" || got.Color != "#111111" || got.Description != "Renamed only" {
+		t.Fatalf("renamed tag fields = %#v", got)
+	}
+	if got.RuleMatchJSON != ruleMatchJSON {
+		t.Fatalf("rule match changed to %q; want %q", got.RuleMatchJSON, ruleMatchJSON)
+	}
+
+	if _, err := store.CreateUserRouteTag(" ", "#fff", "empty name", ruleMatchJSON); err == nil {
+		t.Fatal("CreateUserRouteTag accepted empty name")
+	}
+
+	if err := store.DeleteUserRouteTag(tag.ID); err != nil {
+		t.Fatalf("DeleteUserRouteTag: %v", err)
+	}
+	_, err = store.GetUserRouteTag(tag.ID)
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("GetUserRouteTag after delete error = %v; want sql.ErrNoRows", err)
 	}
 }
 

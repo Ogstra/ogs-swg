@@ -234,6 +234,35 @@ SELECT email, quota_limit, quota_period, reset_day, enabled, credential, flow, v
 -- name: DeleteUser :exec
 DELETE FROM users WHERE email = ?;
 
+-- User Route Tags --
+-- name: CreateUserRouteTag :one
+INSERT INTO user_route_tags (name, color, description, rule_match_json)
+VALUES (?, ?, ?, ?)
+RETURNING id, name, color, description, rule_match_json, created_at, updated_at;
+
+-- name: GetUserRouteTag :one
+SELECT id, name, color, description, rule_match_json, created_at, updated_at
+FROM user_route_tags
+WHERE id = ?;
+
+-- name: ListUserRouteTags :many
+SELECT id, name, color, description, rule_match_json, created_at, updated_at
+FROM user_route_tags
+ORDER BY name ASC;
+
+-- name: UpdateUserRouteTag :exec
+UPDATE user_route_tags
+SET
+	name = ?,
+	color = ?,
+	description = ?,
+	rule_match_json = ?,
+	updated_at = strftime('%s','now')
+WHERE id = ?;
+
+-- name: DeleteUserRouteTag :exec
+DELETE FROM user_route_tags WHERE id = ?;
+
 -- Sampler Runs --
 -- name: InsertSamplerRun :exec
 INSERT INTO sampler_runs (ts, duration_ms, inserted, error, source) VALUES (?, ?, ?, ?, ?);
