@@ -371,11 +371,11 @@ export default function SingboxConfigEditor() {
             parsed.route = route
             parsed.route.rules = nextRules
             await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
-            const applyResult = await api.applySingboxChanges()
-            if (applyResult.restart_required) {
+            const dashboardData = await api.getDashboardData()
+            if (dashboardData.singbox_pending_changes) {
                 setRulesRestartPending(true)
-                setRulesRestartConfirmOpen(true)
             } else {
+                setRulesRestartPending(false)
                 success('Rules saved')
             }
             await loadRules()
