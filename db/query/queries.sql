@@ -413,8 +413,10 @@ WHERE su.user_name = ?;
 
 -- Subscription Users Queries --
 -- name: AddUserToSubscription :exec
-INSERT INTO subscription_users (sub_id, user_name, alias) VALUES (?, ?, ?)
-ON CONFLICT(sub_id, user_name) DO UPDATE SET alias = excluded.alias;
+INSERT INTO subscription_users (sub_id, user_name, alias, position) VALUES (?, ?, ?, ?)
+ON CONFLICT(sub_id, user_name) DO UPDATE SET
+	alias = excluded.alias,
+	position = excluded.position;
 
 -- name: RemoveUserFromSubscription :exec
 DELETE FROM subscription_users WHERE sub_id = ? AND user_name = ?;
@@ -426,13 +428,13 @@ DELETE FROM subscription_users WHERE user_name = ?;
 DELETE FROM subscription_users WHERE sub_id = ?;
 
 -- name: GetUsersForSubscription :many
-SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY user_name ASC;
+SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY position ASC, user_name ASC;
 
 -- name: GetSubscriptionMembers :many
-SELECT sub_id, user_name, alias
+SELECT sub_id, user_name, alias, position
 FROM subscription_users
 WHERE sub_id = ?
-ORDER BY user_name ASC;
+ORDER BY position ASC, user_name ASC;
 
 -- Subscription Requests Queries --
 -- name: InsertSubscriptionRequest :exec

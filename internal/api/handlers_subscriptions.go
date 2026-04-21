@@ -390,11 +390,12 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	for _, member := range members {
+	for position, member := range members {
 		_ = s.store.Queries.AddUserToSubscription(r.Context(), store.AddUserToSubscriptionParams{
 			SubID:    id,
 			UserName: member.Username,
 			Alias:    member.Alias,
+			Position: int64(position),
 		})
 	}
 
@@ -497,11 +498,12 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	s.store.Queries.ClearSubscriptionUsers(r.Context(), id)
-	for _, member := range members {
+	for position, member := range members {
 		_ = s.store.Queries.AddUserToSubscription(r.Context(), store.AddUserToSubscriptionParams{
 			SubID:    id,
 			UserName: member.Username,
 			Alias:    member.Alias,
+			Position: int64(position),
 		})
 	}
 

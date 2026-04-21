@@ -11,19 +11,22 @@ import (
 )
 
 const addUserToSubscription = `-- name: AddUserToSubscription :exec
-INSERT INTO subscription_users (sub_id, user_name, alias) VALUES (?, ?, ?)
-ON CONFLICT(sub_id, user_name) DO UPDATE SET alias = excluded.alias
+INSERT INTO subscription_users (sub_id, user_name, alias, position) VALUES (?, ?, ?, ?)
+ON CONFLICT(sub_id, user_name) DO UPDATE SET
+	alias = excluded.alias,
+	position = excluded.position
 `
 
 type AddUserToSubscriptionParams struct {
 	SubID    int64  `json:"sub_id"`
 	UserName string `json:"user_name"`
 	Alias    string `json:"alias"`
+	Position int64  `json:"position"`
 }
 
 // Subscription Users Queries --
 func (q *Queries) AddUserToSubscription(ctx context.Context, arg AddUserToSubscriptionParams) error {
-	_, err := q.db.ExecContext(ctx, addUserToSubscription, arg.SubID, arg.UserName, arg.Alias)
+	_, err := q.db.ExecContext(ctx, addUserToSubscription, arg.SubID, arg.UserName, arg.Alias, arg.Position)
 	return err
 }
 
@@ -1155,10 +1158,10 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Sub
 }
 
 const getSubscriptionMembers = `-- name: GetSubscriptionMembers :many
-SELECT sub_id, user_name, alias
+SELECT sub_id, user_name, alias, position
 FROM subscription_users
 WHERE sub_id = ?
-ORDER BY user_name ASC
+ORDER BY position ASC, user_name ASC
 `
 
 func (q *Queries) GetSubscriptionMembers(ctx context.Context, subID int64) ([]SubscriptionUser, error) {
@@ -1170,7 +1173,7 @@ func (q *Queries) GetSubscriptionMembers(ctx context.Context, subID int64) ([]Su
 	var items []SubscriptionUser
 	for rows.Next() {
 		var i SubscriptionUser
-		if err := rows.Scan(&i.SubID, &i.UserName, &i.Alias); err != nil {
+		if err := rows.Scan(&i.SubID, &i.UserName, &i.Alias, &i.Position); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1424,7 +1427,7 @@ func (q *Queries) GetUser(ctx context.Context, email string) (User, error) {
 }
 
 const getUsersForSubscription = `-- name: GetUsersForSubscription :many
-SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY user_name ASC
+SELECT user_name FROM subscription_users WHERE sub_id = ? ORDER BY position ASC, user_name ASC
 `
 
 func (q *Queries) GetUsersForSubscription(ctx context.Context, subID int64) ([]string, error) {

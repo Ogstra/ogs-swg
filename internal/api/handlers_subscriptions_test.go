@@ -531,23 +531,23 @@ func TestSubscriptionAliases_RoundTripThroughCreateAndUpdate(t *testing.T) {
 		QuotaLimit:  0,
 		QuotaPeriod: "monthly",
 		Members: []subscriptionMemberPayload{
-			{Username: "alice", Alias: "Alice Phone"},
 			{Username: "bob", Alias: ""},
+			{Username: "alice", Alias: "Alice Phone"},
 		},
 	})
 
 	got := getSubscriptionForTest(t, server, created.ID)
-	if len(got.Users) != 2 || got.Users[0] != "alice" || got.Users[1] != "bob" {
-		t.Fatalf("users=%v want [alice bob]", got.Users)
+	if len(got.Users) != 2 || got.Users[0] != "bob" || got.Users[1] != "alice" {
+		t.Fatalf("users=%v want [bob alice]", got.Users)
 	}
 	if len(got.Members) != 2 {
 		t.Fatalf("members=%v want 2 entries", got.Members)
 	}
-	if got.Members[0].Username != "alice" || got.Members[0].Alias != "Alice Phone" {
-		t.Fatalf("first member=%+v want alice/Alice Phone", got.Members[0])
+	if got.Members[0].Username != "bob" || got.Members[0].Alias != "" {
+		t.Fatalf("first member=%+v want bob/empty alias", got.Members[0])
 	}
-	if got.Members[1].Username != "bob" || got.Members[1].Alias != "" {
-		t.Fatalf("second member=%+v want bob/empty alias", got.Members[1])
+	if got.Members[1].Username != "alice" || got.Members[1].Alias != "Alice Phone" {
+		t.Fatalf("second member=%+v want alice/Alice Phone", got.Members[1])
 	}
 
 	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{

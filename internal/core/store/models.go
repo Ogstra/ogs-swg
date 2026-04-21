@@ -133,6 +133,7 @@ type SubscriptionUser struct {
 	SubID    int64  `json:"sub_id"`
 	UserName string `json:"user_name"`
 	Alias    string `json:"alias"`
+	Position int64  `json:"position"`
 }
 
 type User struct {

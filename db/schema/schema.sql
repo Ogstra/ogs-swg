@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS subscription_users (
 	sub_id INTEGER NOT NULL,
 	user_name TEXT NOT NULL,
 	alias TEXT NOT NULL DEFAULT '',
+	position INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (sub_id, user_name),
 	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
 	FOREIGN KEY (user_name) REFERENCES users(email) ON DELETE CASCADE

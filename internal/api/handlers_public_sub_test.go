@@ -206,6 +206,64 @@ func TestHandlePublicSubscription_UsesMemberAliasInDeliveredProfileName(t *testi
 	}
 }
 
+func TestHandlePublicSubscription_PreservesSubscriptionMemberOrder(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServerWithConfig(t, `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "test-vless",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"tls": {
+					"enabled": true,
+					"server_name": "edge.example.com"
+				},
+				"users": [
+					{
+						"name": "alice",
+						"uuid": "11111111-1111-1111-1111-111111111111"
+					},
+					{
+						"name": "bob",
+						"uuid": "22222222-2222-2222-2222-222222222222"
+					}
+				]
+			}
+		]
+	}`, []string{"test-vless"})
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Ordered Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		Members: []subscriptionMemberPayload{
+			{Username: "bob", Alias: ""},
+			{Username: "alice", Alias: ""},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/s/"+created.Token, nil)
+	req.SetPathValue("token", created.Token)
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	body, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("decoded lines=%q want two links", string(body))
+	}
+	if !strings.Contains(lines[0], "22222222-2222-2222-2222-222222222222") || !strings.Contains(lines[1], "11111111-1111-1111-1111-111111111111") {
+		t.Fatalf("decoded body order=%q want bob before alice", string(body))
+	}
+}
+
 func TestHandlePublicSubscription_UsesSingleCanonicalInboundForLegacyUsers(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServerWithConfig(t, `{
 		"inbounds": [
