@@ -578,7 +578,6 @@ export default function UserManagement() {
             setInboundRows([])
             setOriginalInboundTags([])
             await refreshUsersData()
-            await handleApplySingboxChanges()
         } catch (err) {
             toastError('Failed to save user: ' + err)
         }
