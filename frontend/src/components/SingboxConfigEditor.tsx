@@ -8,8 +8,44 @@ import { RawEditorPanel } from './raw/RawEditorPanel'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../context/ToastContext'
 import { ConfirmModal } from './ui/ConfirmModal'
+import { Modal } from './ui/Modal'
+import { Button } from './ui/Button'
 
 type TabId = 'inbounds' | 'rules' | 'outbounds' | 'raw'
+type RouteRuleKind = 'inbound' | 'auth_user' | 'rule_set'
+type EditableRouteRule = {
+    kind: RouteRuleKind
+    inbound: string
+    authUsers: string[]
+    ruleSets: string[]
+    outbound: string
+    ipVersion?: string
+}
+
+const emptyEditableRule = (): EditableRouteRule => ({
+    kind: 'inbound',
+    inbound: '',
+    authUsers: [],
+    ruleSets: [],
+    outbound: '',
+    ipVersion: '',
+})
+
+const normalizeStringArray = (value: unknown): string[] => {
+    const rawValues = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]
+    return rawValues.map(item => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
+}
+
+const uniqueSorted = (values: string[]) => Array.from(new Set(values.map(value => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+
+const getRuleSetTag = (ruleSet: any): string => {
+    if (typeof ruleSet === 'string') return ruleSet.trim()
+    if (ruleSet && typeof ruleSet === 'object') {
+        if (typeof ruleSet.tag === 'string') return ruleSet.tag.trim()
+        if (typeof ruleSet.name === 'string') return ruleSet.name.trim()
+    }
+    return ''
+}
 
 export default function SingboxConfigEditor() {
     const { permissions } = useAuth()
@@ -21,11 +57,13 @@ export default function SingboxConfigEditor() {
     const [loading, setLoading] = useState(false)
     const [saving, setSaving] = useState(false)
     const [lastBackup, setLastBackup] = useState<string>('')
-    const [rules, setRules] = useState<Array<{ inbound: string; outbound: string; ipVersion?: string }>>([])
+    const [rules, setRules] = useState<EditableRouteRule[]>([])
     const [rulesLoading, setRulesLoading] = useState(false)
     const [rulesSaving, setRulesSaving] = useState(false)
     const [availableInbounds, setAvailableInbounds] = useState<string[]>([])
     const [availableOutbounds, setAvailableOutbounds] = useState<string[]>([])
+    const [availableAuthUsers, setAvailableAuthUsers] = useState<string[]>([])
+    const [availableRuleSets, setAvailableRuleSets] = useState<string[]>([])
     const [preservedRulesCount, setPreservedRulesCount] = useState(0)
     const [outbounds, setOutbounds] = useState<SingboxOutboundView[]>([])
     const [outboundsLoading, setOutboundsLoading] = useState(false)
@@ -162,18 +200,80 @@ export default function SingboxConfigEditor() {
         }
     }
 
-    const isSimpleRule = (rule: any) => {
+    const isEditableRule = (rule: any) => {
         if (!rule || typeof rule !== 'object') return false
-        if (!('inbound' in rule) || !('outbound' in rule)) return false
         const keys = Object.keys(rule)
-        const allowed = new Set(['inbound', 'outbound', 'ip_version'])
-        if (keys.some(k => !allowed.has(k))) return false
-        const inboundOk = Array.isArray(rule.inbound)
-            ? rule.inbound.every((x: any) => typeof x === 'string')
-            : typeof rule.inbound === 'string'
         const outboundOk = typeof rule.outbound === 'string' && rule.outbound.trim() !== ''
         const ipOk = rule.ip_version === undefined || rule.ip_version === 4 || rule.ip_version === 6
-        return inboundOk && outboundOk && ipOk
+        if (!outboundOk || !ipOk) return false
+
+        if ('inbound' in rule) {
+            const allowed = new Set(['inbound', 'outbound', 'ip_version'])
+            const inboundOk = Array.isArray(rule.inbound)
+                ? rule.inbound.every((x: any) => typeof x === 'string')
+                : typeof rule.inbound === 'string'
+            return keys.every(k => allowed.has(k)) && inboundOk
+        }
+
+        if ('auth_user' in rule) {
+            const allowed = new Set(['auth_user', 'action', 'outbound', 'ip_version'])
+            const actionOk = rule.action === undefined || rule.action === 'route'
+            return keys.every(k => allowed.has(k)) && actionOk && normalizeStringArray(rule.auth_user).length > 0
+        }
+
+        if ('rule_set' in rule) {
+            const allowed = new Set(['rule_set', 'outbound', 'ip_version'])
+            return keys.every(k => allowed.has(k)) && normalizeStringArray(rule.rule_set).length > 0
+        }
+
+        return false
+    }
+
+    const toEditableRule = (rule: any): EditableRouteRule => {
+        if ('auth_user' in rule) {
+            return {
+                kind: 'auth_user',
+                inbound: '',
+                authUsers: normalizeStringArray(rule.auth_user),
+                ruleSets: [],
+                outbound: String(rule.outbound || '').trim(),
+                ipVersion: rule.ip_version === 4 || rule.ip_version === 6 ? String(rule.ip_version) : '',
+            }
+        }
+        if ('rule_set' in rule) {
+            return {
+                kind: 'rule_set',
+                inbound: '',
+                authUsers: [],
+                ruleSets: normalizeStringArray(rule.rule_set),
+                outbound: String(rule.outbound || '').trim(),
+                ipVersion: rule.ip_version === 4 || rule.ip_version === 6 ? String(rule.ip_version) : '',
+            }
+        }
+        return {
+            kind: 'inbound',
+            inbound: Array.isArray(rule.inbound) ? (rule.inbound[0] ?? '') : String(rule.inbound || ''),
+            authUsers: [],
+            ruleSets: [],
+            outbound: String(rule.outbound || '').trim(),
+            ipVersion: rule.ip_version === 4 || rule.ip_version === 6 ? String(rule.ip_version) : '',
+        }
+    }
+
+    const fromEditableRule = (rule: EditableRouteRule) => {
+        const obj: any = { outbound: rule.outbound.trim() }
+        if (rule.kind === 'auth_user') {
+            obj.auth_user = uniqueSorted(rule.authUsers)
+            obj.action = 'route'
+        } else if (rule.kind === 'rule_set') {
+            obj.rule_set = uniqueSorted(rule.ruleSets)
+        } else {
+            obj.inbound = [rule.inbound]
+        }
+        if (rule.ipVersion === '4' || rule.ipVersion === '6') {
+            obj.ip_version = Number(rule.ipVersion)
+        }
+        return obj
     }
 
     const loadRules = async () => {
@@ -184,26 +284,40 @@ export default function SingboxConfigEditor() {
             const inboundTags = Array.isArray(parsed?.inbounds)
                 ? parsed.inbounds.map((i: any) => (i && typeof i.tag === 'string' ? i.tag.trim() : '')).filter(Boolean)
                 : []
+            const authUsers = Array.isArray(parsed?.inbounds)
+                ? parsed.inbounds.flatMap((inbound: any) => {
+                    if (!Array.isArray(inbound?.users)) return []
+                    return inbound.users.map((user: any) => {
+                        if (typeof user === 'string') return user.trim()
+                        if (user && typeof user === 'object' && typeof user.name === 'string') return user.name.trim()
+                        return ''
+                    })
+                }).filter(Boolean)
+                : []
             const outboundTags = Array.isArray(parsed?.outbounds)
                 ? parsed.outbounds.map((o: any) => (o && typeof o.tag === 'string' ? o.tag.trim() : '')).filter(Boolean)
                 : []
+            const configuredRuleSets = [
+                ...(Array.isArray(parsed?.route?.rule_set) ? parsed.route.rule_set.map(getRuleSetTag) : []),
+                ...(Array.isArray(parsed?.route?.ruleset) ? parsed.route.ruleset.map(getRuleSetTag) : []),
+            ].filter(Boolean)
             setAvailableInbounds(inboundTags)
             setAvailableOutbounds(outboundTags)
 
             const rulesArr = parsed?.route?.rules
             if (Array.isArray(rulesArr)) {
                 const simple = rulesArr
-                    .filter(isSimpleRule)
-                    .map((r: any) => ({
-                        inbound: Array.isArray(r.inbound) ? (r.inbound[0] ?? '') : String(r.inbound || ''),
-                        outbound: String(r.outbound || '').trim(),
-                        ipVersion: r.ip_version === 4 || r.ip_version === 6 ? String(r.ip_version) : ''
-                    }))
-                const preserved = rulesArr.filter((r: any) => !isSimpleRule(r))
+                    .filter(isEditableRule)
+                    .map(toEditableRule)
+                const preserved = rulesArr.filter((r: any) => !isEditableRule(r))
                 setPreservedRulesCount(preserved.length)
+                setAvailableAuthUsers(uniqueSorted([...authUsers, ...simple.flatMap(r => r.authUsers)]))
+                setAvailableRuleSets(uniqueSorted([...configuredRuleSets, ...simple.flatMap(r => r.ruleSets)]))
                 setRules(simple)
             } else {
                 setRules([])
+                setAvailableAuthUsers(uniqueSorted(authUsers))
+                setAvailableRuleSets(uniqueSorted(configuredRuleSets))
                 setPreservedRulesCount(0)
             }
         } catch (err: any) {
@@ -215,7 +329,7 @@ export default function SingboxConfigEditor() {
     }
 
     const saveRules = async () => {
-        const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
+        const hasInvalid = rules.some(r => !r.outbound || (r.kind === 'inbound' && !r.inbound) || (r.kind === 'auth_user' && r.authUsers.length === 0) || (r.kind === 'rule_set' && r.ruleSets.length === 0))
         if (hasInvalid) {
             toastError('Please fix rules before saving')
             return
@@ -226,16 +340,10 @@ export default function SingboxConfigEditor() {
             const parsed = JSON.parse(raw)
             const route = parsed.route || {}
             const existing = Array.isArray(route.rules) ? route.rules : []
-            const preserved = existing.filter((r: any) => !isSimpleRule(r))
+            const preserved = existing.filter((r: any) => !isEditableRule(r))
             const nextRules = [
                 ...preserved,
-                ...rules.map(r => {
-                    const obj: any = { inbound: [r.inbound], outbound: r.outbound.trim() }
-                    if (r.ipVersion === '4' || r.ipVersion === '6') {
-                        obj.ip_version = Number(r.ipVersion)
-                    }
-                    return obj
-                })
+                ...rules.map(fromEditableRule)
             ]
             parsed.route = route
             parsed.route.rules = nextRules
@@ -318,6 +426,8 @@ export default function SingboxConfigEditor() {
                                     setRules={setRules}
                                     availableInbounds={availableInbounds}
                                     availableOutbounds={availableOutbounds}
+                                    availableAuthUsers={availableAuthUsers}
+                                    availableRuleSets={availableRuleSets}
                                     preservedCount={preservedRulesCount}
                                     loading={rulesLoading}
                                     saving={rulesSaving}
@@ -503,6 +613,8 @@ function RulesTab({
     setRules,
     availableInbounds,
     availableOutbounds,
+    availableAuthUsers,
+    availableRuleSets,
     preservedCount: _preservedCount,
     loading,
     saving,
@@ -510,10 +622,12 @@ function RulesTab({
     reload,
     save,
 }: {
-    rules: Array<{ inbound: string; outbound: string; ipVersion?: string }>
-    setRules: React.Dispatch<React.SetStateAction<Array<{ inbound: string; outbound: string; ipVersion?: string }>>>
+    rules: EditableRouteRule[]
+    setRules: React.Dispatch<React.SetStateAction<EditableRouteRule[]>>
     availableInbounds: string[]
     availableOutbounds: string[]
+    availableAuthUsers: string[]
+    availableRuleSets: string[]
     preservedCount: number
     loading: boolean
     saving: boolean
@@ -521,20 +635,46 @@ function RulesTab({
     reload: () => void
     save: () => void
 }) {
+    const [selectionModal, setSelectionModal] = useState<{ idx: number; type: 'auth_user' | 'rule_set' } | null>(null)
+
     const addRule = () => {
         if (!canWrite) return
-        setRules(prev => [...prev, { inbound: '', outbound: '', ipVersion: '' }])
+        setRules(prev => [...prev, emptyEditableRule()])
     }
-    const updateRule = (idx: number, patch: Partial<{ inbound: string; outbound: string; ipVersion?: string }>) => {
+    const updateRule = (idx: number, patch: Partial<EditableRouteRule>) => {
         if (!canWrite) return
         setRules(prev => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
+    }
+    const updateRuleKind = (idx: number, kind: RouteRuleKind) => {
+        if (!canWrite) return
+        setRules(prev => prev.map((r, i) => {
+            if (i !== idx) return r
+            return {
+                ...r,
+                kind,
+                inbound: kind === 'inbound' ? r.inbound : '',
+                authUsers: kind === 'auth_user' ? r.authUsers : [],
+                ruleSets: kind === 'rule_set' ? r.ruleSets : [],
+                ipVersion: kind === 'inbound' ? r.ipVersion : '',
+            }
+        }))
     }
     const removeRule = (idx: number) => {
         if (!canWrite) return
         setRules(prev => prev.filter((_, i) => i !== idx))
     }
+    const applySelection = (idx: number, type: 'auth_user' | 'rule_set', selected: string[]) => {
+        const nextValues = uniqueSorted(selected)
+        if (type === 'auth_user') {
+            updateRule(idx, { authUsers: nextValues })
+        } else {
+            updateRule(idx, { ruleSets: nextValues })
+        }
+        setSelectionModal(null)
+    }
 
-    const hasInvalid = rules.some(r => !r.inbound || !r.outbound)
+    const hasInvalid = rules.some(r => !r.outbound || (r.kind === 'inbound' && !r.inbound) || (r.kind === 'auth_user' && r.authUsers.length === 0) || (r.kind === 'rule_set' && r.ruleSets.length === 0))
+    const activeSelectionRule = selectionModal ? rules[selectionModal.idx] : null
 
     return (
         <div className="space-y-4">
@@ -564,21 +704,54 @@ function RulesTab({
                 )}
                 {rules.map((rule, idx) => (
                     <Card key={idx} title={`Rule ${idx + 1}`} className="space-y-3">
-                        <div className="grid grid-cols-1 md:grid-cols-[5fr_5fr_2fr_auto] gap-3 items-end">
+                        <div className="grid grid-cols-1 md:grid-cols-[2fr_5fr_5fr_2fr_auto] gap-3 items-end">
                             <div className="space-y-1">
-                                <label className="text-xs font-medium text-slate-400">Inbound</label>
+                                <label className="text-xs font-medium text-slate-400">Type</label>
                                 <select
                                     className="select-field w-full h-[38px] bg-slate-950 border border-slate-800 rounded-lg px-3 text-white outline-none focus:border-blue-500/50 transition-colors"
-                                    value={rule.inbound}
+                                    value={rule.kind}
                                     disabled={!canWrite}
-                                    onChange={e => updateRule(idx, { inbound: e.target.value })}
+                                    onChange={e => updateRuleKind(idx, e.target.value as RouteRuleKind)}
                                 >
-                                    <option value="">Select inbound</option>
-                                    {availableInbounds.map(tag => (
-                                        <option key={tag} value={tag}>{tag}</option>
-                                    ))}
+                                    <option value="inbound">Inbound</option>
+                                    <option value="auth_user">Auth user</option>
+                                    <option value="rule_set">Rule set</option>
                                 </select>
-                                {!rule.inbound && <p className="text-xs text-amber-400">Inbound is required.</p>}
+                            </div>
+                            <div className="space-y-1">
+                                {rule.kind === 'inbound' ? (
+                                    <>
+                                        <label className="text-xs font-medium text-slate-400">Inbound</label>
+                                        <select
+                                            className="select-field w-full h-[38px] bg-slate-950 border border-slate-800 rounded-lg px-3 text-white outline-none focus:border-blue-500/50 transition-colors"
+                                            value={rule.inbound}
+                                            disabled={!canWrite}
+                                            onChange={e => updateRule(idx, { inbound: e.target.value })}
+                                        >
+                                            <option value="">Select inbound</option>
+                                            {availableInbounds.map(tag => (
+                                                <option key={tag} value={tag}>{tag}</option>
+                                            ))}
+                                        </select>
+                                        {!rule.inbound && <p className="text-xs text-amber-400">Inbound is required.</p>}
+                                    </>
+                                ) : (
+                                    <>
+                                        <label className="text-xs font-medium text-slate-400">{rule.kind === 'auth_user' ? 'Auth users' : 'Rule sets'}</label>
+                                        <button
+                                            type="button"
+                                            onClick={() => setSelectionModal({ idx, type: rule.kind === 'auth_user' ? 'auth_user' : 'rule_set' })}
+                                            disabled={!canWrite}
+                                            className="w-full min-h-[38px] rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-left text-sm text-white outline-none hover:border-blue-500/50 disabled:opacity-60"
+                                        >
+                                            {rule.kind === 'auth_user'
+                                                ? rule.authUsers.length ? rule.authUsers.join(', ') : 'Select users'
+                                                : rule.ruleSets.length ? rule.ruleSets.join(', ') : 'Select rule sets'}
+                                        </button>
+                                        {rule.kind === 'auth_user' && rule.authUsers.length === 0 && <p className="text-xs text-amber-400">At least one user is required.</p>}
+                                        {rule.kind === 'rule_set' && rule.ruleSets.length === 0 && <p className="text-xs text-amber-400">At least one rule set is required.</p>}
+                                    </>
+                                )}
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-slate-400">Outbound</label>
@@ -600,7 +773,7 @@ function RulesTab({
                                 <select
                                     className="select-field w-full h-[38px] bg-slate-950 border border-slate-800 rounded-lg px-3 text-white outline-none focus:border-blue-500/50 transition-colors"
                                     value={rule.ipVersion || ''}
-                                    disabled={!canWrite}
+                                    disabled={!canWrite || rule.kind !== 'inbound'}
                                     onChange={e => updateRule(idx, { ipVersion: e.target.value })}
                                 >
                                     <option value="">Any</option>
@@ -629,6 +802,119 @@ function RulesTab({
             >
                 Add Rule
             </button>
+
+            {selectionModal && activeSelectionRule && (
+                <RuleValueModal
+                    isOpen
+                    title={selectionModal.type === 'auth_user' ? 'Manage Auth Users' : 'Manage Rule Sets'}
+                    options={selectionModal.type === 'auth_user' ? availableAuthUsers : availableRuleSets}
+                    selected={selectionModal.type === 'auth_user' ? activeSelectionRule.authUsers : activeSelectionRule.ruleSets}
+                    emptyText={selectionModal.type === 'auth_user' ? 'No users found.' : 'No rule sets found.'}
+                    allowCustom={selectionModal.type === 'auth_user'}
+                    customPlaceholder="Add user"
+                    onClose={() => setSelectionModal(null)}
+                    onApply={selected => applySelection(selectionModal.idx, selectionModal.type, selected)}
+                />
+            )}
         </div>
+    )
+}
+
+function RuleValueModal({
+    isOpen,
+    title,
+    options,
+    selected,
+    emptyText,
+    allowCustom = false,
+    customPlaceholder = 'Add value',
+    onClose,
+    onApply,
+}: {
+    isOpen: boolean
+    title: string
+    options: string[]
+    selected: string[]
+    emptyText: string
+    allowCustom?: boolean
+    customPlaceholder?: string
+    onClose: () => void
+    onApply: (selected: string[]) => void
+}) {
+    const [draft, setDraft] = useState<string[]>(selected)
+    const [customValue, setCustomValue] = useState('')
+    const allOptions = uniqueSorted([...options, ...draft])
+
+    useEffect(() => {
+        if (!isOpen) return
+        setDraft(selected)
+        setCustomValue('')
+    }, [isOpen, selected])
+
+    const toggle = (value: string) => {
+        setDraft(prev => prev.includes(value) ? prev.filter(item => item !== value) : uniqueSorted([...prev, value]))
+    }
+
+    const addCustom = () => {
+        const value = customValue.trim()
+        if (!value) return
+        setDraft(prev => uniqueSorted([...prev, value]))
+        setCustomValue('')
+    }
+
+    return (
+        <Modal
+            isOpen={isOpen}
+            onClose={onClose}
+            title={title}
+            size="md"
+            footer={
+                <>
+                    <Button variant="ghost" onClick={onClose}>Cancel</Button>
+                    <Button variant="primary" onClick={() => onApply(draft)}>Apply</Button>
+                </>
+            }
+        >
+            <div className="space-y-4">
+                {allowCustom && (
+                    <div className="flex gap-2">
+                        <input
+                            value={customValue}
+                            onChange={e => setCustomValue(e.target.value)}
+                            onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault()
+                                    addCustom()
+                                }
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50 transition-colors placeholder:text-slate-600"
+                            placeholder={customPlaceholder}
+                        />
+                        <Button variant="secondary" onClick={addCustom}>Add</Button>
+                    </div>
+                )}
+
+                {allOptions.length === 0 ? (
+                    <div className="text-sm text-slate-400">{emptyText}</div>
+                ) : (
+                    <div className="max-h-[360px] overflow-y-auto custom-scrollbar space-y-2">
+                        {allOptions.map(option => (
+                            <label
+                                key={option}
+                                className="flex items-center gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 text-sm text-slate-200"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={draft.includes(option)}
+                                    onChange={() => toggle(option)}
+                                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                                />
+                                <span className="min-w-0 flex-1 truncate" title={option}>{option}</span>
+                            </label>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </Modal>
     )
 }
