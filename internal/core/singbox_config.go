@@ -1143,7 +1143,7 @@ func (c *Config) ReloadSingbox() error {
 			cfg.Experimental != nil &&
 			cfg.Experimental.ClashAPI != nil &&
 			cfg.Experimental.ClashAPI.ExternalController != "" {
-			return c.reloadViaClashAPI(cfg.Experimental.ClashAPI)
+			return c.restartViaClashAPI(cfg.Experimental.ClashAPI)
 		}
 	}
 
@@ -1156,19 +1156,14 @@ func (c *Config) ReloadSingbox() error {
 	return cmd.Run()
 }
 
-func (c *Config) reloadViaClashAPI(api *ClashAPI) error {
-	body, err := json.Marshal(map[string]string{"path": c.SingboxConfigPath})
-	if err != nil {
-		return fmt.Errorf("clash API reload: marshal request body: %w", err)
-	}
-
+func (c *Config) restartViaClashAPI(api *ClashAPI) error {
 	req, err := http.NewRequest(
-		http.MethodPut,
-		fmt.Sprintf("http://%s/configs?force=false", api.ExternalController),
-		bytes.NewReader(body),
+		http.MethodPost,
+		fmt.Sprintf("http://%s/restart", api.ExternalController),
+		bytes.NewReader([]byte("{}")),
 	)
 	if err != nil {
-		return fmt.Errorf("clash API reload: create request: %w", err)
+		return fmt.Errorf("clash API restart: create request: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
@@ -1179,12 +1174,12 @@ func (c *Config) reloadViaClashAPI(api *ClashAPI) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("clash API reload: %w", err)
+		return fmt.Errorf("clash API restart: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("clash API reload: unexpected status %d", resp.StatusCode)
+		return fmt.Errorf("clash API restart: unexpected status %d", resp.StatusCode)
 	}
 
 	return nil
@@ -1647,7 +1642,24 @@ func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []in
 	return resolveUserRouteTagsFromRules(userName, tags, updatedRules)
 }
 
-func (c *Config) afterSingboxConfigWriteLocked(_ *SingboxConfig) error {
+func (c *Config) afterSingboxConfigWriteLocked(cfg *SingboxConfig) error {
+	if cfg == nil {
+		raw, err := c.readSingboxConfigLocked()
+		if err == nil {
+			var parsed SingboxConfig
+			if json.Unmarshal(raw, &parsed) == nil {
+				cfg = &parsed
+			}
+		}
+	}
+
+	if cfg != nil && cfg.Experimental != nil && cfg.Experimental.ClashAPI != nil && cfg.Experimental.ClashAPI.ExternalController != "" {
+		if err := c.restartViaClashAPI(cfg.Experimental.ClashAPI); err == nil {
+			c.SingboxPendingChanges = false
+			return nil
+		}
+	}
+
 	c.SingboxPendingChanges = true
 	return nil
 }
