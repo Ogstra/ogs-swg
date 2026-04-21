@@ -657,6 +657,10 @@ export default function UserManagement() {
             }
 
             setSingboxPendingChanges(false)
+
+            // Wait a moment for the service restart/reload to be fully reflected in the OS
+            await new Promise(resolve => setTimeout(resolve, 2000))
+
             await Promise.all([
                 pendingChangesQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),

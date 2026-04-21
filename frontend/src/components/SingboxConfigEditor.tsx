@@ -390,6 +390,10 @@ export default function SingboxConfigEditor() {
         setRulesRestartLoading(true)
         try {
             await api.restartService('sing-box')
+            
+            // Wait a moment to ensure the backend sees the new PID
+            await new Promise(resolve => setTimeout(resolve, 2000))
+            
             setRulesRestartPending(false)
             success('Sing-box restart started')
         } catch (err) {

@@ -399,6 +399,10 @@ export default function Dashboard() {
             }
 
             setSingboxPendingChanges(false)
+
+            // Wait a moment for the service restart/reload to be fully reflected in the OS
+            await new Promise(resolve => setTimeout(resolve, 2000))
+
             await Promise.all([
                 dashboardQuery.refetch(),
                 queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
