@@ -1557,7 +1557,7 @@ export default function UserManagement() {
                     setModalState({ type: null })
                     resetRouteTagDraft()
                 }}
-                title="Manage Route Tags"
+                title="Route Tags"
                 size="xl"
                 footer={
                     <>

@@ -1100,9 +1100,6 @@ export default function Subscriptions() {
                                 'ping-type: proxy',
                             ].join('\n')}
                         />
-                        <p className="mt-2 text-xs text-slate-500">
-                            Use one Happ parameter per line as key: value. fallback-url gets the subscription token appended automatically.
-                        </p>
                     </div>
                 </div>
             </Modal>
@@ -1128,9 +1125,7 @@ export default function Subscriptions() {
                         defaultIntervalHours,
                         setDefaultIntervalHours,
                         defaultUpdateAlways,
-                        setDefaultUpdateAlways,
-                        'These are your defaults for the current panel account.'
-                    )}
+                        setDefaultUpdateAlways                    )}
                 </div>
             </Modal>
 
