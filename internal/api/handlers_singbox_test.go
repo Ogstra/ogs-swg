@@ -19,8 +19,10 @@ import (
 )
 
 type singboxConfigExecutorStub struct {
-	mu   sync.Mutex
-	data []byte
+	mu           sync.Mutex
+	data         []byte
+	writeCount   int
+	restartCount int
 }
 
 func (s *singboxConfigExecutorStub) ReadConfig(_ context.Context, _ string) ([]byte, error) {
@@ -32,14 +34,20 @@ func (s *singboxConfigExecutorStub) ReadConfig(_ context.Context, _ string) ([]b
 func (s *singboxConfigExecutorStub) WriteConfig(_ context.Context, _ string, content []byte, _ os.FileMode) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.writeCount++
 	s.data = append([]byte(nil), content...)
 	return nil
 }
 
 func (s *singboxConfigExecutorStub) ValidateSingboxConfig(context.Context, []byte) error { return nil }
-func (s *singboxConfigExecutorStub) RestartService(context.Context, string) error        { return nil }
-func (s *singboxConfigExecutorStub) StartService(context.Context, string) error          { return nil }
-func (s *singboxConfigExecutorStub) StopService(context.Context, string) error           { return nil }
+func (s *singboxConfigExecutorStub) RestartService(context.Context, string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.restartCount++
+	return nil
+}
+func (s *singboxConfigExecutorStub) StartService(context.Context, string) error { return nil }
+func (s *singboxConfigExecutorStub) StopService(context.Context, string) error  { return nil }
 func (s *singboxConfigExecutorStub) IsServiceActive(context.Context, string) (bool, error) {
 	return false, nil
 }

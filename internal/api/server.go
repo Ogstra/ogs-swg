@@ -239,6 +239,11 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleRemoveUserFromInbound)))
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserInInbound)))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.handleBulkCreateUsers)))
+	protected.HandleFunc("GET /api/user-route-tags", s.secure(s.requirePerm(canReadUsers, s.handleGetUserRouteTags)))
+	protected.HandleFunc("POST /api/user-route-tags", s.secure(s.requirePerm(canWriteUsers, s.handleCreateUserRouteTag)))
+	protected.HandleFunc("PUT /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserRouteTag)))
+	protected.HandleFunc("DELETE /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteUserRouteTag)))
+	protected.HandleFunc("GET /api/user-route-tags/compatible-rules", s.secure(s.requirePerm(canReadConfig, s.handleGetCompatibleUserRouteRules)))
 
 	// Reports/logs
 	protected.HandleFunc("GET /api/report", s.secure(s.requirePerm(canReadUsers, s.handleGetReport)))
