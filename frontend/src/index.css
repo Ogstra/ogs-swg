@@ -16,6 +16,23 @@ body {
     overscroll-behavior-y: none;
 }
 
+@media (max-width: 1023px) {
+    body {
+        overscroll-behavior-y: auto;
+    }
+}
+
+.app-shell {
+    height: 100vh;
+    height: 100svh;
+}
+
+@supports (height: 100dvh) {
+    .app-shell {
+        height: 100dvh;
+    }
+}
+
 /* Prevent iOS/Safari auto-zoom on focused form controls */
 @media (max-width: 640px) {
     input,
