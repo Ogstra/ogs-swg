@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, Link, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +7,7 @@ import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJ
 
 export const Layout: React.FC = () => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
+    const edgeSwipeRef = useRef<{ startX: number; startY: number; tracking: boolean }>({ startX: 0, startY: 0, tracking: false });
     const location = useLocation();
     const [settingsOpen, setSettingsOpen] = useState(location.pathname === '/settings');
     const navigate = useNavigate();
@@ -66,8 +67,41 @@ export const Layout: React.FC = () => {
         navigate('/login');
     };
 
+    const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+        if (sidebarOpen || window.innerWidth >= 1024 || event.touches.length !== 1) {
+            edgeSwipeRef.current.tracking = false;
+            return;
+        }
+
+        const touch = event.touches[0];
+        edgeSwipeRef.current = {
+            startX: touch.clientX,
+            startY: touch.clientY,
+            tracking: touch.clientX <= 24,
+        };
+    };
+
+    const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+        const swipe = edgeSwipeRef.current;
+        if (!swipe.tracking || event.touches.length !== 1) return;
+
+        const touch = event.touches[0];
+        const deltaX = touch.clientX - swipe.startX;
+        const deltaY = Math.abs(touch.clientY - swipe.startY);
+        if (deltaX > 64 && deltaY < 48) {
+            swipe.tracking = false;
+            setSidebarOpen(true);
+        } else if (deltaY > 48 && deltaY > Math.abs(deltaX)) {
+            swipe.tracking = false;
+        }
+    };
+
     return (
-        <div className="app-shell bg-slate-950 text-slate-100 flex font-sans overflow-hidden">
+        <div
+            className="app-shell bg-slate-950 text-slate-100 flex font-sans overflow-hidden"
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+        >
             {/* Mobile Sidebar Overlay */}
             {sidebarOpen && (
                 <div
