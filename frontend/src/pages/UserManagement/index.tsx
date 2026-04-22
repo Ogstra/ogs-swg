@@ -905,7 +905,7 @@ export default function UserManagement() {
                         disabled={!canWriteConfig}
                         className="w-full md:w-auto justify-center"
                     >
-                        Manage Route Tags
+                        Route Tags
                     </Button>
                     <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
                         <select
