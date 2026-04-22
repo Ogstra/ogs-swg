@@ -281,6 +281,12 @@ func (s *Store) initSchema() error {
 		created_at INTEGER DEFAULT (strftime('%s','now'))
 	);
 
+	CREATE TABLE IF NOT EXISTS app_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_subscription_requests_sub_id_requested_at
 		ON subscription_requests(sub_id, requested_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_protection_rules_type_value
@@ -385,6 +391,17 @@ type SubscriptionDefaults struct {
 	ProfileUpdateIntervalHours *int64   `json:"profile_update_interval_hours"`
 	UpdateAlways               bool     `json:"update_always"`
 	Destinations               []string `json:"destinations"`
+}
+
+type SubscriptionHappParameter struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type SubscriptionHappConfig struct {
+	ProviderID         string                      `json:"provider_id"`
+	HideSettings       string                      `json:"hide_settings"`
+	AdvancedParameters []SubscriptionHappParameter `json:"advanced_parameters"`
 }
 
 type DashboardPreferences struct {
@@ -781,6 +798,51 @@ func (s *Store) UpdatePanelUserSubscriptionDefaults(ctx context.Context, usernam
 		SubscriptionDefaultDestinationsJson:           string(destinationsJSON),
 		Username:                                      username,
 	})
+}
+
+const subscriptionHappConfigSettingKey = "subscription_happ_config"
+
+func (s *Store) GetSubscriptionHappConfig(ctx context.Context) (SubscriptionHappConfig, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = ?`, subscriptionHappConfigSettingKey)
+
+	var raw string
+	if err := row.Scan(&raw); err != nil {
+		if err == sql.ErrNoRows {
+			return SubscriptionHappConfig{AdvancedParameters: []SubscriptionHappParameter{}}, nil
+		}
+		return SubscriptionHappConfig{}, err
+	}
+
+	var config SubscriptionHappConfig
+	if strings.TrimSpace(raw) == "" {
+		return SubscriptionHappConfig{AdvancedParameters: []SubscriptionHappParameter{}}, nil
+	}
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		return SubscriptionHappConfig{}, err
+	}
+	if config.AdvancedParameters == nil {
+		config.AdvancedParameters = []SubscriptionHappParameter{}
+	}
+	return config, nil
+}
+
+func (s *Store) UpdateSubscriptionHappConfig(ctx context.Context, config SubscriptionHappConfig) error {
+	if config.AdvancedParameters == nil {
+		config.AdvancedParameters = []SubscriptionHappParameter{}
+	}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO app_settings (key, value, updated_at)
+		VALUES (?, ?, strftime('%s','now'))
+		ON CONFLICT(key) DO UPDATE SET
+			value = excluded.value,
+			updated_at = strftime('%s','now')
+	`, subscriptionHappConfigSettingKey, string(raw))
+	return err
 }
 
 func (s *Store) GetDashboardPreferences(ctx context.Context, principal string) (DashboardPreferences, error) {

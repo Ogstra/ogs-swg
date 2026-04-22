@@ -24,6 +24,7 @@ type cachedSub struct {
 	HeaderTot             int64
 	HeaderProfileInterval *int64
 	HeaderUpdateAlways    bool
+	HeaderHappParams      []happSubscriptionParam
 }
 
 type subscriptionRequestMetadata struct {
@@ -47,6 +48,11 @@ type parsedSubscriptionUserAgent struct {
 	deviceOSVer   string
 }
 
+type happSubscriptionParam struct {
+	Key   string
+	Value string
+}
+
 func subscriptionMemberDisplayName(username, alias string) string {
 	if trimmed := strings.TrimSpace(alias); trimmed != "" {
 		return trimmed
@@ -66,6 +72,7 @@ var (
 	subscriptionUserAgentAndroidVersionRE        = regexp.MustCompile(`Android\s+([0-9][0-9A-Za-z._-]*)`)
 	subscriptionUserAgentMacOSVersionRE          = regexp.MustCompile(`Mac OS X\s+([0-9_]+)`)
 	subscriptionUserAgentWindowsRE               = regexp.MustCompile(`Windows NT\s+([0-9.]+)`)
+	happSubscriptionParamKeyRE                   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 )
 
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
@@ -132,11 +139,15 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		s.subscriptionLimiter.record(token)
 	}
 
+	happParams := s.happSubscriptionParamsForRequest(r)
 	cacheKey := "sub:" + token
+	if len(happParams) > 0 {
+		cacheKey += ":happ:" + happSubscriptionParamsCacheKey(happParams)
+	}
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
 			s.recordSubscriptionRequest(r, sub.ID, users, true)
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
 			return
 		}
 	}
@@ -256,7 +267,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	joined := strings.Join(links, "\n")
+	responseLines := make([]string, 0, len(happParams)+len(links))
+	for _, param := range happParams {
+		responseLines = append(responseLines, happSubscriptionBodyLine(param))
+	}
+	responseLines = append(responseLines, links...)
+	joined := strings.Join(responseLines, "\n")
 	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(joined)))
 	base64.StdEncoding.Encode(encoded, []byte(joined))
 
@@ -274,11 +290,70 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		HeaderTot:             totalLimit,
 		HeaderProfileInterval: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 		HeaderUpdateAlways:    int64ToBool(sub.UpdateAlways),
+		HeaderHappParams:      happParams,
 	}
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
 	s.recordSubscriptionRequest(r, sub.ID, users, false)
-	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
+}
+
+func (s *Server) happSubscriptionParamsForRequest(r *http.Request) []happSubscriptionParam {
+	if r == nil || !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "happ") {
+		return nil
+	}
+
+	params := make([]happSubscriptionParam, 0, 8)
+	seen := make(map[string]struct{}, 8)
+
+	appendParam := func(key, value string) {
+		key = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(key, "#")))
+		value = normalizeHappSubscriptionParamValue(value)
+		if value == "" || !happSubscriptionParamKeyRE.MatchString(key) {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		params = append(params, happSubscriptionParam{Key: key, Value: value})
+	}
+
+	config, err := s.store.GetSubscriptionHappConfig(r.Context())
+	if err != nil {
+		return nil
+	}
+
+	appendParam("providerid", config.ProviderID)
+	appendParam("hide-settings", config.HideSettings)
+
+	for _, param := range config.AdvancedParameters {
+		appendParam(param.Key, param.Value)
+	}
+	return params
+}
+
+func normalizeHappSubscriptionParamValue(value string) string {
+	value = strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(value))
+	if len(value) > 512 {
+		return value[:512]
+	}
+	return value
+}
+
+func happSubscriptionParamsCacheKey(params []happSubscriptionParam) string {
+	parts := make([]string, 0, len(params))
+	for _, param := range params {
+		parts = append(parts, param.Key+"="+param.Value)
+	}
+	return strings.Join(parts, "&")
+}
+
+func happSubscriptionBodyLine(param happSubscriptionParam) string {
+	if param.Key == "providerid" {
+		return "#providerid " + param.Value
+	}
+	return "#" + param.Key + ": " + param.Value
 }
 
 func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool) {
@@ -718,7 +793,7 @@ func servedFromCacheToInt64(v bool) int64 {
 	return 0
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool) {
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool, happParams []happSubscriptionParam) {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
 	parts = append(parts, fmt.Sprintf("download=%d", down))
@@ -734,6 +809,9 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 	w.Header().Set("profile-update-interval", strconv.FormatInt(intervalVal, 10))
 	if updateAlways {
 		w.Header().Set("update-always", "true")
+	}
+	for _, param := range happParams {
+		w.Header().Set(param.Key, param.Value)
 	}
 	w.Header().Set("Subscription-Userinfo", strings.Join(parts, "; "))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

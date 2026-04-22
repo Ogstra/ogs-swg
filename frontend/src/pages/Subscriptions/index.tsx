@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, Subscription, SubscriptionDefaults } from '../../services/api'
+import { api, Subscription, SubscriptionDefaults, SubscriptionHappConfig } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { Button } from '../../components/ui/Button'
@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical } from 'lucide-react'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical, Smartphone } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
 import {
@@ -36,11 +36,22 @@ const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
     update_always: false,
     destinations: [],
 }
+const EMPTY_HAPP_CONFIG: SubscriptionHappConfig = {
+    provider_id: '',
+    hide_settings: '',
+    advanced_parameters: [],
+}
 
 type RefreshPolicyDraft = {
     intervalEnabled: boolean
     intervalHours: string
     updateAlways: boolean
+}
+
+type HappConfigDraft = {
+    providerId: string
+    hideSettings: '' | '0' | '1'
+    advancedParameters: string
 }
 
 const parseIntervalHours = (value: string): number | null => {
@@ -60,6 +71,44 @@ const subscriptionDefaultsToRefreshPolicyDraft = (defaults: SubscriptionDefaults
     updateAlways: defaults.update_always === true,
 })
 
+const parseHappAdvancedParameters = (raw: string): Array<{ key: string; value: string }> => {
+    const params: Array<{ key: string; value: string }> = []
+    const seen = new Set<string>()
+    const keyPattern = /^[a-z0-9][a-z0-9-]{0,63}$/
+
+    for (const line of raw.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+
+        const separatorIndex = trimmed.includes(':') ? trimmed.indexOf(':') : trimmed.indexOf('=')
+        if (separatorIndex <= 0) {
+            throw new Error(`Invalid Happ parameter: ${trimmed}`)
+        }
+
+        const key = trimmed.slice(0, separatorIndex).trim().replace(/^#/, '').toLowerCase()
+        const value = trimmed.slice(separatorIndex + 1).trim()
+        if (!keyPattern.test(key)) {
+            throw new Error(`Invalid Happ parameter name: ${key}`)
+        }
+        if (!value) {
+            throw new Error(`Missing value for Happ parameter: ${key}`)
+        }
+        if (seen.has(key) || key === 'providerid' || key === 'hide-settings') continue
+        seen.add(key)
+        params.push({ key, value })
+    }
+
+    return params
+}
+
+const happConfigToDraft = (config: SubscriptionHappConfig): HappConfigDraft => ({
+    providerId: config.provider_id || '',
+    hideSettings: config.hide_settings === '0' || config.hide_settings === '1' ? config.hide_settings : '',
+    advancedParameters: (config.advanced_parameters || [])
+        .map(param => `${param.key}: ${param.value}`)
+        .join('\n'),
+})
+
 export default function Subscriptions() {
     const { success, error: toastError } = useToast()
     const { permissions, token } = useAuth()
@@ -72,6 +121,7 @@ export default function Subscriptions() {
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
     const [confirmRegenerate, setConfirmRegenerate] = useState<Subscription | null>(null)
     const [defaultsModalOpen, setDefaultsModalOpen] = useState(false)
+    const [happConfigOpen, setHappConfigOpen] = useState(false)
 
     const [nameInput, setNameInput] = useState('')
     const [quotaGB, setQuotaGB] = useState('0')
@@ -87,6 +137,9 @@ export default function Subscriptions() {
     const [draggedProfile, setDraggedProfile] = useState<string | null>(null)
     const [sortKey, setSortKey] = useState<'name' | 'last_request' | 'users' | 'quota'>('name')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+    const [happProviderId, setHappProviderId] = useState('')
+    const [happHideSettings, setHappHideSettings] = useState<'' | '0' | '1'>('')
+    const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers(), enabled: canReadUsers })
@@ -99,6 +152,11 @@ export default function Subscriptions() {
         queryKey: ['subscription-defaults'],
         queryFn: () => api.getSubscriptionDefaults(),
         enabled: canManagePanelScopedDefaults,
+    })
+    const happConfigQuery = useQuery({
+        queryKey: ['subscription-happ-config'],
+        queryFn: () => api.getSubscriptionHappConfig(),
+        enabled: canReadUsers,
     })
 
     const subs = subsQuery.data || []
@@ -124,6 +182,7 @@ export default function Subscriptions() {
     })
     const subDomain = domainQuery.data || window.location.host
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
+    const happConfig = happConfigQuery.data || EMPTY_HAPP_CONFIG
     const sortedSubs = [...subs].sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1
         switch (sortKey) {
@@ -204,6 +263,18 @@ export default function Subscriptions() {
         setDefaultsModalOpen(true)
     }
 
+    const openHappConfig = () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
+        const draft = happConfigToDraft(happConfig)
+        setHappProviderId(draft.providerId)
+        setHappHideSettings(draft.hideSettings)
+        setHappAdvancedParameters(draft.advancedParameters)
+        setHappConfigOpen(true)
+    }
+
     const handleSave = async () => {
         if (!canWriteUsers) {
             toastError('No write permission for subscriptions')
@@ -263,6 +334,33 @@ export default function Subscriptions() {
             success('Subscription defaults updated')
         } catch (err) {
             toastError('Failed to update subscription defaults: ' + err)
+        }
+    }
+
+    const handleSaveHappConfig = async () => {
+        if (!canWriteUsers) {
+            toastError('No write permission for subscriptions')
+            return
+        }
+        let advancedParameters: Array<{ key: string; value: string }>
+        try {
+            advancedParameters = parseHappAdvancedParameters(happAdvancedParameters)
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : 'Invalid Happ advanced parameters')
+            return
+        }
+
+        try {
+            await api.updateSubscriptionHappConfig({
+                provider_id: happProviderId.trim(),
+                hide_settings: happHideSettings,
+                advanced_parameters: advancedParameters,
+            })
+            await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
+            setHappConfigOpen(false)
+            success('Happ config saved')
+        } catch (err) {
+            toastError('Failed to update Happ config: ' + err)
         }
     }
 
@@ -457,11 +555,16 @@ export default function Subscriptions() {
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
     const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
-    // Product rules currently support only Direct and Shadowrocket in this modal.
+    const buildHappLink = (token: string) => {
+        const url = new URL(subLink(token))
+        url.searchParams.set('client', 'happ')
+        return url.toString()
+    }
     const getSubscriptionLinkVariants = (sub: Subscription) => (
         sub.token
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
+                { id: 'happ', label: 'Happ', link: buildHappLink(sub.token) },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
             ]
             : []
@@ -519,6 +622,14 @@ export default function Subscriptions() {
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
                 <div className="flex items-center justify-end gap-2">
+                    <ActionIconButton
+                        onClick={openHappConfig}
+                        title="Happ Config"
+                        className="h-9 w-9 text-cyan-300 hover:text-cyan-200 hover:bg-cyan-500/10"
+                        disabled={!canWriteUsers}
+                    >
+                        <Smartphone size={16} />
+                    </ActionIconButton>
                     <ActionIconButton
                         onClick={openDefaults}
                         title="Subscription Defaults"
@@ -806,6 +917,64 @@ export default function Subscriptions() {
                                 </div>
                             )}
                         </div>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal
+                title="Happ Config"
+                isOpen={happConfigOpen}
+                onClose={() => setHappConfigOpen(false)}
+                footer={
+                    <div className="flex gap-3 justify-end w-full">
+                        <Button variant="secondary" onClick={() => setHappConfigOpen(false)}>Cancel</Button>
+                        <Button variant="primary" onClick={handleSaveHappConfig} disabled={!canWriteUsers}>Save Happ Config</Button>
+                    </div>
+                }
+            >
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Provider ID</label>
+                        <input
+                            type="text"
+                            value={happProviderId}
+                            onChange={e => setHappProviderId(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                            placeholder="providerid"
+                        />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">hide-settings</label>
+                        <select
+                            value={happHideSettings}
+                            onChange={e => setHappHideSettings(e.target.value as '' | '0' | '1')}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="">Unset</option>
+                            <option value="1">1</option>
+                            <option value="0">0</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Advanced Parameters</label>
+                        <textarea
+                            value={happAdvancedParameters}
+                            onChange={e => setHappAdvancedParameters(e.target.value)}
+                            rows={8}
+                            className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                            placeholder={[
+                                'server-address-resolve-enable: 1',
+                                'subscription-autoconnect: 1',
+                                'subscription-autoconnect-type: lowestdelay',
+                                'fragmentation-enable: 1',
+                                'ping-type: proxy',
+                            ].join('\n')}
+                        />
+                        <p className="mt-2 text-xs text-slate-500">
+                            Use one Happ parameter per line as key: value. Provider ID and hide-settings are managed above.
+                        </p>
                     </div>
                 </div>
             </Modal>

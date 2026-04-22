@@ -206,6 +206,88 @@ func TestHandlePublicSubscription_UsesMemberAliasInDeliveredProfileName(t *testi
 	}
 }
 
+func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "happ-token",
+		Name:        "Happ Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+	if err := dataStore.UpdateSubscriptionHappConfig(t.Context(), core.SubscriptionHappConfig{
+		ProviderID:   "provider-test-id",
+		HideSettings: "1",
+		AdvancedParameters: []core.SubscriptionHappParameter{
+			{Key: "subscription-autoconnect", Value: "1"},
+			{Key: "ping-type", Value: "proxy"},
+		},
+	}); err != nil {
+		t.Fatalf("UpdateSubscriptionHappConfig: %v", err)
+	}
+
+	directReq := httptest.NewRequest(http.MethodGet, "/s/happ-token", nil)
+	directReq.SetPathValue("token", "happ-token")
+	directRec := httptest.NewRecorder()
+	server.handlePublicSubscription(directRec, directReq)
+	if directRec.Code != http.StatusOK {
+		t.Fatalf("direct status=%d body=%q", directRec.Code, directRec.Body.String())
+	}
+	if got := directRec.Header().Get("providerid"); got != "" {
+		t.Fatalf("direct providerid header=%q want empty", got)
+	}
+	directBody, err := base64.StdEncoding.DecodeString(strings.TrimSpace(directRec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode direct body: %v", err)
+	}
+	if strings.Contains(string(directBody), "providerid") || strings.Contains(string(directBody), "hide-settings") {
+		t.Fatalf("direct decoded body should not include Happ params: %q", string(directBody))
+	}
+
+	happReq := httptest.NewRequest(http.MethodGet, "/s/happ-token?client=happ", nil)
+	happReq.SetPathValue("token", "happ-token")
+	happRec := httptest.NewRecorder()
+	server.handlePublicSubscription(happRec, happReq)
+	if happRec.Code != http.StatusOK {
+		t.Fatalf("happ status=%d body=%q", happRec.Code, happRec.Body.String())
+	}
+	if got := happRec.Header().Get("providerid"); got != "provider-test-id" {
+		t.Fatalf("happ providerid header=%q", got)
+	}
+	if got := happRec.Header().Get("hide-settings"); got != "1" {
+		t.Fatalf("happ hide-settings header=%q", got)
+	}
+	if got := happRec.Header().Get("subscription-autoconnect"); got != "1" {
+		t.Fatalf("happ subscription-autoconnect header=%q", got)
+	}
+	happBody, err := base64.StdEncoding.DecodeString(strings.TrimSpace(happRec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode happ body: %v", err)
+	}
+	decoded := string(happBody)
+	for _, want := range []string{
+		"#providerid provider-test-id",
+		"#hide-settings: 1",
+		"#subscription-autoconnect: 1",
+		"#ping-type: proxy",
+		"vless://11111111-1111-1111-1111-111111111111@sub.example.com:443",
+	} {
+		if !strings.Contains(decoded, want) {
+			t.Fatalf("decoded Happ body missing %q: %q", want, decoded)
+		}
+	}
+}
+
 func TestHandlePublicSubscription_PreservesSubscriptionMemberOrder(t *testing.T) {
 	server, _ := newPublicSubscriptionTestServerWithConfig(t, `{
 		"inbounds": [

@@ -54,6 +54,17 @@ type subscriptionDefaultsResponse struct {
 	Destinations               []string `json:"destinations"`
 }
 
+type subscriptionHappConfigResponse struct {
+	ProviderID         string                             `json:"provider_id"`
+	HideSettings       string                             `json:"hide_settings"`
+	AdvancedParameters []subscriptionHappParameterPayload `json:"advanced_parameters"`
+}
+
+type subscriptionHappParameterPayload struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 type subscriptionDefaultDestinationsResponse struct {
 	Destinations []string `json:"destinations"`
 }
@@ -198,6 +209,38 @@ func TestHandleSubscriptionDefaults_RequirePanelUserToken(t *testing.T) {
 			t.Fatalf("status=%d body=%q want %d", rec.Code, rec.Body.String(), http.StatusUnauthorized)
 		}
 	})
+}
+
+func TestSubscriptionHappConfigPersistsInDatabase(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+	createSubscriptionPanelUserForTest(t, dataStore, "alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
+	headers := subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret")
+
+	updateRec := performSubscriptionDefaultsRequest(t, server, http.MethodPut, "/api/subscriptions/happ-config", subscriptionHappConfigResponse{
+		ProviderID:   "provider-test-id",
+		HideSettings: "1",
+		AdvancedParameters: []subscriptionHappParameterPayload{
+			{Key: "subscription-autoconnect", Value: "1"},
+			{Key: "ping-type", Value: "proxy"},
+		},
+	}, headers)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update status=%d body=%q", updateRec.Code, updateRec.Body.String())
+	}
+
+	getRec := performSubscriptionDefaultsRequest(t, server, http.MethodGet, "/api/subscriptions/happ-config", nil, headers)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get status=%d body=%q", getRec.Code, getRec.Body.String())
+	}
+
+	var got subscriptionHappConfigResponse
+	decodeJSONResponse(t, getRec, &got)
+	if got.ProviderID != "provider-test-id" || got.HideSettings != "1" {
+		t.Fatalf("Happ config provider/hide = %#v", got)
+	}
+	if len(got.AdvancedParameters) != 2 || got.AdvancedParameters[0].Key != "subscription-autoconnect" || got.AdvancedParameters[1].Key != "ping-type" {
+		t.Fatalf("advanced_parameters=%v", got.AdvancedParameters)
+	}
 }
 
 func TestHandleGetSubscriptionDefaultDestinations(t *testing.T) {
