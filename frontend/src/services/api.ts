@@ -566,6 +566,12 @@ export const api = {
         await handleResponse(res, 'Failed to fetch logs');
         return res.json();
     },
+    getClashLogsWebSocketUrl: (accessToken: string): string => {
+        const url = new URL('/api/logs/clash/stream', window.location.href);
+        url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        url.searchParams.set('access_token', accessToken);
+        return url.toString();
+    },
     searchLogs: async ({ query, limit, page, from, to, signal }: LogSearchParams): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
         const params = new URLSearchParams({ q: query });
         if (limit) params.set('limit', String(limit));

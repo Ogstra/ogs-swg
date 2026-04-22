@@ -1,5 +1,6 @@
 import { startTransition, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../../services/api'
+import { useAuth } from '../../context/AuthContext'
 import { Terminal, RefreshCw, Search, X } from 'lucide-react'
 
 function hasBooleanOperator(query: string): boolean {
@@ -15,6 +16,24 @@ function shouldUseServerTailQuery(query: string): boolean {
 function filterTailLinesLocally(lines: string[], query: string): string[] {
     const trimmed = query.trim().toLowerCase()
     if (!trimmed) return lines
+    const matchTerm = (line: string, term: string) => line.includes(term.trim().toLowerCase())
+
+    if (/\bOR\b/i.test(trimmed)) {
+        const terms = trimmed.split(/\bOR\b/i).map(term => term.trim()).filter(Boolean)
+        if (terms.length === 0) return lines
+        return lines.filter(line => {
+            const normalized = line.toLowerCase()
+            return terms.some(term => matchTerm(normalized, term))
+        })
+    }
+    if (/\bAND\b/i.test(trimmed)) {
+        const terms = trimmed.split(/\bAND\b/i).map(term => term.trim()).filter(Boolean)
+        if (terms.length === 0) return lines
+        return lines.filter(line => {
+            const normalized = line.toLowerCase()
+            return terms.every(term => matchTerm(normalized, term))
+        })
+    }
     return lines.filter(line => line.toLowerCase().includes(trimmed))
 }
 
@@ -33,6 +52,7 @@ function toOffsetDateTime(value: string): string | undefined {
 }
 
 export default function LogViewer() {
+    const { token } = useAuth()
     const [lines, setLines] = useState<string[]>([])
     const [tailRawLines, setTailRawLines] = useState<string[]>([])
     const [loading, setLoading] = useState(false)
@@ -51,6 +71,10 @@ export default function LogViewer() {
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
     const searchAbortRef = useRef<AbortController | null>(null)
+    const tailQueryRef = useRef(query)
+    const tailLimitRef = useRef(tailLimit)
+    const clashTailUnavailableRef = useRef(false)
+    const [clashTailActive, setClashTailActive] = useState(false)
     const demoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
     const backendTailQuery = shouldUseServerTailQuery(query) ? query.trim() : ''
 
@@ -92,25 +116,78 @@ export default function LogViewer() {
     }, [viewMode])
 
     useEffect(() => {
+        tailQueryRef.current = query
+    }, [query])
+
+    useEffect(() => {
+        tailLimitRef.current = tailLimit
+    }, [tailLimit])
+
+    useEffect(() => {
         return () => {
             searchAbortRef.current?.abort()
         }
     }, [])
 
     useEffect(() => {
-        if (viewMode !== 'tail') return
+        if (viewMode !== 'tail' || !token || clashTailUnavailableRef.current) {
+            setClashTailActive(false)
+            return
+        }
+
+        const socket = new WebSocket(api.getClashLogsWebSocketUrl(token))
+        let opened = false
+
+        socket.onopen = () => {
+            opened = true
+            setLoading(false)
+            setClashTailActive(true)
+        }
+        socket.onmessage = event => {
+            if (typeof event.data !== 'string') return
+            const nextLine = event.data.trim()
+            if (!nextLine) return
+            setTailRawLines(prev => {
+                const limit = tailLimitRef.current
+                const next = [...prev, nextLine].slice(-limit)
+                setLines(filterTailLinesLocally(next, tailQueryRef.current))
+                return next
+            })
+        }
+        socket.onerror = () => {
+            if (!opened) {
+                clashTailUnavailableRef.current = true
+            }
+            setClashTailActive(false)
+        }
+        socket.onclose = () => {
+            setClashTailActive(false)
+            if (!opened) {
+                clashTailUnavailableRef.current = true
+                fetchLogs(true, tailQueryRef.current)
+            }
+        }
+
+        return () => {
+            socket.close()
+            setClashTailActive(false)
+        }
+    }, [token, viewMode])
+
+    useEffect(() => {
+        if (viewMode !== 'tail' || clashTailActive) return
         fetchLogs(true, query)
         const interval = setInterval(() => {
             fetchLogs(true, query)
         }, refreshInterval)
         return () => clearInterval(interval)
-    }, [refreshInterval, backendTailQuery, viewMode, tailLimit])
+    }, [refreshInterval, backendTailQuery, viewMode, tailLimit, clashTailActive])
 
     useEffect(() => {
         if (viewMode !== 'tail') return
-        if (backendTailQuery) return
+        if (backendTailQuery && !clashTailActive) return
         setLines(filterTailLinesLocally(tailRawLines, query))
-    }, [tailRawLines, query, backendTailQuery, viewMode])
+    }, [tailRawLines, query, backendTailQuery, viewMode, clashTailActive])
 
     useLayoutEffect(() => {
         const el = containerRef.current
