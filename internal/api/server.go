@@ -694,7 +694,7 @@ func (s *Server) replaceUserInRouteRules(oldName, newName string) error {
 		}
 	}
 	if changed {
-		return s.config.UpsertSingboxRouteRules(rules)
+		return s.config.ReplaceSingboxRouteRules(rules)
 	}
 	return nil
 }
