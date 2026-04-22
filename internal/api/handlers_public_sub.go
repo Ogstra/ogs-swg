@@ -300,7 +300,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string) []happSubscriptionParam {
-	if r == nil || !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "happ") {
+	if r == nil {
+		return nil
+	}
+	isHapp := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "happ") ||
+		strings.Contains(strings.ToLower(r.UserAgent()), "happ")
+	if !isHapp {
 		return nil
 	}
 
@@ -473,6 +478,7 @@ func isSubscriptionClientUA(ua string) bool {
 		"surfboard",
 		"kitsunebi",
 		"karing",
+		"happ",
 	} {
 		if strings.Contains(lowered, knownClient) {
 			return true

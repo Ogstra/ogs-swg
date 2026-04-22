@@ -311,6 +311,16 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 			t.Fatalf("decoded Happ body missing %q: %q", want, decoded)
 		}
 	}
+
+	// Test User-Agent triggering Happ profile
+	happUAReq := httptest.NewRequest(http.MethodGet, "/s/happ-token", nil)
+	happUAReq.SetPathValue("token", "happ-token")
+	happUAReq.Header.Set("User-Agent", "Happ/1.0.0 (iOS)")
+	happUARec := httptest.NewRecorder()
+	server.handlePublicSubscription(happUARec, happUAReq)
+	if got := happUARec.Header().Get("providerid"); got != "provider-test-id" {
+		t.Fatalf("happ UA providerid header=%q", got)
+	}
 }
 
 func TestHandlePublicSubscription_PreservesSubscriptionMemberOrder(t *testing.T) {
