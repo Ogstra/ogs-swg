@@ -61,6 +61,17 @@ type SubscriptionDefaultDestinationsResponse struct {
 	Destinations []string `json:"destinations"`
 }
 
+type SubscriptionHappConfigRequest struct {
+	ProviderID         string                             `json:"provider_id"`
+	HideSettings       string                             `json:"hide_settings"`
+	AdvancedParameters []SubscriptionHappParameterRequest `json:"advanced_parameters"`
+}
+
+type SubscriptionHappParameterRequest struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
 var subscriptionDefaultDestinationLogPattern = regexp.MustCompile(`\[OGS\].*inbound(?: packet)? connection to (\S+)`)
 
 func defaultSubscriptionDefaults() SubscriptionDefaultsResponse {
@@ -243,6 +254,77 @@ func (s *Server) handleGetSubscriptionDefaultDestinations(w http.ResponseWriter,
 	json.NewEncoder(w).Encode(SubscriptionDefaultDestinationsResponse{
 		Destinations: parseSubscriptionDefaultDestinations(lines, 10),
 	})
+}
+
+func (s *Server) handleGetSubscriptionHappConfig(w http.ResponseWriter, r *http.Request) {
+	config, err := s.store.GetSubscriptionHappConfig(r.Context())
+	if err != nil {
+		http.Error(w, "Failed to get Happ config", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+func (s *Server) handleUpdateSubscriptionHappConfig(w http.ResponseWriter, r *http.Request) {
+	var req SubscriptionHappConfigRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	config, err := normalizeSubscriptionHappConfig(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := s.store.UpdateSubscriptionHappConfig(r.Context(), config); err != nil {
+		http.Error(w, "Failed to update Happ config", http.StatusInternalServerError)
+		return
+	}
+
+	s.InvalidateSubCache()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(config)
+}
+
+func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.SubscriptionHappConfig, error) {
+	hideSettings := strings.TrimSpace(req.HideSettings)
+	if hideSettings != "" && hideSettings != "0" && hideSettings != "1" {
+		return core.SubscriptionHappConfig{}, httpError("hide_settings must be empty, 0, or 1")
+	}
+
+	advanced := make([]core.SubscriptionHappParameter, 0, len(req.AdvancedParameters))
+	seen := make(map[string]struct{}, len(req.AdvancedParameters))
+	for _, param := range req.AdvancedParameters {
+		key := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(param.Key, "#")))
+		value := normalizeHappSubscriptionParamValue(param.Value)
+		if key == "" && value == "" {
+			continue
+		}
+		if key == "providerid" || key == "hide-settings" {
+			continue
+		}
+		if !happSubscriptionParamKeyRE.MatchString(key) {
+			return core.SubscriptionHappConfig{}, httpError("advanced_parameters contain an invalid Happ parameter name")
+		}
+		if value == "" {
+			return core.SubscriptionHappConfig{}, httpError("advanced_parameters values cannot be empty")
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		advanced = append(advanced, core.SubscriptionHappParameter{Key: key, Value: value})
+	}
+
+	return core.SubscriptionHappConfig{
+		ProviderID:         normalizeHappSubscriptionParamValue(req.ProviderID),
+		HideSettings:       hideSettings,
+		AdvancedParameters: advanced,
+	}, nil
 }
 
 func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) {
