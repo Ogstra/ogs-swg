@@ -57,6 +57,8 @@ type subscriptionDefaultsResponse struct {
 type subscriptionHappConfigResponse struct {
 	ProviderID         string                             `json:"provider_id"`
 	HideSettings       string                             `json:"hide_settings"`
+	AlwaysHWID         string                             `json:"subscription_always_hwid_enable"`
+	AutoUpdateOnOpen   string                             `json:"subscription_auto_update_open_enable"`
 	AdvancedParameters []subscriptionHappParameterPayload `json:"advanced_parameters"`
 }
 
@@ -217,8 +219,10 @@ func TestSubscriptionHappConfigPersistsInDatabase(t *testing.T) {
 	headers := subscriptionAuthHeadersForUser(t, server, "alice-panel", "secret")
 
 	updateRec := performSubscriptionDefaultsRequest(t, server, http.MethodPut, "/api/subscriptions/happ-config", subscriptionHappConfigResponse{
-		ProviderID:   "provider-test-id",
-		HideSettings: "1",
+		ProviderID:       "provider-test-id",
+		HideSettings:     "1",
+		AlwaysHWID:       "0",
+		AutoUpdateOnOpen: "1",
 		AdvancedParameters: []subscriptionHappParameterPayload{
 			{Key: "subscription-autoconnect", Value: "1"},
 			{Key: "ping-type", Value: "proxy"},
@@ -235,7 +239,7 @@ func TestSubscriptionHappConfigPersistsInDatabase(t *testing.T) {
 
 	var got subscriptionHappConfigResponse
 	decodeJSONResponse(t, getRec, &got)
-	if got.ProviderID != "provider-test-id" || got.HideSettings != "1" {
+	if got.ProviderID != "provider-test-id" || got.HideSettings != "1" || got.AlwaysHWID != "0" || got.AutoUpdateOnOpen != "1" {
 		t.Fatalf("Happ config provider/hide = %#v", got)
 	}
 	if len(got.AdvancedParameters) != 2 || got.AdvancedParameters[0].Key != "subscription-autoconnect" || got.AdvancedParameters[1].Key != "ping-type" {

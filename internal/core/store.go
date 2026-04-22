@@ -401,6 +401,8 @@ type SubscriptionHappParameter struct {
 type SubscriptionHappConfig struct {
 	ProviderID         string                      `json:"provider_id"`
 	HideSettings       string                      `json:"hide_settings"`
+	AlwaysHWID         string                      `json:"subscription_always_hwid_enable"`
+	AutoUpdateOnOpen   string                      `json:"subscription_auto_update_open_enable"`
 	AdvancedParameters []SubscriptionHappParameter `json:"advanced_parameters"`
 }
 

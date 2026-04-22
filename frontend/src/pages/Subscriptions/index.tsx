@@ -39,6 +39,8 @@ const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
 const EMPTY_HAPP_CONFIG: SubscriptionHappConfig = {
     provider_id: '',
     hide_settings: '',
+    subscription_always_hwid_enable: '',
+    subscription_auto_update_open_enable: '',
     advanced_parameters: [],
 }
 
@@ -51,6 +53,8 @@ type RefreshPolicyDraft = {
 type HappConfigDraft = {
     providerId: string
     hideSettings: '' | '0' | '1'
+    alwaysHwid: '' | '0' | '1'
+    autoUpdateOnOpen: '' | '0' | '1'
     advancedParameters: string
 }
 
@@ -93,7 +97,7 @@ const parseHappAdvancedParameters = (raw: string): Array<{ key: string; value: s
         if (!value) {
             throw new Error(`Missing value for Happ parameter: ${key}`)
         }
-        if (seen.has(key) || key === 'providerid' || key === 'hide-settings') continue
+        if (seen.has(key) || key === 'providerid' || key === 'hide-settings' || key === 'subscription-always-hwid-enable' || key === 'subscription-auto-update-open-enable') continue
         seen.add(key)
         params.push({ key, value })
     }
@@ -104,6 +108,8 @@ const parseHappAdvancedParameters = (raw: string): Array<{ key: string; value: s
 const happConfigToDraft = (config: SubscriptionHappConfig): HappConfigDraft => ({
     providerId: config.provider_id || '',
     hideSettings: config.hide_settings === '0' || config.hide_settings === '1' ? config.hide_settings : '',
+    alwaysHwid: config.subscription_always_hwid_enable === '0' || config.subscription_always_hwid_enable === '1' ? config.subscription_always_hwid_enable : '',
+    autoUpdateOnOpen: config.subscription_auto_update_open_enable === '0' || config.subscription_auto_update_open_enable === '1' ? config.subscription_auto_update_open_enable : '',
     advancedParameters: (config.advanced_parameters || [])
         .map(param => `${param.key}: ${param.value}`)
         .join('\n'),
@@ -139,6 +145,8 @@ export default function Subscriptions() {
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
     const [happProviderId, setHappProviderId] = useState('')
     const [happHideSettings, setHappHideSettings] = useState<'' | '0' | '1'>('')
+    const [happAlwaysHwid, setHappAlwaysHwid] = useState<'' | '0' | '1'>('')
+    const [happAutoUpdateOnOpen, setHappAutoUpdateOnOpen] = useState<'' | '0' | '1'>('')
     const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
@@ -271,6 +279,8 @@ export default function Subscriptions() {
         const draft = happConfigToDraft(happConfig)
         setHappProviderId(draft.providerId)
         setHappHideSettings(draft.hideSettings)
+        setHappAlwaysHwid(draft.alwaysHwid)
+        setHappAutoUpdateOnOpen(draft.autoUpdateOnOpen)
         setHappAdvancedParameters(draft.advancedParameters)
         setHappConfigOpen(true)
     }
@@ -354,6 +364,8 @@ export default function Subscriptions() {
             await api.updateSubscriptionHappConfig({
                 provider_id: happProviderId.trim(),
                 hide_settings: happHideSettings,
+                subscription_always_hwid_enable: happAlwaysHwid,
+                subscription_auto_update_open_enable: happAutoUpdateOnOpen,
                 advanced_parameters: advancedParameters,
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
@@ -958,6 +970,32 @@ export default function Subscriptions() {
                     </div>
 
                     <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">subscription-always-hwid-enable</label>
+                        <select
+                            value={happAlwaysHwid}
+                            onChange={e => setHappAlwaysHwid(e.target.value as '' | '0' | '1')}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="">Unset</option>
+                            <option value="1">1</option>
+                            <option value="0">0</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">subscription-auto-update-open-enable</label>
+                        <select
+                            value={happAutoUpdateOnOpen}
+                            onChange={e => setHappAutoUpdateOnOpen(e.target.value as '' | '0' | '1')}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="">Unset</option>
+                            <option value="1">1</option>
+                            <option value="0">0</option>
+                        </select>
+                    </div>
+
+                    <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Advanced Parameters</label>
                         <textarea
                             value={happAdvancedParameters}
@@ -965,6 +1003,7 @@ export default function Subscriptions() {
                             rows={8}
                             className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
                             placeholder={[
+                                'fallback-url: https://fallback.example.com/s',
                                 'server-address-resolve-enable: 1',
                                 'subscription-autoconnect: 1',
                                 'subscription-autoconnect-type: lowestdelay',
@@ -973,7 +1012,7 @@ export default function Subscriptions() {
                             ].join('\n')}
                         />
                         <p className="mt-2 text-xs text-slate-500">
-                            Use one Happ parameter per line as key: value. Provider ID and hide-settings are managed above.
+                            Use one Happ parameter per line as key: value. fallback-url gets the subscription token appended automatically.
                         </p>
                     </div>
                 </div>
