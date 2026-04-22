@@ -303,6 +303,11 @@ export default function LogViewer() {
                         <span className={`text-xs px-2 py-0.5 rounded border ${logSource === 'journal' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
                             {logSource === 'journal' ? 'journalctl' : 'File'}
                         </span>
+                        {clashTailActive && (
+                            <span className="text-xs px-2 py-0.5 rounded border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                                WebSocket
+                            </span>
+                        )}
                     </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 w-full sm:w-auto flex-nowrap">
