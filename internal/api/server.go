@@ -679,6 +679,70 @@ type UserStatus struct {
 	SubscriptionQuota *SubQuotaInfo        `json:"subscription_quota,omitempty"`
 }
 
+func (s *Server) replaceUserInRouteRules(oldName, newName string) error {
+	rules, err := s.config.GetSingboxRouteRules()
+	if err != nil || len(rules) == 0 {
+		return nil
+	}
+	changed := false
+	for _, rule := range rules {
+		if raw, ok := rule["auth_user"]; ok {
+			if updated, modified := replaceUserInAuthUser(raw, oldName, newName); modified {
+				rule["auth_user"] = updated
+				changed = true
+			}
+		}
+	}
+	if changed {
+		return s.config.UpsertSingboxRouteRules(rules)
+	}
+	return nil
+}
+
+func replaceUserInAuthUser(raw interface{}, oldName, newName string) (interface{}, bool) {
+	changed := false
+	switch value := raw.(type) {
+	case string:
+		if value == oldName {
+			if newName == "" {
+				return []string{}, true
+			}
+			return newName, true
+		}
+	case []interface{}:
+		newUsers := make([]interface{}, 0, len(value))
+		for _, u := range value {
+			if str, ok := u.(string); ok && str == oldName {
+				if newName != "" {
+					newUsers = append(newUsers, newName)
+				}
+				changed = true
+			} else {
+				newUsers = append(newUsers, u)
+			}
+		}
+		if changed {
+			return newUsers, true
+		}
+	case []string:
+		newUsers := make([]string, 0, len(value))
+		for _, u := range value {
+			if u == oldName {
+				if newName != "" {
+					newUsers = append(newUsers, newName)
+				}
+				changed = true
+			} else {
+				newUsers = append(newUsers, u)
+			}
+		}
+		if changed {
+			return newUsers, true
+		}
+	}
+	return raw, false
+}
+
 func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -1166,7 +1230,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if originalName != req.Name {
-		s.store.DeleteUserMetadata(originalName)
+		_ = s.store.DeleteUserMetadata(originalName)
+		if err := s.replaceUserInRouteRules(originalName, req.Name); err != nil {
+			log.Printf("Failed to rename user in route rules: %v", err)
+		}
 	}
 	shouldReconcileQuota := existingMeta == nil ||
 		existingMeta.QuotaLimit != req.QuotaLimit ||
@@ -1197,6 +1264,10 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	if err := s.config.RemoveUser(name); err != nil {
 		http.Error(w, "Failed to remove user from config: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	if err := s.replaceUserInRouteRules(name, ""); err != nil {
+		log.Printf("Failed to remove user from route rules: %v", err)
 	}
 
 	if err := s.store.RemoveUserFromSubscriptions(name); err != nil {
@@ -1855,69 +1926,4 @@ func searchJournalLines(ctx context.Context, unit, query string, maxLines int) (
 			matched = append(matched, lines[i])
 		}
 	}
-	// reverse to keep chronological order
-	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
-		matched[i], matched[j] = matched[j], matched[i]
-	}
-	return matched, nil
-}
-
-func searchFileLines(path, query string, maxLines int) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	const chunkSize = 64 * 1024
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-	size := info.Size()
-	q := strings.ToLower(query)
-	var matched []string
-	rem := ""
-
-	for offset := size; offset > 0 && len(matched) < maxLines; {
-		readSize := int64(chunkSize)
-		if offset < readSize {
-			readSize = offset
-		}
-		offset -= readSize
-		buf := make([]byte, readSize)
-		if _, err := f.ReadAt(buf, offset); err != nil && err != io.EOF {
-			return nil, err
-		}
-		data := string(buf) + rem
-		lines := strings.Split(data, "\n")
-		if offset > 0 && len(lines) > 0 {
-			rem = lines[0]
-			lines = lines[1:]
-		} else {
-			rem = ""
-		}
-		for i := len(lines) - 1; i >= 0 && len(matched) < maxLines; i-- {
-			if strings.Contains(strings.ToLower(lines[i]), q) {
-				matched = append(matched, lines[i])
-			}
-		}
-	}
-	// reverse to chronological order
-	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
-		matched[i], matched[j] = matched[j], matched[i]
-	}
-	return matched, nil
-}
-
-func detectLogSource(cfg *core.Config) string {
-	source := strings.ToLower(strings.TrimSpace(cfg.LogSource))
-	if source == "" {
-		source = "journal"
-	}
-	if source != "journal" && source != "file" {
-		log.Printf("Unknown log_source %q, defaulting to journal", cfg.LogSource)
-		return "journal"
-	}
-	return source
-}
+	// reverse to
