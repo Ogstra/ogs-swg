@@ -320,6 +320,17 @@ export interface SubscriptionDefaults {
     destinations: string[];
 }
 
+export interface SubscriptionHappParameter {
+    key: string;
+    value: string;
+}
+
+export interface SubscriptionHappConfig {
+    provider_id: string;
+    hide_settings: '' | '0' | '1';
+    advanced_parameters: SubscriptionHappParameter[];
+}
+
 export interface SubscriptionDefaultDestinationsResponse {
     destinations: string[];
 }
@@ -1250,6 +1261,20 @@ export const api = {
     getSubscriptionDefaultDestinations: async (): Promise<SubscriptionDefaultDestinationsResponse> => {
         const res = await fetch('/api/subscriptions/default-destinations', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch subscription destination suggestions');
+        return res.json();
+    },
+    getSubscriptionHappConfig: async (): Promise<SubscriptionHappConfig> => {
+        const res = await fetch('/api/subscriptions/happ-config', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch Happ config');
+        return res.json();
+    },
+    updateSubscriptionHappConfig: async (data: SubscriptionHappConfig): Promise<SubscriptionHappConfig> => {
+        const res = await fetch('/api/subscriptions/happ-config', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(data),
+        });
+        await handleResponse(res, 'Failed to update Happ config');
         return res.json();
     },
     createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> => {

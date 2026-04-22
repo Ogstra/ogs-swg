@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UserStatus, CreateUserRequest, UserRouteTag } from '../../services/api'
-import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon } from 'lucide-react'
+import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
@@ -74,11 +74,21 @@ export default function UserManagement() {
     const [userType, setUserType] = useState<UserType>('vless')
     // Modals state
     const [modalState, setModalState] = useState<{
-        type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | null,
+        type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | 'route_tags' | 'manage_route_tags' | null,
         data?: any
     }>({ type: null })
     const [selectedInboundsToRemove, setSelectedInboundsToRemove] = useState<Set<string>>(new Set())
     const [confirmDeleteUser, setConfirmDeleteUser] = useState<UserStatus | null>(null)
+    const [selectedRouteTagIds, setSelectedRouteTagIds] = useState<Set<number>>(new Set())
+    const [routeTagDraft, setRouteTagDraft] = useState<{ id?: number; name: string; color: string; description: string; rule_index: string }>({
+        name: '',
+        color: '',
+        description: '',
+        rule_index: '',
+    })
+    const [routeTagDeleteTarget, setRouteTagDeleteTarget] = useState<UserRouteTag | null>(null)
+    const [routeTagSaving, setRouteTagSaving] = useState(false)
+    const [routeTagDefinitionSaving, setRouteTagDefinitionSaving] = useState(false)
 
     const [isEditing, setIsEditing] = useState(false)
     const [sortKey, setSortKey] = useState<'user' | 'quota' | 'usage' | 'status' | 'last_seen'>('user')
@@ -173,6 +183,13 @@ export default function UserManagement() {
         queryKey: ['user-route-tags'],
         queryFn: () => api.getUserRouteTags(),
         enabled: canReadUsers,
+        placeholderData: previousData => previousData,
+    })
+
+    const compatibleRulesQuery = useQuery({
+        queryKey: ['user-route-tags-compatible-rules'],
+        queryFn: () => api.getCompatibleUserRouteRules(),
+        enabled: modalState.type === 'manage_route_tags' && canReadConfig,
         placeholderData: previousData => previousData,
     })
 
@@ -362,6 +379,117 @@ export default function UserManagement() {
             ))}
         </div>
     )
+
+    const resetRouteTagDraft = () => {
+        setRouteTagDraft({
+            name: '',
+            color: '',
+            description: '',
+            rule_index: '',
+        })
+    }
+
+    const openRouteTagsModal = (user: UserStatus) => {
+        setSelectedRouteTagIds(new Set((user.route_tags || []).map(tag => tag.id)))
+        setModalState({ type: 'route_tags', data: user })
+    }
+
+    const openManageRouteTagsModal = () => {
+        resetRouteTagDraft()
+        setRouteTagDeleteTarget(null)
+        setModalState({ type: 'manage_route_tags' })
+    }
+
+    const refreshRouteTagData = async () => {
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['user-route-tags'] }),
+            queryClient.invalidateQueries({ queryKey: ['users'] }),
+            queryClient.invalidateQueries({ queryKey: ['user-route-tags-compatible-rules'] }),
+        ])
+    }
+
+    const handleSaveUserRouteTags = async () => {
+        if (!canWriteUsers || !modalState.data) return
+        const user = modalState.data as UserStatus
+        setRouteTagSaving(true)
+        try {
+            const result = await api.updateUserRouteTags(user.name, Array.from(selectedRouteTagIds))
+            setSingboxPendingChanges(result.singbox_pending_changes)
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['users'] }),
+                queryClient.invalidateQueries({ queryKey: ['user-route-tags'] }),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
+                queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
+            ])
+            setModalState({ type: null })
+            setSelectedRouteTagIds(new Set())
+            success('Route tags saved')
+        } catch (err) {
+            const message = String(err)
+            toastError(message.toLowerCase().includes('needs relink') ? `Route tag needs relink: ${message}` : `Failed to save route tags: ${message}`)
+        } finally {
+            setRouteTagSaving(false)
+        }
+    }
+
+    const handleEditRouteTag = (tag: UserRouteTag) => {
+        const linkedRule = (compatibleRulesQuery.data || []).find(rule => rule.rule_match_json === tag.rule_match_json)
+        setRouteTagDraft({
+            id: tag.id,
+            name: tag.name,
+            color: tag.color || '',
+            description: tag.description || '',
+            rule_index: linkedRule ? String(linkedRule.index) : '',
+        })
+    }
+
+    const handleSaveRouteTagDefinition = async () => {
+        if (!canWriteConfig) return
+        const name = routeTagDraft.name.trim()
+        const ruleIndex = routeTagDraft.rule_index === '' ? NaN : Number(routeTagDraft.rule_index)
+        if (!name || Number.isNaN(ruleIndex)) {
+            toastError('Name and linked rule are required')
+            return
+        }
+        setRouteTagDefinitionSaving(true)
+        try {
+            const payload = {
+                name,
+                color: routeTagDraft.color.trim() || undefined,
+                description: routeTagDraft.description.trim() || undefined,
+                rule_index: ruleIndex,
+            }
+            if (routeTagDraft.id) {
+                await api.updateUserRouteTag(routeTagDraft.id, payload)
+                success('Route tag updated')
+            } else {
+                await api.createUserRouteTag(payload)
+                success('Route tag created')
+            }
+            resetRouteTagDraft()
+            await refreshRouteTagData()
+        } catch (err) {
+            toastError('Failed to save route tag: ' + err)
+        } finally {
+            setRouteTagDefinitionSaving(false)
+        }
+    }
+
+    const handleDeleteRouteTagDefinition = async () => {
+        if (!canWriteConfig || !routeTagDeleteTarget) return
+        const target = routeTagDeleteTarget
+        setRouteTagDefinitionSaving(true)
+        try {
+            await api.deleteUserRouteTag(target.id)
+            setRouteTagDeleteTarget(null)
+            success('Route tag deleted')
+            await refreshRouteTagData()
+        } catch (err) {
+            toastError('Failed to delete route tag: ' + err)
+        } finally {
+            setRouteTagDefinitionSaving(false)
+        }
+    }
 
     const fetchUsage = async () => {
         setLoadingUsage(true)
@@ -770,6 +898,15 @@ export default function UserManagement() {
                     >
                         Bulk Create
                     </Button>
+                    <Button
+                        onClick={() => canWriteConfig && openManageRouteTagsModal()}
+                        variant="secondary"
+                        icon={<Tags size={16} />}
+                        disabled={!canWriteConfig}
+                        className="w-full md:w-auto justify-center"
+                    >
+                        Manage Route Tags
+                    </Button>
                     <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
                         <select
                             value={filterInbound}
@@ -958,6 +1095,13 @@ export default function UserManagement() {
                                                         <Edit size={16} />
                                                     </ActionIconButton>
                                                     <ActionIconButton
+                                                        onClick={() => openRouteTagsModal(user)}
+                                                        disabled={!canWriteUsers}
+                                                        title="Route Tags"
+                                                    >
+                                                        <Tags size={16} />
+                                                    </ActionIconButton>
+                                                    <ActionIconButton
                                                         onClick={() => openQrModal(user)}
                                                         disabled={!canWriteUsers}
                                                         title="Show QR / Link"
@@ -1030,6 +1174,13 @@ export default function UserManagement() {
                                                 tone="primary"
                                             >
                                                 <Edit size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton
+                                                onClick={() => openRouteTagsModal(user)}
+                                                disabled={!canWriteUsers}
+                                                title="Route Tags"
+                                            >
+                                                <Tags size={16} />
                                             </ActionIconButton>
                                             <ActionIconButton
                                                 onClick={() => openQrModal(user)}
@@ -1277,7 +1428,7 @@ export default function UserManagement() {
                             )}
                         </div>
                         {isEditing && originalInboundTags.length > 1 && (
-                            <p className="text-xs text-amber-400">Legacy multi-inbound assignment detected. Saving will keep only the selected inbound.</p>
+                            <p className="text-xs text-amber-400">Legacy multi-inbound user detected. Saving will keep only the selected inbound.</p>
                         )}
                         {hasEmptyInbound && (
                             <p className="text-xs text-amber-400">Each inbound row must have a selected inbound.</p>
@@ -1326,6 +1477,221 @@ export default function UserManagement() {
                 message={confirmDeleteUser ? `This will delete "${confirmDeleteUser.name}".` : 'This action cannot be undone.'}
                 confirmLabel="Delete"
                 confirmTone="danger"
+            />
+
+            {/* Per-user Route Tags Modal */}
+            <Modal
+                isOpen={modalState.type === 'route_tags'}
+                onClose={() => {
+                    setModalState({ type: null })
+                    setSelectedRouteTagIds(new Set())
+                }}
+                title="Route Tags"
+                footer={
+                    <>
+                        <Button
+                            variant="ghost"
+                            onClick={() => {
+                                setModalState({ type: null })
+                                setSelectedRouteTagIds(new Set())
+                            }}
+                            disabled={routeTagSaving}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSaveUserRouteTags}
+                            disabled={!canWriteUsers}
+                            isLoading={routeTagSaving}
+                        >
+                            Save
+                        </Button>
+                    </>
+                }
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-slate-400">
+                        User <span className="font-mono text-slate-100">{modalState.data?.name}</span>
+                    </p>
+                    <div className="space-y-2">
+                        {(routeTagsQuery.data || []).length === 0 ? (
+                            <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">
+                                No route tags configured.
+                            </div>
+                        ) : (
+                            (routeTagsQuery.data || []).map(tag => (
+                                <label
+                                    key={tag.id}
+                                    className={`flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 ${tag.broken ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-700'}`}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedRouteTagIds.has(tag.id)}
+                                        disabled={tag.broken || !canWriteUsers}
+                                        onChange={e => {
+                                            const next = new Set(selectedRouteTagIds)
+                                            if (e.target.checked) {
+                                                next.add(tag.id)
+                                            } else {
+                                                next.delete(tag.id)
+                                            }
+                                            setSelectedRouteTagIds(next)
+                                        }}
+                                        className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 disabled:opacity-50"
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                        <span className="flex flex-wrap items-center gap-2">
+                                            <span className="font-medium text-slate-100">{tag.name}</span>
+                                            {tag.broken && <Badge variant="error">needs relink</Badge>}
+                                        </span>
+                                        {tag.description && <span className="mt-1 block text-xs text-slate-500">{tag.description}</span>}
+                                        {tag.broken_reason && <span className="mt-1 block text-xs text-red-300">{tag.broken_reason}</span>}
+                                    </span>
+                                </label>
+                            ))
+                        )}
+                    </div>
+                </div>
+            </Modal>
+
+            {/* Route Tag Definition Management Modal */}
+            <Modal
+                isOpen={modalState.type === 'manage_route_tags'}
+                onClose={() => {
+                    setModalState({ type: null })
+                    resetRouteTagDraft()
+                }}
+                title="Manage Route Tags"
+                size="xl"
+                footer={
+                    <>
+                        <Button variant="ghost" onClick={() => {
+                            setModalState({ type: null })
+                            resetRouteTagDraft()
+                        }}>Close</Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSaveRouteTagDefinition}
+                            disabled={!canWriteConfig || routeTagDefinitionSaving}
+                            isLoading={routeTagDefinitionSaving}
+                        >
+                            {routeTagDraft.id ? 'Save Tag' : 'Create Tag'}
+                        </Button>
+                    </>
+                }
+            >
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] gap-6">
+                    <div className="space-y-3">
+                        {(routeTagsQuery.data || []).length === 0 ? (
+                            <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">
+                                No route tags configured.
+                            </div>
+                        ) : (
+                            (routeTagsQuery.data || []).map(tag => (
+                                <div key={tag.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="font-semibold text-slate-100">{tag.name}</span>
+                                                {tag.broken && <Badge variant="error" title={tag.broken_reason || 'needs relink'}>needs relink</Badge>}
+                                            </div>
+                                            {tag.description && <p className="mt-1 text-sm text-slate-400">{tag.description}</p>}
+                                            {tag.broken_reason && <p className="mt-1 text-xs text-red-300">{tag.broken_reason}</p>}
+                                        </div>
+                                        <div className="flex shrink-0 gap-2">
+                                            <ActionIconButton
+                                                onClick={() => handleEditRouteTag(tag)}
+                                                disabled={!canWriteConfig}
+                                                title="Edit route tag"
+                                                tone="primary"
+                                            >
+                                                <Edit size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton
+                                                onClick={() => setRouteTagDeleteTarget(tag)}
+                                                disabled={!canWriteConfig}
+                                                title="Delete route tag"
+                                                tone="danger"
+                                            >
+                                                <Trash2 size={16} />
+                                            </ActionIconButton>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                    </div>
+
+                    <div className="space-y-4 rounded-lg border border-slate-800 bg-slate-950 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-sm font-semibold text-slate-100">{routeTagDraft.id ? 'Edit Tag' : 'Create Tag'}</h3>
+                            {routeTagDraft.id && (
+                                <Button variant="ghost" size="sm" onClick={resetRouteTagDraft}>
+                                    New
+                                </Button>
+                            )}
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Name</label>
+                            <input
+                                type="text"
+                                value={routeTagDraft.name}
+                                onChange={e => setRouteTagDraft(prev => ({ ...prev, name: e.target.value }))}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Color</label>
+                            <input
+                                type="text"
+                                value={routeTagDraft.color}
+                                onChange={e => setRouteTagDraft(prev => ({ ...prev, color: e.target.value }))}
+                                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                                placeholder="#38bdf8"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Description</label>
+                            <textarea
+                                value={routeTagDraft.description}
+                                onChange={e => setRouteTagDraft(prev => ({ ...prev, description: e.target.value }))}
+                                className="min-h-[84px] w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Linked Rule</label>
+                            <select
+                                value={routeTagDraft.rule_index}
+                                onChange={e => setRouteTagDraft(prev => ({ ...prev, rule_index: e.target.value }))}
+                                className="select-field w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            >
+                                <option value="">Select route rule</option>
+                                {(compatibleRulesQuery.data || []).map(rule => {
+                                    const ruleValue = String(rule.index)
+                                    const disabled = rule.already_linked && routeTagDraft.rule_index !== ruleValue
+                                    return (
+                                        <option key={rule.index} value={ruleValue} disabled={disabled}>
+                                            {rule.summary}
+                                        </option>
+                                    )
+                                })}
+                            </select>
+                            {compatibleRulesQuery.isFetching && <p className="mt-1 text-xs text-slate-500">Loading rules...</p>}
+                        </div>
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmModal
+                isOpen={!!routeTagDeleteTarget}
+                onClose={() => setRouteTagDeleteTarget(null)}
+                onConfirm={handleDeleteRouteTagDefinition}
+                title="Delete route tag?"
+                message={routeTagDeleteTarget ? `This will delete "${routeTagDeleteTarget.name}".` : 'This action cannot be undone.'}
+                confirmLabel="Delete"
+                confirmTone="danger"
+                isLoading={routeTagDefinitionSaving}
             />
 
 
