@@ -60,6 +60,7 @@ type subscriptionHappConfigResponse struct {
 	AlwaysHWID         string                             `json:"subscription_always_hwid_enable"`
 	AutoUpdateOnOpen   string                             `json:"subscription_auto_update_open_enable"`
 	PingOnOpen         string                             `json:"subscription_ping_onopen_enabled"`
+	ColorProfile       string                             `json:"color_profile"`
 	AdvancedParameters []subscriptionHappParameterPayload `json:"advanced_parameters"`
 }
 
@@ -225,6 +226,7 @@ func TestSubscriptionHappConfigPersistsInDatabase(t *testing.T) {
 		AlwaysHWID:       "0",
 		AutoUpdateOnOpen: "1",
 		PingOnOpen:       "0",
+		ColorProfile:     `{"theme":"turquoise"}`,
 		AdvancedParameters: []subscriptionHappParameterPayload{
 			{Key: "subscription-autoconnect", Value: "1"},
 			{Key: "ping-type", Value: "proxy"},
@@ -241,7 +243,7 @@ func TestSubscriptionHappConfigPersistsInDatabase(t *testing.T) {
 
 	var got subscriptionHappConfigResponse
 	decodeJSONResponse(t, getRec, &got)
-	if got.ProviderID != "provider-test-id" || got.HideSettings != "1" || got.AlwaysHWID != "0" || got.AutoUpdateOnOpen != "1" || got.PingOnOpen != "0" {
+	if got.ProviderID != "provider-test-id" || got.HideSettings != "1" || got.AlwaysHWID != "0" || got.AutoUpdateOnOpen != "1" || got.PingOnOpen != "0" || got.ColorProfile != `{"theme":"turquoise"}` {
 		t.Fatalf("Happ config provider/hide = %#v", got)
 	}
 	if len(got.AdvancedParameters) != 2 || got.AdvancedParameters[0].Key != "subscription-autoconnect" || got.AdvancedParameters[1].Key != "ping-type" {

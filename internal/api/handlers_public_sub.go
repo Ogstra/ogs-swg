@@ -330,6 +330,7 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 	appendParam("subscription-always-hwid-enable", config.AlwaysHWID)
 	appendParam("subscription-auto-update-open-enable", config.AutoUpdateOnOpen)
 	appendParam("subscription-ping-onopen-enabled", config.PingOnOpen)
+	appendParam("color-profile", config.ColorProfile)
 
 	for _, param := range config.AdvancedParameters {
 		value := param.Value
@@ -361,8 +362,8 @@ func appendSubscriptionTokenToURL(value string, token string) string {
 
 func normalizeHappSubscriptionParamValue(value string) string {
 	value = strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(value))
-	if len(value) > 512 {
-		return value[:512]
+	if len(value) > 8192 {
+		return value[:8192]
 	}
 	return value
 }

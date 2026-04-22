@@ -42,6 +42,7 @@ const EMPTY_HAPP_CONFIG: SubscriptionHappConfig = {
     subscription_always_hwid_enable: '',
     subscription_auto_update_open_enable: '',
     subscription_ping_onopen_enabled: '',
+    color_profile: '',
     advanced_parameters: [],
 }
 
@@ -57,8 +58,68 @@ type HappConfigDraft = {
     alwaysHwid: '' | '0' | '1'
     autoUpdateOnOpen: '' | '0' | '1'
     pingOnOpen: '' | '0' | '1'
+    colorProfile: string
     advancedParameters: string
 }
+
+const compactJSON = (value: Record<string, unknown>) => JSON.stringify(value)
+
+const makeHappTheme = (
+    backgroundColors: string[],
+    accent: string,
+    header: string,
+    row: string,
+    selected: string,
+    text: string,
+    subText: string,
+    power: string,
+    imageType: 'light' | 'system' = 'system'
+) => compactJSON({
+    backgroundGradientRotationAngle: 34.5,
+    backgroundGradientColorIntensity: 1,
+    backgroundImageType: imageType,
+    backgroundColors,
+    subsHeaderColor: header,
+    serverRowBackgroundColor: row,
+    selectedServerRowColor: selected,
+    serverRowTitleTextColor: text,
+    serverRowSubTitleTextColor: subText,
+    disclosureHeaderTextColor: text,
+    disclosureSubHeaderTextColor: subText,
+    subscriptionInfoTextColor: text,
+    subscriptionInfoBackgroundColor: selected,
+    subscriptionTrafficBackgroundColor: header,
+    buttonColor: accent,
+    buttonTextColor: '#FFFFFFFF',
+    buttonTimerColor: text,
+    buttonImageType: imageType === 'light' ? 'dark' : 'light',
+    subHeaderButtonColor: text,
+    topBarButtonsColor: text,
+    additionalOptionsButtonColor: text,
+    supportIconColor: text,
+    profileWebPageIconColor: text,
+    powerIconColor: power,
+    settingsControlsTintColor: accent,
+    serverRowChevronColor: text,
+    elipseColors: [accent, power, '#FFFFFFFF'],
+})
+
+const HAPP_THEME_PRESETS = [
+    { id: '', label: 'None', value: '' },
+    { id: 'violet', label: 'Violet', value: compactJSON({ backgroundGradientRotationAngle: 37.1, serverRowBackgroundColor: '#21003D67', subsHeaderColor: '#42296DFF', profileWebPageIconColor: '#A2B8FFFF', selectedServerRowColor: '#3E2F62B5', disclosureSubHeaderTextColor: '#C1C2E2FF', buttonTextColor: '#FFFFFFFF', buttonTimerColor: '#FFFFFFFF', subscriptionInfoBackgroundColor: '#21003CFF', backgroundColors: ['#3D2A7DFF', '#6557BAFF', '#9377FF7F'], disclosureHeaderTextColor: '#FFFFFFFF', backgroundGradientColorIntensity: 1, additionalOptionsButtonColor: '#FFFFFFFF', buttonImageType: 'light', serverRowSubTitleTextColor: '#C1C2E2FF', supportIconColor: '#FFFFFFFF', topBarButtonsColor: '#FFFFFFFF', subscriptionTrafficBackgroundColor: '#533EA7FF', subHeaderButtonColor: '#FFFFFFFF', buttonColor: '#9377FFFF', powerIconColor: '#3D2A7DFF', subscriptionInfoTextColor: '#FFFFFFFF', serverRowTitleTextColor: '#FFFFFFFF', backgroundImageType: 'system', elipseColors: ['#00B460FF', '#CF72FFE0', '#FFDD00FF'], serverRowChevronColor: '#FFFFFFFF' }) },
+    { id: 'turquoise', label: 'Turquoise', value: compactJSON({ backgroundGradientRotationAngle: 39.21265661716461, serverRowChevronColor: '#F3FFFDFF', buttonImageType: 'light', buttonTimerColor: '#3B3C3DFF', subscriptionTrafficBackgroundColor: '#00343BFF', subscriptionInfoBackgroundColor: '#006B7AFF', serverRowTitleTextColor: '#D0FFF3FF', serverRowBackgroundColor: '#02424DFF', powerIconColor: '#05525ACA', supportIconColor: '#F3FFF9FF', profileWebPageIconColor: '#F5FFF9FF', selectedServerRowColor: '#006B7BFF', disclosureHeaderTextColor: '#D0FFF3FF', subsHeaderColor: '#007982FF', elipseColors: ['#4DFF00CC', '#E2FF00FF', '#FF6000FF'], subscriptionInfoTextColor: '#E5FFF7FF', buttonColor: '#8FFFFEFF', serverRowSubTitleTextColor: '#ADD3CBFF', topBarButtonsColor: '#FFFFFFD8', settingsControlsTintColor: '#00C3C1FF', backgroundGradientColorIntensity: 1, disclosureSubHeaderTextColor: '#A4FFE599', additionalOptionsButtonColor: '#FBFFFF99', backgroundImageType: 'light', backgroundColors: ['#003740FF', '#003740FF', '#005255FF', '#00A6A1FF', '#00C9DDFF'], subHeaderButtonColor: '#BAD7CFFF', buttonTextColor: '#000000FF' }) },
+    { id: 'ember', label: 'Ember', value: makeHappTheme(['#260C0BFF', '#6A1B16FF', '#FF6B35FF'], '#FF8A4CFF', '#7F241BFF', '#3D1512DD', '#8F2F22FF', '#FFF4EEFF', '#FFD1C0CC', '#FFD166FF') },
+    { id: 'forest', label: 'Forest', value: makeHappTheme(['#052B1BFF', '#0E5F3AFF', '#45B36BFF'], '#6DDF8DFF', '#147345FF', '#0A3A26DD', '#1D804FFF', '#F0FFF5FF', '#B8E8C9CC', '#B7F06BFF') },
+    { id: 'midnight', label: 'Midnight', value: makeHappTheme(['#080B18FF', '#17203DFF', '#3A61B8FF'], '#7AA2FFFF', '#1F2B56FF', '#10162BDD', '#25366CFF', '#F3F7FFFF', '#B9C7EACC', '#89F7FEFF') },
+    { id: 'rose', label: 'Rose', value: makeHappTheme(['#30091BFF', '#8A1F4EFF', '#F772A9FF'], '#FF94C2FF', '#9A255AFF', '#4A1230DD', '#A62E65FF', '#FFF2F8FF', '#F8BFD8CC', '#FFD166FF') },
+    { id: 'graphite', label: 'Graphite', value: makeHappTheme(['#14161AFF', '#2A2E35FF', '#6E7681FF'], '#D0D7DEFF', '#343941FF', '#20242ADD', '#3E444DFF', '#F6F8FAFF', '#C9D1D9CC', '#7EE787FF') },
+    { id: 'aurora', label: 'Aurora', value: makeHappTheme(['#071B2CFF', '#164B5EFF', '#3A8F8AFF', '#D6F77AFF'], '#91F6D1FF', '#1C6475FF', '#0D2A3CDD', '#267886FF', '#F2FFFCFF', '#B9EDE5CC', '#F6E05EFF') },
+    { id: 'ocean', label: 'Ocean', value: makeHappTheme(['#031B34FF', '#075985FF', '#38BDF8FF'], '#7DD3FCFF', '#0B6FA4FF', '#06304CDD', '#0D7DB8FF', '#F0FAFFFF', '#BAE6FDCC', '#22D3EEFF') },
+    { id: 'citrus', label: 'Citrus', value: makeHappTheme(['#243000FF', '#6E8F00FF', '#D9F99DFF'], '#BEF264FF', '#7C9A12FF', '#35450ADD', '#86A51AFF', '#FCFFEFFF', '#E2F7AACC', '#FACC15FF', 'light') },
+] as const
+
+const resolveHappThemeValue = (themeId: string): string => HAPP_THEME_PRESETS.find(theme => theme.id === themeId)?.value || ''
+const resolveHappThemeId = (colorProfile: string): string => HAPP_THEME_PRESETS.find(theme => theme.value === colorProfile)?.id || ''
 
 const parseIntervalHours = (value: string): number | null => {
     const trimmed = value.trim()
@@ -99,7 +160,7 @@ const parseHappAdvancedParameters = (raw: string): Array<{ key: string; value: s
         if (!value) {
             throw new Error(`Missing value for Happ parameter: ${key}`)
         }
-        if (seen.has(key) || key === 'providerid' || key === 'hide-settings' || key === 'subscription-always-hwid-enable' || key === 'subscription-auto-update-open-enable' || key === 'subscription-ping-onopen-enabled') continue
+        if (seen.has(key) || key === 'providerid' || key === 'hide-settings' || key === 'subscription-always-hwid-enable' || key === 'subscription-auto-update-open-enable' || key === 'subscription-ping-onopen-enabled' || key === 'color-profile') continue
         seen.add(key)
         params.push({ key, value })
     }
@@ -113,6 +174,7 @@ const happConfigToDraft = (config: SubscriptionHappConfig): HappConfigDraft => (
     alwaysHwid: config.subscription_always_hwid_enable === '0' || config.subscription_always_hwid_enable === '1' ? config.subscription_always_hwid_enable : '',
     autoUpdateOnOpen: config.subscription_auto_update_open_enable === '0' || config.subscription_auto_update_open_enable === '1' ? config.subscription_auto_update_open_enable : '',
     pingOnOpen: config.subscription_ping_onopen_enabled === '0' || config.subscription_ping_onopen_enabled === '1' ? config.subscription_ping_onopen_enabled : '',
+    colorProfile: config.color_profile || '',
     advancedParameters: (config.advanced_parameters || [])
         .map(param => `${param.key}: ${param.value}`)
         .join('\n'),
@@ -151,6 +213,7 @@ export default function Subscriptions() {
     const [happAlwaysHwid, setHappAlwaysHwid] = useState<'' | '0' | '1'>('')
     const [happAutoUpdateOnOpen, setHappAutoUpdateOnOpen] = useState<'' | '0' | '1'>('')
     const [happPingOnOpen, setHappPingOnOpen] = useState<'' | '0' | '1'>('')
+    const [happThemeId, setHappThemeId] = useState('')
     const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
@@ -286,6 +349,7 @@ export default function Subscriptions() {
         setHappAlwaysHwid(draft.alwaysHwid)
         setHappAutoUpdateOnOpen(draft.autoUpdateOnOpen)
         setHappPingOnOpen(draft.pingOnOpen)
+        setHappThemeId(resolveHappThemeId(draft.colorProfile))
         setHappAdvancedParameters(draft.advancedParameters)
         setHappConfigOpen(true)
     }
@@ -372,6 +436,7 @@ export default function Subscriptions() {
                 subscription_always_hwid_enable: happAlwaysHwid,
                 subscription_auto_update_open_enable: happAutoUpdateOnOpen,
                 subscription_ping_onopen_enabled: happPingOnOpen,
+                color_profile: resolveHappThemeValue(happThemeId),
                 advanced_parameters: advancedParameters,
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
@@ -1011,6 +1076,19 @@ export default function Subscriptions() {
                             <option value="">Unset</option>
                             <option value="1">1</option>
                             <option value="0">0</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">color-profile</label>
+                        <select
+                            value={happThemeId}
+                            onChange={e => setHappThemeId(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            {HAPP_THEME_PRESETS.map(theme => (
+                                <option key={theme.id || 'none'} value={theme.id}>{theme.label}</option>
+                            ))}
                         </select>
                     </div>
 
