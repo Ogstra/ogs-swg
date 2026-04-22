@@ -329,6 +329,7 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 	appendParam("hide-settings", config.HideSettings)
 	appendParam("subscription-always-hwid-enable", config.AlwaysHWID)
 	appendParam("subscription-auto-update-open-enable", config.AutoUpdateOnOpen)
+	appendParam("subscription-ping-onopen-enabled", config.PingOnOpen)
 
 	for _, param := range config.AdvancedParameters {
 		value := param.Value

@@ -230,6 +230,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 		HideSettings:     "1",
 		AlwaysHWID:       "1",
 		AutoUpdateOnOpen: "0",
+		PingOnOpen:       "1",
 		AdvancedParameters: []core.SubscriptionHappParameter{
 			{Key: "fallback-url", Value: "https://fallback.example.com/s"},
 			{Key: "subscription-autoconnect", Value: "1"},
@@ -279,6 +280,9 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if got := happRec.Header().Get("subscription-auto-update-open-enable"); got != "0" {
 		t.Fatalf("happ subscription-auto-update-open-enable header=%q", got)
 	}
+	if got := happRec.Header().Get("subscription-ping-onopen-enabled"); got != "1" {
+		t.Fatalf("happ subscription-ping-onopen-enabled header=%q", got)
+	}
 	if got := happRec.Header().Get("fallback-url"); got != "https://fallback.example.com/s/happ-token" {
 		t.Fatalf("happ fallback-url header=%q", got)
 	}
@@ -292,6 +296,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 		"#hide-settings: 1",
 		"#subscription-always-hwid-enable: 1",
 		"#subscription-auto-update-open-enable: 0",
+		"#subscription-ping-onopen-enabled: 1",
 		"#fallback-url: https://fallback.example.com/s/happ-token",
 		"#subscription-autoconnect: 1",
 		"#ping-type: proxy",

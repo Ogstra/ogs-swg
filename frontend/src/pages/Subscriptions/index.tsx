@@ -41,6 +41,7 @@ const EMPTY_HAPP_CONFIG: SubscriptionHappConfig = {
     hide_settings: '',
     subscription_always_hwid_enable: '',
     subscription_auto_update_open_enable: '',
+    subscription_ping_onopen_enabled: '',
     advanced_parameters: [],
 }
 
@@ -55,6 +56,7 @@ type HappConfigDraft = {
     hideSettings: '' | '0' | '1'
     alwaysHwid: '' | '0' | '1'
     autoUpdateOnOpen: '' | '0' | '1'
+    pingOnOpen: '' | '0' | '1'
     advancedParameters: string
 }
 
@@ -97,7 +99,7 @@ const parseHappAdvancedParameters = (raw: string): Array<{ key: string; value: s
         if (!value) {
             throw new Error(`Missing value for Happ parameter: ${key}`)
         }
-        if (seen.has(key) || key === 'providerid' || key === 'hide-settings' || key === 'subscription-always-hwid-enable' || key === 'subscription-auto-update-open-enable') continue
+        if (seen.has(key) || key === 'providerid' || key === 'hide-settings' || key === 'subscription-always-hwid-enable' || key === 'subscription-auto-update-open-enable' || key === 'subscription-ping-onopen-enabled') continue
         seen.add(key)
         params.push({ key, value })
     }
@@ -110,6 +112,7 @@ const happConfigToDraft = (config: SubscriptionHappConfig): HappConfigDraft => (
     hideSettings: config.hide_settings === '0' || config.hide_settings === '1' ? config.hide_settings : '',
     alwaysHwid: config.subscription_always_hwid_enable === '0' || config.subscription_always_hwid_enable === '1' ? config.subscription_always_hwid_enable : '',
     autoUpdateOnOpen: config.subscription_auto_update_open_enable === '0' || config.subscription_auto_update_open_enable === '1' ? config.subscription_auto_update_open_enable : '',
+    pingOnOpen: config.subscription_ping_onopen_enabled === '0' || config.subscription_ping_onopen_enabled === '1' ? config.subscription_ping_onopen_enabled : '',
     advancedParameters: (config.advanced_parameters || [])
         .map(param => `${param.key}: ${param.value}`)
         .join('\n'),
@@ -147,6 +150,7 @@ export default function Subscriptions() {
     const [happHideSettings, setHappHideSettings] = useState<'' | '0' | '1'>('')
     const [happAlwaysHwid, setHappAlwaysHwid] = useState<'' | '0' | '1'>('')
     const [happAutoUpdateOnOpen, setHappAutoUpdateOnOpen] = useState<'' | '0' | '1'>('')
+    const [happPingOnOpen, setHappPingOnOpen] = useState<'' | '0' | '1'>('')
     const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
@@ -281,6 +285,7 @@ export default function Subscriptions() {
         setHappHideSettings(draft.hideSettings)
         setHappAlwaysHwid(draft.alwaysHwid)
         setHappAutoUpdateOnOpen(draft.autoUpdateOnOpen)
+        setHappPingOnOpen(draft.pingOnOpen)
         setHappAdvancedParameters(draft.advancedParameters)
         setHappConfigOpen(true)
     }
@@ -366,6 +371,7 @@ export default function Subscriptions() {
                 hide_settings: happHideSettings,
                 subscription_always_hwid_enable: happAlwaysHwid,
                 subscription_auto_update_open_enable: happAutoUpdateOnOpen,
+                subscription_ping_onopen_enabled: happPingOnOpen,
                 advanced_parameters: advancedParameters,
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
@@ -987,6 +993,19 @@ export default function Subscriptions() {
                         <select
                             value={happAutoUpdateOnOpen}
                             onChange={e => setHappAutoUpdateOnOpen(e.target.value as '' | '0' | '1')}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="">Unset</option>
+                            <option value="1">1</option>
+                            <option value="0">0</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">subscription-ping-onopen-enabled</label>
+                        <select
+                            value={happPingOnOpen}
+                            onChange={e => setHappPingOnOpen(e.target.value as '' | '0' | '1')}
                             className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                         >
                             <option value="">Unset</option>

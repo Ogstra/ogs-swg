@@ -330,6 +330,7 @@ export interface SubscriptionHappConfig {
     hide_settings: '' | '0' | '1';
     subscription_always_hwid_enable: '' | '0' | '1';
     subscription_auto_update_open_enable: '' | '0' | '1';
+    subscription_ping_onopen_enabled: '' | '0' | '1';
     advanced_parameters: SubscriptionHappParameter[];
 }
 

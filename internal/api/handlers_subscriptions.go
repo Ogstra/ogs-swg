@@ -66,6 +66,7 @@ type SubscriptionHappConfigRequest struct {
 	HideSettings       string                             `json:"hide_settings"`
 	AlwaysHWID         string                             `json:"subscription_always_hwid_enable"`
 	AutoUpdateOnOpen   string                             `json:"subscription_auto_update_open_enable"`
+	PingOnOpen         string                             `json:"subscription_ping_onopen_enabled"`
 	AdvancedParameters []SubscriptionHappParameterRequest `json:"advanced_parameters"`
 }
 
@@ -305,6 +306,10 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 	if autoUpdateOnOpen != "" && autoUpdateOnOpen != "0" && autoUpdateOnOpen != "1" {
 		return core.SubscriptionHappConfig{}, httpError("subscription_auto_update_open_enable must be empty, 0, or 1")
 	}
+	pingOnOpen := strings.TrimSpace(req.PingOnOpen)
+	if pingOnOpen != "" && pingOnOpen != "0" && pingOnOpen != "1" {
+		return core.SubscriptionHappConfig{}, httpError("subscription_ping_onopen_enabled must be empty, 0, or 1")
+	}
 
 	advanced := make([]core.SubscriptionHappParameter, 0, len(req.AdvancedParameters))
 	seen := make(map[string]struct{}, len(req.AdvancedParameters))
@@ -314,7 +319,7 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 		if key == "" && value == "" {
 			continue
 		}
-		if key == "providerid" || key == "hide-settings" || key == "subscription-always-hwid-enable" || key == "subscription-auto-update-open-enable" {
+		if key == "providerid" || key == "hide-settings" || key == "subscription-always-hwid-enable" || key == "subscription-auto-update-open-enable" || key == "subscription-ping-onopen-enabled" {
 			continue
 		}
 		if !happSubscriptionParamKeyRE.MatchString(key) {
@@ -335,6 +340,7 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 		HideSettings:       hideSettings,
 		AlwaysHWID:         alwaysHWID,
 		AutoUpdateOnOpen:   autoUpdateOnOpen,
+		PingOnOpen:         pingOnOpen,
 		AdvancedParameters: advanced,
 	}, nil
 }
