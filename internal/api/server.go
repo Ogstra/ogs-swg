@@ -1870,6 +1870,16 @@ func tailFileLines(path string, maxBytes int64, maxLines int) ([]string, error) 
 	return lines, nil
 }
 
+func detectLogSource(cfg *core.Config) string {
+	if cfg.LogSource != "" {
+		return cfg.LogSource
+	}
+	if _, err := os.Stat(cfg.AccessLogPath); err == nil && cfg.AccessLogPath != "" {
+		return "file"
+	}
+	return "journal"
+}
+
 func readJournalLines(ctx context.Context, unit string, maxLines int) ([]string, error) {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		log.Printf("journalctl not found: %v", err)
@@ -1926,4 +1936,9 @@ func searchJournalLines(ctx context.Context, unit, query string, maxLines int) (
 			matched = append(matched, lines[i])
 		}
 	}
-	// reverse to
+	// reverse to get chronological order
+	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
+		matched[i], matched[j] = matched[j], matched[i]
+	}
+	return matched, nil
+}
