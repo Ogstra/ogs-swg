@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, UserStatus, CreateUserRequest } from '../../services/api'
+import { api, UserStatus, CreateUserRequest, UserRouteTag } from '../../services/api'
 import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { useToast } from '../../context/ToastContext'
@@ -65,6 +65,7 @@ export default function UserManagement() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
     const canReadConfig = !!permissions?.can_read_config
+    const canReadUsers = !!permissions?.can_read_users
     const canWriteUsers = !!permissions?.can_write_users
     const canWriteConfig = !!permissions?.can_write_config
 
@@ -84,6 +85,7 @@ export default function UserManagement() {
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
     const [originalName, setOriginalName] = useState<string>('')
     const [filterInbound, setFilterInbound] = useState<string>('')
+    const [routeTagFilter, setRouteTagFilter] = useState<string>('')
 
     // Usage Report State
     const [usageStart, setUsageStart] = useState<string>('')
@@ -164,6 +166,13 @@ export default function UserManagement() {
         queryKey: ['singbox-inbounds'],
         queryFn: () => api.getSingboxInbounds(),
         enabled: canReadConfig,
+        placeholderData: previousData => previousData,
+    })
+
+    const routeTagsQuery = useQuery({
+        queryKey: ['user-route-tags'],
+        queryFn: () => api.getUserRouteTags(),
+        enabled: canReadUsers,
         placeholderData: previousData => previousData,
     })
 
@@ -289,6 +298,7 @@ export default function UserManagement() {
 
     const sortedUsers = users
         .filter(u => !filterInbound || (u.inbound_tags && u.inbound_tags.includes(filterInbound)) || (!u.inbound_tags && !filterInbound))
+        .filter(u => !routeTagFilter || (u.route_tags || []).some(tag => String(tag.id) === routeTagFilter))
         .sort((a, b) => {
             const dir = sortDir === 'asc' ? 1 : -1
             switch (sortKey) {
@@ -337,6 +347,21 @@ export default function UserManagement() {
             ? <ArrowUp size={12} className="inline ml-1 text-white" />
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
+
+    const renderRouteTagBadges = (routeTags?: UserRouteTag[]) => (
+        <div className="flex flex-wrap gap-1.5 max-w-full">
+            {(routeTags || []).map(tag => (
+                <Badge
+                    key={tag.id}
+                    variant={tag.broken ? 'error' : 'info'}
+                    className="max-w-[180px] truncate"
+                    title={tag.broken_reason || tag.name}
+                >
+                    {tag.name}{tag.broken ? ' (needs relink)' : ''}
+                </Badge>
+            ))}
+        </div>
+    )
 
     const fetchUsage = async () => {
         setLoadingUsage(true)
@@ -757,6 +782,20 @@ export default function UserManagement() {
                             ))}
                         </select>
                     </div>
+                    <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
+                        <select
+                            value={routeTagFilter}
+                            onChange={(e) => setRouteTagFilter(e.target.value)}
+                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
+                        >
+                            <option value="">All Route Tags</option>
+                            {(routeTagsQuery.data || []).map(tag => (
+                                <option key={tag.id} value={String(tag.id)}>
+                                    {tag.name}{tag.broken ? ' (needs relink)' : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
                     <Button
                         onClick={() => setModalState({ type: 'usage' })}
                         variant="secondary"
@@ -902,6 +941,11 @@ export default function UserManagement() {
                                                         <Badge variant="neutral" className="max-w-[160px] truncate">All</Badge>
                                                     )}
                                                 </div>
+                                                {user.route_tags && user.route_tags.length > 0 && (
+                                                    <div className="mt-2">
+                                                        {renderRouteTagBadges(user.route_tags)}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="p-4 text-right">
                                                 <div className="flex items-center justify-end gap-2">
@@ -1019,6 +1063,12 @@ export default function UserManagement() {
                                             )}
                                         </div>
                                     </div>
+
+                                    {user.route_tags && user.route_tags.length > 0 && (
+                                        <div className="flex justify-end">
+                                            {renderRouteTagBadges(user.route_tags)}
+                                        </div>
+                                    )}
 
                                     <div className="bg-slate-950/50 rounded-lg p-3">
                                         <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
