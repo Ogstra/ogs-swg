@@ -209,11 +209,6 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		}
 
 		authHeader := strings.TrimSpace(r.Header.Get("Authorization"))
-		if authHeader == "" && r.URL.Path == "/api/logs/clash/stream" {
-			if token := strings.TrimSpace(r.URL.Query().Get("access_token")); token != "" {
-				authHeader = "Bearer " + token
-			}
-		}
 		if authHeader == "" {
 			if apiKeyPerms, ok := s.permissionsFromAPIKey(r); ok {
 				ctx := context.WithValue(r.Context(), permissionsContextKey, apiKeyPerms)
