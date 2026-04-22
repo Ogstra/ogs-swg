@@ -899,6 +899,14 @@ export default function UserManagement() {
                         Bulk Create
                     </Button>
                     <Button
+                        onClick={() => setModalState({ type: 'usage' })}
+                        variant="secondary"
+                        icon={<RefreshCw size={16} />}
+                        className="w-full md:w-auto justify-center"
+                    >
+                        Usage Report
+                    </Button>
+                    <Button
                         onClick={() => canWriteConfig && openManageRouteTagsModal()}
                         variant="secondary"
                         icon={<Tags size={16} />}
@@ -933,14 +941,6 @@ export default function UserManagement() {
                             ))}
                         </select>
                     </div>
-                    <Button
-                        onClick={() => setModalState({ type: 'usage' })}
-                        variant="secondary"
-                        icon={<RefreshCw size={16} />}
-                        className="w-full md:w-auto justify-center"
-                    >
-                        Usage Report
-                    </Button>
                 </div>
             </div>
 
