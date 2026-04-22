@@ -328,6 +328,8 @@ export interface SubscriptionHappParameter {
 export interface SubscriptionHappConfig {
     provider_id: string;
     hide_settings: '' | '0' | '1';
+    subscription_always_hwid_enable: '' | '0' | '1';
+    subscription_auto_update_open_enable: '' | '0' | '1';
     advanced_parameters: SubscriptionHappParameter[];
 }
 

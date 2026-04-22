@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -139,7 +140,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		s.subscriptionLimiter.record(token)
 	}
 
-	happParams := s.happSubscriptionParamsForRequest(r)
+	happParams := s.happSubscriptionParamsForRequest(r, token)
 	cacheKey := "sub:" + token
 	if len(happParams) > 0 {
 		cacheKey += ":happ:" + happSubscriptionParamsCacheKey(happParams)
@@ -298,7 +299,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
 }
 
-func (s *Server) happSubscriptionParamsForRequest(r *http.Request) []happSubscriptionParam {
+func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string) []happSubscriptionParam {
 	if r == nil || !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "happ") {
 		return nil
 	}
@@ -326,11 +327,35 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request) []happSubscri
 
 	appendParam("providerid", config.ProviderID)
 	appendParam("hide-settings", config.HideSettings)
+	appendParam("subscription-always-hwid-enable", config.AlwaysHWID)
+	appendParam("subscription-auto-update-open-enable", config.AutoUpdateOnOpen)
 
 	for _, param := range config.AdvancedParameters {
-		appendParam(param.Key, param.Value)
+		value := param.Value
+		if strings.EqualFold(strings.TrimSpace(param.Key), "fallback-url") {
+			value = appendSubscriptionTokenToURL(value, token)
+		}
+		appendParam(param.Key, value)
 	}
 	return params
+}
+
+func appendSubscriptionTokenToURL(value string, token string) string {
+	base := strings.TrimSpace(value)
+	token = strings.TrimSpace(token)
+	if base == "" || token == "" {
+		return base
+	}
+	if strings.HasSuffix(strings.TrimRight(base, "/"), "/"+token) {
+		return base
+	}
+
+	parsed, err := url.Parse(base)
+	if err == nil && (parsed.Scheme != "" || parsed.Host != "" || parsed.Path != "") {
+		parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + url.PathEscape(token)
+		return parsed.String()
+	}
+	return strings.TrimRight(base, "/") + "/" + token
 }
 
 func normalizeHappSubscriptionParamValue(value string) string {

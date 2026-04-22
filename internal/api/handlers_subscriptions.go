@@ -64,6 +64,8 @@ type SubscriptionDefaultDestinationsResponse struct {
 type SubscriptionHappConfigRequest struct {
 	ProviderID         string                             `json:"provider_id"`
 	HideSettings       string                             `json:"hide_settings"`
+	AlwaysHWID         string                             `json:"subscription_always_hwid_enable"`
+	AutoUpdateOnOpen   string                             `json:"subscription_auto_update_open_enable"`
 	AdvancedParameters []SubscriptionHappParameterRequest `json:"advanced_parameters"`
 }
 
@@ -295,6 +297,14 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 	if hideSettings != "" && hideSettings != "0" && hideSettings != "1" {
 		return core.SubscriptionHappConfig{}, httpError("hide_settings must be empty, 0, or 1")
 	}
+	alwaysHWID := strings.TrimSpace(req.AlwaysHWID)
+	if alwaysHWID != "" && alwaysHWID != "0" && alwaysHWID != "1" {
+		return core.SubscriptionHappConfig{}, httpError("subscription_always_hwid_enable must be empty, 0, or 1")
+	}
+	autoUpdateOnOpen := strings.TrimSpace(req.AutoUpdateOnOpen)
+	if autoUpdateOnOpen != "" && autoUpdateOnOpen != "0" && autoUpdateOnOpen != "1" {
+		return core.SubscriptionHappConfig{}, httpError("subscription_auto_update_open_enable must be empty, 0, or 1")
+	}
 
 	advanced := make([]core.SubscriptionHappParameter, 0, len(req.AdvancedParameters))
 	seen := make(map[string]struct{}, len(req.AdvancedParameters))
@@ -304,7 +314,7 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 		if key == "" && value == "" {
 			continue
 		}
-		if key == "providerid" || key == "hide-settings" {
+		if key == "providerid" || key == "hide-settings" || key == "subscription-always-hwid-enable" || key == "subscription-auto-update-open-enable" {
 			continue
 		}
 		if !happSubscriptionParamKeyRE.MatchString(key) {
@@ -323,6 +333,8 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 	return core.SubscriptionHappConfig{
 		ProviderID:         normalizeHappSubscriptionParamValue(req.ProviderID),
 		HideSettings:       hideSettings,
+		AlwaysHWID:         alwaysHWID,
+		AutoUpdateOnOpen:   autoUpdateOnOpen,
 		AdvancedParameters: advanced,
 	}, nil
 }

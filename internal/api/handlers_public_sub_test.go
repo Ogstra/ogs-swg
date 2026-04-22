@@ -226,9 +226,12 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 		t.Fatalf("AddUserToSubscription: %v", err)
 	}
 	if err := dataStore.UpdateSubscriptionHappConfig(t.Context(), core.SubscriptionHappConfig{
-		ProviderID:   "provider-test-id",
-		HideSettings: "1",
+		ProviderID:       "provider-test-id",
+		HideSettings:     "1",
+		AlwaysHWID:       "1",
+		AutoUpdateOnOpen: "0",
 		AdvancedParameters: []core.SubscriptionHappParameter{
+			{Key: "fallback-url", Value: "https://fallback.example.com/s"},
 			{Key: "subscription-autoconnect", Value: "1"},
 			{Key: "ping-type", Value: "proxy"},
 		},
@@ -270,6 +273,15 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if got := happRec.Header().Get("subscription-autoconnect"); got != "1" {
 		t.Fatalf("happ subscription-autoconnect header=%q", got)
 	}
+	if got := happRec.Header().Get("subscription-always-hwid-enable"); got != "1" {
+		t.Fatalf("happ subscription-always-hwid-enable header=%q", got)
+	}
+	if got := happRec.Header().Get("subscription-auto-update-open-enable"); got != "0" {
+		t.Fatalf("happ subscription-auto-update-open-enable header=%q", got)
+	}
+	if got := happRec.Header().Get("fallback-url"); got != "https://fallback.example.com/s/happ-token" {
+		t.Fatalf("happ fallback-url header=%q", got)
+	}
 	happBody, err := base64.StdEncoding.DecodeString(strings.TrimSpace(happRec.Body.String()))
 	if err != nil {
 		t.Fatalf("decode happ body: %v", err)
@@ -278,6 +290,9 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	for _, want := range []string{
 		"#providerid provider-test-id",
 		"#hide-settings: 1",
+		"#subscription-always-hwid-enable: 1",
+		"#subscription-auto-update-open-enable: 0",
+		"#fallback-url: https://fallback.example.com/s/happ-token",
 		"#subscription-autoconnect: 1",
 		"#ping-type: proxy",
 		"vless://11111111-1111-1111-1111-111111111111@sub.example.com:443",
