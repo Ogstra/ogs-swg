@@ -121,6 +121,10 @@ func (s *Server) PondMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
 			next.ServeHTTP(w, r)
 			return
@@ -252,6 +256,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/logs", s.secure(s.requirePerm(canReadLogs, s.handleGetLogs)))
 	protected.HandleFunc("GET /api/logs/search", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogs)))
 	protected.HandleFunc("GET /api/logs/search/stream", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogsStream)))
+	protected.HandleFunc("GET /api/logs/clash/stream", s.secure(s.requirePerm(canReadLogs, s.handleClashLogsStream)))
 	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
 	protected.HandleFunc("GET /api/dashboard/consumer-chart", s.secure(s.handleGetDashboardConsumerChart))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
