@@ -778,19 +778,15 @@ export default function Subscriptions() {
                                     <td className="p-4">{getQuotaPill(sub)}</td>
                                     <td className="p-4">
                                         <div className="flex items-center justify-end gap-2">
-                                            {canWriteUsers && (
+                                            {sub.token && (
                                                 <>
-                                                    {sub.token && (
-                                                        <>
-                                                            <ActionIconButton onClick={() => openQr(sub)} title="Show QR Code" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10"><QrCodeIcon size={16} /></ActionIconButton>
-                                                            <ActionIconButton onClick={() => copyLink(sub.token!)} title="Copy Link" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"><Copy size={16} /></ActionIconButton>
-                                                        </>
-                                                    )}
-                                                    <ActionIconButton onClick={() => openEdit(sub)} title="Edit"><Edit size={16} /></ActionIconButton>
-                                                    <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10"><RefreshCw size={16} /></ActionIconButton>
-                                                    <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" className="text-red-400 hover:text-red-300 hover:bg-red-500/10"><Trash2 size={16} /></ActionIconButton>
+                                                    <ActionIconButton onClick={() => openQr(sub)} title="Show QR Code" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10" disabled={!canWriteUsers}><QrCodeIcon size={16} /></ActionIconButton>
+                                                    <ActionIconButton onClick={() => copyLink(sub.token!)} title="Copy Link" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10" disabled={!canWriteUsers}><Copy size={16} /></ActionIconButton>
                                                 </>
                                             )}
+                                            <ActionIconButton onClick={() => openEdit(sub)} title="Edit" disabled={!canWriteUsers}><Edit size={16} /></ActionIconButton>
+                                            <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10" disabled={!canWriteUsers}><RefreshCw size={16} /></ActionIconButton>
+                                            <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" className="text-red-400 hover:text-red-300 hover:bg-red-500/10" disabled={!canWriteUsers}><Trash2 size={16} /></ActionIconButton>
                                         </div>
                                     </td>
                                 </tr>
@@ -816,24 +812,20 @@ export default function Subscriptions() {
                                     <div className="flex items-center justify-between gap-3">
                                         <p className="min-w-0 flex-1 text-white font-semibold truncate">{sub.name}</p>
                                         <div className="flex gap-2 shrink-0">
-                                            {canWriteUsers && (
-                                                <>
-                                                    {sub.token && (
-                                                        <ActionIconButton onClick={() => openQr(sub)} title="QR Code">
-                                                            <QrCodeIcon size={16} />
-                                                        </ActionIconButton>
-                                                    )}
-                                                    <ActionIconButton onClick={() => openEdit(sub)} title="Edit" tone="primary">
-                                                        <Edit size={16} />
-                                                    </ActionIconButton>
-                                                    <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10">
-                                                        <RefreshCw size={16} />
-                                                    </ActionIconButton>
-                                                    <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" tone="danger">
-                                                        <Trash2 size={16} />
-                                                    </ActionIconButton>
-                                                </>
+                                            {sub.token && (
+                                                <ActionIconButton onClick={() => openQr(sub)} title="QR Code" disabled={!canWriteUsers}>
+                                                    <QrCodeIcon size={16} />
+                                                </ActionIconButton>
                                             )}
+                                            <ActionIconButton onClick={() => openEdit(sub)} title="Edit" tone="primary" disabled={!canWriteUsers}>
+                                                <Edit size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10" disabled={!canWriteUsers}>
+                                                <RefreshCw size={16} />
+                                            </ActionIconButton>
+                                            <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" tone="danger" disabled={!canWriteUsers}>
+                                                <Trash2 size={16} />
+                                            </ActionIconButton>
                                         </div>
                                     </div>
 
