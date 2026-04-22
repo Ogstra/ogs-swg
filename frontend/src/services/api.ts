@@ -27,6 +27,39 @@ export interface UserStatus {
     enabled?: boolean;
     last_seen?: number;
     inbound_tags?: string[];
+    route_tags?: UserRouteTag[];
+}
+
+export interface UserRouteTag {
+    id: number;
+    name: string;
+    color: string;
+    description: string;
+    rule_match_json: string;
+    linked: boolean;
+    broken: boolean;
+    broken_reason?: string;
+    auth_users: string[];
+}
+
+export interface CompatibleUserRouteRule {
+    index: number;
+    rule_match_json: string;
+    outbound: string;
+    auth_users: string[];
+    summary: string;
+    already_linked: boolean;
+}
+
+export interface CreateUserRouteTagRequest {
+    name: string;
+    color?: string;
+    description?: string;
+    rule_index: number;
+}
+
+export interface UpdateUserRouteTagsResponse {
+    singbox_pending_changes: boolean;
 }
 
 export interface CreateUserRequest {
@@ -378,6 +411,50 @@ export const api = {
     getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; password?: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
         const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch user inbounds');
+        return res.json();
+    },
+    getUserRouteTags: async (): Promise<UserRouteTag[]> => {
+        const res = await fetch('/api/user-route-tags', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch user route tags');
+        return res.json();
+    },
+    getCompatibleUserRouteRules: async (): Promise<CompatibleUserRouteRule[]> => {
+        const res = await fetch('/api/user-route-tags/compatible-rules', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch compatible user route rules');
+        return res.json();
+    },
+    createUserRouteTag: async (payload: CreateUserRouteTagRequest): Promise<UserRouteTag> => {
+        const res = await fetch('/api/user-route-tags', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload)
+        });
+        await handleResponse(res, 'Failed to create user route tag');
+        return res.json();
+    },
+    updateUserRouteTag: async (id: number, payload: { name: string; color?: string; description?: string; rule_index?: number }): Promise<UserRouteTag> => {
+        const res = await fetch(`/api/user-route-tags/${encodeURIComponent(String(id))}`, {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(payload)
+        });
+        await handleResponse(res, 'Failed to update user route tag');
+        return res.json();
+    },
+    deleteUserRouteTag: async (id: number): Promise<void> => {
+        const res = await fetch(`/api/user-route-tags/${encodeURIComponent(String(id))}`, {
+            method: 'DELETE',
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to delete user route tag');
+    },
+    updateUserRouteTags: async (name: string, tagIds: number[]): Promise<UpdateUserRouteTagsResponse> => {
+        const res = await fetch(`/api/users/${encodeURIComponent(name)}/route-tags`, {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ tag_ids: tagIds })
+        });
+        await handleResponse(res, 'Failed to update user route tags');
         return res.json();
     },
     removeUserFromInbound: async (name: string, inboundTag: string): Promise<void> => {
