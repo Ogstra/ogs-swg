@@ -130,6 +130,105 @@ func TestHandleUpdateUser_RenamePreservesHistoricalTraffic(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateUser_RenamePreservesRouteTagMembership(t *testing.T) {
+	server, stub, store := newSingboxHandlerTestServerWithStore(t, `{
+		"inbounds": [
+			{
+				"type":"vless",
+				"tag":"test-vless",
+				"listen":"0.0.0.0",
+				"listen_port":443,
+				"users":[
+					{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}
+				]
+			}
+		],
+		"route":{
+			"rules":[
+				{"action":"route","rule_set":["geoip-premium"],"outbound":"premium","auth_user":["alice"]}
+			]
+		}
+	}`)
+
+	if err := store.SaveUserMetadata(core.UserMetadata{
+		Email:       "alice",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+		ResetDay:    1,
+		Enabled:     true,
+		InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+
+	ruleMatchJSON, err := core.CanonicalRouteTagRuleMatch(map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geoip-premium"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{"alice"},
+	})
+	if err != nil {
+		t.Fatalf("CanonicalRouteTagRuleMatch: %v", err)
+	}
+	if _, err := store.CreateUserRouteTag("Premium", "#00aa00", "", ruleMatchJSON); err != nil {
+		t.Fatalf("CreateUserRouteTag: %v", err)
+	}
+
+	body, err := json.Marshal(CreateUserRequest{
+		Name:         "alice-renamed",
+		OriginalName: "alice",
+		UUID:         "11111111-1111-1111-1111-111111111111",
+		QuotaLimit:   0,
+		QuotaPeriod:  "monthly",
+		ResetDay:     1,
+		Enabled:      boolPtr(true),
+		InboundTag:   "test-vless",
+	})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/users", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	server.handleUpdateUser(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleUpdateUser status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+
+	names := inboundUserNames(t, stub, "test-vless")
+	if len(names) != 1 || names[0] != "alice-renamed" {
+		t.Fatalf("stored inbound users = %#v; want [alice-renamed]", names)
+	}
+
+	routeRules, err := server.config.GetSingboxRouteRules()
+	if err != nil {
+		t.Fatalf("GetSingboxRouteRules: %v", err)
+	}
+	authUsers, ok := routeRules[0]["auth_user"].([]interface{})
+	if !ok || len(authUsers) != 1 || authUsers[0] != "alice-renamed" {
+		t.Fatalf("route rule auth_user = %#v; want [alice-renamed]", routeRules[0]["auth_user"])
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/users", nil)
+	listRec := httptest.NewRecorder()
+	server.handleGetUsers(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("handleGetUsers status = %d; body = %s", listRec.Code, listRec.Body.String())
+	}
+
+	var users []UserStatus
+	if err := json.Unmarshal(listRec.Body.Bytes(), &users); err != nil {
+		t.Fatalf("Unmarshal users: %v", err)
+	}
+	renamed := findUserStatus(users, "alice-renamed")
+	if renamed == nil {
+		t.Fatalf("renamed user not found in handleGetUsers response: %+v", users)
+	}
+	if len(renamed.RouteTags) != 1 || renamed.RouteTags[0].Name != "Premium" {
+		t.Fatalf("renamed route_tags = %#v; want Premium", renamed.RouteTags)
+	}
+}
+
 func TestHandleGetUsers_RenameUsesCombinedHistory(t *testing.T) {
 	server, _, store := newSingboxHandlerTestServerWithStore(t, `{
 		"inbounds": [

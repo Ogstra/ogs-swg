@@ -1282,6 +1282,40 @@ func (c *Config) UpsertSingboxRouteRules(newRules []map[string]interface{}) erro
 	return c.afterSingboxConfigWriteLocked(nil)
 }
 
+func (c *Config) ReplaceSingboxRouteRules(rules []map[string]interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	raw, err := c.readSingboxConfigMapLocked()
+	if err != nil {
+		return err
+	}
+
+	route, _ := raw["route"].(map[string]interface{})
+	if route == nil {
+		route = map[string]interface{}{}
+	}
+
+	replacement := make([]interface{}, len(rules))
+	for i, rule := range rules {
+		replacement[i] = rule
+	}
+	route["rules"] = replacement
+	raw["route"] = route
+
+	data, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := c.ValidateConfig(data); err != nil {
+		return fmt.Errorf("sing-box validation failed: %v", err)
+	}
+	if err := c.writeSingboxConfigLocked(data); err != nil {
+		return err
+	}
+	return c.afterSingboxConfigWriteLocked(nil)
+}
+
 type RouteTagRuleResolution struct {
 	Index        int
 	Rule         map[string]interface{}

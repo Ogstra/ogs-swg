@@ -365,8 +365,8 @@ export default function UserManagement() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
-    const renderRouteTagBadges = (routeTags?: UserRouteTag[]) => (
-        <div className="flex flex-wrap gap-1.5 max-w-full">
+    const renderRouteTagBadges = (routeTags?: UserRouteTag[], className = "flex flex-wrap gap-1.5 max-w-full") => (
+        <div className={className}>
             {(routeTags || []).map(tag => (
                 <Badge
                     key={tag.id}
@@ -1199,27 +1199,22 @@ export default function UserManagement() {
                                         </div>
                                     </div>
 
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div className="flex items-center gap-2 shrink-0">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex items-center gap-2 shrink-0 pt-0.5">
                                             <div className={`w-2 h-2 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
                                             <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>{statusText}</span>
                                         </div>
-                                        <div className="flex flex-wrap justify-end gap-1.5">
+                                        <div className="min-w-0 flex flex-1 flex-wrap justify-end gap-1.5">
                                             {(user.inbound_tags && user.inbound_tags.length > 0) ? (
                                                 user.inbound_tags.map(tag => (
-                                                    <Badge key={tag} variant="info" className="max-w-[200px]" title={tag}>{tag}</Badge>
+                                                    <Badge key={tag} variant="info" className="max-w-[140px] truncate" title={tag}>{tag}</Badge>
                                                 ))
                                             ) : (
                                                 <Badge variant="neutral">All</Badge>
                                             )}
+                                            {user.route_tags && user.route_tags.length > 0 && renderRouteTagBadges(user.route_tags, "contents")}
                                         </div>
                                     </div>
-
-                                    {user.route_tags && user.route_tags.length > 0 && (
-                                        <div className="flex justify-end">
-                                            {renderRouteTagBadges(user.route_tags)}
-                                        </div>
-                                    )}
 
                                     <div className="bg-slate-950/50 rounded-lg p-3">
                                         <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
