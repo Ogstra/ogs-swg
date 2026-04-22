@@ -67,7 +67,7 @@ export const Layout: React.FC = () => {
     };
 
     return (
-        <div className="h-screen bg-slate-950 text-slate-100 flex font-sans overflow-hidden">
+        <div className="app-shell bg-slate-950 text-slate-100 flex font-sans overflow-hidden">
             {/* Mobile Sidebar Overlay */}
             {sidebarOpen && (
                 <div
