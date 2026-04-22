@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -197,5 +198,140 @@ func TestHandleUserRouteTagRejectsInvalidCreate(t *testing.T) {
 	server.handleCreateUserRouteTag(rec, httptest.NewRequest(http.MethodPost, "/api/user-route-tags", bytes.NewReader([]byte(`{"name":"","rule_index":1}`))))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%q; want 400", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleGetUsersIncludesRouteTags(t *testing.T) {
+	server, _, store := newSingboxHandlerTestServerWithStore(t, routeTagAPIFixture())
+	premiumRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geoip-premium"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{"alice"},
+		"x-extra":   map[string]interface{}{"preserve": true},
+	}
+	brokenRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"missing"},
+		"outbound":  "missing",
+		"auth_user": []interface{}{},
+	}
+	createRouteTagForRule(t, store, premiumRule, "Premium")
+	createRouteTagForRule(t, store, brokenRule, "Broken")
+
+	rec := httptest.NewRecorder()
+	server.handleGetUsers(rec, httptest.NewRequest(http.MethodGet, "/api/users", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var users []UserStatus
+	if err := json.NewDecoder(rec.Body).Decode(&users); err != nil {
+		t.Fatalf("decode users: %v", err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("users len=%d; want alice only: %#v", len(users), users)
+	}
+	alice := users[0]
+	if alice.Name != "alice" {
+		t.Fatalf("user name=%q; want alice", alice.Name)
+	}
+	if len(alice.InboundTags) != 1 || alice.InboundTags[0] != "test-vless" {
+		t.Fatalf("inbound_tags = %#v; want unchanged [test-vless]", alice.InboundTags)
+	}
+	if len(alice.RouteTags) != 1 || alice.RouteTags[0].Name != "Premium" || !alice.RouteTags[0].Linked || alice.RouteTags[0].Broken {
+		t.Fatalf("route_tags = %#v; want healthy Premium only", alice.RouteTags)
+	}
+
+	rec = httptest.NewRecorder()
+	server.handleGetUserRouteTags(rec, httptest.NewRequest(http.MethodGet, "/api/user-route-tags", nil))
+	statuses := decodeRouteTagStatuses(t, rec)
+	foundBroken := false
+	for _, status := range statuses {
+		if status.Name == "Broken" && status.Broken {
+			foundBroken = true
+		}
+	}
+	if !foundBroken {
+		t.Fatalf("GET /api/user-route-tags did not expose broken tag: %#v", statuses)
+	}
+}
+
+func TestHandleUpdateUserRouteTags(t *testing.T) {
+	server, stub, store := newSingboxHandlerTestServerWithStore(t, routeTagAPIFixture())
+	premiumRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geoip-premium"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{"alice"},
+		"x-extra":   map[string]interface{}{"preserve": true},
+	}
+	emptyRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geosite-empty"},
+		"outbound":  "empty",
+		"auth_user": []interface{}{},
+	}
+	createRouteTagForRule(t, store, premiumRule, "Premium")
+	empty := createRouteTagForRule(t, store, emptyRule, "Empty")
+
+	req := httptest.NewRequest(http.MethodPut, "/api/users/alice/route-tags", strings.NewReader(`{"tag_ids":[`+strconv.FormatInt(empty.ID, 10)+`]}`))
+	req.SetPathValue("name", "alice")
+	rec := httptest.NewRecorder()
+	server.handleUpdateUserRouteTags(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var body UpdateUserRouteTagsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !body.Success || !body.SingboxPendingChanges {
+		t.Fatalf("response = %#v; want success with pending changes", body)
+	}
+	if len(body.RouteTags) != 1 || body.RouteTags[0].ID != empty.ID {
+		t.Fatalf("route_tags = %#v; want Empty only", body.RouteTags)
+	}
+	if stub.writeCount != 1 {
+		t.Fatalf("writeCount=%d; want one batched config write", stub.writeCount)
+	}
+	if stub.restartCount != 0 {
+		t.Fatalf("restartCount=%d; want no RestartService call", stub.restartCount)
+	}
+
+	rules := readStoredConfigMap(t, stub)["route"].(map[string]interface{})["rules"].([]interface{})
+	premiumAuth, ok := rules[0].(map[string]interface{})["auth_user"].([]interface{})
+	if !ok || len(premiumAuth) != 0 {
+		t.Fatalf("premium auth_user=%#v; want empty array after removing last user", rules[0].(map[string]interface{})["auth_user"])
+	}
+	if _, ok := rules[0].(map[string]interface{})["x-extra"]; !ok {
+		t.Fatalf("premium x-extra was not preserved")
+	}
+	emptyAuth, ok := rules[1].(map[string]interface{})["auth_user"].([]interface{})
+	if !ok || len(emptyAuth) != 1 || emptyAuth[0] != "alice" {
+		t.Fatalf("empty auth_user=%#v; want [alice]", rules[1].(map[string]interface{})["auth_user"])
+	}
+}
+
+func TestHandleUpdateUserRouteTagsReturnsConflictForBrokenChangedTag(t *testing.T) {
+	server, stub, store := newSingboxHandlerTestServerWithStore(t, routeTagAPIFixture())
+	brokenRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"missing"},
+		"outbound":  "missing",
+		"auth_user": []interface{}{},
+	}
+	broken := createRouteTagForRule(t, store, brokenRule, "Broken")
+
+	req := httptest.NewRequest(http.MethodPut, "/api/users/alice/route-tags", strings.NewReader(`{"tag_ids":[`+strconv.FormatInt(broken.ID, 10)+`]}`))
+	req.SetPathValue("name", "alice")
+	rec := httptest.NewRecorder()
+	server.handleUpdateUserRouteTags(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%q; want 409", rec.Code, rec.Body.String())
+	}
+	if stub.writeCount != 0 {
+		t.Fatalf("writeCount=%d; want no write for broken changed tag", stub.writeCount)
 	}
 }

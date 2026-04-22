@@ -238,6 +238,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/users/{name}/link", s.secure(s.requirePerm(canWriteUsers, s.handleGetUserLink)))
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleRemoveUserFromInbound)))
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserInInbound)))
+	protected.HandleFunc("PUT /api/users/{name}/route-tags", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserRouteTags)))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.handleBulkCreateUsers)))
 	protected.HandleFunc("GET /api/user-route-tags", s.secure(s.requirePerm(canReadUsers, s.handleGetUserRouteTags)))
 	protected.HandleFunc("POST /api/user-route-tags", s.secure(s.requirePerm(canWriteUsers, s.handleCreateUserRouteTag)))
@@ -658,21 +659,22 @@ type SubQuotaInfo struct {
 }
 
 type UserStatus struct {
-	Name              string        `json:"name"`
-	UUID              string        `json:"uuid"`
-	Flow              string        `json:"flow"`
-	VmessSecurity     string        `json:"vmess_security,omitempty"`
-	VmessAlterID      int           `json:"vmess_alter_id,omitempty"`
-	Uplink            int64         `json:"uplink"`
-	Downlink          int64         `json:"downlink"`
-	Total             int64         `json:"total"`
-	QuotaLimit        int64         `json:"quota_limit"`
-	QuotaPeriod       string        `json:"quota_period"`
-	ResetDay          int           `json:"reset_day"`
-	Enabled           bool          `json:"enabled"`
-	LastSeen          int64         `json:"last_seen"`
-	InboundTags       []string      `json:"inbound_tags"`
-	SubscriptionQuota *SubQuotaInfo `json:"subscription_quota,omitempty"`
+	Name              string               `json:"name"`
+	UUID              string               `json:"uuid"`
+	Flow              string               `json:"flow"`
+	VmessSecurity     string               `json:"vmess_security,omitempty"`
+	VmessAlterID      int                  `json:"vmess_alter_id,omitempty"`
+	Uplink            int64                `json:"uplink"`
+	Downlink          int64                `json:"downlink"`
+	Total             int64                `json:"total"`
+	QuotaLimit        int64                `json:"quota_limit"`
+	QuotaPeriod       string               `json:"quota_period"`
+	ResetDay          int                  `json:"reset_day"`
+	Enabled           bool                 `json:"enabled"`
+	LastSeen          int64                `json:"last_seen"`
+	InboundTags       []string             `json:"inbound_tags"`
+	RouteTags         []UserRouteTagStatus `json:"route_tags"`
+	SubscriptionQuota *SubQuotaInfo        `json:"subscription_quota,omitempty"`
 }
 
 func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
@@ -726,6 +728,11 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+	routeTagDefinitions, err := s.store.ListUserRouteTags()
+	if err != nil {
+		http.Error(w, "Failed to load route tags: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	result := []UserStatus{}
@@ -862,6 +869,11 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 				lastSeen = demoModeLastSeenInRange("singbox-user-idle", name, now, 6*60, 9*60*60)
 			}
 		}
+		routeTags, err := s.routeTagStatusesForUser(name, routeTagDefinitions)
+		if err != nil {
+			http.Error(w, "Failed to resolve route tags: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 
 		// Subscription quota: check if this user belongs to a subscription with quota_limit > 0.
 		var subQuota *SubQuotaInfo
@@ -898,6 +910,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			Enabled:           enabled,
 			LastSeen:          lastSeen,
 			InboundTags:       inboundTags,
+			RouteTags:         routeTags,
 			SubscriptionQuota: subQuota,
 		})
 	}

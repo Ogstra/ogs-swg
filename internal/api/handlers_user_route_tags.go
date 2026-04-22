@@ -41,6 +41,16 @@ type userRouteTagWriteRequest struct {
 	RuleIndex   *int   `json:"rule_index"`
 }
 
+type UpdateUserRouteTagsRequest struct {
+	TagIDs []int64 `json:"tag_ids"`
+}
+
+type UpdateUserRouteTagsResponse struct {
+	Success               bool                 `json:"success"`
+	SingboxPendingChanges bool                 `json:"singbox_pending_changes"`
+	RouteTags             []UserRouteTagStatus `json:"route_tags"`
+}
+
 func (s *Server) requireUserRouteTagDependencies(w http.ResponseWriter) bool {
 	if s.store == nil {
 		http.Error(w, "store unavailable", http.StatusInternalServerError)
@@ -85,6 +95,22 @@ func (s *Server) enrichUserRouteTag(tag core.UserRouteTag) (UserRouteTagStatus, 
 		return UserRouteTagStatus{}, err
 	}
 	return routeTagStatusFromTag(tag, resolution), nil
+}
+
+func (s *Server) routeTagStatusesForUser(userName string, tags []core.UserRouteTag) ([]UserRouteTagStatus, error) {
+	assigned, err := s.config.ResolveUserRouteTags(userName, tags)
+	if err != nil {
+		return nil, err
+	}
+	statuses := make([]UserRouteTagStatus, 0, len(assigned))
+	for _, tag := range assigned {
+		status, err := s.enrichUserRouteTag(tag)
+		if err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }
 
 func (s *Server) handleGetUserRouteTags(w http.ResponseWriter, _ *http.Request) {
@@ -281,6 +307,56 @@ func (s *Server) handleDeleteUserRouteTag(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleUpdateUserRouteTags(w http.ResponseWriter, r *http.Request) {
+	if !s.requireUserRouteTagDependencies(w) {
+		return
+	}
+
+	name := strings.TrimSpace(r.PathValue("name"))
+	if name == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateUserRouteTagsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	tags, err := s.store.ListUserRouteTags()
+	if err != nil {
+		http.Error(w, "Failed to list route tags: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	assigned, err := s.config.UpdateUserRouteTagMembership(name, req.TagIDs, tags)
+	if err != nil {
+		if strings.Contains(err.Error(), "route tag needs relink") {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, "Failed to update route tags: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	statuses := make([]UserRouteTagStatus, 0, len(assigned))
+	for _, tag := range assigned {
+		status, err := s.enrichUserRouteTag(tag)
+		if err != nil {
+			http.Error(w, "Failed to resolve route tag: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		statuses = append(statuses, status)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(UpdateUserRouteTagsResponse{
+		Success:               true,
+		SingboxPendingChanges: s.config.GetSingboxPendingChanges(),
+		RouteTags:             statuses,
+	})
 }
 
 func parseRouteTagID(r *http.Request) (int64, error) {
