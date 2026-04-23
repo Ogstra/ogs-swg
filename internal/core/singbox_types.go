@@ -86,17 +86,17 @@ type TrojanInbound struct {
 type AnyTLSInbound struct {
 	InboundBase
 	ListenFields
-	Users         []AnyTLSUser   `json:"users"`
-	PaddingScheme []string       `json:"padding_scheme,omitempty"`
+	Users         []AnyTLSUser    `json:"users"`
+	PaddingScheme []string        `json:"padding_scheme,omitempty"`
 	TLS           json.RawMessage `json:"tls,omitempty"`
 }
 
 type NaiveInbound struct {
 	InboundBase
 	ListenFields
-	Network               string         `json:"network,omitempty"`
-	Users                 []NaiveUser    `json:"users"`
-	QuicCongestionControl string         `json:"quic_congestion_control,omitempty"`
+	Network               string          `json:"network,omitempty"`
+	Users                 []NaiveUser     `json:"users"`
+	QuicCongestionControl string          `json:"quic_congestion_control,omitempty"`
 	TLS                   json.RawMessage `json:"tls,omitempty"`
 }
 
@@ -235,11 +235,14 @@ type Hysteria2Obfs struct {
 type Hysteria2Inbound struct {
 	InboundBase
 	ListenFields
-	UpMbps   int             `json:"up_mbps,omitempty"`
-	DownMbps int             `json:"down_mbps,omitempty"`
-	Obfs     *Hysteria2Obfs  `json:"obfs,omitempty"`
-	Users    []Hysteria2User `json:"users"`
-	TLS      json.RawMessage `json:"tls,omitempty"`
+	UpMbps                int             `json:"up_mbps,omitempty"`
+	DownMbps              int             `json:"down_mbps,omitempty"`
+	Obfs                  *Hysteria2Obfs  `json:"obfs,omitempty"`
+	Users                 []Hysteria2User `json:"users"`
+	IgnoreClientBandwidth bool            `json:"ignore_client_bandwidth,omitempty"`
+	TLS                   json.RawMessage `json:"tls,omitempty"`
+	Masquerade            json.RawMessage `json:"masquerade,omitempty"`
+	BBRProfile            string          `json:"bbr_profile,omitempty"`
 }
 
 func (h *Hysteria2Inbound) Base() InboundBase { return h.InboundBase }

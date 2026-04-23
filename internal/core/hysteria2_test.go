@@ -38,12 +38,15 @@ const hy2FixtureWithUserJSON = `{
 // appears in the marshalled output. (HY2-01, HY2-04)
 func TestHysteria2Struct_JSONRoundTrip(t *testing.T) {
 	original := Hysteria2Inbound{
-		InboundBase: InboundBase{Type: "hysteria2", Tag: "hy2-in"},
-		UpMbps:      100,
-		DownMbps:    50,
-		Obfs:        &Hysteria2Obfs{Type: "salamander", Password: "obfs-secret"},
-		Users:       []Hysteria2User{{Name: "alice", Password: "pass1"}},
-		TLS:         json.RawMessage(`{"enabled":true}`),
+		InboundBase:           InboundBase{Type: "hysteria2", Tag: "hy2-in"},
+		UpMbps:                100,
+		DownMbps:              50,
+		Obfs:                  &Hysteria2Obfs{Type: "salamander", Password: "obfs-secret"},
+		Users:                 []Hysteria2User{{Name: "alice", Password: "pass1"}},
+		IgnoreClientBandwidth: true,
+		TLS:                   json.RawMessage(`{"enabled":true}`),
+		Masquerade:            json.RawMessage(`{"type":"proxy","url":"http://127.0.0.1:8080","rewrite_host":true}`),
+		BBRProfile:            "standard",
 	}
 
 	data, err := json.Marshal(original)
@@ -66,6 +69,15 @@ func TestHysteria2Struct_JSONRoundTrip(t *testing.T) {
 	}
 	if decoded.DownMbps != 50 {
 		t.Errorf("DownMbps = %d; want 50", decoded.DownMbps)
+	}
+	if !decoded.IgnoreClientBandwidth {
+		t.Error("IgnoreClientBandwidth = false; want true")
+	}
+	if string(decoded.Masquerade) == "" {
+		t.Fatal("Masquerade is empty; want preserved raw JSON")
+	}
+	if decoded.BBRProfile != "standard" {
+		t.Errorf("BBRProfile = %q; want %q", decoded.BBRProfile, "standard")
 	}
 	if decoded.Obfs == nil {
 		t.Fatal("Obfs is nil; want non-nil")
@@ -108,6 +120,15 @@ func TestHysteria2Struct_OmitemptyFields(t *testing.T) {
 	}
 	if strings.Contains(s, `"obfs"`) {
 		t.Errorf("marshalled JSON must not contain \"obfs\" when nil; got: %s", s)
+	}
+	if strings.Contains(s, `"ignore_client_bandwidth"`) {
+		t.Errorf("marshalled JSON must not contain \"ignore_client_bandwidth\" when false; got: %s", s)
+	}
+	if strings.Contains(s, `"masquerade"`) {
+		t.Errorf("marshalled JSON must not contain \"masquerade\" when empty; got: %s", s)
+	}
+	if strings.Contains(s, `"bbr_profile"`) {
+		t.Errorf("marshalled JSON must not contain \"bbr_profile\" when empty; got: %s", s)
 	}
 }
 
