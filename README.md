@@ -42,16 +42,6 @@ A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstr
 *   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.
 *   **Raw Configuration**: full JSON editor for the Sing-box config file (Experimental).
 
-### Hysteria2 Notes
-
-Current Hysteria2 support includes:
-
-*   TLS-required inbound editing
-*   Password-based user management
-*   Optional `up_mbps` / `down_mbps` bandwidth limits
-*   Optional `salamander` obfuscation
-*   Per-inbound share-link override for `allowInsecure`
-
 ### Subscriptions
 
 *   Per-member aliases control the display name emitted in generated subscription links.

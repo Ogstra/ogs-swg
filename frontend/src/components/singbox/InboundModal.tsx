@@ -592,30 +592,54 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                         <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">Hysteria2</h3>
                         <div className="grid grid-cols-1 gap-4 rounded-lg border border-slate-800/50 bg-slate-950/50 p-4">
                             {visibility.showHysteria2Bandwidth && (
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-slate-300">Upload (Mbps)</label>
-                                        <input
-                                            type="number"
-                                            min={1}
-                                            value={formData.up_mbps ?? ''}
-                                            onChange={e => updateForm(prev => ({ ...prev, up_mbps: e.target.value }))}
-                                            className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
-                                            placeholder="Optional"
-                                        />
+                                <>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">Upload (Mbps)</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                value={formData.up_mbps ?? ''}
+                                                onChange={e => updateForm(prev => ({ ...prev, up_mbps: e.target.value }))}
+                                                className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                                                placeholder="Optional"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">Download (Mbps)</label>
+                                            <input
+                                                type="number"
+                                                min={1}
+                                                value={formData.down_mbps ?? ''}
+                                                onChange={e => updateForm(prev => ({ ...prev, down_mbps: e.target.value }))}
+                                                className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
+                                                placeholder="Optional"
+                                            />
+                                        </div>
                                     </div>
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-medium text-slate-300">Download (Mbps)</label>
+                                    <label className="flex items-center gap-2">
                                         <input
-                                            type="number"
-                                            min={1}
-                                            value={formData.down_mbps ?? ''}
-                                            onChange={e => updateForm(prev => ({ ...prev, down_mbps: e.target.value }))}
-                                            className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
-                                            placeholder="Optional"
+                                            type="checkbox"
+                                            checked={!!formData.ignore_client_bandwidth}
+                                            onChange={e => updateForm(prev => ({ ...prev, ignore_client_bandwidth: e.target.checked }))}
+                                            className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900"
                                         />
+                                        <span className="text-xs font-medium text-white">Ignore client bandwidth</span>
+                                    </label>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-300">BBR Profile</label>
+                                        <select
+                                            value={formData.bbr_profile || ''}
+                                            onChange={e => updateForm(prev => ({ ...prev, bbr_profile: e.target.value }))}
+                                            className="select-field w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white focus:border-blue-500 focus:outline-none"
+                                        >
+                                            <option value="">Default</option>
+                                            <option value="conservative">conservative</option>
+                                            <option value="standard">standard</option>
+                                            <option value="aggressive">aggressive</option>
+                                        </select>
                                     </div>
-                                </div>
+                                </>
                             )}
 
                             {visibility.showHysteria2Obfs && (
@@ -656,6 +680,17 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                     </div>
                                 </div>
                             )}
+
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-300">Masquerade (URL or JSON object)</label>
+                                <textarea
+                                    value={formData.masquerade || ''}
+                                    onChange={e => updateForm(prev => ({ ...prev, masquerade: e.target.value }))}
+                                    rows={3}
+                                    className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 font-mono text-xs text-white focus:border-blue-500 focus:outline-none"
+                                    placeholder="file:///var/www or {&quot;type&quot;:&quot;proxy&quot;,&quot;url&quot;:&quot;http://127.0.0.1:8080&quot;}"
+                                />
+                            </div>
                         </div>
                     </div>
                 )}

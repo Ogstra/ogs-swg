@@ -147,6 +147,9 @@ const DEFAULT_HYSTERIA2 = {
     link_allow_insecure: 'auto',
     up_mbps: '',
     down_mbps: '',
+    ignore_client_bandwidth: false,
+    masquerade: '',
+    bbr_profile: '',
     users: [],
     obfs: {
         type: '',
@@ -272,6 +275,19 @@ function normalizeHeadersForEditor(headers: unknown): string {
         }
     }
     return ''
+}
+
+function normalizeRawJsonOrStringForEditor(value: unknown): string {
+    if (value === undefined || value === null || value === '') return ''
+    if (typeof value === 'string') return value
+    if (typeof value === 'object') {
+        try {
+            return JSON.stringify(value, null, 2)
+        } catch {
+            return ''
+        }
+    }
+    return String(value)
 }
 
 function normalizeTls(type: InboundType, tls: any, fallback: any) {
@@ -464,6 +480,9 @@ function stripHiddenInboundState(inbound: InboundLike) {
         delete inbound.up_mbps
         delete inbound.down_mbps
         delete inbound.obfs
+        delete inbound.ignore_client_bandwidth
+        delete inbound.masquerade
+        delete inbound.bbr_profile
     }
 
     if (!visibility.showShadowsocksSection && !visibility.showNaiveSection) {
@@ -499,6 +518,9 @@ export function normalizeInboundForEditor(value: InboundLike | null | undefined)
     } else {
         normalized.up_mbps = source.up_mbps ?? ''
         normalized.down_mbps = source.down_mbps ?? ''
+        normalized.ignore_client_bandwidth = !!source.ignore_client_bandwidth
+        normalized.masquerade = normalizeRawJsonOrStringForEditor(source.masquerade)
+        normalized.bbr_profile = String(source.bbr_profile || '')
         normalized.obfs = normalizeHysteria2Obfs(source.obfs)
         normalized.users = normalizeHysteria2Users(source.users, String(source.tag || fallback.tag))
     }
@@ -545,6 +567,23 @@ function parseHeaders(headers: unknown) {
     } catch {
         return { error: 'WebSocket headers must be valid JSON.' }
     }
+}
+
+function parseMasquerade(masquerade: unknown) {
+    const raw = String(masquerade ?? '').trim()
+    if (!raw) return { value: undefined }
+    if (raw.startsWith('{') || raw.startsWith('[')) {
+        try {
+            const parsed = JSON.parse(raw)
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                return { error: 'Hysteria2 masquerade JSON must be an object.' }
+            }
+            return { value: parsed }
+        } catch {
+            return { error: 'Hysteria2 masquerade JSON must be valid.' }
+        }
+    }
+    return { value: raw }
 }
 
 export function canSelectInboundUserFlow(userType: string, inbound: InboundLike | null | undefined): boolean {
@@ -627,6 +666,26 @@ export function buildInboundSubmission(formData: InboundLike) {
         else delete submission.up_mbps
         if (downMbps.value !== undefined) submission.down_mbps = downMbps.value
         else delete submission.down_mbps
+        submission.ignore_client_bandwidth = !!submission.ignore_client_bandwidth
+        if (submission.ignore_client_bandwidth && (submission.up_mbps !== undefined || submission.down_mbps !== undefined)) {
+            return { error: 'Hysteria2 ignore_client_bandwidth conflicts with up_mbps/down_mbps.' }
+        }
+        if (!submission.ignore_client_bandwidth) delete submission.ignore_client_bandwidth
+
+        const masquerade = parseMasquerade(submission.masquerade)
+        if (masquerade.error) return { error: masquerade.error }
+        if (masquerade.value !== undefined) submission.masquerade = masquerade.value
+        else delete submission.masquerade
+
+        const bbrProfile = String(submission.bbr_profile || '').trim()
+        if (bbrProfile) {
+            if (!['conservative', 'standard', 'aggressive'].includes(bbrProfile)) {
+                return { error: 'Hysteria2 bbr_profile must be conservative, standard, or aggressive.' }
+            }
+            submission.bbr_profile = bbrProfile
+        } else {
+            delete submission.bbr_profile
+        }
 
         const obfsType = String(submission.obfs?.type || '').trim()
         const obfsPassword = String(submission.obfs?.password || '').trim()
