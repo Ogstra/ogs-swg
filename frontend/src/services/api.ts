@@ -332,6 +332,7 @@ export interface SubscriptionHappConfig {
     subscription_auto_update_open_enable: '' | '0' | '1';
     subscription_ping_onopen_enabled: '' | '0' | '1';
     color_profile: string;
+    profile_flag: string;
     advanced_parameters: SubscriptionHappParameter[];
 }
 

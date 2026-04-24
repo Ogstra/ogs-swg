@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { COUNTRIES, countryFlagEmoji } from '../../data/countries'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Subscription, SubscriptionDefaults, SubscriptionHappConfig } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
@@ -43,6 +44,7 @@ const EMPTY_HAPP_CONFIG: SubscriptionHappConfig = {
     subscription_auto_update_open_enable: '',
     subscription_ping_onopen_enabled: '',
     color_profile: '',
+    profile_flag: '',
     advanced_parameters: [],
 }
 
@@ -59,6 +61,7 @@ type HappConfigDraft = {
     autoUpdateOnOpen: '' | '0' | '1'
     pingOnOpen: '' | '0' | '1'
     colorProfile: string
+    profileFlag: string
     advancedParameters: string
 }
 
@@ -175,6 +178,7 @@ const happConfigToDraft = (config: SubscriptionHappConfig): HappConfigDraft => (
     autoUpdateOnOpen: config.subscription_auto_update_open_enable === '0' || config.subscription_auto_update_open_enable === '1' ? config.subscription_auto_update_open_enable : '',
     pingOnOpen: config.subscription_ping_onopen_enabled === '0' || config.subscription_ping_onopen_enabled === '1' ? config.subscription_ping_onopen_enabled : '',
     colorProfile: config.color_profile || '',
+    profileFlag: config.profile_flag || '',
     advancedParameters: (config.advanced_parameters || [])
         .map(param => `${param.key}: ${param.value}`)
         .join('\n'),
@@ -220,6 +224,7 @@ export default function Subscriptions() {
     const [happAutoUpdateOnOpen, setHappAutoUpdateOnOpen] = useState<'' | '0' | '1'>('')
     const [happPingOnOpen, setHappPingOnOpen] = useState<'' | '0' | '1'>('')
     const [happThemeId, setHappThemeId] = useState('')
+    const [happProfileFlag, setHappProfileFlag] = useState('')
     const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
@@ -377,6 +382,7 @@ export default function Subscriptions() {
         setHappAutoUpdateOnOpen(draft.autoUpdateOnOpen)
         setHappPingOnOpen(draft.pingOnOpen)
         setHappThemeId(resolveHappThemeId(draft.colorProfile))
+        setHappProfileFlag(draft.profileFlag)
         setHappAdvancedParameters(draft.advancedParameters)
         setHappConfigOpen(true)
     }
@@ -464,6 +470,7 @@ export default function Subscriptions() {
                 subscription_auto_update_open_enable: happAutoUpdateOnOpen,
                 subscription_ping_onopen_enabled: happPingOnOpen,
                 color_profile: resolveHappThemeValue(happThemeId),
+                profile_flag: happProfileFlag.trim(),
                 advanced_parameters: advancedParameters,
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
@@ -664,7 +671,11 @@ export default function Subscriptions() {
     }
 
     const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
-    const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
+    const buildShadowrocketLink = (token: string, name: string) => {
+        const url = new URL(subLink(token))
+        url.searchParams.set('client', 'shadowrocket')
+        return `sub://${toBase64(url.toString())}#${encodeURIComponent(name)}`
+    }
     const buildHappLink = (token: string) => {
         const url = new URL(subLink(token))
         url.searchParams.set('client', 'happ')
@@ -674,7 +685,7 @@ export default function Subscriptions() {
         sub.token
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-                { id: 'happ', label: 'Happ', link: happEncrypted.token === sub.token && happEncrypted.link ? happEncrypted.link : buildHappLink(sub.token) },
+                { id: 'happ', label: 'Happ', link: happEncrypted.token === sub.token && happEncrypted.link ? happEncrypted.link : buildHappLink(sub.token), loading: happEncrypted.token === sub.token && happEncrypted.loading },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
             ]
             : []
@@ -1099,6 +1110,26 @@ export default function Subscriptions() {
                     </div>
 
                     <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Profile Flag</label>
+                        <select
+                            value={happProfileFlag}
+                            onChange={e => setHappProfileFlag(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            <option value="">None</option>
+                            {COUNTRIES.map(c => {
+                                const emoji = countryFlagEmoji(c.code)
+                                return (
+                                    <option key={c.code} value={emoji}>
+                                        {emoji} {c.code} · {c.name}
+                                    </option>
+                                )
+                            })}
+                        </select>
+                        <p className="mt-1 text-xs text-slate-500">Prepended to each proxy name. Happ and Shadowrocket use the first emoji as the server icon.</p>
+                    </div>
+
+                    <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">color-profile</label>
                         <select
                             value={happThemeId}
@@ -1163,7 +1194,6 @@ export default function Subscriptions() {
                 title={`${modalState.data?.name || ''}`}
                 link={modalState.data?.token ? subLink(modalState.data.token) : ''}
                 linkVariants={modalState.data ? getSubscriptionLinkVariants(modalState.data) : undefined}
-                loading={happEncrypted.loading}
             />
 
             <ConfirmModal

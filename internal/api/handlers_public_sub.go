@@ -140,10 +140,19 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		s.subscriptionLimiter.record(token)
 	}
 
-	happParams := s.happSubscriptionParamsForRequest(r, token)
+	happParams, happFlag := s.happSubscriptionParamsForRequest(r, token)
+	profileFlag := happFlag
+	if profileFlag == "" && isShadowrocketRequest(r) {
+		if cfg, cfgErr := s.store.GetSubscriptionHappConfig(r.Context()); cfgErr == nil {
+			profileFlag = cfg.ProfileFlag
+		}
+	}
 	cacheKey := "sub:" + token
-	if len(happParams) > 0 {
+	if happParams != nil {
 		cacheKey += ":happ:" + happSubscriptionParamsCacheKey(happParams)
+	}
+	if profileFlag != "" {
+		cacheKey += ":flag:" + profileFlag
 	}
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
@@ -172,6 +181,14 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			metaCopy := v
 			metaMap[k] = &metaCopy
 		}
+	}
+
+	proxyDisplayName := func(username, alias string) string {
+		name := subscriptionMemberDisplayName(username, alias)
+		if profileFlag != "" {
+			return profileFlag + name
+		}
+		return name
 	}
 
 	for _, member := range memberRows {
@@ -238,7 +255,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 			switch inbType {
 			case "vless":
-				link, buildErr = buildVlessLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildVlessLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "vmess":
 				infoCopy := userInfo
 				if userMeta != nil {
@@ -249,17 +266,17 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 						infoCopy.VmessAlterID = userMeta.VmessAlterID
 					}
 				}
-				link, buildErr = buildVmessLink(subscriptionMemberDisplayName(username, member.Alias), &infoCopy, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildVmessLink(proxyDisplayName(username, member.Alias), &infoCopy, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "trojan":
-				link, buildErr = buildTrojanLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildTrojanLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "hysteria2":
-				link, buildErr = buildHysteria2Link(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
+				link, buildErr = buildHysteria2Link(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
 			case "shadowsocks":
-				link, buildErr = buildShadowsocksLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
+				link, buildErr = buildShadowsocksLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
 			case "anytls":
-				link, buildErr = buildAnyTLSLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildAnyTLSLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
 			case "naive":
-				link, buildErr = buildNaiveLink(subscriptionMemberDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				link, buildErr = buildNaiveLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
 			}
 
 			if buildErr == nil && link != "" {
@@ -299,14 +316,14 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
 }
 
-func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string) []happSubscriptionParam {
+func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string) ([]happSubscriptionParam, string) {
 	if r == nil {
-		return nil
+		return nil, ""
 	}
 	isHapp := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "happ") ||
 		strings.Contains(strings.ToLower(r.UserAgent()), "happ")
 	if !isHapp {
-		return nil
+		return nil, ""
 	}
 
 	params := make([]happSubscriptionParam, 0, 8)
@@ -327,7 +344,7 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 
 	config, err := s.store.GetSubscriptionHappConfig(r.Context())
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 
 	appendParam("providerid", config.ProviderID)
@@ -344,7 +361,12 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 		}
 		appendParam(param.Key, value)
 	}
-	return params
+	return params, config.ProfileFlag
+}
+
+func isShadowrocketRequest(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "shadowrocket") ||
+		strings.Contains(strings.ToLower(r.UserAgent()), "shadowrocket")
 }
 
 func appendSubscriptionTokenToURL(value string, token string) string {
