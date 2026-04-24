@@ -674,9 +674,8 @@ export default function Subscriptions() {
         sub.token
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-                { id: 'happ', label: 'Happ', link: buildHappLink(sub.token) },
+                { id: 'happ', label: 'Happ', link: happEncrypted.token === sub.token && happEncrypted.link ? happEncrypted.link : buildHappLink(sub.token) },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
-                { id: 'happ-encrypted', label: 'Happ 🔒', link: happEncrypted.token === sub.token ? happEncrypted.link : '' },
             ]
             : []
     )
@@ -1164,6 +1163,7 @@ export default function Subscriptions() {
                 title={`${modalState.data?.name || ''}`}
                 link={modalState.data?.token ? subLink(modalState.data.token) : ''}
                 linkVariants={modalState.data ? getSubscriptionLinkVariants(modalState.data) : undefined}
+                loading={happEncrypted.loading}
             />
 
             <ConfirmModal
