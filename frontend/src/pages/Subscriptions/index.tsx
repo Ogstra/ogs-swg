@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { COUNTRIES, countryFlagEmoji } from '../../data/countries'
+import { COUNTRIES, countryFlagEmoji } from '../../utils/countries'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Subscription, SubscriptionDefaults, SubscriptionHappConfig } from '../../services/api'
 import { useToast } from '../../context/ToastContext'
