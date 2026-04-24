@@ -1281,6 +1281,15 @@ export const api = {
         await handleResponse(res, 'Failed to update Happ config');
         return res.json();
     },
+    encryptHappLink: async (url: string): Promise<{ encrypted_url: string }> => {
+        const res = await fetch('/api/happ/encrypt-link', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ url }),
+        });
+        await handleResponse(res, 'Failed to encrypt Happ link');
+        return res.json();
+    },
     createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> => {
         const res = await fetch('/api/subscriptions', {
             method: 'POST',

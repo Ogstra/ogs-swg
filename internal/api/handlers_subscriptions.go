@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"regexp"
@@ -741,4 +743,86 @@ func (s *Server) handleRegenerateSubscriptionToken(w http.ResponseWriter, r *htt
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"token": token})
+}
+
+func (s *Server) handleEncryptHappLink(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	req.URL = strings.TrimSpace(req.URL)
+	if req.URL == "" {
+		http.Error(w, "url is required", http.StatusBadRequest)
+		return
+	}
+	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
+		http.Error(w, "url must be http(s)", http.StatusBadRequest)
+		return
+	}
+
+	outBody, err := json.Marshal(map[string]string{"url": req.URL})
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+
+	outReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://crypto.happ.su/api-v2.php", bytes.NewReader(outBody))
+	if err != nil {
+		http.Error(w, "Internal error", http.StatusInternalServerError)
+		return
+	}
+	outReq.Header.Set("Content-Type", "application/json")
+	outReq.Header.Set("Accept", "application/json, text/plain")
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(outReq)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Happ crypto API failed"})
+		return
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Happ crypto API failed"})
+		return
+	}
+
+	// Attempt JSON decode first
+	var parsed struct {
+		URL          string `json:"url"`
+		EncryptedURL string `json:"encrypted_url"`
+		Result       string `json:"result"`
+		Data         string `json:"data"`
+	}
+	candidate := ""
+	if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
+		for _, v := range []string{parsed.URL, parsed.EncryptedURL, parsed.Result, parsed.Data} {
+			if v != "" {
+				candidate = v
+				break
+			}
+		}
+	}
+	if candidate == "" {
+		candidate = strings.TrimSpace(string(bodyBytes))
+	}
+
+	if !strings.HasPrefix(candidate, "happ://crypt5/") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]string{"error": "unexpected response from Happ crypto API"})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"encrypted_url": candidate})
 }

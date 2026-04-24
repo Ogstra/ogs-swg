@@ -357,6 +357,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/subscriptions/defaults", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscriptionDefaults)))
 	protected.HandleFunc("GET /api/subscriptions/happ-config", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscriptionHappConfig)))
 	protected.HandleFunc("PUT /api/subscriptions/happ-config", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscriptionHappConfig)))
+	protected.HandleFunc("POST /api/happ/encrypt-link", s.secure(s.requirePerm(canReadUsers, s.handleEncryptHappLink)))
 	protected.HandleFunc("GET /api/subscriptions/{id}", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscription)))
 	protected.HandleFunc("PUT /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscription)))
 	protected.HandleFunc("DELETE /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteSubscription)))
