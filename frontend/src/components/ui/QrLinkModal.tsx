@@ -8,6 +8,7 @@ interface LinkVariant {
     id: string
     label: string
     link: string
+    loading?: boolean
 }
 
 interface Props {
@@ -33,6 +34,7 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
         : [{ id: 'default', label: 'Link', link }]
     const selectedVariant = variants.find(variant => variant.id === selectedVariantId) || variants[0]
     const activeLink = selectedVariant?.link || link || ''
+    const isActiveLoading = loading || !!selectedVariant?.loading
 
     useEffect(() => {
         setSelectedVariantId(variants[0]?.id || 'default')
@@ -95,7 +97,7 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
                     </div>
                 ) : (
                     <div className="relative p-4 bg-white rounded-xl shadow-lg w-full">
-                        <div className={loading ? 'blur-sm opacity-70' : ''}>
+                        <div className={isActiveLoading ? 'blur-sm opacity-70' : ''}>
                             <QRCode
                                 size={256}
                                 style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
@@ -103,7 +105,7 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
                                 viewBox="0 0 256 256"
                             />
                         </div>
-                        {loading && (
+                        {isActiveLoading && (
                             <div className="absolute inset-0 flex items-center justify-center">
                                 <div className="w-8 h-8 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
                             </div>
@@ -116,7 +118,7 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
                     <div className="flex gap-2">
                         <input
                             readOnly
-                            value={loading ? 'Loading…' : activeLink}
+                            value={isActiveLoading ? 'Loading…' : activeLink}
                             className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-xs text-slate-400 font-mono focus:outline-none"
                         />
                         <Button
@@ -124,7 +126,7 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
                             variant="secondary"
                             onClick={handleCopy}
                             icon={copied ? <Check size={14} /> : <Copy size={14} />}
-                            disabled={!activeLink || loading}
+                            disabled={!activeLink || isActiveLoading}
                         >
                             {copied ? 'Copied' : 'Copy'}
                         </Button>

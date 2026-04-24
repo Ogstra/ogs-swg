@@ -405,6 +405,7 @@ type SubscriptionHappConfig struct {
 	AutoUpdateOnOpen   string                      `json:"subscription_auto_update_open_enable"`
 	PingOnOpen         string                      `json:"subscription_ping_onopen_enabled"`
 	ColorProfile       string                      `json:"color_profile"`
+	ProfileFlag        string                      `json:"profile_flag"`
 	AdvancedParameters []SubscriptionHappParameter `json:"advanced_parameters"`
 }
 

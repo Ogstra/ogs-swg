@@ -70,6 +70,7 @@ type SubscriptionHappConfigRequest struct {
 	AutoUpdateOnOpen   string                             `json:"subscription_auto_update_open_enable"`
 	PingOnOpen         string                             `json:"subscription_ping_onopen_enabled"`
 	ColorProfile       string                             `json:"color_profile"`
+	ProfileFlag        string                             `json:"profile_flag"`
 	AdvancedParameters []SubscriptionHappParameterRequest `json:"advanced_parameters"`
 }
 
@@ -346,6 +347,7 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 		AutoUpdateOnOpen:   autoUpdateOnOpen,
 		PingOnOpen:         pingOnOpen,
 		ColorProfile:       colorProfile,
+		ProfileFlag:        strings.TrimSpace(req.ProfileFlag),
 		AdvancedParameters: advanced,
 	}, nil
 }
