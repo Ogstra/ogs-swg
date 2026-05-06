@@ -290,11 +290,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if got := happRec.Header().Get("fallback-url"); got != "https://fallback.example.com/s/happ-token" {
 		t.Fatalf("happ fallback-url header=%q", got)
 	}
-	happBody, err := base64.StdEncoding.DecodeString(strings.TrimSpace(happRec.Body.String()))
-	if err != nil {
-		t.Fatalf("decode happ body: %v", err)
-	}
-	decoded := string(happBody)
+	decoded := happRec.Body.String()
 	for _, want := range []string{
 		"#providerid provider-test-id",
 		"#hide-settings: 1",
