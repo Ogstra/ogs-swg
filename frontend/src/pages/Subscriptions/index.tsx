@@ -94,6 +94,11 @@ export default function Subscriptions() {
         queryFn: () => api.getSubscriptionDomain(),
         enabled: canWriteUsers,
     })
+    const cfWorkerURLQuery = useQuery({
+        queryKey: ['settings-cf-worker-url'],
+        queryFn: () => api.getCFWorkerURL(),
+        enabled: canWriteUsers,
+    })
     const defaultsQuery = useQuery({
         queryKey: ['subscription-defaults'],
         queryFn: () => api.getSubscriptionDefaults(),
@@ -113,6 +118,7 @@ export default function Subscriptions() {
         })
         : sortedUsersInfo
     const subDomain = domainQuery.data || window.location.host
+    const cfWorkerURL = cfWorkerURLQuery.data?.trim() || ''
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const sortedSubs = [...subs].sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1
@@ -294,8 +300,7 @@ export default function Subscriptions() {
             return
         }
         try {
-            const protocol = window.location.protocol
-            const link = `${protocol}//${subDomain}/s/${token}`
+            const link = subLink(token)
             if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(link)
             } else {
@@ -431,7 +436,12 @@ export default function Subscriptions() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
-    const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
+    const subLink = (token: string) => {
+        if (cfWorkerURL) {
+            return `${cfWorkerURL}/s/${token}`
+        }
+        return `${window.location.protocol}//${subDomain}/s/${token}`
+    }
     const buildShadowrocketLink = (token: string, name: string) => `sub://${toBase64(subLink(token))}#${encodeURIComponent(name)}`
     // Product rules currently support only Direct and Shadowrocket in this modal.
     const getSubscriptionLinkVariants = (sub: Subscription) => (
