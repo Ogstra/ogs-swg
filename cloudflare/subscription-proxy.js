@@ -26,19 +26,35 @@ export default {
     const url = new URL(request.url)
     const targetURL = origin + url.pathname + url.search
 
+    // Explicitly copy request headers so client headers (User-Agent, X-Hwid, etc.)
+    // reach the panel intact for Happ/Shadowrocket detection.
+    const reqHeaders = new Headers()
+    for (const [key, value] of request.headers.entries()) {
+      if (key.toLowerCase() === 'host') continue
+      reqHeaders.set(key, value)
+    }
+
     const proxyRequest = new Request(targetURL, {
       method: request.method,
-      headers: request.headers,
+      headers: reqHeaders,
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
       redirect: 'follow',
     })
 
     try {
       const response = await fetch(proxyRequest)
+
+      // Explicitly copy response headers so all custom subscription headers
+      // (profile-title, subscription-userinfo, Happ params, etc.) pass through.
+      const resHeaders = new Headers()
+      for (const [key, value] of response.headers.entries()) {
+        resHeaders.set(key, value)
+      }
+
       return new Response(response.body, {
         status: response.status,
         statusText: response.statusText,
-        headers: response.headers,
+        headers: resHeaders,
       })
     } catch (err) {
       return new Response('Proxy error: ' + err.message, { status: 502 })
