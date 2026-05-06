@@ -2,7 +2,7 @@
 
 Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
-<img width="3024" height="1714" alt="image" src="https://github.com/user-attachments/assets/9fca6d02-1f95-406b-a59e-0127b2c693ae" />
+<img max-width="3024" max-height="1714" alt="image" src="https://github.com/user-attachments/assets/2f80f4c3-20fe-49a3-901c-f84586301cde" />
 
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://swg-demo.ogstra.com/)
 

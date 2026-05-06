@@ -1337,4 +1337,18 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update subscription domain');
     },
+    getCFWorkerURL: async (): Promise<string> => {
+        const res = await fetch('/api/settings/cf-worker-url', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch CF Worker URL');
+        const data = await res.json();
+        return data.cf_worker_url || '';
+    },
+    updateCFWorkerURL: async (url: string): Promise<void> => {
+        const res = await fetch('/api/settings/cf-worker-url', {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ cf_worker_url: url }),
+        });
+        await handleResponse(res, 'Failed to update CF Worker URL');
+    },
 };
