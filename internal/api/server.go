@@ -328,6 +328,8 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/settings/public-ip", s.secure(s.requirePerm(canWriteSettings, s.handleUpdatePublicIP)))
 	protected.HandleFunc("GET /api/settings/subscription-domain", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionDomain)))
 	protected.HandleFunc("PUT /api/settings/subscription-domain", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateSubscriptionDomain)))
+	protected.HandleFunc("GET /api/settings/cf-worker-url", s.secure(s.requirePerm(canReadSettings, s.handleGetCFWorkerURL)))
+	protected.HandleFunc("PUT /api/settings/cf-worker-url", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateCFWorkerURL)))
 	protected.HandleFunc("POST /api/sampler/run", s.secure(s.requirePerm(canWriteSettings, s.handleRunSampler)))
 	protected.HandleFunc("GET /api/sampler/history", s.secure(s.requirePerm(canReadSettings, s.handleSamplerHistory)))
 	protected.HandleFunc("GET /api/subscription-requests/history", s.secure(s.requirePerm(canReadSettings, s.handleSubscriptionRequestHistory)))
