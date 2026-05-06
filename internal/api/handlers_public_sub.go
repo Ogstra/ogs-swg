@@ -289,6 +289,27 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	for _, param := range happParams {
 		responseLines = append(responseLines, happSubscriptionBodyLine(param))
 	}
+	// Embed standard subscription metadata as body lines for Happ clients so they
+	// remain accessible even when HTTP response headers are stripped by proxies.
+	if happParams != nil {
+		if title := strings.TrimSpace(sub.Name); title != "" {
+			responseLines = append(responseLines, "#profile-title: "+title)
+		}
+		userinfoParts := []string{
+			fmt.Sprintf("upload=%d", totalUp),
+			fmt.Sprintf("download=%d", totalDown),
+			fmt.Sprintf("total=%d", totalLimit),
+		}
+		responseLines = append(responseLines, "#subscription-userinfo: "+strings.Join(userinfoParts, "; "))
+		intervalVal := int64(0)
+		if sub.ProfileUpdateIntervalHours.Valid {
+			intervalVal = sub.ProfileUpdateIntervalHours.Int64
+		}
+		responseLines = append(responseLines, fmt.Sprintf("#profile-update-interval: %d", intervalVal))
+		if int64ToBool(sub.UpdateAlways) {
+			responseLines = append(responseLines, "#update-always: true")
+		}
+	}
 	responseLines = append(responseLines, links...)
 	joined := strings.Join(responseLines, "\n")
 	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(joined)))
