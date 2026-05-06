@@ -3,10 +3,12 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -153,6 +155,37 @@ func waitForCondition(t *testing.T, timeout time.Duration, msg string, condition
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal(msg)
+}
+
+func TestHandleUpdateCFWorkerURL_PersistsToConfigFile(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &core.Config{
+		EnableSingbox: true,
+		ConfigPath:    configPath,
+	}
+	server := NewServer(nil, cfg, nil)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/cf-worker-url", bytes.NewBufferString(`{"cf_worker_url":"https://proxy.example.workers.dev/"}`))
+	rec := httptest.NewRecorder()
+	server.handleUpdateCFWorkerURL(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if cfg.CFWorkerURL != "https://proxy.example.workers.dev" {
+		t.Fatalf("config CFWorkerURL=%q", cfg.CFWorkerURL)
+	}
+
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	var saved map[string]any
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatalf("Unmarshal saved config: %v", err)
+	}
+	if got := saved["cf_worker_url"]; got != "https://proxy.example.workers.dev" {
+		t.Fatalf("saved cf_worker_url=%v", got)
+	}
 }
 
 func TestHandleRestartService_SingboxDispatchesAsync(t *testing.T) {
