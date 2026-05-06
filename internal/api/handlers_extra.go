@@ -1011,8 +1011,7 @@ func (s *Server) handleUpdateCFWorkerURL(w http.ResponseWriter, r *http.Request)
 	// Validate: must be empty or a valid http(s) URL
 	if raw != "" {
 		if !strings.HasPrefix(raw, "https://") && !strings.HasPrefix(raw, "http://") {
-			http.Error(w, "cf_worker_url must be a valid http(s) URL or empty", http.StatusBadRequest)
-			return
+			raw = "https://" + raw
 		}
 		raw = strings.TrimRight(raw, "/")
 	}

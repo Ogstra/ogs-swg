@@ -188,6 +188,25 @@ func TestHandleUpdateCFWorkerURL_PersistsToConfigFile(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateCFWorkerURL_DefaultsMissingSchemeToHTTPS(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.json")
+	cfg := &core.Config{
+		EnableSingbox: true,
+		ConfigPath:    configPath,
+	}
+	server := NewServer(nil, cfg, nil)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings/cf-worker-url", bytes.NewBufferString(`{"cf_worker_url":"proxy.example.workers.dev/"}`))
+	rec := httptest.NewRecorder()
+	server.handleUpdateCFWorkerURL(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if cfg.CFWorkerURL != "https://proxy.example.workers.dev" {
+		t.Fatalf("config CFWorkerURL=%q", cfg.CFWorkerURL)
+	}
+}
+
 func TestHandleRestartService_SingboxDispatchesAsync(t *testing.T) {
 	prevDelay := detachedServiceActionDelay
 	detachedServiceActionDelay = 0
