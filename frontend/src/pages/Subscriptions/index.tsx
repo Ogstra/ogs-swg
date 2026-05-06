@@ -234,6 +234,11 @@ export default function Subscriptions() {
         queryFn: () => api.getSubscriptionDomain(),
         enabled: canWriteUsers,
     })
+    const cfWorkerURLQuery = useQuery({
+        queryKey: ['settings-cf-worker-url'],
+        queryFn: () => api.getCFWorkerURL(),
+        enabled: canWriteUsers,
+    })
     const defaultsQuery = useQuery({
         queryKey: ['subscription-defaults'],
         queryFn: () => api.getSubscriptionDefaults(),
@@ -267,6 +272,7 @@ export default function Subscriptions() {
         return 0
     })
     const subDomain = domainQuery.data || window.location.host
+    const cfWorkerURL = cfWorkerURLQuery.data?.trim() || ''
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const happConfig = happConfigQuery.data || EMPTY_HAPP_CONFIG
 
@@ -519,8 +525,7 @@ export default function Subscriptions() {
             return
         }
         try {
-            const protocol = window.location.protocol
-            const link = `${protocol}//${subDomain}/s/${token}`
+            const link = subLink(token)
             if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(link)
             } else {
@@ -670,7 +675,12 @@ export default function Subscriptions() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
-    const subLink = (token: string) => `${window.location.protocol}//${subDomain}/s/${token}`
+    const subLink = (token: string) => {
+        if (cfWorkerURL) {
+            return `${cfWorkerURL}/s/${token}`
+        }
+        return `${window.location.protocol}//${subDomain}/s/${token}`
+    }
     const buildShadowrocketLink = (token: string, name: string) => {
         const url = new URL(subLink(token))
         url.searchParams.set('client', 'shadowrocket')

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, RefreshCw, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { Card } from '../../../components/ui/Card'
 import { Button } from '../../../components/ui/Button'
 import { Badge } from '../../../components/ui/Badge'
@@ -79,6 +79,7 @@ const formatReasonLabel = (reason: string) => {
 
 export default function SecurityTab({ canWriteSettings, success, toastError }: SecurityTabProps) {
     const queryClient = useQueryClient()
+    const [cfWorkerURL, setCFWorkerURL] = useState<string>('')
     const [maxRequests, setMaxRequests] = useState(60)
     const [windowSeconds, setWindowSeconds] = useState(60)
     const [uaFilterEnabled, setUAFilterEnabled] = useState(false)
@@ -89,6 +90,12 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
         note: '',
     })
     const [offset, setOffset] = useState(0)
+
+    const cfWorkerURLQuery = useQuery({
+        queryKey: ['settings-cf-worker-url'],
+        queryFn: () => api.getCFWorkerURL(),
+        placeholderData: previousData => previousData,
+    })
 
     const settingsQuery = useQuery({
         queryKey: ['subscription-protection'],
@@ -110,12 +117,30 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
     })
 
     useEffect(() => {
+        setCFWorkerURL(cfWorkerURLQuery.data || '')
+    }, [cfWorkerURLQuery.data])
+
+    useEffect(() => {
         if (!settingsQuery.data) return
         setMaxRequests(Math.max(1, settingsQuery.data.max_requests || 60))
         setWindowSeconds(Math.max(1, settingsQuery.data.window_seconds || 60))
         setUAFilterEnabled(!!settingsQuery.data.ua_filter_enabled)
         setSocialFetchersBlockEnabled(!!settingsQuery.data.social_fetchers_block_enabled)
     }, [settingsQuery.data])
+
+    const handleSaveCFWorkerURL = async () => {
+        if (!canWriteSettings) {
+            toastError('No write permission for settings')
+            return
+        }
+        try {
+            await api.updateCFWorkerURL(cfWorkerURL.trim())
+            await queryClient.invalidateQueries({ queryKey: ['settings-cf-worker-url'] })
+            success('CF Worker URL saved')
+        } catch (err) {
+            toastError('Failed to save CF Worker URL: ' + err)
+        }
+    }
 
     const saveSettingsMutation = useMutation({
         mutationFn: async () => api.updateSubscriptionProtection({
@@ -193,6 +218,35 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
 
     return (
         <div className="space-y-4 sm:space-y-6">
+            <Card title="Subscription Proxy">
+                <div className="space-y-3">
+                    <p className="text-sm text-slate-400">
+                        Route subscription links through a Cloudflare Worker to bypass firewalls that sinkhole the server's IP or domain. Leave empty to use the direct server address.
+                    </p>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">
+                            CF Worker URL
+                        </label>
+                        <input
+                            type="text"
+                            value={cfWorkerURL}
+                            onChange={e => setCFWorkerURL(e.target.value)}
+                            disabled={!canWriteSettings}
+                            placeholder="https://my-sub-proxy.myaccount.workers.dev"
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">
+                            When set, all subscription links use this URL as base. Empty = disabled.
+                        </p>
+                    </div>
+                    <div className="flex justify-end">
+                        <Button onClick={handleSaveCFWorkerURL} size="sm" icon={<Save size={16} />} disabled={!canWriteSettings}>
+                            Save
+                        </Button>
+                    </div>
+                </div>
+            </Card>
+
             <Card
                 title="Protection Settings"
                 action={settingsQuery.isFetching ? <RefreshCw size={16} className="animate-spin text-slate-400" /> : undefined}

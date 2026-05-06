@@ -988,6 +988,42 @@ func (s *Server) handleUpdateSubscriptionDomain(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleGetCFWorkerURL(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"cf_worker_url": s.config.CFWorkerURL})
+}
+
+func (s *Server) handleUpdateCFWorkerURL(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSingbox(w) {
+		return
+	}
+	var payload struct {
+		CFWorkerURL string `json:"cf_worker_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return
+	}
+	raw := strings.TrimSpace(payload.CFWorkerURL)
+	// Validate: must be empty or a valid http(s) URL
+	if raw != "" {
+		if !strings.HasPrefix(raw, "https://") && !strings.HasPrefix(raw, "http://") {
+			http.Error(w, "cf_worker_url must be a valid http(s) URL or empty", http.StatusBadRequest)
+			return
+		}
+		raw = strings.TrimRight(raw, "/")
+	}
+	s.config.CFWorkerURL = raw
+	if err := s.config.SaveAppConfig(); err != nil {
+		http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
 func (s *Server) handleBackupConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
