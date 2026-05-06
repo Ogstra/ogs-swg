@@ -345,8 +345,7 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 	if r == nil {
 		return nil, ""
 	}
-	isHapp := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "happ") ||
-		strings.Contains(strings.ToLower(r.UserAgent()), "happ")
+	isHapp := isHappRequest(r)
 	if !isHapp {
 		return nil, ""
 	}
@@ -387,6 +386,24 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 		appendParam(param.Key, value)
 	}
 	return params, config.ProfileFlag
+}
+
+func isHappRequest(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("client")), "happ") {
+		return true
+	}
+	if strings.Contains(strings.ToLower(r.UserAgent()), "happ") {
+		return true
+	}
+	for _, header := range []string{"X-Hwid", "X-Device-OS", "X-Ver-OS", "X-Device-Model"} {
+		if strings.TrimSpace(r.Header.Get(header)) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func isShadowrocketRequest(r *http.Request) bool {

@@ -317,6 +317,20 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if got := happUARec.Header().Get("providerid"); got != "provider-test-id" {
 		t.Fatalf("happ UA providerid header=%q", got)
 	}
+
+	// Happ-compatible clients may identify themselves with device/HWID headers
+	// even when the User-Agent is absent or normalized by a proxy.
+	happHWIDReq := httptest.NewRequest(http.MethodGet, "/s/happ-token", nil)
+	happHWIDReq.SetPathValue("token", "happ-token")
+	happHWIDReq.Header.Set("X-Hwid", "test-hwid")
+	happHWIDRec := httptest.NewRecorder()
+	server.handlePublicSubscription(happHWIDRec, happHWIDReq)
+	if got := happHWIDRec.Header().Get("providerid"); got != "provider-test-id" {
+		t.Fatalf("happ HWID providerid header=%q", got)
+	}
+	if got := happHWIDRec.Body.String(); !strings.Contains(got, "#providerid provider-test-id") {
+		t.Fatalf("happ HWID body missing providerid: %q", got)
+	}
 }
 
 func TestHandlePublicSubscription_PreservesSubscriptionMemberOrder(t *testing.T) {
