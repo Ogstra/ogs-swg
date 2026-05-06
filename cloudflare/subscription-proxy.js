@@ -24,6 +24,13 @@ export default {
     const origin = (env && env.PANEL_URL) ? env.PANEL_URL.replace(/\/$/, '') : TARGET_ORIGIN.replace(/\/$/, '')
 
     const url = new URL(request.url)
+    // CF Workers overrides User-Agent on outgoing fetch requests.
+    // If the client is Happ (detected by UA), ensure ?client=happ reaches the panel
+    // so it returns Happ-specific headers and body params regardless of UA forwarding.
+    const incomingUA = request.headers.get('user-agent') || ''
+    if (!url.searchParams.has('client') && incomingUA.toLowerCase().includes('happ')) {
+      url.searchParams.set('client', 'happ')
+    }
     const targetURL = origin + url.pathname + url.search
 
     // Explicitly copy request headers so client headers (User-Agent, X-Hwid, etc.)
