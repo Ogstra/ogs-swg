@@ -290,7 +290,11 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if got := happRec.Header().Get("fallback-url"); got != "https://fallback.example.com/s/happ-token" {
 		t.Fatalf("happ fallback-url header=%q", got)
 	}
-	decoded := happRec.Body.String()
+	happBody, err := base64.StdEncoding.DecodeString(strings.TrimSpace(happRec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode happ body: %v", err)
+	}
+	decoded := string(happBody)
 	for _, want := range []string{
 		"#providerid provider-test-id",
 		"#hide-settings: 1",
@@ -328,7 +332,11 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if got := happHWIDRec.Header().Get("providerid"); got != "provider-test-id" {
 		t.Fatalf("happ HWID providerid header=%q", got)
 	}
-	if got := happHWIDRec.Body.String(); !strings.Contains(got, "#providerid provider-test-id") {
+	happHWIDBody, err := base64.StdEncoding.DecodeString(strings.TrimSpace(happHWIDRec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode happ HWID body: %v", err)
+	}
+	if got := string(happHWIDBody); !strings.Contains(got, "#providerid provider-test-id") {
 		t.Fatalf("happ HWID body missing providerid: %q", got)
 	}
 }

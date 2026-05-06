@@ -312,12 +312,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	responseLines = append(responseLines, links...)
 	joined := strings.Join(responseLines, "\n")
-	body := []byte(joined)
-	if happParams == nil {
-		encoded := make([]byte, base64.StdEncoding.EncodedLen(len(joined)))
-		base64.StdEncoding.Encode(encoded, []byte(joined))
-		body = encoded
-	}
+	body := make([]byte, base64.StdEncoding.EncodedLen(len(joined)))
+	base64.StdEncoding.Encode(body, []byte(joined))
 
 	// total=0 means "no limit" for most clients; only send if we have either sub or individual quotas.
 	if !hasSubQuota && totalLimit == 0 {
