@@ -25,10 +25,14 @@ export default {
 
     const url = new URL(request.url)
     // CF Workers overrides User-Agent on outgoing fetch requests.
-    // If the client is Happ (detected by UA), ensure ?client=happ reaches the panel
-    // so it returns Happ-specific headers and body params regardless of UA forwarding.
+    // If the client is Happ, ensure ?client=happ reaches the panel so it
+    // returns Happ-specific headers and body params even when Workers rewrites
+    // or normalizes User-Agent. Happ-compatible clients commonly send HWID and
+    // device headers while importing subscriptions.
     const incomingUA = request.headers.get('user-agent') || ''
-    if (!url.searchParams.has('client') && incomingUA.toLowerCase().includes('happ')) {
+    const hasHappDeviceHeaders = ['x-hwid', 'x-device-os', 'x-ver-os', 'x-device-model']
+      .some(header => (request.headers.get(header) || '').trim() !== '')
+    if (!url.searchParams.has('client') && (incomingUA.toLowerCase().includes('happ') || hasHappDeviceHeaders)) {
       url.searchParams.set('client', 'happ')
     }
     const targetURL = origin + url.pathname + url.search
