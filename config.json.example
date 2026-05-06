@@ -3,6 +3,8 @@
   "api_key": "",
   "jwt_secret": "",
   "public_ip": "",
+  "subscription_domain": "",
+  "cf_worker_url": "",
   "enable_singbox": true,
   "enable_wireguard": true,
   "use_stats_sampler": true,
