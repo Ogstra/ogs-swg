@@ -376,7 +376,8 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 
 	for _, param := range config.AdvancedParameters {
 		value := param.Value
-		if strings.EqualFold(strings.TrimSpace(param.Key), "fallback-url") {
+		switch strings.ToLower(strings.TrimSpace(param.Key)) {
+		case "fallback-url", "new-url":
 			value = appendSubscriptionTokenToURL(value, token)
 		}
 		appendParam(param.Key, value)
