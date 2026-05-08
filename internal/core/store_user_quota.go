@@ -10,6 +10,13 @@ import (
 	sqlcStore "github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
+// QuotaWindowStart returns the Unix timestamp of the start of the current quota
+// window for the given period string. It is exported so API handlers can use the
+// same window boundary logic when computing display usage.
+func QuotaWindowStart(period string, now time.Time) int64 {
+	return quotaWindowStart(period, now)
+}
+
 func quotaWindowStart(period string, now time.Time) int64 {
 	switch strings.ToLower(strings.TrimSpace(period)) {
 	case "daily":
@@ -276,6 +283,13 @@ func (s *Store) userStillOverOwnQuota(meta *UserMetadata, now time.Time) bool {
 		return false
 	}
 	return overQuota
+}
+
+// SubscriptionUsageWindowStart returns the Unix timestamp of the start of the
+// current quota window for a subscription's period string. Exported for use
+// in API display handlers.
+func SubscriptionUsageWindowStart(period string, now time.Time) int64 {
+	return subscriptionUsageWindowStart(period, now)
 }
 
 func subscriptionUsageWindowStart(period string, now time.Time) int64 {

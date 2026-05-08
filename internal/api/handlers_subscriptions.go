@@ -359,8 +359,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	now := time.Now()
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	now := s.now()
 
 	res := make([]SubscriptionResponse, 0, len(subs))
 	includeSecrets := canManageSubscriptionSecrets(r)
@@ -369,7 +368,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 		members := subscriptionMembersResponseFromStore(memberRows)
 		usedBytes, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), store.GetSubscriptionUsageInRangeParams{
 			SubID: sub.ID,
-			Ts:    startOfMonth.Unix(),
+			Ts:    core.SubscriptionUsageWindowStart(sub.QuotaPeriod.String, now),
 			Ts_2:  now.Unix(),
 		})
 		var token *string
@@ -528,11 +527,10 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	memberRows, _ := s.store.Queries.GetSubscriptionMembers(r.Context(), id)
 	members := subscriptionMembersResponseFromStore(memberRows)
 
-	now := time.Now()
-	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	now := s.now()
 	usedBytes, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), store.GetSubscriptionUsageInRangeParams{
 		SubID: id,
-		Ts:    startOfMonth.Unix(),
+		Ts:    core.SubscriptionUsageWindowStart(sub.QuotaPeriod.String, now),
 		Ts_2:  now.Unix(),
 	})
 	var token *string
