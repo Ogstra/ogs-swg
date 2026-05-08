@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
@@ -687,4 +688,137 @@ func performSubscriptionDefaultsRequest(t *testing.T, server *Server, method, ta
 	rec := httptest.NewRecorder()
 	server.AuthMiddleware(server.Routes()).ServeHTTP(rec, req)
 	return rec
+}
+
+// TestGetSubscription_UsedBytesRespectsQuotaPeriod verifies that the UsedBytes
+// field returned by GET /api/subscriptions/:id uses the subscription's quota
+// period window, not a hardcoded calendar month.
+//
+// Regression: before the fix both handlers always used startOfMonth, so
+// changing a subscription's period from "monthly" to "daily" would show 0
+// used bytes if there was no traffic on the current calendar day (even though
+// traffic existed earlier in the month).
+func TestGetSubscription_UsedBytesRespectsQuotaPeriod(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	// Fix the server clock to a known point: 2026-05-08 12:00 UTC (mid-day).
+	// "Yesterday" for this clock is 2026-05-07 — within the same calendar month
+	// but before today's midnight boundary.
+	fixedNow := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	server.now = func() time.Time { return fixedNow }
+
+	// Create a subscription with "monthly" period and one member.
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "Period Test Bundle",
+		QuotaLimit:  1_000_000,
+		QuotaPeriod: "monthly",
+		Users:       []string{"alice"},
+	})
+
+	// Inject traffic that happened yesterday (2026-05-07 10:00 UTC).
+	// This is within the current calendar month but before today's midnight.
+	yesterday := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	if err := dataStore.AddSample(core.Sample{
+		User:      "alice",
+		Timestamp: yesterday.Unix(),
+		Uplink:    500_000,
+		Downlink:  500_000,
+	}); err != nil {
+		t.Fatalf("AddSample: %v", err)
+	}
+
+	// With "monthly" period the window starts 2026-05-01, so yesterday's
+	// traffic (2026-05-07) falls inside → UsedBytes must be 1_000_000.
+	got := getSubscriptionForTest(t, server, created.ID)
+	if got.UsedBytes != 1_000_000 {
+		t.Fatalf("monthly period: UsedBytes=%d want 1_000_000", got.UsedBytes)
+	}
+
+	// Now change the period to "daily".
+	// Yesterday's traffic is now outside the daily window (today midnight = 2026-05-08 00:00).
+	// UsedBytes must be 0 — no traffic happened today.
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:        "Period Test Bundle",
+		QuotaLimit:  1_000_000,
+		QuotaPeriod: "daily",
+		Users:       []string{"alice"},
+	})
+
+	got = getSubscriptionForTest(t, server, created.ID)
+	if got.UsedBytes != 0 {
+		t.Fatalf("daily period (no traffic today): UsedBytes=%d want 0", got.UsedBytes)
+	}
+
+	// Inject traffic from today (2026-05-08 08:00 UTC) and verify it appears.
+	today := time.Date(2026, 5, 8, 8, 0, 0, 0, time.UTC)
+	if err := dataStore.AddSample(core.Sample{
+		User:      "alice",
+		Timestamp: today.Unix(),
+		Uplink:    200_000,
+		Downlink:  300_000,
+	}); err != nil {
+		t.Fatalf("AddSample today: %v", err)
+	}
+
+	got = getSubscriptionForTest(t, server, created.ID)
+	if got.UsedBytes != 500_000 {
+		t.Fatalf("daily period (traffic today): UsedBytes=%d want 500_000", got.UsedBytes)
+	}
+}
+
+// TestGetSubscriptions_UsedBytesRespectsQuotaPeriod verifies the list endpoint
+// (GET /api/subscriptions) applies the same period-aware window as the single
+// subscription endpoint.
+func TestGetSubscriptions_UsedBytesRespectsQuotaPeriod(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	fixedNow := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	server.now = func() time.Time { return fixedNow }
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "List Period Test",
+		QuotaLimit:  1_000_000,
+		QuotaPeriod: "daily",
+		Users:       []string{"bob"},
+	})
+
+	// Traffic from yesterday — outside the daily window.
+	yesterday := time.Date(2026, 5, 7, 10, 0, 0, 0, time.UTC)
+	if err := dataStore.AddSample(core.Sample{
+		User:      "bob",
+		Timestamp: yesterday.Unix(),
+		Uplink:    400_000,
+		Downlink:  400_000,
+	}); err != nil {
+		t.Fatalf("AddSample: %v", err)
+	}
+
+	// List endpoint — find our subscription by ID.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
+	server.handleGetSubscriptions(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	var list []subscriptionDetailResponse
+	if err := json.NewDecoder(rec.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+
+	var found *subscriptionDetailResponse
+	for i := range list {
+		if list[i].ID == created.ID {
+			found = &list[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("subscription %d not found in list", created.ID)
+	}
+
+	// Daily period with no today traffic → 0.
+	if found.UsedBytes != 0 {
+		t.Fatalf("daily period (no traffic today): UsedBytes=%d want 0", found.UsedBytes)
+	}
 }

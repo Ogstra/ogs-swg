@@ -901,11 +901,14 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		// Stats calculation for user table indicators:
-		// always show current calendar month usage.
+		// Stats calculation for user table indicators.
+		// Traffic (uplink/downlink/total) uses the user's quota period window so the
+		// displayed usage matches what the quota enforcement engine sees.
+		// lastSeen always uses the calendar month so the activity signal is not affected
+		// by quota period changes.
 		now := s.now()
 		startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		combinedSamples, err := s.store.GetCombinedReport(name, startOfMonth.Unix(), now.Unix())
+		combinedSamples, err := s.store.GetCombinedReport(name, core.QuotaWindowStart(period, now), now.Unix())
 		var up, down int64
 		lastSeen := int64(0)
 		if err == nil {
@@ -951,7 +954,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 				if sub.QuotaLimit.Int64 > 0 {
 					subUsed, _ := s.store.Queries.GetSubscriptionUsageInRange(r.Context(), sqlcStore.GetSubscriptionUsageInRangeParams{
 						SubID: sub.ID,
-						Ts:    startOfMonth.Unix(),
+						Ts:    core.SubscriptionUsageWindowStart(sub.QuotaPeriod.String, now),
 						Ts_2:  now.Unix(),
 					})
 					subQuota = &SubQuotaInfo{
