@@ -205,6 +205,7 @@ export default function Subscriptions() {
     const [happConfigOpen, setHappConfigOpen] = useState(false)
 
     const [nameInput, setNameInput] = useState('')
+    const [aliasInput, setAliasInput] = useState('')
     const [quotaGB, setQuotaGB] = useState('0')
     const [selectedProfiles, setSelectedProfiles] = useState<SelectedSubscriptionProfile[]>([])
     const [profileUpdateIntervalEnabled, setProfileUpdateIntervalEnabled] = useState(false)
@@ -331,6 +332,7 @@ export default function Subscriptions() {
             return
         }
         setNameInput('')
+        setAliasInput('')
         setQuotaGB('0')
         setSelectedProfiles(hydrateSubscriptionProfileAliases([]))
         setUserSearch('')
@@ -345,6 +347,7 @@ export default function Subscriptions() {
             return
         }
         setNameInput(sub.name)
+        setAliasInput(sub.alias || '')
         setQuotaGB(sub.quota_limit ? (sub.quota_limit / 1024 ** 3).toFixed(2) : '0')
         setUserSearch('')
         const drafts = getSubscriptionProfileDrafts(sub)
@@ -408,6 +411,7 @@ export default function Subscriptions() {
 
         const payload = {
             name: nameInput.trim(),
+            alias: aliasInput.trim(),
             quota_limit: quotaLimit,
             quota_period: 'monthly' as const,
             users: selectedProfiles.map(profile => profile.username),
@@ -675,6 +679,8 @@ export default function Subscriptions() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
+    const displaySubName = (sub: Subscription) => (sub.alias?.trim() ? sub.alias.trim() : sub.name)
+
     const subLink = (token: string) => {
         if (cfWorkerURL) {
             return `${cfWorkerURL}/s/${token}`
@@ -696,7 +702,7 @@ export default function Subscriptions() {
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
                 { id: 'happ', label: 'Happ', link: happEncrypted.token === sub.token && happEncrypted.link ? happEncrypted.link : buildHappLink(sub.token), loading: happEncrypted.token === sub.token && happEncrypted.loading },
-                { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, sub.name) },
+                { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, displaySubName(sub)) },
             ]
             : []
     )
@@ -807,7 +813,10 @@ export default function Subscriptions() {
                             ) : sortedSubs.map(sub => (
                                 <tr key={sub.id} className="border-b last:border-0 border-slate-800/50 hover:bg-slate-800/20 transition-colors">
                                     <td className="w-[260px] p-4">
-                                        <div className="max-w-[260px] truncate text-white font-medium" title={sub.name}>{sub.name}</div>
+                                        <div className="max-w-[260px] truncate text-white font-medium" title={sub.alias || sub.name}>{displaySubName(sub)}</div>
+                                        {sub.alias?.trim() ? (
+                                            <div className="max-w-[260px] truncate text-xs text-slate-500" title={sub.name}>{sub.name}</div>
+                                        ) : null}
                                     </td>
                                     <td className="p-4">
                                         {(() => {
@@ -858,7 +867,12 @@ export default function Subscriptions() {
                             return (
                                 <div className="p-4 space-y-3">
                                     <div className="flex items-center justify-between gap-3">
-                                        <p className="min-w-0 flex-1 text-white font-semibold truncate">{sub.name}</p>
+                                        <div className="min-w-0 flex-1">
+                                            <p className="text-white font-semibold truncate">{displaySubName(sub)}</p>
+                                            {sub.alias?.trim() ? (
+                                                <p className="text-xs text-slate-500 truncate">{sub.name}</p>
+                                            ) : null}
+                                        </div>
                                         <div className="flex gap-2 shrink-0">
                                             {sub.token && (
                                                 <ActionIconButton onClick={() => openQr(sub)} title="QR Code" disabled={!canWriteUsers}>
@@ -908,11 +922,17 @@ export default function Subscriptions() {
                 }
             >
                 <div className="space-y-4">
-                    <div className="grid grid-cols-3 gap-3">
-                        <div className="col-span-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
                             <label className="block text-sm font-medium text-slate-300 mb-1">Name</label>
                             <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="" />
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">Alias <span className="text-slate-500 text-xs">(optional)</span></label>
+                            <input type="text" value={aliasInput} onChange={e => setAliasInput(e.target.value)} className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500" placeholder="Displayed name (falls back to Name)" />
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                             <label className="block text-sm font-medium text-slate-300 mb-1">
                                 Quota (GB)
