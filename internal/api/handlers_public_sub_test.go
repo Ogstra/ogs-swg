@@ -390,7 +390,13 @@ func TestHandlePublicSubscription_PreservesSubscriptionMemberOrder(t *testing.T)
 	if err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
-	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	allLines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	var lines []string
+	for _, l := range allLines {
+		if !strings.HasPrefix(l, "#") {
+			lines = append(lines, l)
+		}
+	}
 	if len(lines) != 2 {
 		t.Fatalf("decoded lines=%q want two links", string(body))
 	}
@@ -475,10 +481,16 @@ func TestHandlePublicSubscription_UsesSingleCanonicalInboundForLegacyUsers(t *te
 	}
 	decoded := strings.TrimSpace(string(body))
 	lines := strings.Split(decoded, "\n")
-	if len(lines) != 1 {
+	var linkLines []string
+	for _, l := range lines {
+		if !strings.HasPrefix(l, "#") {
+			linkLines = append(linkLines, l)
+		}
+	}
+	if len(linkLines) != 1 {
 		t.Fatalf("decoded body should contain a single canonical link, got %q", decoded)
 	}
-	if !strings.HasPrefix(lines[0], "vless://11111111-1111-1111-1111-111111111111@sub.example.com:443") {
+	if !strings.HasPrefix(linkLines[0], "vless://11111111-1111-1111-1111-111111111111@sub.example.com:443") {
 		t.Fatalf("decoded body = %q; want canonical vless link only", decoded)
 	}
 }
