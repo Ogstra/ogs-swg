@@ -32,7 +32,6 @@ type DashboardPreference struct {
 	DefaultService          string        `json:"default_service"`
 	RefreshMs               int64         `json:"refresh_ms"`
 	DefaultRange            string        `json:"default_range"`
-	ActiveUserWindowMinutes int64         `json:"active_user_window_minutes"`
 	DetailChartTargetPoints int64         `json:"detail_chart_target_points"`
 	CreatedAt               sql.NullInt64 `json:"created_at"`
 	UpdatedAt               sql.NullInt64 `json:"updated_at"`
@@ -90,12 +89,12 @@ type Subscription struct {
 	ID                         int64          `json:"id"`
 	Token                      string         `json:"token"`
 	Name                       string         `json:"name"`
+	Alias                      string         `json:"alias"`
 	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
 	QuotaPeriod                sql.NullString `json:"quota_period"`
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
 	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
 	UpdateAlways               int64          `json:"update_always"`
-	LastRequestAt              sql.NullInt64  `json:"last_request_at"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
 }

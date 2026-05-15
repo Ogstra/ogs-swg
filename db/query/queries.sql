@@ -344,18 +344,20 @@ WHERE user = ? AND ts >= ? AND ts <= ?;
 INSERT INTO subscriptions (
 	token,
 	name,
+	alias,
 	quota_limit,
 	quota_period,
 	reset_day,
 	profile_update_interval_hours,
 	update_always
-) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id;
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id;
 
 -- name: GetSubscriptionByToken :one
 SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
@@ -372,6 +374,7 @@ SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
@@ -388,6 +391,7 @@ SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
@@ -403,6 +407,7 @@ ORDER BY s.created_at DESC;
 UPDATE subscriptions
 SET
 	name = ?,
+	alias = ?,
 	quota_limit = ?,
 	quota_period = ?,
 	reset_day = ?,
@@ -428,6 +433,7 @@ SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,

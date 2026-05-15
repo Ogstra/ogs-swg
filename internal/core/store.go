@@ -232,6 +232,7 @@ func (s *Store) initSchema() error {
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		token TEXT UNIQUE NOT NULL,
 		name TEXT NOT NULL,
+		alias TEXT NOT NULL DEFAULT '',
 		quota_limit INTEGER DEFAULT 0,
 		quota_period TEXT DEFAULT 'monthly',
 		reset_day INTEGER DEFAULT 1,
@@ -337,6 +338,8 @@ func (s *Store) initSchema() error {
 	s.db.Exec(`UPDATE panel_users SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET created_at = strftime('%s','now') WHERE typeof(created_at) != 'integer'`)
 	s.db.Exec(`UPDATE wg_peers SET updated_at = strftime('%s','now') WHERE typeof(updated_at) != 'integer'`)
+	// Upgrade path: add alias to subscriptions for existing rows that predate this feature.
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN alias TEXT NOT NULL DEFAULT '';")
 	// Upgrade path: add quota fields to subscriptions for existing rows that predate this feature.
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_limit INTEGER DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN quota_period TEXT DEFAULT 'monthly';")
