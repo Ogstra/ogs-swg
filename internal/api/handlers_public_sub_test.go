@@ -1885,3 +1885,80 @@ func TestHandlePublicSubscription_IncludesShadowsocksLink(t *testing.T) {
 		t.Fatalf("subscription body missing host/port: %q", string(body))
 	}
 }
+
+func TestHandlePublicSubscription_UsesSubscriptionAliasInProfileTitle(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	// Create subscription with alias set
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "pfm-alias-token",
+		Name:        "canonical-name",
+		Alias:       "Friendly Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/pfm-alias-token", nil)
+	req.SetPathValue("token", "pfm-alias-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	// Profile-Title header must be the alias, not the canonical name
+	if got := rec.Header().Get("Profile-Title"); got != "Friendly Bundle" {
+		t.Fatalf("Profile-Title=%q want %q", got, "Friendly Bundle")
+	}
+
+	// Body must contain #profile-title: Friendly Bundle
+	body, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if !strings.Contains(string(body), "#profile-title: Friendly Bundle") {
+		t.Fatalf("decoded body missing #profile-title line: %q", string(body))
+	}
+
+	// Empty alias falls back to canonical name
+	subID2, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "pfm-noalias-token",
+		Name:        "canonical-name-2",
+		Alias:       "",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription no-alias: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID2,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req2 := httptest.NewRequest(http.MethodGet, "/s/pfm-noalias-token", nil)
+	req2.SetPathValue("token", "pfm-noalias-token")
+	rec2 := httptest.NewRecorder()
+	server.handlePublicSubscription(rec2, req2)
+
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("no-alias status=%d body=%q", rec2.Code, rec2.Body.String())
+	}
+	if got := rec2.Header().Get("Profile-Title"); got != "canonical-name-2" {
+		t.Fatalf("no-alias Profile-Title=%q want %q", got, "canonical-name-2")
+	}
+}
