@@ -61,6 +61,13 @@ func subscriptionMemberDisplayName(username, alias string) string {
 	return username
 }
 
+func subscriptionDisplayName(name, alias string) string {
+	if trimmed := strings.TrimSpace(alias); trimmed != "" {
+		return trimmed
+	}
+	return name
+}
+
 var (
 	subscriptionUserAgentClientPlatformVersionRE = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z][A-Za-z0-9 _.-]{0,31})/([A-Za-z0-9._-]{1,64})`)
 	subscriptionUserAgentProductRE               = regexp.MustCompile(`^\s*([A-Za-z][A-Za-z0-9 _.-]{0,63})/([A-Za-z0-9._-]{1,64})`)
@@ -285,6 +292,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	displayTitle := subscriptionDisplayName(sub.Name, sub.Alias)
+
 	responseLines := make([]string, 0, len(happParams)+len(links))
 	for _, param := range happParams {
 		responseLines = append(responseLines, happSubscriptionBodyLine(param))
@@ -292,7 +301,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	// Embed standard subscription metadata as body lines for Happ clients so they
 	// remain accessible even when HTTP response headers are stripped by proxies.
 	if happParams != nil {
-		if title := strings.TrimSpace(sub.Name); title != "" {
+		if title := strings.TrimSpace(displayTitle); title != "" {
 			responseLines = append(responseLines, "#profile-title: "+title)
 		}
 		userinfoParts := []string{
@@ -323,7 +332,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	// Save to cache (TTL: 2 minutes to protect against flood, but fast enough for normal use)
 	c := cachedSub{
 		Body:                  body,
-		HeaderName:            sub.Name,
+		HeaderName:            displayTitle,
 		HeaderUp:              totalUp,
 		HeaderDown:            totalDown,
 		HeaderTot:             totalLimit,

@@ -30,6 +30,7 @@ type SubscriptionResponse struct {
 	ID                         int64                        `json:"id"`
 	Token                      *string                      `json:"token,omitempty"`
 	Name                       string                       `json:"name"`
+	Alias                      string                       `json:"alias"`
 	QuotaLimit                 int64                        `json:"quota_limit"`
 	QuotaPeriod                string                       `json:"quota_period"`
 	UsedBytes                  int64                        `json:"used_bytes"`
@@ -379,6 +380,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			ID:                         sub.ID,
 			Token:                      token,
 			Name:                       sub.Name,
+			Alias:                      sub.Alias,
 			QuotaLimit:                 sub.QuotaLimit.Int64,
 			QuotaPeriod:                sub.QuotaPeriod.String,
 			UsedBytes:                  usedBytes,
@@ -397,6 +399,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 
 type CreateSubscriptionRequest struct {
 	Name                       string                      `json:"name"`
+	Alias                      string                      `json:"alias"`
 	QuotaLimit                 int64                       `json:"quota_limit"`
 	QuotaPeriod                string                      `json:"quota_period"`
 	Users                      []string                    `json:"users"`
@@ -485,6 +488,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	id, err := s.store.Queries.CreateSubscription(r.Context(), store.CreateSubscriptionParams{
 		Token:                      token,
 		Name:                       req.Name,
+		Alias:                      strings.TrimSpace(req.Alias),
 		QuotaLimit:                 sql.NullInt64{Int64: req.QuotaLimit, Valid: true},
 		QuotaPeriod:                sql.NullString{String: req.QuotaPeriod, Valid: true},
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
@@ -543,6 +547,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		ID:                         sub.ID,
 		Token:                      token,
 		Name:                       sub.Name,
+		Alias:                      sub.Alias,
 		QuotaLimit:                 sub.QuotaLimit.Int64,
 		QuotaPeriod:                sub.QuotaPeriod.String,
 		UsedBytes:                  usedBytes,
@@ -590,6 +595,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 
 	err = s.store.Queries.UpdateSubscription(r.Context(), store.UpdateSubscriptionParams{
 		Name:                       req.Name,
+		Alias:                      strings.TrimSpace(req.Alias),
 		QuotaLimit:                 sql.NullInt64{Int64: req.QuotaLimit, Valid: true},
 		QuotaPeriod:                sql.NullString{String: req.QuotaPeriod, Valid: true},
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
