@@ -15,6 +15,7 @@ import (
 
 type subscriptionMutationRequest struct {
 	Name                       string                      `json:"name"`
+	Alias                      string                      `json:"alias,omitempty"`
 	QuotaLimit                 int64                       `json:"quota_limit"`
 	QuotaPeriod                string                      `json:"quota_period"`
 	Users                      []string                    `json:"users"`
@@ -37,6 +38,7 @@ type subscriptionDetailResponse struct {
 	ID                         int64                       `json:"id"`
 	Token                      *string                     `json:"token"`
 	Name                       string                      `json:"name"`
+	Alias                      string                      `json:"alias"`
 	QuotaLimit                 int64                       `json:"quota_limit"`
 	QuotaPeriod                string                      `json:"quota_period"`
 	UsedBytes                  int64                       `json:"used_bytes"`
@@ -820,5 +822,46 @@ func TestGetSubscriptions_UsedBytesRespectsQuotaPeriod(t *testing.T) {
 	// Daily period with no today traffic → 0.
 	if found.UsedBytes != 0 {
 		t.Fatalf("daily period (no traffic today): UsedBytes=%d want 0", found.UsedBytes)
+	}
+}
+
+func TestSubscriptionAlias_RoundTripThroughCreateAndUpdate(t *testing.T) {
+	server, _ := newPublicSubscriptionTestServer(t)
+
+	created := createSubscriptionForTest(t, server, subscriptionMutationRequest{
+		Name:        "pfm-bundle",
+		Alias:       "Friendly Bundle",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+	})
+
+	got := getSubscriptionForTest(t, server, created.ID)
+	if got.Name != "pfm-bundle" {
+		t.Fatalf("name=%q want pfm-bundle", got.Name)
+	}
+	if got.Alias != "Friendly Bundle" {
+		t.Fatalf("alias=%q want %q", got.Alias, "Friendly Bundle")
+	}
+
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:        "pfm-bundle",
+		Alias:       "  New Alias  ",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+	})
+	updated := getSubscriptionForTest(t, server, created.ID)
+	if updated.Alias != "New Alias" {
+		t.Fatalf("after update alias=%q want %q (trimmed)", updated.Alias, "New Alias")
+	}
+
+	updateSubscriptionForTest(t, server, created.ID, subscriptionMutationRequest{
+		Name:        "pfm-bundle",
+		Alias:       "",
+		QuotaLimit:  0,
+		QuotaPeriod: "monthly",
+	})
+	cleared := getSubscriptionForTest(t, server, created.ID)
+	if cleared.Alias != "" {
+		t.Fatalf("after clear alias=%q want empty", cleared.Alias)
 	}
 }
