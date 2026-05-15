@@ -287,6 +287,7 @@ export interface Subscription {
     id: number;
     token?: string;
     name: string;
+    alias: string;
     quota_limit: number;
     quota_period: string;
     used_bytes: number;
@@ -306,6 +307,7 @@ export interface SubscriptionMember {
 
 export interface SubscriptionMutationRequest {
     name: string;
+    alias?: string;
     quota_limit: number;
     quota_period: string;
     users: string[];
