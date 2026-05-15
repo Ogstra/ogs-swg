@@ -247,17 +247,19 @@ const createSubscription = `-- name: CreateSubscription :one
 INSERT INTO subscriptions (
 	token,
 	name,
+	alias,
 	quota_limit,
 	quota_period,
 	reset_day,
 	profile_update_interval_hours,
 	update_always
-) VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
 `
 
 type CreateSubscriptionParams struct {
 	Token                      string         `json:"token"`
 	Name                       string         `json:"name"`
+	Alias                      string         `json:"alias"`
 	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
 	QuotaPeriod                sql.NullString `json:"quota_period"`
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
@@ -270,6 +272,7 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 	row := q.db.QueryRowContext(ctx, createSubscription,
 		arg.Token,
 		arg.Name,
+		arg.Alias,
 		arg.QuotaLimit,
 		arg.QuotaPeriod,
 		arg.ResetDay,
@@ -595,6 +598,7 @@ SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
@@ -607,19 +611,35 @@ FROM subscriptions s
 ORDER BY s.created_at DESC
 `
 
-func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]Subscription, error) {
+type GetAllSubscriptionsRow struct {
+	ID                         int64          `json:"id"`
+	Token                      string         `json:"token"`
+	Name                       string         `json:"name"`
+	Alias                      string         `json:"alias"`
+	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
+	QuotaPeriod                sql.NullString `json:"quota_period"`
+	ResetDay                   sql.NullInt64  `json:"reset_day"`
+	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
+	UpdateAlways               int64          `json:"update_always"`
+	LastRequestAt              interface{}    `json:"last_request_at"`
+	CreatedAt                  sql.NullInt64  `json:"created_at"`
+	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
+}
+
+func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]GetAllSubscriptionsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getAllSubscriptions)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Subscription
+	var items []GetAllSubscriptionsRow
 	for rows.Next() {
-		var i Subscription
+		var i GetAllSubscriptionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Token,
 			&i.Name,
+			&i.Alias,
 			&i.QuotaLimit,
 			&i.QuotaPeriod,
 			&i.ResetDay,
@@ -1170,6 +1190,7 @@ SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
@@ -1182,13 +1203,29 @@ FROM subscriptions s
 WHERE s.id = ?
 `
 
-func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (Subscription, error) {
+type GetSubscriptionByIDRow struct {
+	ID                         int64          `json:"id"`
+	Token                      string         `json:"token"`
+	Name                       string         `json:"name"`
+	Alias                      string         `json:"alias"`
+	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
+	QuotaPeriod                sql.NullString `json:"quota_period"`
+	ResetDay                   sql.NullInt64  `json:"reset_day"`
+	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
+	UpdateAlways               int64          `json:"update_always"`
+	LastRequestAt              interface{}    `json:"last_request_at"`
+	CreatedAt                  sql.NullInt64  `json:"created_at"`
+	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
+}
+
+func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (GetSubscriptionByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getSubscriptionByID, id)
-	var i Subscription
+	var i GetSubscriptionByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Token,
 		&i.Name,
+		&i.Alias,
 		&i.QuotaLimit,
 		&i.QuotaPeriod,
 		&i.ResetDay,
@@ -1206,6 +1243,7 @@ SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
@@ -1218,13 +1256,29 @@ FROM subscriptions s
 WHERE s.token = ?
 `
 
-func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Subscription, error) {
+type GetSubscriptionByTokenRow struct {
+	ID                         int64          `json:"id"`
+	Token                      string         `json:"token"`
+	Name                       string         `json:"name"`
+	Alias                      string         `json:"alias"`
+	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
+	QuotaPeriod                sql.NullString `json:"quota_period"`
+	ResetDay                   sql.NullInt64  `json:"reset_day"`
+	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
+	UpdateAlways               int64          `json:"update_always"`
+	LastRequestAt              interface{}    `json:"last_request_at"`
+	CreatedAt                  sql.NullInt64  `json:"created_at"`
+	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
+}
+
+func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (GetSubscriptionByTokenRow, error) {
 	row := q.db.QueryRowContext(ctx, getSubscriptionByToken, token)
-	var i Subscription
+	var i GetSubscriptionByTokenRow
 	err := row.Scan(
 		&i.ID,
 		&i.Token,
 		&i.Name,
+		&i.Alias,
 		&i.QuotaLimit,
 		&i.QuotaPeriod,
 		&i.ResetDay,
@@ -1296,9 +1350,10 @@ LIMIT ? OFFSET ?
 `
 
 type GetSubscriptionRequestHistoryParams struct {
-	SubID  int64 `json:"sub_id"`
-	Limit  int64 `json:"limit"`
-	Offset int64 `json:"offset"`
+	Column1 interface{} `json:"column_1"`
+	SubID   int64       `json:"sub_id"`
+	Limit   int64       `json:"limit"`
+	Offset  int64       `json:"offset"`
 }
 
 type GetSubscriptionRequestHistoryRow struct {
@@ -1325,7 +1380,7 @@ type GetSubscriptionRequestHistoryRow struct {
 
 func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, arg GetSubscriptionRequestHistoryParams) ([]GetSubscriptionRequestHistoryRow, error) {
 	rows, err := q.db.QueryContext(ctx, getSubscriptionRequestHistory,
-		arg.SubID,
+		arg.Column1,
 		arg.SubID,
 		arg.Limit,
 		arg.Offset,
@@ -1396,6 +1451,7 @@ SELECT
 	s.id,
 	s.token,
 	s.name,
+	s.alias,
 	s.quota_limit,
 	s.quota_period,
 	s.reset_day,
@@ -1409,19 +1465,35 @@ INNER JOIN subscription_users su ON su.sub_id = s.id
 WHERE su.user_name = ?
 `
 
-func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) ([]Subscription, error) {
+type GetSubscriptionsForUserRow struct {
+	ID                         int64          `json:"id"`
+	Token                      string         `json:"token"`
+	Name                       string         `json:"name"`
+	Alias                      string         `json:"alias"`
+	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
+	QuotaPeriod                sql.NullString `json:"quota_period"`
+	ResetDay                   sql.NullInt64  `json:"reset_day"`
+	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
+	UpdateAlways               int64          `json:"update_always"`
+	LastRequestAt              interface{}    `json:"last_request_at"`
+	CreatedAt                  sql.NullInt64  `json:"created_at"`
+	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
+}
+
+func (q *Queries) GetSubscriptionsForUser(ctx context.Context, userName string) ([]GetSubscriptionsForUserRow, error) {
 	rows, err := q.db.QueryContext(ctx, getSubscriptionsForUser, userName)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Subscription
+	var items []GetSubscriptionsForUserRow
 	for rows.Next() {
-		var i Subscription
+		var i GetSubscriptionsForUserRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Token,
 			&i.Name,
+			&i.Alias,
 			&i.QuotaLimit,
 			&i.QuotaPeriod,
 			&i.ResetDay,
@@ -2125,6 +2197,7 @@ const updateSubscription = `-- name: UpdateSubscription :exec
 UPDATE subscriptions
 SET
 	name = ?,
+	alias = ?,
 	quota_limit = ?,
 	quota_period = ?,
 	reset_day = ?,
@@ -2136,6 +2209,7 @@ WHERE id = ?
 
 type UpdateSubscriptionParams struct {
 	Name                       string         `json:"name"`
+	Alias                      string         `json:"alias"`
 	QuotaLimit                 sql.NullInt64  `json:"quota_limit"`
 	QuotaPeriod                sql.NullString `json:"quota_period"`
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
@@ -2147,6 +2221,7 @@ type UpdateSubscriptionParams struct {
 func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscriptionParams) error {
 	_, err := q.db.ExecContext(ctx, updateSubscription,
 		arg.Name,
+		arg.Alias,
 		arg.QuotaLimit,
 		arg.QuotaPeriod,
 		arg.ResetDay,

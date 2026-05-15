@@ -386,7 +386,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			Members:                    members,
 			ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 			UpdateAlways:               int64ToBool(sub.UpdateAlways),
-			LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
+			LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
 			UpdatedAt:                  sub.UpdatedAt.Int64,
 		})
@@ -550,7 +550,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		Members:                    members,
 		ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 		UpdateAlways:               int64ToBool(sub.UpdateAlways),
-		LastRequestAt:              nullableInt64Ptr(sub.LastRequestAt),
+		LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,
 		UpdatedAt:                  sub.UpdatedAt.Int64,
 	})
@@ -667,6 +667,28 @@ func nullableInt64Ptr(value sql.NullInt64) *int64 {
 	}
 	v := value.Int64
 	return &v
+}
+
+// interfaceToInt64Ptr converts the interface{} that sqlc emits for nullable
+// subquery columns (e.g. last_request_at) to a *int64. Returns nil when the
+// value is nil, sql.NullInt64{Valid:false}, or any zero-value.
+func interfaceToInt64Ptr(v interface{}) *int64 {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case int64:
+		return &val
+	case float64:
+		i := int64(val)
+		return &i
+	case sql.NullInt64:
+		if !val.Valid {
+			return nil
+		}
+		return &val.Int64
+	}
+	return nil
 }
 
 func boolPtrToInt64(value *bool, fallback bool) int64 {
