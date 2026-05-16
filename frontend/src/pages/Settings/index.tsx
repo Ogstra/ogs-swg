@@ -208,9 +208,18 @@ export default function Settings() {
             const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
             if (subscriptionHistorySubIdRef.current !== subID) return
             const incomingIds = new Set(page.items.map(item => item.id))
+            const nameBySubId = new Map<number, string>()
+            for (const item of page.items) {
+                if (item.sub_id && item.name) nameBySubId.set(item.sub_id, item.name)
+            }
             const merged = [
                 ...page.items,
-                ...subscriptionRequestHistoryRef.current.filter(item => !incomingIds.has(item.id)),
+                ...subscriptionRequestHistoryRef.current
+                    .filter(item => !incomingIds.has(item.id))
+                    .map(item => {
+                        const freshName = nameBySubId.get(item.sub_id)
+                        return freshName && freshName !== item.name ? { ...item, name: freshName } : item
+                    }),
             ]
             subscriptionRequestHistoryRef.current = merged
             setSubscriptionRequestHistory(merged)
