@@ -946,7 +946,7 @@ export default function UserManagement() {
             </div>
 
             {/* Users Table Container - Matching WireGuard Style */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
+            <div className="border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto hidden md:block">
                     <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[1100px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
                         <thead>
