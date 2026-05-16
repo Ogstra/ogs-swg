@@ -945,9 +945,9 @@ export default function UserManagement() {
                 </div>
             </div>
 
-            {/* Users Table Container - Matching WireGuard Style */}
-            <div className="border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
-                <div className="overflow-x-auto hidden md:block">
+            {/* Users Table Container */}
+            <div className="hidden md:block bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
+                <div className="overflow-x-auto">
                     <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[1100px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
                         <thead>
                             <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
@@ -1127,8 +1127,10 @@ export default function UserManagement() {
                     </table>
                 </div>
 
-                {/* Mobile List */}
-                <div className="md:hidden space-y-3">
+            </div>
+
+            {/* Mobile List */}
+            <div className="md:hidden space-y-3">
                     {(sortedUsers || []).map(user => {
                         const isExceeded = user.quota_limit ? user.total > user.quota_limit : false
                         const quotaRatio = user.quota_limit ? (user.total / user.quota_limit) : 0
@@ -1248,7 +1250,6 @@ export default function UserManagement() {
                         </div>
                     )}
                 </div>
-            </div>
 
             {/* Create/Edit User Modal */}
             <Modal
