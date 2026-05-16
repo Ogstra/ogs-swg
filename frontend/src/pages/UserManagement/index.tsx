@@ -231,6 +231,7 @@ export default function UserManagement() {
     const refreshUsersData = async () => {
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['users'] }),
+            queryClient.invalidateQueries({ queryKey: ['subscriptions'] }),
             queryClient.invalidateQueries({ queryKey: ['dashboard-pending-changes'] }),
             queryClient.invalidateQueries({ queryKey: ['dashboard-data'] }),
         ])
