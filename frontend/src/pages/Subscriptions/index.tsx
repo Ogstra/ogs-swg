@@ -813,9 +813,9 @@ export default function Subscriptions() {
                             ) : sortedSubs.map(sub => (
                                 <tr key={sub.id} className="border-b last:border-0 border-slate-800/50 hover:bg-slate-800/20 transition-colors">
                                     <td className="w-[260px] p-4">
-                                        <div className="max-w-[260px] truncate text-white font-medium" title={sub.alias || sub.name}>{displaySubName(sub)}</div>
+                                        <div className="max-w-[260px] truncate text-white font-medium" title={sub.name}>{sub.name}</div>
                                         {sub.alias?.trim() ? (
-                                            <div className="max-w-[260px] truncate text-xs text-slate-500" title={sub.name}>{sub.name}</div>
+                                            <div className="max-w-[260px] truncate text-xs text-slate-500" title={sub.alias}>{sub.alias}</div>
                                         ) : null}
                                     </td>
                                     <td className="p-4">
@@ -868,9 +868,9 @@ export default function Subscriptions() {
                                 <div className="p-4 space-y-3">
                                     <div className="flex items-center justify-between gap-3">
                                         <div className="min-w-0 flex-1">
-                                            <p className="text-white font-semibold truncate">{displaySubName(sub)}</p>
+                                            <p className="text-white font-semibold truncate">{sub.name}</p>
                                             {sub.alias?.trim() ? (
-                                                <p className="text-xs text-slate-500 truncate">{sub.name}</p>
+                                                <p className="text-xs text-slate-500 truncate">{sub.alias}</p>
                                             ) : null}
                                         </div>
                                         <div className="flex gap-2 shrink-0">
