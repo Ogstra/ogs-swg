@@ -637,9 +637,10 @@ func (s *Server) prefetchSubscriptionRequestHistoryPage(limit, offset, subID int
 
 func (s *Server) loadSubscriptionRequestHistoryPage(ctx context.Context, limit, offset, subID int, censor bool) (subscriptionRequestHistoryPageResponse, error) {
 	rows, err := s.store.Queries.GetSubscriptionRequestHistory(ctx, sqlcStore.GetSubscriptionRequestHistoryParams{
-		SubID:  int64(subID),
-		Limit:  int64(limit + 1),
-		Offset: int64(offset),
+		Column1: int64(subID),
+		SubID:   int64(subID),
+		Limit:   int64(limit + 1),
+		Offset:  int64(offset),
 	})
 	if err != nil {
 		return subscriptionRequestHistoryPageResponse{}, err
