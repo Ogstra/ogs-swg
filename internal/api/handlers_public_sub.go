@@ -854,6 +854,16 @@ func prefixSubscriptionHWID(value string) string {
 }
 
 func resolveSubscriptionRequestIP(r *http.Request) string {
+	// CF-Connecting-IP is set by Cloudflare to the real client IP for every
+	// proxied request and cannot be injected by end-users (Cloudflare strips
+	// and re-sets it at the edge). Check it first so that Cloudflare edge IPs —
+	// which are public and therefore not matched by isTrustedProxy — do not end
+	// up being recorded as the client address.
+	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
+		if ip := net.ParseIP(cfIP); ip != nil {
+			return cfIP
+		}
+	}
 	if isTrustedProxy(r.RemoteAddr) {
 		if ip := firstPublicForwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
 			return ip

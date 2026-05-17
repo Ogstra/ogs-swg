@@ -1974,3 +1974,55 @@ func TestHandlePublicSubscription_UsesSubscriptionAliasInProfileTitle(t *testing
 		t.Fatalf("no-alias Profile-Title=%q want %q", got, "canonical-name-2")
 	}
 }
+
+func TestHandleSubscriptionRequestHistory_PrefersCFConnectingIPOverRemoteAddr(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "cf-connecting-ip-token",
+		Name:        "CF Connecting IP Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	// Simulate a Cloudflare-proxied request: RemoteAddr is the public Cloudflare
+	// edge IP (not private, so isTrustedProxy returns false). CF-Connecting-IP
+	// carries the real client IPv6.
+	req := httptest.NewRequest(http.MethodGet, "/s/cf-connecting-ip-token", nil)
+	req.SetPathValue("token", "cf-connecting-ip-token")
+	req.RemoteAddr = "[2a06:98c0:3600::103]:12345"
+	req.Header.Set("CF-Connecting-IP", "2001:db8::cafe")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscription status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/subscription-requests/history?limit=5", nil)
+	historyReq = withSettingsPerms(historyReq, &core.PanelUserPermissions{CanReadSettings: true, CanReadLogs: true})
+	historyRec := httptest.NewRecorder()
+	server.handleSubscriptionRequestHistory(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%q", historyRec.Code, historyRec.Body.String())
+	}
+
+	var got []store.GetSubscriptionRequestHistoryRow
+	decodeJSONResponse(t, historyRec, &got)
+	if len(got) == 0 {
+		t.Fatalf("history empty")
+	}
+	// Must record the real client IP from CF-Connecting-IP, not the Cloudflare edge IP.
+	if got[0].RequestIp != "2001:db8::cafe" {
+		t.Fatalf("request_ip=%q want %q (CF-Connecting-IP)", got[0].RequestIp, "2001:db8::cafe")
+	}
+}
