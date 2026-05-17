@@ -55,11 +55,21 @@ export default {
       method: request.method,
       headers: reqHeaders,
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
-      redirect: 'follow',
+      redirect: 'manual',
     })
 
     try {
       const response = await fetch(proxyRequest)
+
+      // With redirect: 'manual', any 3xx redirect response from the panel is
+      // returned as an opaque redirect whose body and headers are inaccessible.
+      // Pass it directly to the browser so the browser can follow it itself.
+      // This prevents the Worker from silently following redirects to unexpected
+      // destinations (e.g., a misconfigured reverse proxy that redirects /s/<token>
+      // to a path that serves the SPA, which would then redirect to /login).
+      if (response.type === 'opaqueredirect') {
+        return response
+      }
 
       // Explicitly copy response headers so all custom subscription headers
       // (profile-title, subscription-userinfo, Happ params, etc.) pass through.

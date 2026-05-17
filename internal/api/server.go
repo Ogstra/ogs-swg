@@ -628,6 +628,14 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 			http.NotFound(w, r)
 			return
 		}
+		// Subscription routes are handled by the dedicated GET /s/{token} handler.
+		// If a request reaches here with a /s/ prefix it means routing missed (e.g.
+		// wrong method, unclean path after a redirect). Return 404 rather than
+		// serving index.html, which would cause the SPA to redirect to /login.
+		if strings.HasPrefix(r.URL.Path, "/s/") {
+			http.NotFound(w, r)
+			return
+		}
 		if distDir == "" {
 			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
 			return
