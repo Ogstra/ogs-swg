@@ -13,19 +13,32 @@ const maskedValue = "********"
 
 var iniSensitiveLine = regexp.MustCompile(`(?im)^(\s*(?:PrivateKey|PublicKey|PresharedKey)\s*=\s*).*$`)
 
+// DEPRECATED: read-only redaction is disabled as part of deprecating the granular
+// permission system. Functions are preserved for future reimplementation.
+// TODO(reimplement): re-enable when role-based access is restored.
+
 func shouldRedactConfigReadOnly(r *http.Request) bool {
+	return false // DEPRECATED stub
+	/* original (disabled):
 	perms := getPermissions(r)
 	return perms != nil && perms.CanReadConfig && !perms.CanWriteConfig
+	*/
 }
 
 func shouldRedactWireGuardReadOnly(r *http.Request) bool {
+	return false // DEPRECATED stub
+	/* original (disabled):
 	perms := getPermissions(r)
 	return perms != nil && perms.CanReadWireguard && !perms.CanWriteWireguard
+	*/
 }
 
 func shouldRedactUsersReadOnly(r *http.Request) bool {
+	return false // DEPRECATED stub
+	/* original (disabled):
 	perms := getPermissions(r)
 	return perms != nil && perms.CanReadUsers && !perms.CanWriteUsers
+	*/
 }
 
 func redactSingboxJSON(raw string) string {

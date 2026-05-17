@@ -167,9 +167,17 @@ func getPermissions(r *http.Request) *core.PanelUserPermissions {
 	return p
 }
 
-// requirePerm wraps a handler and returns 403 if the caller lacks the required permission.
+// DEPRECATED: granular permission enforcement is disabled.
+// The per-permission role system (CanRead*/CanWrite*) is preserved for future
+// reimplementation. All authenticated requests are currently treated as fully
+// privileged. See: internal/core/store.go PanelUserPermissions.
+// TODO(reimplement): restore role-based access control when the permission model
+// is redesigned. Re-enable the original body below and remove this stub.
 func (s *Server) requirePerm(check func(*core.PanelUserPermissions) bool, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// DEPRECATED stub — permission check skipped, all authenticated users pass.
+		h(w, r)
+		/* original enforcement (disabled):
 		p := getPermissions(r)
 		// nil permissions means API-key auth — grant full access for backward compatibility
 		if p != nil && !check(p) {
@@ -177,6 +185,7 @@ func (s *Server) requirePerm(check func(*core.PanelUserPermissions) bool, h http
 			return
 		}
 		h(w, r)
+		*/
 	}
 }
 
