@@ -19,9 +19,61 @@
 // Example: "https://123.45.67.89:8080" or "https://panel.example.com"
 const TARGET_ORIGIN = typeof PANEL_URL !== 'undefined' ? PANEL_URL : 'https://YOUR_PANEL_URL_HERE'
 
+/**
+ * Returns true for known subscription client UAs (sing-box, clash, happ, etc.).
+ * Mirrors isSubscriptionClientUA() in internal/api/handlers_public_sub.go.
+ */
+function isSubscriptionClientUA(ua) {
+  const lowered = ua.toLowerCase()
+  const knownClients = [
+    'v2rayn', 'shadowrocket', 'nekoray', 'clash', 'sing-box',
+    'hiddify', 'loon', 'stash', 'surge', 'quantumult', 'surfboard',
+    'kitsunebi', 'karing', 'happ',
+  ]
+  return knownClients.some(c => lowered.includes(c))
+}
+
+/**
+ * Returns true for social-media crawlers and link-preview fetchers.
+ * Returns false if the UA is already a known subscription client.
+ * Mirrors isSocialFetcherUA() in internal/api/handlers_public_sub.go.
+ */
+function isSocialFetcherUA(ua) {
+  if (!ua || isSubscriptionClientUA(ua)) return false
+  const lowered = ua.toLowerCase()
+  const markers = [
+    'facebookexternalhit', 'facebookcatalog', 'meta-externalagent', 'meta-externalfetcher',
+    'twitterbot', 'slackbot-linkexpanding', 'slack-imgproxy', 'slackbot',
+    'linkedinbot', 'discordbot', 'telegrambot', 'skypeuripreview', 'microsoftpreview',
+    'whatsapp/', 'instagram', 'fban/', 'fbav/', 'messenger',
+  ]
+  return markers.some(m => lowered.includes(m))
+}
+
+/**
+ * Returns true for browser UAs (Mozilla/, Chrome/, Firefox/, etc.).
+ * Returns false if the UA is already a known subscription client.
+ * Mirrors isBrowserUA() in internal/api/handlers_public_sub.go.
+ */
+function isBrowserUA(ua) {
+  if (!ua || isSubscriptionClientUA(ua)) return false
+  if (ua.startsWith('Mozilla/')) return true
+  const markers = ['Chrome/', 'Firefox/', 'Safari/', 'Edg/', 'OPR/', 'CriOS/', 'FxiOS/']
+  return markers.some(m => ua.includes(m))
+}
+
 export default {
   async fetch(request, env) {
     const origin = (env && env.PANEL_URL) ? env.PANEL_URL.replace(/\/$/, '') : TARGET_ORIGIN.replace(/\/$/, '')
+
+    // UA-based authorization: block browsers and social crawlers unconditionally.
+    // This mirrors the panel's UA checks (handlers_public_sub.go) but runs in the
+    // Worker so that no auth cookie or other request state can cause the Worker to
+    // relay a non-403 response to an unauthorized UA.
+    const incomingUA = request.headers.get('user-agent') || ''
+    if (isSocialFetcherUA(incomingUA) || isBrowserUA(incomingUA)) {
+      return new Response('Forbidden', { status: 403 })
+    }
 
     const url = new URL(request.url)
     // CF Workers overrides User-Agent on outgoing fetch requests.
@@ -29,7 +81,6 @@ export default {
     // returns Happ-specific headers and body params even when Workers rewrites
     // or normalizes User-Agent. Happ-compatible clients commonly send HWID and
     // device headers while importing subscriptions.
-    const incomingUA = request.headers.get('user-agent') || ''
     const hasHappDeviceHeaders = ['x-hwid', 'x-device-os', 'x-ver-os', 'x-device-model']
       .some(header => (request.headers.get(header) || '').trim() !== '')
     if (!url.searchParams.has('client') && (incomingUA.toLowerCase().includes('happ') || hasHappDeviceHeaders)) {
