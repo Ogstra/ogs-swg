@@ -1975,6 +1975,58 @@ func TestHandlePublicSubscription_UsesSubscriptionAliasInProfileTitle(t *testing
 	}
 }
 
+func TestHandleSubscriptionRequestHistory_PrefersXCFClientIPFromWorker(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "worker-ip-token",
+		Name:        "Worker IP Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "alice",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	// Simulate Worker→nginx→panel: nginx overwrites CF-Connecting-IP and X-Real-IP
+	// with the Worker egress IP. Worker sets X-CF-Client-IP to the real client IP.
+	req := httptest.NewRequest(http.MethodGet, "/s/worker-ip-token", nil)
+	req.SetPathValue("token", "worker-ip-token")
+	req.RemoteAddr = "[2a06:98c0:3600::103]:12345"
+	req.Header.Set("CF-Connecting-IP", "2a06:98c0:3600::103") // nginx-overwritten
+	req.Header.Set("X-Real-IP", "2a06:98c0:3600::103")        // nginx-overwritten
+	req.Header.Set("X-CF-Client-IP", "2001:db8::beef")        // set by Worker, untouched
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subscription status=%d body=%q", rec.Code, rec.Body.String())
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/subscription-requests/history?limit=5", nil)
+	historyReq = withSettingsPerms(historyReq, &core.PanelUserPermissions{CanReadSettings: true, CanReadLogs: true})
+	historyRec := httptest.NewRecorder()
+	server.handleSubscriptionRequestHistory(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("history status=%d body=%q", historyRec.Code, historyRec.Body.String())
+	}
+
+	var got []store.GetSubscriptionRequestHistoryRow
+	decodeJSONResponse(t, historyRec, &got)
+	if len(got) == 0 {
+		t.Fatalf("history empty")
+	}
+	if got[0].RequestIp != "2001:db8::beef" {
+		t.Fatalf("request_ip=%q want %q (X-CF-Client-IP)", got[0].RequestIp, "2001:db8::beef")
+	}
+}
+
 func TestHandleSubscriptionRequestHistory_PrefersCFConnectingIPOverRemoteAddr(t *testing.T) {
 	server, dataStore := newPublicSubscriptionTestServer(t)
 
