@@ -1,4 +1,5 @@
-import { startTransition, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { api } from '../../services/api'
 import { Terminal, RefreshCw, Search, X } from 'lucide-react'
 
@@ -32,6 +33,112 @@ function toOffsetDateTime(value: string): string | undefined {
     return `${trimmed}:00${sign}${hours}:${minutes}`
 }
 
+interface LogTerminalProps {
+    lines: string[]
+    autoScroll: boolean
+    setAutoScroll: (v: boolean) => void
+    viewMode: 'tail' | 'search'
+    searchStatus: string
+    containerRef: React.RefObject<HTMLDivElement | null>
+    onScroll: () => void
+    initialScrollPendingRef: React.RefObject<boolean>
+}
+
+function LogTerminal({
+    lines,
+    autoScroll,
+    setAutoScroll,
+    viewMode,
+    searchStatus,
+    containerRef,
+    onScroll,
+    initialScrollPendingRef,
+}: LogTerminalProps) {
+    const virtualizer = useVirtualizer({
+        count: lines.length,
+        getScrollElement: () => containerRef.current,
+        estimateSize: () => 22,
+        overscan: 20,
+    })
+
+    // Scroll to bottom when autoScroll is requested (tail mode initial load)
+    useLayoutEffect(() => {
+        if (!autoScroll || viewMode !== 'tail') return
+        if (!initialScrollPendingRef.current) return
+        if (lines.length === 0) return
+        virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+        initialScrollPendingRef.current = false
+        setAutoScroll(false)
+    }, [lines.length, autoScroll, viewMode])
+
+    const virtualItems = virtualizer.getVirtualItems()
+
+    return (
+        <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col flex-1 min-h-0">
+            <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800">
+                <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                    <Terminal size={14} className="text-emerald-400" />
+                    <span>Console Output</span>
+                </div>
+                <div className="flex items-center gap-4 text-[10px] text-slate-500 font-medium uppercase tracking-wider">
+                    <span>{lines.length} lines</span>
+                    {viewMode === 'search' && searchStatus && <span className="text-slate-400 normal-case tracking-normal">{searchStatus}</span>}
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors">
+                        <input
+                            type="checkbox"
+                            checked={autoScroll}
+                            onChange={e => setAutoScroll(e.target.checked)}
+                            className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-0 w-3 h-3"
+                        />
+                        Auto-scroll
+                    </label>
+                </div>
+            </div>
+
+            <div
+                className="logs-scrollbar flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm bg-black/20"
+                ref={containerRef}
+                onScroll={onScroll}
+            >
+                {lines.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50">
+                        <Terminal size={48} className="mb-4" />
+                        <p>No logs to display</p>
+                    </div>
+                ) : (
+                    <div
+                        style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}
+                    >
+                        {virtualItems.map(virtualRow => (
+                            <div
+                                key={virtualRow.key}
+                                data-index={virtualRow.index}
+                                ref={virtualizer.measureElement}
+                                style={{
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    width: '100%',
+                                    transform: `translateY(${virtualRow.start}px)`,
+                                }}
+                                className="flex items-center gap-2 hover:bg-white/5 py-0.5 rounded -mx-2 group"
+                            >
+                                <span className="text-slate-400 select-none w-[3ch] text-center shrink-0 opacity-50 text-[10px]">
+                                    {virtualRow.index + 1}
+                                </span>
+                                <span className="text-slate-300 break-all whitespace-pre-wrap">
+                                    {lines[virtualRow.index]}
+                                </span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                <div className="h-4" />
+            </div>
+        </div>
+    )
+}
+
 export default function LogViewer() {
     const [lines, setLines] = useState<string[]>([])
     const [tailRawLines, setTailRawLines] = useState<string[]>([])
@@ -51,6 +158,11 @@ export default function LogViewer() {
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
     const searchAbortRef = useRef<AbortController | null>(null)
+    // Pending lines buffer: chunks are accumulated here and flushed into state
+    // via rAF so each rAF only triggers one React render regardless of how many
+    // chunks the backend sends in quick succession.
+    const pendingLinesRef = useRef<string[]>([])
+    const rafRef = useRef<number | null>(null)
     const demoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
     const backendTailQuery = shouldUseServerTailQuery(query) ? query.trim() : ''
 
@@ -112,15 +224,6 @@ export default function LogViewer() {
         setLines(filterTailLinesLocally(tailRawLines, query))
     }, [tailRawLines, query, backendTailQuery, viewMode])
 
-    useLayoutEffect(() => {
-        const el = containerRef.current
-        if (!el || !autoScroll || viewMode !== 'tail') return
-        if (!initialTailScrollPendingRef.current) return
-        el.scrollTop = el.scrollHeight
-        initialTailScrollPendingRef.current = false
-        setAutoScroll(false)
-    }, [lines, autoScroll, viewMode])
-
     const handleScroll = () => {
         const el = containerRef.current
         if (!el) return
@@ -138,6 +241,14 @@ export default function LogViewer() {
         searchAbortRef.current?.abort()
         const controller = new AbortController()
         searchAbortRef.current = controller
+
+        // Reset buffering state
+        if (rafRef.current !== null) {
+            cancelAnimationFrame(rafRef.current)
+            rafRef.current = null
+        }
+        pendingLinesRef.current = []
+
         setSearching(true)
         setLines([])
         setViewMode('search')
@@ -145,6 +256,20 @@ export default function LogViewer() {
         let completed = false
         let matchedCount = 0
         let truncated = false
+
+        // Schedule a rAF flush: drain pendingLinesRef into React state in a single
+        // render, preventing one setState per chunk from the stream.
+        const scheduleFlush = () => {
+            if (rafRef.current !== null) return
+            rafRef.current = requestAnimationFrame(() => {
+                rafRef.current = null
+                const batch = pendingLinesRef.current
+                if (batch.length === 0) return
+                pendingLinesRef.current = []
+                setLines(prev => [...batch, ...prev])
+            })
+        }
+
         try {
             await api.searchLogsStream({
                 query: q,
@@ -164,10 +289,12 @@ export default function LogViewer() {
                 }
                 if (event.type === 'chunk') {
                     matchedCount = event.matched ?? matchedCount
+                    // Prepend newest lines: backend sends oldest-first within each chunk,
+                    // reverse so newest is at top when prepended.
                     const nextLines = [...(event.logs || [])].reverse()
-                    startTransition(() => {
-                        setLines(prev => [...nextLines, ...prev])
-                    })
+                    // Accumulate into buffer; flush will batch these into one React render.
+                    pendingLinesRef.current = [...nextLines, ...pendingLinesRef.current]
+                    scheduleFlush()
                     if (!completed) {
                         setSearchStatus(`Found ${event.matched ?? 0} lines...`)
                     }
@@ -177,6 +304,16 @@ export default function LogViewer() {
                     completed = true
                     matchedCount = event.matched ?? matchedCount
                     truncated = event.truncated === true
+                    // Flush any remaining buffered lines before marking done
+                    if (rafRef.current !== null) {
+                        cancelAnimationFrame(rafRef.current)
+                        rafRef.current = null
+                    }
+                    const remaining = pendingLinesRef.current
+                    pendingLinesRef.current = []
+                    if (remaining.length > 0) {
+                        setLines(prev => [...remaining, ...prev])
+                    }
                     const suffix = truncated ? ' (limit reached)' : ''
                     setSearchStatus(`Showing ${event.matched ?? 0} lines${suffix}`)
                     return
@@ -297,6 +434,8 @@ export default function LogViewer() {
                                 <option value={25000}>25k lines</option>
                                 <option value={50000}>50k lines</option>
                                 <option value={100000}>100k lines</option>
+                                <option value={250000}>250k lines</option>
+                                <option value={500000}>500k lines</option>
                             </select>
                             <select
                                 value={searchLimit}
@@ -312,6 +451,8 @@ export default function LogViewer() {
                                 <option value={25000}>25k</option>
                                 <option value={50000}>50k</option>
                                 <option value={100000}>100k</option>
+                                <option value={250000}>250k</option>
+                                <option value={500000}>500k</option>
                             </select>
                         </div>
                     )}
@@ -432,48 +573,16 @@ export default function LogViewer() {
             </div>
 
             {/* Log Terminal */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col flex-1 min-h-0">
-                <div className="flex items-center justify-between px-4 py-2 bg-slate-900 border-b border-slate-800">
-                    <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                        <Terminal size={14} className="text-emerald-400" />
-                        <span>Console Output</span>
-                    </div>
-                    <div className="flex items-center gap-4 text-[10px] text-slate-500 font-medium uppercase tracking-wider">
-                        <span>{lines.length} lines</span>
-                        {viewMode === 'search' && searchStatus && <span className="text-slate-400 normal-case tracking-normal">{searchStatus}</span>}
-                        <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors">
-                            <input
-                                type="checkbox"
-                                checked={autoScroll}
-                                onChange={e => setAutoScroll(e.target.checked)}
-                                className="rounded border-slate-700 bg-slate-800 text-blue-500 focus:ring-0 w-3 h-3"
-                            />
-                            Auto-scroll
-                        </label>
-                    </div>
-                </div>
-
-                <div
-                    className="logs-scrollbar flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm bg-black/20"
-                    ref={containerRef}
-                    onScroll={handleScroll}
-                >
-                    {lines.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50">
-                            <Terminal size={48} className="mb-4" />
-                            <p>No logs to display</p>
-                        </div>
-                    ) : (
-                        lines.map((line, i) => (
-                            <div key={i} className="flex items-center gap-2 hover:bg-white/5 py-0.5 rounded -mx-2 group">
-                                <span className="text-slate-400 select-none w-[3ch] text-center shrink-0 opacity-50 text-[10px]">{i + 1}</span>
-                                <span className="text-slate-300 break-all whitespace-pre-wrap">{line}</span>
-                            </div>
-                        ))
-                    )}
-                    <div className="h-4" />
-                </div>
-            </div>
+            <LogTerminal
+                lines={lines}
+                autoScroll={autoScroll}
+                setAutoScroll={setAutoScroll}
+                viewMode={viewMode}
+                searchStatus={searchStatus}
+                containerRef={containerRef}
+                onScroll={handleScroll}
+                initialScrollPendingRef={initialTailScrollPendingRef}
+            />
         </div>
     )
 }

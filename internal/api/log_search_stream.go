@@ -38,6 +38,19 @@ func (s *Server) searchLogsIncrementally(ctx context.Context, opts logSearchOpti
 		opts.chunkSize = 100
 	}
 
+	// Acquire the log-search semaphore before doing any I/O or CPU work.
+	// This caps concurrent full-log scans so that rapid or parallel requests
+	// cannot saturate all CPU cores. The semaphore is released as soon as
+	// the scan completes (or the caller's context is cancelled).
+	if s.logSearchSem != nil {
+		select {
+		case s.logSearchSem <- struct{}{}:
+			defer func() { <-s.logSearchSem }()
+		case <-ctx.Done():
+			return logSearchSummary{}, ctx.Err()
+		}
+	}
+
 	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
 		return s.searchLogsOnSource(ctx, logSearchSourceJournal, opts, emitChunk, emitStatus)
 	}
@@ -291,6 +304,10 @@ func walkFileLinesReverse(path string, visit func(string) error) error {
 	if err != nil {
 		return err
 	}
+
+	// Allocate once and reuse for every chunk read. This avoids a make([]byte)
+	// allocation per 64 KB chunk when walking multi-MB log files.
+	buf := make([]byte, chunkSize)
 	var rem string
 	for offset := info.Size(); offset > 0; {
 		readSize := int64(chunkSize)
@@ -298,11 +315,11 @@ func walkFileLinesReverse(path string, visit func(string) error) error {
 			readSize = offset
 		}
 		offset -= readSize
-		buf := make([]byte, readSize)
-		if _, err := f.ReadAt(buf, offset); err != nil {
+		chunk := buf[:readSize]
+		if _, err := f.ReadAt(chunk, offset); err != nil {
 			return err
 		}
-		data := string(buf) + rem
+		data := string(chunk) + rem
 		lines := strings.Split(data, "\n")
 		if offset > 0 && len(lines) > 0 {
 			rem = lines[0]
@@ -341,12 +358,12 @@ func collectSearchChunks(chunks [][]string) []string {
 func parseSearchPageParams(r *http.Request) (page, pageSize, effectiveLimit int) {
 	pageSize = 200
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 100000 {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 500000 {
 			pageSize = v
 		}
 	}
 	if ps := r.URL.Query().Get("page_size"); ps != "" {
-		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 100000 {
+		if v, err := strconv.Atoi(ps); err == nil && v > 0 && v <= 500000 {
 			pageSize = v
 		}
 	}
@@ -357,8 +374,8 @@ func parseSearchPageParams(r *http.Request) (page, pageSize, effectiveLimit int)
 		}
 	}
 	effectiveLimit = page * pageSize
-	if effectiveLimit > 100000 {
-		effectiveLimit = 100000
+	if effectiveLimit > 500000 {
+		effectiveLimit = 500000
 	}
 	return page, pageSize, effectiveLimit
 }

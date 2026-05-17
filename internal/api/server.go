@@ -48,6 +48,9 @@ type Server struct {
 	protectionRules      *protectionRuleCache
 	blockedRecordDedup   map[string]time.Time
 	blockedRecordDedupMu sync.Mutex
+	// logSearchSem caps the number of concurrent log-search scans so that
+	// rapid or parallel search requests cannot saturate all CPU cores.
+	logSearchSem chan struct{}
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -85,6 +88,9 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		subscriptionLimiter: newSubscriptionLimiter(),
 		protectionRules:     newProtectionRuleCache(),
 		blockedRecordDedup:  make(map[string]time.Time),
+		// Allow at most 2 concurrent log scans. A buffered channel acts as a
+		// counting semaphore: acquire by sending, release by receiving.
+		logSearchSem: make(chan struct{}, 2),
 	}
 	srv.reloadProtectionRules(context.Background())
 	return srv
