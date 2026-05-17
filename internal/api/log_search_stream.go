@@ -88,7 +88,7 @@ func (s *Server) searchLogsOnSource(ctx context.Context, source logSearchSource,
 				return logSearchSummary{}, err
 			}
 		}
-		if err := s.walkSearchSource(ctx, source, func(line string) error {
+		if err := s.walkSearchSource(ctx, source, opts, func(line string) error {
 			normalized, ok := s.normalizeSearchLine(line, opts.timeRange, opts.censored)
 			if !ok {
 				return nil
@@ -122,7 +122,7 @@ func (s *Server) searchLogsOnSource(ctx context.Context, source logSearchSource,
 		return emitChunk(chunk, matched)
 	}
 
-	err := s.walkSearchSource(ctx, source, func(line string) error {
+	err := s.walkSearchSource(ctx, source, opts, func(line string) error {
 		normalized, ok := s.normalizeSearchLine(line, opts.timeRange, opts.censored)
 		if !ok {
 			return nil
@@ -193,25 +193,33 @@ func accumulateUserConnectionIDs(line string, result map[string]map[string]struc
 	result[token][connID] = struct{}{}
 }
 
-func (s *Server) walkSearchSource(ctx context.Context, source logSearchSource, visit func(string) error) error {
+func (s *Server) walkSearchSource(ctx context.Context, source logSearchSource, opts logSearchOptions, visit func(string) error) error {
 	switch source {
 	case logSearchSourceFile:
 		return walkFileLinesReverse(s.config.AccessLogPath, visit)
 	case logSearchSourceJournal:
-		return s.walkJournalLogLines(ctx, visit)
+		return s.walkJournalLogLines(ctx, opts, visit)
 	default:
 		return nil
 	}
 }
 
-func (s *Server) walkJournalLogLines(ctx context.Context, visit func(string) error) error {
+func (s *Server) walkJournalLogLines(ctx context.Context, opts logSearchOptions, visit func(string) error) error {
+	// Use the simple text as a journalctl --grep hint when the query doesn't
+	// require Go-side post-filtering (no user correlation, no AND/OR logic).
+	// This lets journalctl filter at the journal reader level — far cheaper
+	// than streaming every line to the Go process.
+	grepFilter := ""
+	if !opts.query.requiresPostFilter() {
+		grepFilter = opts.query.simpleText
+	}
 	if walker, ok := s.executor.(journalWalker); ok {
 		return walker.WalkJournal(ctx, "sing-box", true, visit)
 	}
-	return walkJournalLinesReverse(ctx, "sing-box", visit)
+	return walkJournalLinesReverse(ctx, "sing-box", grepFilter, visit)
 }
 
-func walkJournalLinesReverse(ctx context.Context, unit string, visit func(string) error) error {
+func walkJournalLinesReverse(ctx context.Context, unit string, grepFilter string, visit func(string) error) error {
 	if _, err := exec.LookPath("journalctl"); err != nil {
 		return nil
 	}
@@ -221,7 +229,11 @@ func walkJournalLinesReverse(ctx context.Context, unit string, visit func(string
 		unitFull += ".service"
 	}
 
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", unitFull, "--no-pager", "--merge", "-o", "cat", "--reverse")
+	args := []string{"-u", unitFull, "--no-pager", "--merge", "-o", "cat", "--reverse"}
+	if grepFilter != "" {
+		args = append(args, "--grep", grepFilter)
+	}
+	cmd := exec.CommandContext(ctx, "journalctl", args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
