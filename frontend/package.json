@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.3",
+    "@tanstack/react-virtual": "^3.13.24",
     "clsx": "^2.1.1",
     "lucide-react": "^0.575.0",
     "prismjs": "^1.30.0",

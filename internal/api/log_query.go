@@ -127,6 +127,12 @@ func compileLogQueryTerm(raw string) logQueryTerm {
 
 func sanitizeLogLine(line string) string {
 	line = strings.TrimRight(line, "\r")
+	// Fast path: sing-box log files almost never contain ANSI escape sequences.
+	// Skipping the regex when the ESC byte is absent avoids a costly
+	// regexp.ReplaceAllString allocation on every log line.
+	if !strings.ContainsRune(line, '\x1b') {
+		return line
+	}
 	return logANSIEscapeRe.ReplaceAllString(line, "")
 }
 
