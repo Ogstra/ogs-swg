@@ -30,7 +30,27 @@ const API_KEY_KEY = 'api_key';
 const DASHBOARD_PREFS_KEY = 'dashboard:prefs:v1';
 const DASHBOARD_SNAPSHOT_PREFIX = 'dashboard:snapshot:v1:';
 
-const normalizePermissions = (raw: any): PanelUserPermissions => ({
+// DEPRECATED: granular permission gating is disabled.
+// The PanelUserPermissions interface and the per-field checks in UI components
+// are preserved for future reimplementation. Until then every authenticated user
+// receives all-true permissions so no nav item is hidden and no button is greyed out.
+// TODO(reimplement): restore per-permission UI guards when the permission model
+// is redesigned. Re-enable the original body below and remove this stub.
+const normalizePermissions = (_raw: any): PanelUserPermissions => ({
+    // DEPRECATED stub — all permissions granted unconditionally.
+    can_read_users: true,
+    can_write_users: true,
+    can_read_wireguard: true,
+    can_write_wireguard: true,
+    can_read_config: true,
+    can_write_config: true,
+    can_read_settings: true,
+    can_write_settings: true,
+    can_read_panel_users: true,
+    can_write_panel_users: true,
+    can_read_logs: true,
+    can_read_logs_censored: true,
+    /* original (disabled):
     can_read_users: !!raw?.can_read_users,
     can_write_users: !!raw?.can_write_users,
     can_read_wireguard: !!raw?.can_read_wireguard,
@@ -43,6 +63,7 @@ const normalizePermissions = (raw: any): PanelUserPermissions => ({
     can_write_panel_users: !!raw?.can_write_panel_users,
     can_read_logs: !!raw?.can_read_logs,
     can_read_logs_censored: !!raw?.can_read_logs_censored,
+    */
 });
 
 const clearDashboardStartupCache = () => {
