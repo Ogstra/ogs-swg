@@ -44,6 +44,11 @@ export default {
       if (key.toLowerCase() === 'host') continue
       reqHeaders.set(key, value)
     }
+    // CF-Connecting-IP in the incoming request is the real client IP.
+    // Cloudflare overrides it on outgoing fetch() with the Worker egress IP,
+    // so preserve it under X-Real-IP before the request leaves the Worker.
+    const clientIP = request.headers.get('CF-Connecting-IP')
+    if (clientIP) reqHeaders.set('X-Real-IP', clientIP)
 
     const proxyRequest = new Request(targetURL, {
       method: request.method,

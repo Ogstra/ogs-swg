@@ -854,11 +854,20 @@ func prefixSubscriptionHWID(value string) string {
 }
 
 func resolveSubscriptionRequestIP(r *http.Request) string {
+	// X-Real-IP is set by the Cloudflare Worker (subscription-proxy.js) to the
+	// real client IP before the outgoing fetch, because Cloudflare overrides
+	// CF-Connecting-IP with the Worker egress IP on outgoing requests.
+	// Only trust it when it is a public (non-private) address so that internal
+	// reverse-proxy setups that populate X-Real-IP with their own private IP
+	// do not shadow the X-Forwarded-For chain.
+	if xrIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); xrIP != "" {
+		if ip := net.ParseIP(xrIP); ip != nil && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() {
+			return xrIP
+		}
+	}
 	// CF-Connecting-IP is set by Cloudflare to the real client IP for every
 	// proxied request and cannot be injected by end-users (Cloudflare strips
-	// and re-sets it at the edge). Check it first so that Cloudflare edge IPs —
-	// which are public and therefore not matched by isTrustedProxy — do not end
-	// up being recorded as the client address.
+	// and re-sets it at the edge). Check it for direct-CF requests (no Worker).
 	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
 		if ip := net.ParseIP(cfIP); ip != nil {
 			return cfIP
