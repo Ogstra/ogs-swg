@@ -46,9 +46,10 @@ export default {
     }
     // CF-Connecting-IP in the incoming request is the real client IP.
     // Cloudflare overrides it on outgoing fetch() with the Worker egress IP,
-    // so preserve it under X-Real-IP before the request leaves the Worker.
+    // and nginx on the origin may overwrite X-Real-IP / CF-Connecting-IP too.
+    // Use a custom header that reverse proxies won't touch.
     const clientIP = request.headers.get('CF-Connecting-IP')
-    if (clientIP) reqHeaders.set('X-Real-IP', clientIP)
+    if (clientIP) reqHeaders.set('X-CF-Client-IP', clientIP)
 
     const proxyRequest = new Request(targetURL, {
       method: request.method,
