@@ -366,6 +366,7 @@ func (s *Store) initSchema() error {
 	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked ON subscription_requests(blocked, requested_at DESC);")
 	// Upgrade path: add happ_routing_profile to existing subscriptions tables.
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_routing_profile TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_color_profile TEXT NOT NULL DEFAULT '';")
 	return nil
 }
 
