@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -339,7 +340,17 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			responseLines = append(responseLines, "#update-always: true")
 		}
 		if routingProfileJSON != "" {
-			encoded := base64.StdEncoding.EncodeToString([]byte(routingProfileJSON))
+			profileJSON := routingProfileJSON
+			if displayTitle != "" {
+				var profileMap map[string]interface{}
+				if err := json.Unmarshal([]byte(routingProfileJSON), &profileMap); err == nil {
+					profileMap["Name"] = displayTitle
+					if reencoded, err := json.Marshal(profileMap); err == nil {
+						profileJSON = string(reencoded)
+					}
+				}
+			}
+			encoded := base64.StdEncoding.EncodeToString([]byte(profileJSON))
 			responseLines = append(responseLines, "#routing: happ://routing/onadd/"+encoded)
 		}
 	}
