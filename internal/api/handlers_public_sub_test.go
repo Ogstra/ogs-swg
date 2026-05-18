@@ -232,6 +232,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 		AutoUpdateOnOpen: "0",
 		PingOnOpen:       "1",
 		ColorProfile:     `{"theme":"violet"}`,
+		RoutingProfile:   `{"Name":"global","GlobalProxy":"true","FakeDNS":"true"}`,
 		AdvancedParameters: []core.SubscriptionHappParameter{
 			{Key: "fallback-url", Value: "https://fallback.example.com/s"},
 			{Key: "subscription-autoconnect", Value: "1"},
@@ -310,6 +311,14 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 		if !strings.Contains(decoded, want) {
 			t.Fatalf("decoded Happ body missing %q: %q", want, decoded)
 		}
+	}
+	if strings.Contains(decoded, "#routing:") {
+		t.Fatalf("decoded Happ body should not include #routing prefix: %q", decoded)
+	}
+	wantRoutingJSON := `{"FakeDNS":"true","GlobalProxy":"true","Name":"Happ Bundle"}`
+	wantRouting := "happ://routing/onadd/" + base64.StdEncoding.EncodeToString([]byte(wantRoutingJSON))
+	if !strings.Contains(decoded, wantRouting) {
+		t.Fatalf("decoded Happ body missing routing link %q: %q", wantRouting, decoded)
 	}
 
 	// Test User-Agent triggering Happ profile

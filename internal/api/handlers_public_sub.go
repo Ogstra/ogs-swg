@@ -351,7 +351,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 				}
 			}
 			encoded := base64.StdEncoding.EncodeToString([]byte(profileJSON))
-			responseLines = append(responseLines, "#routing: happ://routing/onadd/"+encoded)
+			responseLines = append(responseLines, "happ://routing/onadd/"+encoded)
 		}
 	}
 	responseLines = append(responseLines, links...)

@@ -1289,7 +1289,7 @@ export default function Subscriptions() {
                             className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
                             placeholder='{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}'
                         />
-                        <p className="mt-1 text-xs text-slate-500">Emits <code>#routing: happ://routing/onadd/&lt;base64&gt;</code> in the subscription body. Controls FakeDNS and DNS strategy for Happ clients. Leave empty to disable.</p>
+                        <p className="mt-1 text-xs text-slate-500">Emits <code>happ://routing/onadd/&lt;base64&gt;</code> directly in the subscription body. Controls FakeDNS and DNS strategy for Happ clients. Leave empty to disable.</p>
                     </div>
                 </div>
             </Modal>
