@@ -546,6 +546,11 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 	}
 
 	start, end, interval := resolveDashboardConsumerWindow(rangeStr, startStr, endStr, targetPoints)
+	// For preset ranges, override end to actual now so the consumer chart
+	// always shows data up to the current moment (not the quantized boundary).
+	if startStr == "" || endStr == "" {
+		end = time.Now().Unix()
+	}
 	if end <= start {
 		http.Error(w, "Invalid dashboard window", http.StatusBadRequest)
 		return
