@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { api } from '../../services/api'
-import { Terminal, RefreshCw, Search, X } from 'lucide-react'
+import { Terminal, RefreshCw, Search, X, Download } from 'lucide-react'
 
 function hasBooleanOperator(query: string): boolean {
     return /\b(AND|OR)\b/i.test(query)
@@ -42,6 +42,7 @@ interface LogTerminalProps {
     containerRef: React.RefObject<HTMLDivElement | null>
     onScroll: () => void
     initialScrollPendingRef: React.RefObject<boolean>
+    onDownload: () => void
 }
 
 function LogTerminal({
@@ -53,6 +54,7 @@ function LogTerminal({
     containerRef,
     onScroll,
     initialScrollPendingRef,
+    onDownload,
 }: LogTerminalProps) {
     const virtualizer = useVirtualizer({
         count: lines.length,
@@ -92,6 +94,15 @@ function LogTerminal({
                         />
                         Auto-scroll
                     </label>
+                    <button
+                        onClick={onDownload}
+                        disabled={lines.length === 0}
+                        className="flex items-center gap-1 hover:text-slate-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Download logs as .log file"
+                    >
+                        <Download size={12} />
+                        Download
+                    </button>
                 </div>
             </div>
 
@@ -353,6 +364,16 @@ export default function LogViewer() {
         setSearchStatus('Search cancelled')
     }
 
+    const handleDownload = () => {
+        const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `sing-box-logs-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.log`
+        a.click()
+        URL.revokeObjectURL(url)
+    }
+
     return (
         <div className="h-full min-h-0 flex flex-col gap-4">
             {/* Header */}
@@ -582,6 +603,7 @@ export default function LogViewer() {
                 containerRef={containerRef}
                 onScroll={handleScroll}
                 initialScrollPendingRef={initialTailScrollPendingRef}
+                onDownload={handleDownload}
             />
         </div>
     )
