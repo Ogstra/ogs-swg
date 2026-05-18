@@ -95,6 +95,7 @@ type Subscription struct {
 	ResetDay                   sql.NullInt64  `json:"reset_day"`
 	ProfileUpdateIntervalHours sql.NullInt64  `json:"profile_update_interval_hours"`
 	UpdateAlways               int64          `json:"update_always"`
+	HappRoutingProfile         string         `json:"happ_routing_profile"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
 }
