@@ -492,9 +492,6 @@ func happSubscriptionParamsCacheKey(params []happSubscriptionParam) string {
 }
 
 func happSubscriptionBodyLine(param happSubscriptionParam) string {
-	if param.Key == "providerid" {
-		return "#providerid " + param.Value
-	}
 	return "#" + param.Key + ": " + param.Value
 }
 
