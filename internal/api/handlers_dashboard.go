@@ -268,6 +268,9 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	endStr := r.URL.Query().Get("end")
 
 	start, end, interval := resolveDashboardWindow(rangeStr, startStr, endStr)
+	// liveEnd is used for top-consumer queries so they always reflect data
+	// up to the current moment, independent of the quantized chart window.
+	liveEnd := time.Now().Unix()
 	dashboardPrefs := core.DefaultDashboardPreferences()
 	cachePrincipal := "__default__"
 	if principal, ok := s.dashboardPreferencesPrincipal(r); ok {
@@ -293,7 +296,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		if rangeStr == "" {
 			rangeStr = "24h"
 		}
-		cacheKey = cachePrincipal + ":window:" + strconv.Itoa(dashboardPrefs.ActiveUserWindowMinutes) + ":range:" + rangeStr + ":" + strconv.FormatInt(end, 10)
+		quantized15 := (time.Now().Unix() / 15) * 15
+		cacheKey = cachePrincipal + ":window:" + strconv.Itoa(dashboardPrefs.ActiveUserWindowMinutes) + ":range:" + rangeStr + ":" + strconv.FormatInt(quantized15, 10)
 	}
 
 	if cachedPayload, found := s.cache.Get(cacheKey); found {
@@ -407,7 +411,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 
 	// WG Top Consumers (delta in selected range) via single query
 	if len(wgPeerKeys) > 0 {
-		if totals, err := s.store.GetWGTopTotals(start, end, topLimit); err == nil {
+		if totals, err := s.store.GetWGTopTotals(start, liveEnd, topLimit); err == nil {
 			for _, t := range totals {
 				if t.Total <= 0 {
 					continue
@@ -444,7 +448,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 			metaLookup[m.Email] = m
 		}
 
-		if totals, err := s.store.GetSBTopTotals(start, end, topLimit); err == nil {
+		if totals, err := s.store.GetSBTopTotals(start, liveEnd, topLimit); err == nil {
 			for _, t := range totals {
 				if t.Total <= 0 {
 					continue
