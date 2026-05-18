@@ -948,7 +948,7 @@ export default function Subscriptions() {
                 onClose={() => setModalState({ type: null })}
                 footer={
                     <div className="flex gap-3 justify-end w-full">
-                        <Button variant="secondary" onClick={() => setSubRoutingProfileOpen(true)}>Routing Profile</Button>
+                        <Button variant="secondary" onClick={() => setSubRoutingProfileOpen(true)}>Happ Routing</Button>
                         <Button variant="secondary" onClick={() => setModalState({ type: null })}>Cancel</Button>
                         <Button variant="primary" onClick={handleSave} disabled={!canWriteUsers}>Save</Button>
                     </div>
@@ -1100,7 +1100,7 @@ export default function Subscriptions() {
 
             {/* Per-Subscription Happ Routing Profile Modal */}
             <Modal
-                title="Happ Routing Profile Override"
+                title="Happ Routing"
                 isOpen={subRoutingProfileOpen}
                 onClose={() => setSubRoutingProfileOpen(false)}
                 footer={
@@ -1111,7 +1111,7 @@ export default function Subscriptions() {
             >
                 <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Routing Profile</label>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Happ Routing</label>
                         <select
                             value={subHappRoutingPresetId}
                             onChange={e => {
@@ -1281,7 +1281,7 @@ export default function Subscriptions() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Routing Profile (JSON)</label>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Happ Routing (JSON)</label>
                         <textarea
                             value={happRoutingProfile}
                             onChange={e => setHappRoutingProfile(e.target.value)}
