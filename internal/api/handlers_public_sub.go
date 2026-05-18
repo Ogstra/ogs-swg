@@ -147,7 +147,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		s.subscriptionLimiter.record(token)
 	}
 
-	happParams, happFlag := s.happSubscriptionParamsForRequest(r, token)
+	happParams, happFlag := s.happSubscriptionParamsForRequest(r, token, sub.HappColorProfile)
 	profileFlag := happFlag
 	if profileFlag == "" && isShadowrocketRequest(r) {
 		if cfg, cfgErr := s.store.GetSubscriptionHappConfig(r.Context()); cfgErr == nil {
@@ -174,6 +174,9 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if routingProfileJSON != "" {
 		cacheKey += ":r:" + routingProfileJSON
+	}
+	if sub.HappColorProfile != "" {
+		cacheKey += ":cp:" + sub.HappColorProfile
 	}
 	if profileFlag != "" {
 		cacheKey += ":flag:" + profileFlag
@@ -367,7 +370,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
 }
 
-func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string) ([]happSubscriptionParam, string) {
+func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string, subColorProfile string) ([]happSubscriptionParam, string) {
 	if r == nil {
 		return nil, ""
 	}
@@ -402,7 +405,12 @@ func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string)
 	appendParam("subscription-always-hwid-enable", config.AlwaysHWID)
 	appendParam("subscription-auto-update-open-enable", config.AutoUpdateOnOpen)
 	appendParam("subscription-ping-onopen-enabled", config.PingOnOpen)
-	appendParam("color-profile", config.ColorProfile)
+	// Per-sub color-profile takes priority over global; seen map blocks the global below.
+	if subColorProfile != "" {
+		appendParam("color-profile", subColorProfile)
+	} else {
+		appendParam("color-profile", config.ColorProfile)
+	}
 
 	for _, param := range config.AdvancedParameters {
 		value := param.Value

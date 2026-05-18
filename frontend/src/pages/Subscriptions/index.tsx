@@ -242,10 +242,11 @@ export default function Subscriptions() {
     const [happThemeId, setHappThemeId] = useState('')
     const [happProfileFlag, setHappProfileFlag] = useState('')
     const [happRoutingProfile, setHappRoutingProfile] = useState('')
-    const [happRoutingPresetId, setHappRoutingPresetId] = useState('')
     const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
     const [subHappRoutingProfile, setSubHappRoutingProfile] = useState('')
     const [subHappRoutingPresetId, setSubHappRoutingPresetId] = useState('')
+    const [subHappThemeId, setSubHappThemeId] = useState('')
+    const [subRoutingProfileOpen, setSubRoutingProfileOpen] = useState(false)
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers(), enabled: canReadUsers })
@@ -359,6 +360,7 @@ export default function Subscriptions() {
         applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
         setSubHappRoutingProfile('')
         setSubHappRoutingPresetId('')
+        setSubHappThemeId(happThemeId)
         setModalState({ type: 'create' })
     }
 
@@ -388,6 +390,8 @@ export default function Subscriptions() {
         const subRouting = sub.happ_routing_profile || ''
         setSubHappRoutingProfile(subRouting)
         setSubHappRoutingPresetId(resolveRoutingPresetId(subRouting))
+        const subColorProfile = sub.happ_color_profile || ''
+        setSubHappThemeId(subColorProfile ? resolveHappThemeId(subColorProfile) : happThemeId)
         setModalState({ type: 'edit', data: sub })
     }
 
@@ -416,8 +420,6 @@ export default function Subscriptions() {
         setHappPingOnOpen(draft.pingOnOpen)
         setHappThemeId(resolveHappThemeId(draft.colorProfile))
         setHappProfileFlag(draft.profileFlag)
-        const routingPresetId = resolveRoutingPresetId(draft.routingProfile)
-        setHappRoutingPresetId(routingPresetId)
         setHappRoutingProfile(draft.routingProfile)
         setHappAdvancedParameters(draft.advancedParameters)
         setHappConfigOpen(true)
@@ -446,6 +448,7 @@ export default function Subscriptions() {
             profile_update_interval_hours: intervalHours,
             update_always: updateAlways,
             happ_routing_profile: subHappRoutingPresetId === 'custom' ? subHappRoutingProfile.trim() : (HAPP_ROUTING_PRESETS.find(p => p.id === subHappRoutingPresetId)?.value || ''),
+            happ_color_profile: subHappThemeId !== happThemeId ? (HAPP_THEME_PRESETS.find(t => t.id === subHappThemeId)?.value || '') : '',
         }
 
         try {
@@ -509,7 +512,7 @@ export default function Subscriptions() {
                 subscription_ping_onopen_enabled: happPingOnOpen,
                 color_profile: resolveHappThemeValue(happThemeId),
                 profile_flag: happProfileFlag.trim(),
-                routing_profile: happRoutingPresetId === 'custom' ? happRoutingProfile.trim() : (HAPP_ROUTING_PRESETS.find(p => p.id === happRoutingPresetId)?.value || ''),
+                routing_profile: happRoutingProfile.trim(),
                 advanced_parameters: advancedParameters,
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
@@ -945,6 +948,7 @@ export default function Subscriptions() {
                 onClose={() => setModalState({ type: null })}
                 footer={
                     <div className="flex gap-3 justify-end w-full">
+                        <Button variant="secondary" onClick={() => setSubRoutingProfileOpen(true)}>Routing Profile</Button>
                         <Button variant="secondary" onClick={() => setModalState({ type: null })}>Cancel</Button>
                         <Button variant="primary" onClick={handleSave} disabled={!canWriteUsers}>Save</Button>
                     </div>
@@ -1091,8 +1095,23 @@ export default function Subscriptions() {
                         </div>
                     </div>
 
+                </div>
+            </Modal>
+
+            {/* Per-Subscription Happ Routing Profile Modal */}
+            <Modal
+                title="Happ Routing Profile Override"
+                isOpen={subRoutingProfileOpen}
+                onClose={() => setSubRoutingProfileOpen(false)}
+                footer={
+                    <div className="flex gap-3 justify-end w-full">
+                        <Button variant="secondary" onClick={() => setSubRoutingProfileOpen(false)}>Close</Button>
+                    </div>
+                }
+            >
+                <div className="space-y-4">
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Happ Routing Profile Override</label>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Routing Profile</label>
                         <select
                             value={subHappRoutingPresetId}
                             onChange={e => {
@@ -1112,12 +1131,25 @@ export default function Subscriptions() {
                             <textarea
                                 value={subHappRoutingProfile}
                                 onChange={e => setSubHappRoutingProfile(e.target.value)}
-                                rows={3}
+                                rows={4}
                                 className="mt-2 w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
-                                placeholder='{"Name":"ogs","GlobalProxy":"true","FakeDNS":"true",...}'
+                                placeholder='{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}'
                             />
                         )}
-                        <p className="mt-1 text-xs text-slate-500">Overrides the global Happ routing profile for this subscription. Leave empty to use global setting.</p>
+                        <p className="mt-1 text-xs text-slate-500">Overrides the global routing profile for this subscription. The JSON is sent in full — it replaces the entire routing profile on the client.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Theme Override</label>
+                        <select
+                            value={subHappThemeId}
+                            onChange={e => setSubHappThemeId(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            {HAPP_THEME_PRESETS.map(theme => (
+                                <option key={theme.id || 'none'} value={theme.id}>{theme.label}{theme.id === happThemeId ? ' (global)' : ''}</option>
+                            ))}
+                        </select>
+                        <p className="mt-1 text-xs text-slate-500">Overrides the global theme for this subscription. Defaults to the global theme.</p>
                     </div>
                 </div>
             </Modal>
@@ -1231,35 +1263,6 @@ export default function Subscriptions() {
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Routing Profile</label>
-                        <select
-                            value={happRoutingPresetId}
-                            onChange={e => {
-                                const id = e.target.value
-                                setHappRoutingPresetId(id)
-                                if (id !== 'custom') {
-                                    setHappRoutingProfile(HAPP_ROUTING_PRESETS.find(p => p.id === id)?.value || '')
-                                }
-                            }}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                        >
-                            {HAPP_ROUTING_PRESETS.map(p => (
-                                <option key={p.id} value={p.id}>{p.label}</option>
-                            ))}
-                        </select>
-                        {happRoutingPresetId === 'custom' && (
-                            <textarea
-                                value={happRoutingProfile}
-                                onChange={e => setHappRoutingProfile(e.target.value)}
-                                rows={3}
-                                className="mt-2 w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
-                                placeholder='{"Name":"ogs","GlobalProxy":"true","FakeDNS":"true",...}'
-                            />
-                        )}
-                        <p className="mt-1 text-xs text-slate-500">Emits a <code>#routing:</code> line in the subscription body for Happ clients. Controls FakeDNS and DNS strategy.</p>
-                    </div>
-
-                    <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Advanced Parameters</label>
                         <textarea
                             value={happAdvancedParameters}
@@ -1275,6 +1278,18 @@ export default function Subscriptions() {
                                 'ping-type: proxy',
                             ].join('\n')}
                         />
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Routing Profile (JSON)</label>
+                        <textarea
+                            value={happRoutingProfile}
+                            onChange={e => setHappRoutingProfile(e.target.value)}
+                            rows={4}
+                            className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                            placeholder='{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}'
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Emits <code>#routing: happ://routing/onadd/&lt;base64&gt;</code> in the subscription body. Controls FakeDNS and DNS strategy for Happ clients. Leave empty to disable.</p>
                     </div>
                 </div>
             </Modal>

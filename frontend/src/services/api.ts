@@ -289,6 +289,7 @@ export interface Subscription {
     name: string;
     alias: string;
     happ_routing_profile?: string;
+    happ_color_profile?: string;
     quota_limit: number;
     quota_period: string;
     used_bytes: number;
@@ -316,6 +317,7 @@ export interface SubscriptionMutationRequest {
     profile_update_interval_hours: number | null;
     update_always: boolean;
     happ_routing_profile?: string;
+    happ_color_profile?: string;
 }
 
 export interface SubscriptionDefaults {
