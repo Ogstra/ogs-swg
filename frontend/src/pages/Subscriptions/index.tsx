@@ -244,6 +244,8 @@ export default function Subscriptions() {
     const [happRoutingProfile, setHappRoutingProfile] = useState('')
     const [happRoutingPresetId, setHappRoutingPresetId] = useState('')
     const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
+    const [subHappRoutingProfile, setSubHappRoutingProfile] = useState('')
+    const [subHappRoutingPresetId, setSubHappRoutingPresetId] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers(), enabled: canReadUsers })
@@ -355,6 +357,8 @@ export default function Subscriptions() {
         setUserSearch('')
         setExpandedAliasUsers(new Set())
         applyRefreshPolicyDraft(subscriptionDefaultsToRefreshPolicyDraft(subscriptionDefaults))
+        setSubHappRoutingProfile('')
+        setSubHappRoutingPresetId('')
         setModalState({ type: 'create' })
     }
 
@@ -381,6 +385,9 @@ export default function Subscriptions() {
                 )
         )
         setUpdateAlways(sub.update_always === true)
+        const subRouting = sub.happ_routing_profile || ''
+        setSubHappRoutingProfile(subRouting)
+        setSubHappRoutingPresetId(resolveRoutingPresetId(subRouting))
         setModalState({ type: 'edit', data: sub })
     }
 
@@ -438,6 +445,7 @@ export default function Subscriptions() {
             members: serializeSubscriptionProfileAliases(selectedProfiles),
             profile_update_interval_hours: intervalHours,
             update_always: updateAlways,
+            happ_routing_profile: subHappRoutingPresetId === 'custom' ? subHappRoutingProfile.trim() : (HAPP_ROUTING_PRESETS.find(p => p.id === subHappRoutingPresetId)?.value || ''),
         }
 
         try {
@@ -1081,6 +1089,35 @@ export default function Subscriptions() {
                                 </div>
                             )}
                         </div>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Happ Routing Profile Override</label>
+                        <select
+                            value={subHappRoutingPresetId}
+                            onChange={e => {
+                                const id = e.target.value
+                                setSubHappRoutingPresetId(id)
+                                if (id !== 'custom') {
+                                    setSubHappRoutingProfile(HAPP_ROUTING_PRESETS.find(p => p.id === id)?.value || '')
+                                }
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            {HAPP_ROUTING_PRESETS.map(p => (
+                                <option key={p.id} value={p.id}>{p.id === '' ? 'None (use global)' : p.label}</option>
+                            ))}
+                        </select>
+                        {subHappRoutingPresetId === 'custom' && (
+                            <textarea
+                                value={subHappRoutingProfile}
+                                onChange={e => setSubHappRoutingProfile(e.target.value)}
+                                rows={3}
+                                className="mt-2 w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                                placeholder='{"Name":"ogs","GlobalProxy":"true","FakeDNS":"true",...}'
+                            />
+                        )}
+                        <p className="mt-1 text-xs text-slate-500">Overrides the global Happ routing profile for this subscription. Leave empty to use global setting.</p>
                     </div>
                 </div>
             </Modal>
