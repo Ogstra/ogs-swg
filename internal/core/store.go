@@ -364,6 +364,8 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN block_reason TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked ON subscription_requests(blocked, requested_at DESC);")
+	// Upgrade path: add happ_routing_profile to existing subscriptions tables.
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_routing_profile TEXT NOT NULL DEFAULT '';")
 	return nil
 }
 
@@ -409,6 +411,7 @@ type SubscriptionHappConfig struct {
 	PingOnOpen         string                      `json:"subscription_ping_onopen_enabled"`
 	ColorProfile       string                      `json:"color_profile"`
 	ProfileFlag        string                      `json:"profile_flag"`
+	RoutingProfile     string                      `json:"routing_profile"`
 	AdvancedParameters []SubscriptionHappParameter `json:"advanced_parameters"`
 }
 
