@@ -127,8 +127,8 @@ const resolveHappThemeId = (colorProfile: string): string => HAPP_THEME_PRESETS.
 
 const HAPP_ROUTING_PRESETS = [
     { id: '', label: 'None (disabled)', value: '' },
-    { id: 'fakedns', label: 'FakeDNS + DoH (recommended)', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}' },
-    { id: 'standard', label: 'Standard DoH', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"false"}' },
+    { id: 'fakedns', label: 'FakeDNS (recommended)', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomesticDNSType":"System","DomainStrategy":"IPIfNonMatch","FakeDNS":"true","UseChunkFiles":"true","DirectIp":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}' },
+    { id: 'fakedns-domestic', label: 'FakeDNS + DoH doméstico', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomesticDNSType":"DoH","DomesticDNSDomain":"https://8.8.8.8/dns-query","DomesticDNSIP":"8.8.8.8","DomainStrategy":"IPIfNonMatch","FakeDNS":"true","UseChunkFiles":"true","DirectIp":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}' },
     { id: 'custom', label: 'Custom', value: 'custom' },
 ] as const
 
