@@ -129,13 +129,44 @@ const HAPP_ROUTING_PRESETS = [
     { id: '', label: 'None (disabled)', value: '' },
     { id: 'fakedns', label: 'FakeDNS (recommended)', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomesticDNSType":"System","DomainStrategy":"IPIfNonMatch","FakeDNS":"true","UseChunkFiles":"true","DirectIp":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}' },
     { id: 'fakedns-domestic', label: 'FakeDNS + DoH doméstico', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomesticDNSType":"DoH","DomesticDNSDomain":"https://8.8.8.8/dns-query","DomesticDNSIP":"8.8.8.8","DomainStrategy":"IPIfNonMatch","FakeDNS":"true","UseChunkFiles":"true","DirectIp":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}' },
+    { id: 'fakedns-cloudflare-lan', label: 'FakeDNS + Cloudflare DoH + LAN direct', value: compactJSON({ Name: 'ogs', GlobalProxy: 'true', RemoteDNSType: 'DoH', RemoteDNSDomain: 'https://1.1.1.1/dns-query', RemoteDNSIP: '1.1.1.1', DomesticDNSType: 'DoH', DomesticDNSDomain: 'https://1.1.1.1/dns-query', DomesticDNSIP: '1.1.1.1', DomainStrategy: 'IPIfNonMatch', FakeDNS: 'true', UseChunkFiles: 'true', DirectIp: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', '224.0.0.0/4', '255.255.255.255'] }) },
     { id: 'custom', label: 'Custom', value: 'custom' },
 ] as const
 
+const normalizeRoutingPresetValue = (value: string): string => {
+    if (!value) return ''
+    try {
+        const parsed = JSON.parse(value)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            delete parsed.Name
+            return JSON.stringify(parsed)
+        }
+    } catch {
+        // Fall back to exact matching for malformed custom JSON.
+    }
+    return value
+}
+
 const resolveRoutingPresetId = (value: string): string => {
     if (!value) return ''
-    const preset = HAPP_ROUTING_PRESETS.find(p => p.id !== 'custom' && p.value === value)
+    const normalizedValue = normalizeRoutingPresetValue(value)
+    const preset = HAPP_ROUTING_PRESETS.find(p => p.id !== 'custom' && normalizeRoutingPresetValue(p.value) === normalizedValue)
     return preset ? preset.id : 'custom'
+}
+
+const routingProfileForSubscriptionName = (presetId: string, subscriptionDisplayName: string): string => {
+    const preset = HAPP_ROUTING_PRESETS.find(p => p.id === presetId)
+    if (!preset || preset.id === 'custom' || !preset.value) return ''
+    try {
+        const parsed = JSON.parse(preset.value)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            parsed.Name = subscriptionDisplayName.trim() || parsed.Name || 'route'
+            return JSON.stringify(parsed)
+        }
+    } catch {
+        return preset.value
+    }
+    return preset.value
 }
 
 const parseIntervalHours = (value: string): number | null => {
@@ -447,7 +478,7 @@ export default function Subscriptions() {
             members: serializeSubscriptionProfileAliases(selectedProfiles),
             profile_update_interval_hours: intervalHours,
             update_always: updateAlways,
-            happ_routing_profile: subHappRoutingPresetId === 'custom' ? subHappRoutingProfile.trim() : (HAPP_ROUTING_PRESETS.find(p => p.id === subHappRoutingPresetId)?.value || ''),
+            happ_routing_profile: subHappRoutingPresetId === 'custom' ? subHappRoutingProfile.trim() : routingProfileForSubscriptionName(subHappRoutingPresetId, aliasInput.trim() || nameInput.trim()),
             happ_color_profile: subHappThemeId !== happThemeId ? (HAPP_THEME_PRESETS.find(t => t.id === subHappThemeId)?.value || '') : '',
         }
 
@@ -1118,7 +1149,7 @@ export default function Subscriptions() {
                                 const id = e.target.value
                                 setSubHappRoutingPresetId(id)
                                 if (id !== 'custom') {
-                                    setSubHappRoutingProfile(HAPP_ROUTING_PRESETS.find(p => p.id === id)?.value || '')
+                                    setSubHappRoutingProfile(routingProfileForSubscriptionName(id, aliasInput.trim() || nameInput.trim()))
                                 }
                             }}
                             className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
