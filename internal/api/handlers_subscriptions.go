@@ -72,6 +72,7 @@ type SubscriptionHappConfigRequest struct {
 	PingOnOpen         string                             `json:"subscription_ping_onopen_enabled"`
 	ColorProfile       string                             `json:"color_profile"`
 	ProfileFlag        string                             `json:"profile_flag"`
+	RoutingProfile     string                             `json:"routing_profile"`
 	AdvancedParameters []SubscriptionHappParameterRequest `json:"advanced_parameters"`
 }
 
@@ -349,6 +350,7 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 		PingOnOpen:         pingOnOpen,
 		ColorProfile:       colorProfile,
 		ProfileFlag:        strings.TrimSpace(req.ProfileFlag),
+		RoutingProfile:     strings.TrimSpace(req.RoutingProfile),
 		AdvancedParameters: advanced,
 	}, nil
 }
@@ -406,6 +408,7 @@ type CreateSubscriptionRequest struct {
 	Members                    []SubscriptionMemberRequest `json:"members"`
 	ProfileUpdateIntervalHours optionalInt64Field          `json:"profile_update_interval_hours"`
 	UpdateAlways               *bool                       `json:"update_always"`
+	HappRoutingProfile         string                      `json:"happ_routing_profile"`
 }
 
 type SubscriptionMemberRequest struct {
