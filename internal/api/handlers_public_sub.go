@@ -154,9 +154,26 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			profileFlag = cfg.ProfileFlag
 		}
 	}
+
+	// Determine routing profile for Happ clients.
+	// Per-sub override takes priority; falls back to global config.
+	routingProfileJSON := ""
+	if happParams != nil {
+		if sub.HappRoutingProfile != "" {
+			routingProfileJSON = sub.HappRoutingProfile
+		} else {
+			if globalCfg, cfgErr := s.store.GetSubscriptionHappConfig(r.Context()); cfgErr == nil {
+				routingProfileJSON = globalCfg.RoutingProfile
+			}
+		}
+	}
+
 	cacheKey := "sub:" + token
 	if happParams != nil {
 		cacheKey += ":happ:" + happSubscriptionParamsCacheKey(happParams)
+	}
+	if routingProfileJSON != "" {
+		cacheKey += ":r:" + routingProfileJSON
 	}
 	if profileFlag != "" {
 		cacheKey += ":flag:" + profileFlag
@@ -317,6 +334,10 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		responseLines = append(responseLines, fmt.Sprintf("#profile-update-interval: %d", intervalVal))
 		if int64ToBool(sub.UpdateAlways) {
 			responseLines = append(responseLines, "#update-always: true")
+		}
+		if routingProfileJSON != "" {
+			encoded := base64.StdEncoding.EncodeToString([]byte(routingProfileJSON))
+			responseLines = append(responseLines, "#routing: happ://routing/onadd/"+encoded)
 		}
 	}
 	responseLines = append(responseLines, links...)

@@ -38,6 +38,7 @@ type SubscriptionResponse struct {
 	Members                    []SubscriptionMemberResponse `json:"members"`
 	ProfileUpdateIntervalHours *int64                       `json:"profile_update_interval_hours"`
 	UpdateAlways               bool                         `json:"update_always"`
+	HappRoutingProfile         string                       `json:"happ_routing_profile"`
 	LastRequestAt              *int64                       `json:"last_request_at"`
 	CreatedAt                  int64                        `json:"created_at"`
 	UpdatedAt                  int64                        `json:"updated_at"`
@@ -390,6 +391,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			Members:                    members,
 			ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 			UpdateAlways:               int64ToBool(sub.UpdateAlways),
+			HappRoutingProfile:         sub.HappRoutingProfile,
 			LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
 			UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -497,6 +499,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
 		ProfileUpdateIntervalHours: nullableInt64(req.ProfileUpdateIntervalHours.Value),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, false),
+		HappRoutingProfile:         strings.TrimSpace(req.HappRoutingProfile),
 	})
 	if err != nil {
 		http.Error(w, "Failed to create subscription: "+err.Error(), http.StatusInternalServerError)
@@ -558,6 +561,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		Members:                    members,
 		ProfileUpdateIntervalHours: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
 		UpdateAlways:               int64ToBool(sub.UpdateAlways),
+		HappRoutingProfile:         sub.HappRoutingProfile,
 		LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,
 		UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -604,6 +608,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		ResetDay:                   sql.NullInt64{Int64: 1, Valid: true},
 		ProfileUpdateIntervalHours: mergeNullableInt64(current.ProfileUpdateIntervalHours, req.ProfileUpdateIntervalHours),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, int64ToBool(current.UpdateAlways)),
+		HappRoutingProfile:         strings.TrimSpace(req.HappRoutingProfile),
 		ID:                         id,
 	})
 	if err != nil {
