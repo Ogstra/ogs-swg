@@ -126,7 +126,8 @@ const resolveHappThemeValue = (themeId: string): string => HAPP_THEME_PRESETS.fi
 const resolveHappThemeId = (colorProfile: string): string => HAPP_THEME_PRESETS.find(theme => theme.value === colorProfile)?.id || ''
 
 const HAPP_ROUTING_PRESETS = [
-    { id: '', label: 'None (disabled)', value: '' },
+    { id: '', label: 'None (use global)', value: '' },
+    { id: 'off', label: 'Off (disable routing)', value: 'happ://routing/off' },
     { id: 'fakedns', label: 'FakeDNS (recommended)', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomesticDNSType":"System","DomainStrategy":"IPIfNonMatch","FakeDNS":"true","UseChunkFiles":"true","DirectIp":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}' },
     { id: 'fakedns-domestic', label: 'FakeDNS + DoH doméstico', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomesticDNSType":"DoH","DomesticDNSDomain":"https://8.8.8.8/dns-query","DomesticDNSIP":"8.8.8.8","DomainStrategy":"IPIfNonMatch","FakeDNS":"true","UseChunkFiles":"true","DirectIp":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8"}' },
     { id: 'fakedns-cloudflare-lan', label: 'FakeDNS + Cloudflare DoH + LAN direct', value: compactJSON({ Name: 'ogs', GlobalProxy: 'true', RemoteDNSType: 'DoH', RemoteDNSDomain: 'https://1.1.1.1/dns-query', RemoteDNSIP: '1.1.1.1', DomesticDNSType: 'DoH', DomesticDNSDomain: 'https://1.1.1.1/dns-query', DomesticDNSIP: '1.1.1.1', DomainStrategy: 'IPIfNonMatch', FakeDNS: 'true', UseChunkFiles: 'true', DirectIp: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '169.254.0.0/16', '224.0.0.0/4', '255.255.255.255'] }) },
@@ -157,6 +158,7 @@ const resolveRoutingPresetId = (value: string): string => {
 const routingProfileForSubscriptionName = (presetId: string, subscriptionDisplayName: string): string => {
     const preset = HAPP_ROUTING_PRESETS.find(p => p.id === presetId)
     if (!preset || preset.id === 'custom' || !preset.value) return ''
+    if (preset.value === 'happ://routing/off') return preset.value
     try {
         const parsed = JSON.parse(preset.value)
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -1167,7 +1169,7 @@ export default function Subscriptions() {
                                 placeholder='{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}'
                             />
                         )}
-                        <p className="mt-1 text-xs text-slate-500">Overrides the global routing profile for this subscription. The JSON is sent in full — it replaces the entire routing profile on the client.</p>
+                        <p className="mt-1 text-xs text-slate-500">Overrides the global routing profile for this subscription. Use Off to send <code>happ://routing/off</code> and actively disable routing on the client.</p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Theme Override</label>
@@ -1320,7 +1322,7 @@ export default function Subscriptions() {
                             className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
                             placeholder='{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}'
                         />
-                        <p className="mt-1 text-xs text-slate-500">Emits <code>happ://routing/onadd/&lt;base64&gt;</code> directly in the subscription body. Controls FakeDNS and DNS strategy for Happ clients. Leave empty to disable.</p>
+                        <p className="mt-1 text-xs text-slate-500">Emits <code>happ://routing/onadd/&lt;base64&gt;</code> directly in the subscription body. Use <code>happ://routing/off</code> to actively disable routing on the client.</p>
                     </div>
                 </div>
             </Modal>

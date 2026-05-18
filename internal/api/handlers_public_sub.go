@@ -17,6 +17,8 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
+const happRoutingOffLink = "happ://routing/off"
+
 type cachedSub struct {
 	Body                  []byte
 	HeaderName            string
@@ -339,8 +341,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			responseLines = append(responseLines, "#update-always: true")
 		}
 		if routingProfileJSON != "" {
-			encoded := base64.StdEncoding.EncodeToString([]byte(routingProfileJSON))
-			responseLines = append(responseLines, "happ://routing/onadd/"+encoded)
+			if strings.TrimSpace(routingProfileJSON) == happRoutingOffLink {
+				responseLines = append(responseLines, happRoutingOffLink)
+			} else {
+				encoded := base64.StdEncoding.EncodeToString([]byte(routingProfileJSON))
+				responseLines = append(responseLines, "happ://routing/onadd/"+encoded)
+			}
 		}
 	}
 	responseLines = append(responseLines, links...)
