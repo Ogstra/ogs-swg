@@ -288,6 +288,7 @@ export interface Subscription {
     token?: string;
     name: string;
     alias: string;
+    happ_routing_profile?: string;
     quota_limit: number;
     quota_period: string;
     used_bytes: number;
@@ -314,6 +315,7 @@ export interface SubscriptionMutationRequest {
     members?: SubscriptionMember[];
     profile_update_interval_hours: number | null;
     update_always: boolean;
+    happ_routing_profile?: string;
 }
 
 export interface SubscriptionDefaults {
@@ -335,6 +337,7 @@ export interface SubscriptionHappConfig {
     subscription_ping_onopen_enabled: '' | '0' | '1';
     color_profile: string;
     profile_flag: string;
+    routing_profile?: string;
     advanced_parameters: SubscriptionHappParameter[];
 }
 
