@@ -62,6 +62,7 @@ type HappConfigDraft = {
     pingOnOpen: '' | '0' | '1'
     colorProfile: string
     profileFlag: string
+    routingProfile: string
     advancedParameters: string
 }
 
@@ -124,6 +125,19 @@ const HAPP_THEME_PRESETS = [
 const resolveHappThemeValue = (themeId: string): string => HAPP_THEME_PRESETS.find(theme => theme.id === themeId)?.value || ''
 const resolveHappThemeId = (colorProfile: string): string => HAPP_THEME_PRESETS.find(theme => theme.value === colorProfile)?.id || ''
 
+const HAPP_ROUTING_PRESETS = [
+    { id: '', label: 'None (disabled)', value: '' },
+    { id: 'fakedns', label: 'FakeDNS + DoH (recommended)', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}' },
+    { id: 'standard', label: 'Standard DoH', value: '{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"false"}' },
+    { id: 'custom', label: 'Custom', value: 'custom' },
+] as const
+
+const resolveRoutingPresetId = (value: string): string => {
+    if (!value) return ''
+    const preset = HAPP_ROUTING_PRESETS.find(p => p.id !== 'custom' && p.value === value)
+    return preset ? preset.id : 'custom'
+}
+
 const parseIntervalHours = (value: string): number | null => {
     const trimmed = value.trim()
     if (!trimmed) return null
@@ -179,6 +193,7 @@ const happConfigToDraft = (config: SubscriptionHappConfig): HappConfigDraft => (
     pingOnOpen: config.subscription_ping_onopen_enabled === '0' || config.subscription_ping_onopen_enabled === '1' ? config.subscription_ping_onopen_enabled : '',
     colorProfile: config.color_profile || '',
     profileFlag: config.profile_flag || '',
+    routingProfile: config.routing_profile || '',
     advancedParameters: (config.advanced_parameters || [])
         .map(param => `${param.key}: ${param.value}`)
         .join('\n'),
@@ -226,6 +241,8 @@ export default function Subscriptions() {
     const [happPingOnOpen, setHappPingOnOpen] = useState<'' | '0' | '1'>('')
     const [happThemeId, setHappThemeId] = useState('')
     const [happProfileFlag, setHappProfileFlag] = useState('')
+    const [happRoutingProfile, setHappRoutingProfile] = useState('')
+    const [happRoutingPresetId, setHappRoutingPresetId] = useState('')
     const [happAdvancedParameters, setHappAdvancedParameters] = useState('')
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
@@ -392,6 +409,9 @@ export default function Subscriptions() {
         setHappPingOnOpen(draft.pingOnOpen)
         setHappThemeId(resolveHappThemeId(draft.colorProfile))
         setHappProfileFlag(draft.profileFlag)
+        const routingPresetId = resolveRoutingPresetId(draft.routingProfile)
+        setHappRoutingPresetId(routingPresetId)
+        setHappRoutingProfile(draft.routingProfile)
         setHappAdvancedParameters(draft.advancedParameters)
         setHappConfigOpen(true)
     }
@@ -481,6 +501,7 @@ export default function Subscriptions() {
                 subscription_ping_onopen_enabled: happPingOnOpen,
                 color_profile: resolveHappThemeValue(happThemeId),
                 profile_flag: happProfileFlag.trim(),
+                routing_profile: happRoutingPresetId === 'custom' ? happRoutingProfile.trim() : (HAPP_ROUTING_PRESETS.find(p => p.id === happRoutingPresetId)?.value || ''),
                 advanced_parameters: advancedParameters,
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
@@ -1170,6 +1191,35 @@ export default function Subscriptions() {
                                 <option key={theme.id || 'none'} value={theme.id}>{theme.label}</option>
                             ))}
                         </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Routing Profile</label>
+                        <select
+                            value={happRoutingPresetId}
+                            onChange={e => {
+                                const id = e.target.value
+                                setHappRoutingPresetId(id)
+                                if (id !== 'custom') {
+                                    setHappRoutingProfile(HAPP_ROUTING_PRESETS.find(p => p.id === id)?.value || '')
+                                }
+                            }}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        >
+                            {HAPP_ROUTING_PRESETS.map(p => (
+                                <option key={p.id} value={p.id}>{p.label}</option>
+                            ))}
+                        </select>
+                        {happRoutingPresetId === 'custom' && (
+                            <textarea
+                                value={happRoutingProfile}
+                                onChange={e => setHappRoutingProfile(e.target.value)}
+                                rows={3}
+                                className="mt-2 w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                                placeholder='{"Name":"ogs","GlobalProxy":"true","FakeDNS":"true",...}'
+                            />
+                        )}
+                        <p className="mt-1 text-xs text-slate-500">Emits a <code>#routing:</code> line in the subscription body for Happ clients. Controls FakeDNS and DNS strategy.</p>
                     </div>
 
                     <div>
