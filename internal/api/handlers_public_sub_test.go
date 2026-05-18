@@ -315,7 +315,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if strings.Contains(decoded, "#routing:") {
 		t.Fatalf("decoded Happ body should not include #routing prefix: %q", decoded)
 	}
-	wantRoutingJSON := `{"FakeDNS":"true","GlobalProxy":"true","Name":"Happ Bundle"}`
+	wantRoutingJSON := `{"Name":"global","GlobalProxy":"true","FakeDNS":"true"}`
 	wantRouting := "happ://routing/onadd/" + base64.StdEncoding.EncodeToString([]byte(wantRoutingJSON))
 	if !strings.Contains(decoded, wantRouting) {
 		t.Fatalf("decoded Happ body missing routing link %q: %q", wantRouting, decoded)
