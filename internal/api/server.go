@@ -354,6 +354,8 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/sampler/run", s.secure(s.requirePerm(canWriteSettings, s.handleRunSampler)))
 	protected.HandleFunc("GET /api/sampler/history", s.secure(s.requirePerm(canReadSettings, s.handleSamplerHistory)))
 	protected.HandleFunc("GET /api/subscription-requests/history", s.secure(s.requirePerm(canReadSettings, s.handleSubscriptionRequestHistory)))
+	protected.HandleFunc("DELETE /api/subscription-requests/{id}", s.secure(s.requirePerm(canWriteSettings, s.handleDeleteSubscriptionRequest)))
+	protected.HandleFunc("DELETE /api/subscription-requests", s.secure(s.requirePerm(canWriteSettings, s.handleDeleteSubscriptionRequests)))
 	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.requirePerm(canWriteSettings, s.handlePauseSampler)))
 	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.requirePerm(canWriteSettings, s.handleResumeSampler)))
 	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.handlePruneNow)))
