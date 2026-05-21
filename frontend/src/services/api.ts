@@ -1322,6 +1322,31 @@ export const api = {
         });
         await handleResponse(res, 'Failed to delete subscription');
     },
+    deleteSubscriptionRequest: async (id: number): Promise<void> => {
+        const res = await fetch(`/api/subscription-requests/${id}`, {
+            method: 'DELETE',
+            headers: buildHeaders(),
+        });
+        if (!res.ok) throw new Error(`Failed to delete: ${res.status}`);
+    },
+
+    bulkDeleteSubscriptionRequests: async (ids: number[]): Promise<void> => {
+        const res = await fetch('/api/subscription-requests', {
+            method: 'DELETE',
+            headers: { ...buildHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids }),
+        });
+        if (!res.ok) throw new Error(`Failed to bulk delete: ${res.status}`);
+    },
+
+    clearSubscriptionRequestsBySubID: async (subId: number): Promise<void> => {
+        const res = await fetch(`/api/subscription-requests?sub_id=${subId}`, {
+            method: 'DELETE',
+            headers: buildHeaders(),
+        });
+        if (!res.ok) throw new Error(`Failed to clear: ${res.status}`);
+    },
+
     regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> => {
         const res = await fetch(`/api/subscriptions/${id}/regenerate`, {
             method: 'POST',
