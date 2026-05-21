@@ -592,6 +592,52 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 	json.NewEncoder(w).Encode(page.Items)
 }
 
+// DELETE /api/subscription-requests/{id}
+func (s *Server) handleDeleteSubscriptionRequest(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || id <= 0 {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.DeleteSubscriptionRequest(id); err != nil {
+		http.Error(w, "failed to delete: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DELETE /api/subscription-requests  — body: {"ids":[1,2,3]} OR query: ?sub_id=X
+func (s *Server) handleDeleteSubscriptionRequests(w http.ResponseWriter, r *http.Request) {
+	subIDStr := r.URL.Query().Get("sub_id")
+	if subIDStr != "" {
+		subID, err := strconv.ParseInt(subIDStr, 10, 64)
+		if err != nil || subID <= 0 {
+			http.Error(w, "invalid sub_id", http.StatusBadRequest)
+			return
+		}
+		if err := s.store.DeleteSubscriptionRequestsBySubID(subID); err != nil {
+			http.Error(w, "failed to clear: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.IDs) == 0 {
+		http.Error(w, "ids required", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.DeleteSubscriptionRequestsByIDs(body.IDs); err != nil {
+		http.Error(w, "failed to bulk delete: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) getSubscriptionRequestHistoryPage(ctx context.Context, limit, offset, subID int, censor bool) (subscriptionRequestHistoryPageResponse, error) {
 	cacheKey := fmt.Sprintf("subscription-request-history:v2:censor=%t:sub=%d:limit=%d:offset=%d", censor, subID, limit, offset)
 	if offset > 0 {

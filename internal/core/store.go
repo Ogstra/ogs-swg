@@ -1412,6 +1412,31 @@ func (s *Store) PruneSubscriptionRequestsOlderThan(ts int64) error {
 	return s.Queries.PruneSubscriptionRequestsOlderThan(context.Background(), ts)
 }
 
+func (s *Store) DeleteSubscriptionRequest(id int64) error {
+	_, err := s.db.Exec("DELETE FROM subscription_requests WHERE id = ?", id)
+	return err
+}
+
+func (s *Store) DeleteSubscriptionRequestsByIDs(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := "DELETE FROM subscription_requests WHERE id IN (" + strings.Join(placeholders, ",") + ")"
+	_, err := s.db.Exec(query, args...)
+	return err
+}
+
+func (s *Store) DeleteSubscriptionRequestsBySubID(subID int64) error {
+	_, err := s.db.Exec("DELETE FROM subscription_requests WHERE sub_id = ?", subID)
+	return err
+}
+
 func (s *Store) CountSamples() (int64, error) {
 	c1, _ := s.Queries.CountSamples(context.Background())
 	c2, _ := s.Queries.CountWGSamples(context.Background())
