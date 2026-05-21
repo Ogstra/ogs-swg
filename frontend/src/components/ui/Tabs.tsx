@@ -50,7 +50,11 @@ export function Tabs({ tabs, defaultTab, className, headerRight, activeTab: cont
                 {headerRight ? <div className="shrink-0 px-2">{headerRight}</div> : null}
             </div>
             <div className="w-full flex-1 min-h-0">
-                {tabs.find(t => t.id === activeTab)?.content}
+                {tabs.map(t => (
+                    <div key={t.id} className={twMerge("w-full h-full min-h-0", t.id !== activeTab ? "hidden" : "")}>
+                        {t.content}
+                    </div>
+                ))}
             </div>
         </div>
     )
