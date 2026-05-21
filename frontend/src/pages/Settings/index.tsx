@@ -64,6 +64,8 @@ export default function Settings() {
     const subscriptionHistoryLoadingMoreRef = useRef(false)
     const [subscriptionHistorySubId, setSubscriptionHistorySubId] = useState('all')
     const subscriptionHistorySubIdRef = useRef(0)
+    const [subscriptionHistorySelected, setSubscriptionHistorySelected] = useState<Set<number>>(new Set())
+    const [subscriptionHistoryDeleting, setSubscriptionHistoryDeleting] = useState(false)
     const [features, setFeatures] = useState<FeatureFlags>({
         enable_singbox: true,
         enable_wireguard: true,
@@ -196,6 +198,7 @@ export default function Settings() {
         setSubscriptionRequestHistory([])
         setSubscriptionHistoryNextOffset(0)
         setSubscriptionHistoryHasMore(false)
+        setSubscriptionHistorySelected(new Set())
         setSubscriptionHistorySubId(value)
     }, [])
 
@@ -230,6 +233,72 @@ export default function Settings() {
             setSubscriptionHistoryRefreshing(false)
         }
     }, [selectedSubscriptionHistorySubId])
+
+    const hardRefreshSubscriptionHistory = useCallback(async () => {
+        subscriptionRequestHistoryRef.current = []
+        setSubscriptionRequestHistory([])
+        setSubscriptionHistoryNextOffset(0)
+        setSubscriptionHistoryHasMore(false)
+        setSubscriptionHistorySelected(new Set())
+        const subID = subscriptionHistorySubIdRef.current
+        subscriptionHistoryRefreshingRef.current = true
+        setSubscriptionHistoryRefreshing(true)
+        try {
+            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
+            if (subscriptionHistorySubIdRef.current !== subID) return
+            subscriptionRequestHistoryRef.current = page.items
+            setSubscriptionRequestHistory(page.items)
+            setSubscriptionHistoryNextOffset(page.next_offset)
+            setSubscriptionHistoryHasMore(page.has_more)
+        } finally {
+            subscriptionHistoryRefreshingRef.current = false
+            setSubscriptionHistoryRefreshing(false)
+        }
+    }, [])
+
+    const handleDeleteSingleSubscriptionRequest = useCallback(async (id: number) => {
+        if (!window.confirm('Delete this history record?')) return
+        setSubscriptionHistoryDeleting(true)
+        try {
+            await api.deleteSubscriptionRequest(id)
+            success('Record deleted')
+            await hardRefreshSubscriptionHistory()
+        } catch {
+            toastError('Failed to delete record')
+        } finally {
+            setSubscriptionHistoryDeleting(false)
+        }
+    }, [hardRefreshSubscriptionHistory, success, toastError])
+
+    const handleBulkDeleteSubscriptionRequests = useCallback(async (ids: number[]) => {
+        if (ids.length === 0) return
+        if (!window.confirm(`Delete ${ids.length} selected record(s)?`)) return
+        setSubscriptionHistoryDeleting(true)
+        try {
+            await api.bulkDeleteSubscriptionRequests(ids)
+            success(`Deleted ${ids.length} record(s)`)
+            await hardRefreshSubscriptionHistory()
+        } catch {
+            toastError('Failed to bulk delete')
+        } finally {
+            setSubscriptionHistoryDeleting(false)
+        }
+    }, [hardRefreshSubscriptionHistory, success, toastError])
+
+    const handleClearSubscriptionRequestsBySubID = useCallback(async (subId: number, label: string) => {
+        if (subId === 0) return
+        if (!window.confirm(`Clear all history for "${label}"?`)) return
+        setSubscriptionHistoryDeleting(true)
+        try {
+            await api.clearSubscriptionRequestsBySubID(subId)
+            success('History cleared')
+            await hardRefreshSubscriptionHistory()
+        } catch {
+            toastError('Failed to clear history')
+        } finally {
+            setSubscriptionHistoryDeleting(false)
+        }
+    }, [hardRefreshSubscriptionHistory, success, toastError])
 
     const loadMoreSubscriptionRequestHistory = useCallback(async () => {
         if (subscriptionHistoryLoadingMoreRef.current || !subscriptionHistoryHasMore) return
@@ -497,6 +566,12 @@ export default function Settings() {
                     subscriptionHistoryRefreshing={subscriptionHistoryRefreshing}
                     subscriptionHistoryLoadingMore={subscriptionHistoryLoadingMore}
                     loadMoreSubscriptionRequestHistory={loadMoreSubscriptionRequestHistory}
+                    subscriptionHistorySelected={subscriptionHistorySelected}
+                    setSubscriptionHistorySelected={setSubscriptionHistorySelected}
+                    subscriptionHistoryDeleting={subscriptionHistoryDeleting}
+                    onDeleteSingleSubscriptionRequest={handleDeleteSingleSubscriptionRequest}
+                    onBulkDeleteSubscriptionRequests={handleBulkDeleteSubscriptionRequests}
+                    onClearSubscriptionRequestsBySubID={handleClearSubscriptionRequestsBySubID}
                 />
             )
         },
@@ -1425,6 +1500,12 @@ function DatabaseTab({
     subscriptionHistoryRefreshing,
     subscriptionHistoryLoadingMore,
     loadMoreSubscriptionRequestHistory,
+    subscriptionHistorySelected,
+    setSubscriptionHistorySelected,
+    subscriptionHistoryDeleting,
+    onDeleteSingleSubscriptionRequest,
+    onBulkDeleteSubscriptionRequests,
+    onClearSubscriptionRequestsBySubID,
 }: {
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
@@ -1449,6 +1530,12 @@ function DatabaseTab({
     subscriptionHistoryRefreshing: boolean
     subscriptionHistoryLoadingMore: boolean
     loadMoreSubscriptionRequestHistory: () => Promise<void>
+    subscriptionHistorySelected: Set<number>
+    setSubscriptionHistorySelected: Dispatch<SetStateAction<Set<number>>>
+    subscriptionHistoryDeleting: boolean
+    onDeleteSingleSubscriptionRequest: (id: number) => Promise<void>
+    onBulkDeleteSubscriptionRequests: (ids: number[]) => Promise<void>
+    onClearSubscriptionRequestsBySubID: (subId: number, label: string) => Promise<void>
 }) {
     const [databaseCardHeight, setDatabaseCardHeight] = useState<number | null>(null)
     const databaseCardRef = useRef<HTMLDivElement | null>(null)
@@ -1842,6 +1929,29 @@ function DatabaseTab({
                     action={
                         <div className="flex items-center gap-2">
                             {subscriptionHistoryRefreshing && <RefreshCw size={12} className="animate-spin" />}
+                            {subscriptionHistorySelected.size > 0 && (
+                                <button
+                                    onClick={() => onBulkDeleteSubscriptionRequests(Array.from(subscriptionHistorySelected))}
+                                    disabled={subscriptionHistoryDeleting}
+                                    className="flex items-center gap-1 rounded bg-red-900/40 px-2 py-1 text-[10px] text-red-400 hover:bg-red-900/60 disabled:opacity-50"
+                                >
+                                    <Trash2 size={10} />
+                                    Delete {subscriptionHistorySelected.size}
+                                </button>
+                            )}
+                            {subscriptionHistorySubId !== 'all' && (
+                                <button
+                                    onClick={() => {
+                                        const subId = parseInt(subscriptionHistorySubId, 10)
+                                        const label = subscriptionHistorySubs.find(s => s.id === subId)?.name ?? `#${subId}`
+                                        void onClearSubscriptionRequestsBySubID(subId, label)
+                                    }}
+                                    disabled={subscriptionHistoryDeleting || subscriptionRequestHistory.length === 0}
+                                    className="rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-700 disabled:opacity-50"
+                                >
+                                    Clear all
+                                </button>
+                            )}
                             <select
                                 value={subscriptionHistorySubId}
                                 onChange={e => setSubscriptionHistorySubId(e.target.value)}
@@ -1880,7 +1990,22 @@ function DatabaseTab({
                                     const appVersion = formatAppVersion(run)
                                     const extraDetails = [deviceDetails, appVersion, country, hwidPrefix ? `HWID ${hwidPrefix}` : ''].filter(Boolean).join(' • ')
                                     return (
-                                    <div key={run.id} className="py-2 border-b border-slate-800/50 last:border-0">
+                                    <div key={run.id} className="group flex items-start gap-2 py-2 border-b border-slate-800/50 last:border-0">
+                                        {/* Checkbox */}
+                                        <input
+                                            type="checkbox"
+                                            checked={subscriptionHistorySelected.has(run.id)}
+                                            onChange={e => {
+                                                setSubscriptionHistorySelected(prev => {
+                                                    const next = new Set(prev)
+                                                    if (e.target.checked) next.add(run.id)
+                                                    else next.delete(run.id)
+                                                    return next
+                                                })
+                                            }}
+                                            className="mt-1 shrink-0 accent-slate-500"
+                                        />
+                                        {/* Existing content block */}
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -1913,6 +2038,15 @@ function DatabaseTab({
                                                 </div>
                                             )}
                                         </div>
+                                        {/* Trash icon */}
+                                        <button
+                                            onClick={() => void onDeleteSingleSubscriptionRequest(run.id)}
+                                            disabled={subscriptionHistoryDeleting}
+                                            className="mt-0.5 shrink-0 text-slate-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400 disabled:opacity-30"
+                                            title="Delete record"
+                                        >
+                                            <Trash2 size={12} />
+                                        </button>
                                     </div>
                                 )})
                             )}
