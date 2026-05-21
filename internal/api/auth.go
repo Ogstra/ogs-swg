@@ -193,6 +193,7 @@ func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.insertAuditEntry(r, "auth", "update", currentUsername, "to:"+req.NewUsername)
 	w.WriteHeader(http.StatusOK)
 }
 

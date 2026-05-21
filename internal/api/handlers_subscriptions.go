@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -636,6 +637,11 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	go s.store.EnforceSubscriptionQuotas(s.config)
 
 	s.InvalidateSubCache()
+	detail := fmt.Sprintf("id:%d", id)
+	if strings.TrimSpace(req.Name) != "" && req.Name != current.Name {
+		detail += ",to:" + req.Name
+	}
+	s.insertAuditEntry(r, "subscription", "update", current.Name, detail)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -754,6 +760,12 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	sub, err := s.store.Queries.GetSubscriptionByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Subscription not found", http.StatusNotFound)
+		return
+	}
+
 	err = s.store.Queries.DeleteSubscription(r.Context(), id)
 	if err != nil {
 		http.Error(w, "Failed to delete subscription", http.StatusInternalServerError)
@@ -761,6 +773,7 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	s.InvalidateSubCache()
+	s.insertAuditEntry(r, "subscription", "delete", sub.Name, fmt.Sprintf("id:%d", id))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -769,6 +782,12 @@ func (s *Server) handleRegenerateSubscriptionToken(w http.ResponseWriter, r *htt
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		return
+	}
+
+	sub, err := s.store.Queries.GetSubscriptionByID(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Subscription not found", http.StatusNotFound)
 		return
 	}
 
@@ -783,6 +802,7 @@ func (s *Server) handleRegenerateSubscriptionToken(w http.ResponseWriter, r *htt
 	}
 
 	s.InvalidateSubCache()
+	s.insertAuditEntry(r, "subscription", "regenerate", sub.Name, fmt.Sprintf("id:%d", id))
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }

@@ -150,16 +150,18 @@ func (s *Server) handleCreateProtectionRule(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := s.store.Queries.InsertProtectionRule(r.Context(), store.InsertProtectionRuleParams{
+	id, err := s.store.Queries.InsertProtectionRule(r.Context(), store.InsertProtectionRuleParams{
 		RuleType:  req.RuleType,
 		Value:     req.Value,
 		Note:      req.Note,
 		CreatedAt: sql.NullInt64{Int64: time.Now().Unix(), Valid: true},
-	}); err != nil {
+	})
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.reloadProtectionRules(r.Context())
+	s.insertAuditEntry(r, "protection", "create", strconv.FormatInt(id, 10), req.RuleType)
 	w.WriteHeader(http.StatusCreated)
 }
 

@@ -239,12 +239,12 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Auth: any authenticated user can change their own password/username
 	protected.HandleFunc("PUT /api/auth/password", s.secure(s.AuditLogger("auth", "update", s.handleUpdatePassword)))
-	protected.HandleFunc("PUT /api/auth/username", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("auth", "update", s.handleUpdateUsername))))
+	protected.HandleFunc("PUT /api/auth/username", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateUsername)))
 
 	protected.HandleFunc("GET /api/settings/subscription-protection", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionProtection)))
 	protected.HandleFunc("PUT /api/settings/subscription-protection", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateSubscriptionProtection)))
 	protected.HandleFunc("GET /api/settings/protection-rules", s.secure(s.requirePerm(canReadSettings, s.handleGetProtectionRules)))
-	protected.HandleFunc("POST /api/settings/protection-rules", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("protection", "create", s.handleCreateProtectionRule))))
+	protected.HandleFunc("POST /api/settings/protection-rules", s.secure(s.requirePerm(canWriteSettings, s.handleCreateProtectionRule)))
 	protected.HandleFunc("DELETE /api/settings/protection-rules/{id}", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("protection", "delete", s.handleDeleteProtectionRule))))
 	protected.HandleFunc("GET /api/settings/protection-rules/blocked-log", s.secure(s.requirePerm(canReadSettings, s.handleGetBlockedLog)))
 
@@ -261,9 +261,9 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/users/{name}/route-tags", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserRouteTags))))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "create", s.handleBulkCreateUsers))))
 	protected.HandleFunc("GET /api/user-route-tags", s.secure(s.requirePerm(canReadUsers, s.handleGetUserRouteTags)))
-	protected.HandleFunc("POST /api/user-route-tags", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user_route_tag", "create", s.handleCreateUserRouteTag))))
-	protected.HandleFunc("PUT /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user_route_tag", "update", s.handleUpdateUserRouteTag))))
-	protected.HandleFunc("DELETE /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user_route_tag", "delete", s.handleDeleteUserRouteTag))))
+	protected.HandleFunc("POST /api/user-route-tags", s.secure(s.requirePerm(canWriteUsers, s.handleCreateUserRouteTag)))
+	protected.HandleFunc("PUT /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserRouteTag)))
+	protected.HandleFunc("DELETE /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteUserRouteTag)))
 	protected.HandleFunc("GET /api/user-route-tags/compatible-rules", s.secure(s.requirePerm(canReadConfig, s.handleGetCompatibleUserRouteRules)))
 
 	// Reports/logs
@@ -297,12 +297,12 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/wireguard/interfaces", s.secure(s.requirePerm(canWriteWG, s.AuditLogger("wireguard", "create", s.handleCreateWireGuardInterface))))
 	protected.HandleFunc("GET /api/wireguard/interfaces/status", s.secure(s.requirePerm(canReadWG, s.handleListWireGuardInterfacesStatus)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardPeersForInterface)))
-	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canWriteWG, s.AuditLogger("wireguard", "create", s.handleCreateWireGuardPeerForInterface))))
-	protected.HandleFunc("DELETE /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canWriteWG, s.AuditLogger("wireguard", "delete", s.handleDeleteWireGuardPeerForInterface))))
+	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canWriteWG, s.handleCreateWireGuardPeerForInterface)))
+	protected.HandleFunc("DELETE /api/wireguard/interfaces/{iface}/peers", s.secure(s.requirePerm(canWriteWG, s.handleDeleteWireGuardPeerForInterface)))
 	protected.HandleFunc("POST /api/wireguard/interfaces/{iface}/peers/restore", s.secure(s.requirePerm(canWriteWG, s.handleRestoreWireGuardPeerForInterface)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/interface", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardInterfaceForInterface)))
 	protected.HandleFunc("PUT /api/wireguard/interfaces/{iface}/interface", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardInterfaceForInterface)))
-	protected.HandleFunc("PUT /api/wireguard/interfaces/{iface}/peer", s.secure(s.requirePerm(canWriteWG, s.AuditLogger("wireguard", "update", s.handleUpdateWireGuardPeerForInterface))))
+	protected.HandleFunc("PUT /api/wireguard/interfaces/{iface}/peer", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardPeerForInterface)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/peer/config", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardPeerConfigForInterface)))
 	protected.HandleFunc("GET /api/wireguard/interfaces/{iface}/config", s.secure(s.requirePerm(canReadWG, s.handleGetWireGuardConfigForInterface)))
 	protected.HandleFunc("PUT /api/wireguard/interfaces/{iface}/config", s.secure(s.requirePerm(canWriteWG, s.handleUpdateWireGuardConfigForInterface)))
@@ -369,7 +369,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/panel-users", s.secure(s.requirePerm(canReadPanelUsers, s.handleGetPanelUsers)))
 	protected.HandleFunc("POST /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "create", s.handleCreatePanelUser))))
 	protected.HandleFunc("PUT /api/panel-users/permissions", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "update", s.handleUpdatePanelUserPermissions))))
-	protected.HandleFunc("PUT /api/panel-users/username", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "update", s.handleUpdatePanelUserUsername))))
+	protected.HandleFunc("PUT /api/panel-users/username", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserUsername)))
 	protected.HandleFunc("PUT /api/panel-users/password", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "update", s.handleUpdatePanelUserPassword))))
 	protected.HandleFunc("DELETE /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "delete", s.handleDeletePanelUser))))
 
@@ -383,9 +383,9 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/subscriptions/happ-config", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscriptionHappConfig)))
 	protected.HandleFunc("POST /api/happ/encrypt-link", s.secure(s.requirePerm(canReadUsers, s.handleEncryptHappLink)))
 	protected.HandleFunc("GET /api/subscriptions/{id}", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscription)))
-	protected.HandleFunc("PUT /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("subscription", "update", s.handleUpdateSubscription))))
-	protected.HandleFunc("DELETE /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("subscription", "delete", s.handleDeleteSubscription))))
-	protected.HandleFunc("POST /api/subscriptions/{id}/regenerate", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("subscription", "regenerate", s.handleRegenerateSubscriptionToken))))
+	protected.HandleFunc("PUT /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateSubscription)))
+	protected.HandleFunc("DELETE /api/subscriptions/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteSubscription)))
+	protected.HandleFunc("POST /api/subscriptions/{id}/regenerate", s.secure(s.requirePerm(canWriteUsers, s.handleRegenerateSubscriptionToken)))
 
 	// Mount protected routes under /api/
 	mux.Handle("/api/", s.AuthMiddleware(s.PondMiddleware(s.GzipMiddleware(protected))))

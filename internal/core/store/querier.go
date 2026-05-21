@@ -79,7 +79,7 @@ type Querier interface {
 	// Daily Usage --
 	InsertDailyUsage(ctx context.Context, arg InsertDailyUsageParams) error
 	// Subscription Protection Rules Queries --
-	InsertProtectionRule(ctx context.Context, arg InsertProtectionRuleParams) error
+	InsertProtectionRule(ctx context.Context, arg InsertProtectionRuleParams) (int64, error)
 	InsertSample(ctx context.Context, arg InsertSampleParams) error
 	// Sampler Runs --
 	InsertSamplerRun(ctx context.Context, arg InsertSamplerRunParams) error

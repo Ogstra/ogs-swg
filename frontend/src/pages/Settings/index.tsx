@@ -1707,10 +1707,10 @@ function DatabaseTab({
                 if (entry.action === 'delete') return `Deleted user ${q(e)}`
                 break
             case 'subscription':
-                if (entry.action === 'create') return 'Created subscription'
-                if (entry.action === 'update') return e ? `Updated subscription #${e}` : 'Updated subscription'
-                if (entry.action === 'delete') return e ? `Deleted subscription #${e}` : 'Deleted subscription'
-                if (entry.action === 'regenerate') return e ? `Regenerated token for subscription #${e}` : 'Regenerated subscription token'
+                if (entry.action === 'create') return e ? `Created subscription ${q(e)}` : 'Created subscription'
+                if (entry.action === 'update') return e ? `Updated subscription ${q(e)}` : 'Updated subscription'
+                if (entry.action === 'delete') return e ? `Deleted subscription ${q(e)}` : 'Deleted subscription'
+                if (entry.action === 'regenerate') return e ? `Regenerated token for subscription ${q(e)}` : 'Regenerated subscription token'
                 break
             case 'subscription_request':
                 if (entry.action === 'delete') {
@@ -1721,13 +1721,13 @@ function DatabaseTab({
                 break
             case 'panel_user':
                 if (entry.action === 'create') return `Created admin ${q(e)}`
-                if (entry.action === 'update') return `Updated admin ${q(e)}`
+                if (entry.action === 'update') return d?.startsWith('to:') ? `Renamed admin ${q(e)} to ${q(d.slice(3))}` : `Updated admin ${q(e)}`
                 if (entry.action === 'delete') return `Deleted admin ${q(e)}`
                 break
             case 'wireguard':
-                if (entry.action === 'create') return e ? `Created WireGuard interface ${e}` : 'Created WireGuard peer'
-                if (entry.action === 'update') return e ? `Updated WireGuard peer on ${e}` : 'Updated WireGuard peer'
-                if (entry.action === 'delete') return e ? `Deleted WireGuard interface ${e}` : 'Deleted WireGuard peer'
+                if (entry.action === 'create') return d?.startsWith('peer:') || d?.startsWith('key:') ? `Created WireGuard peer on ${e || 'interface'} (${d})` : e ? `Created WireGuard interface ${e}` : 'Created WireGuard peer'
+                if (entry.action === 'update') return d?.startsWith('peer:') || d?.startsWith('key:') ? `Updated WireGuard peer on ${e || 'interface'} (${d})` : e ? `Updated WireGuard peer on ${e}` : 'Updated WireGuard peer'
+                if (entry.action === 'delete') return d?.startsWith('peer:') || d?.startsWith('key:') ? `Deleted WireGuard peer on ${e || 'interface'} (${d})` : e ? `Deleted WireGuard interface ${e}` : 'Deleted WireGuard peer'
                 if (entry.action === 'enable') return e ? `Enabled interface ${e}` : 'Enabled WireGuard interface'
                 if (entry.action === 'disable') return e ? `Disabled interface ${e}` : 'Disabled WireGuard interface'
                 if (entry.action === 'backup') return e ? `WireGuard backup (${e})` : 'WireGuard config backup'
@@ -1749,17 +1749,17 @@ function DatabaseTab({
                 if (entry.action === 'restore') return 'Config restored from backup'
                 break
             case 'protection':
-                if (entry.action === 'create') return 'Created protection rule'
+                if (entry.action === 'create') return e ? `Created protection rule #${e}${d ? ` (${d})` : ''}` : 'Created protection rule'
                 if (entry.action === 'delete') return e ? `Deleted protection rule #${e}` : 'Deleted protection rule'
                 break
             case 'auth':
                 if (entry.action === 'login') return e ? `Login: ${e}` : 'Login'
-                if (entry.action === 'update') return e ? `Changed credentials for ${e}` : 'Changed credentials'
+                if (entry.action === 'update') return d?.startsWith('to:') ? `Renamed login ${q(e)} to ${q(d.slice(3))}` : e ? `Changed credentials for ${e}` : 'Changed credentials'
                 break
             case 'user_route_tag':
                 if (entry.action === 'create') return e ? `Created route tag ${q(e)}` : 'Created route tag'
-                if (entry.action === 'update') return e ? `Updated route tag #${e}` : 'Updated route tag'
-                if (entry.action === 'delete') return e ? `Deleted route tag #${e}` : 'Deleted route tag'
+                if (entry.action === 'update') return d?.includes('to:') ? `Renamed route tag ${q(e)} to ${q(d.split('to:')[1])}` : e ? `Updated route tag ${q(e)}` : 'Updated route tag'
+                if (entry.action === 'delete') return e ? `Deleted route tag ${q(e)}` : 'Deleted route tag'
                 break
         }
         return `${entry.domain} · ${entry.action}${e ? ` · ${e}` : ''}`

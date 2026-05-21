@@ -868,6 +868,7 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	s.insertAuditEntry(r, "wireguard", "create", s.wireGuardInterfaceForContext(r.Context()), wireGuardPeerAuditDetail(peer.PublicKey, alias))
 	json.NewEncoder(w).Encode(peer)
 }
 
@@ -918,6 +919,7 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	if !s.syncWireGuardConfig(wgConfig) {
 		s.markWireGuardPending()
 	}
+	s.insertAuditEntry(r, "wireguard", "delete", s.wireGuardInterfaceForContext(r.Context()), wireGuardPeerAuditDetail(pubKey, alias))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -1207,7 +1209,35 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	if !s.syncWireGuardConfig(wgConfig) {
 		s.markWireGuardPending()
 	}
+	alias := strings.TrimSpace(req.Alias)
+	if alias == "" {
+		for _, p := range wgConfig.Peers {
+			if p.PublicKey == pubKey {
+				alias = strings.TrimSpace(p.Alias)
+				if alias == "" {
+					alias = strings.TrimSpace(p.Email)
+				}
+				break
+			}
+		}
+	}
+	s.insertAuditEntry(r, "wireguard", "update", s.wireGuardInterfaceForContext(r.Context()), wireGuardPeerAuditDetail(pubKey, alias))
 	w.WriteHeader(http.StatusOK)
+}
+
+func wireGuardPeerAuditDetail(publicKey, alias string) string {
+	alias = strings.TrimSpace(alias)
+	publicKey = strings.TrimSpace(publicKey)
+	if alias != "" {
+		if publicKey != "" {
+			return "peer:" + alias + ",key:" + shortAuditID(publicKey)
+		}
+		return "peer:" + alias
+	}
+	if publicKey != "" {
+		return "key:" + shortAuditID(publicKey)
+	}
+	return ""
 }
 
 func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Request) {
