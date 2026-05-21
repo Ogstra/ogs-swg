@@ -544,13 +544,14 @@ SELECT COUNT(*) FROM subscription_requests;
 DELETE FROM subscription_requests WHERE requested_at < ?;
 
 -- Subscription Protection Rules Queries --
--- name: InsertProtectionRule :exec
+-- name: InsertProtectionRule :one
 INSERT INTO subscription_protection_rules (
 	rule_type,
 	value,
 	note,
 	created_at
-) VALUES (?, ?, ?, ?);
+) VALUES (?, ?, ?, ?)
+RETURNING id;
 
 -- name: GetAllProtectionRules :many
 SELECT id, rule_type, value, note, created_at

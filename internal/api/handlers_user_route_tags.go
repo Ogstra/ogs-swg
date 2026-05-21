@@ -224,6 +224,7 @@ func (s *Server) handleCreateUserRouteTag(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	s.insertAuditEntry(r, "user_route_tag", "create", tag.Name, fmt.Sprintf("id:%d", tag.ID))
 	_ = json.NewEncoder(w).Encode(status)
 }
 
@@ -289,6 +290,11 @@ func (s *Server) handleUpdateUserRouteTag(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	detail := fmt.Sprintf("id:%d", id)
+	if tag.Name != existing.Name {
+		detail += ",to:" + tag.Name
+	}
+	s.insertAuditEntry(r, "user_route_tag", "update", existing.Name, detail)
 	_ = json.NewEncoder(w).Encode(status)
 }
 
@@ -302,10 +308,20 @@ func (s *Server) handleDeleteUserRouteTag(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	existing, err := s.store.GetUserRouteTag(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "Route tag not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Failed to get route tag: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if err := s.store.DeleteUserRouteTag(id); err != nil {
 		http.Error(w, "Failed to delete route tag: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.insertAuditEntry(r, "user_route_tag", "delete", existing.Name, fmt.Sprintf("id:%d", id))
 	w.WriteHeader(http.StatusNoContent)
 }
 

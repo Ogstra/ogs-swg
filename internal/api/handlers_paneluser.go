@@ -148,6 +148,7 @@ func (s *Server) handleUpdatePanelUserUsername(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	s.insertAuditEntry(r, "panel_user", "update", req.Username, "to:"+req.NewUsername)
 	w.WriteHeader(http.StatusOK)
 }
 

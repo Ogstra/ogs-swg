@@ -84,10 +84,19 @@ func auditEntityAndDetail(r *http.Request, body []byte, domain, action string) (
 	if entityID == "" && len(body) > 0 {
 		var m map[string]interface{}
 		if json.Unmarshal(body, &m) == nil {
-			for _, key := range []string{"name", "username", "service", "tag", "public_key", "iface_name", "title"} {
+			for _, key := range []string{"name", "username", "new_username", "service", "tag", "public_key", "iface_name", "title"} {
 				if v, ok := m[key].(string); ok && v != "" {
 					entityID = v
 					break
+				}
+			}
+		}
+		if entityID == "" {
+			var items []map[string]interface{}
+			if json.Unmarshal(body, &items) == nil && len(items) > 0 {
+				names := auditNamesFromItems(items)
+				if len(names) > 0 {
+					entityID = fmt.Sprintf("users:%d", len(names))
 				}
 			}
 		}
@@ -106,12 +115,32 @@ func auditEntityAndDetail(r *http.Request, body []byte, domain, action string) (
 }
 
 func auditDetail(r *http.Request, body []byte, entityID string) string {
-	// Bulk delete: {"ids": [...]}
 	if len(body) > 0 {
 		var m map[string]interface{}
 		if json.Unmarshal(body, &m) == nil {
+			if oldUsername, _ := m["username"].(string); oldUsername != "" {
+				if newUsername, _ := m["new_username"].(string); newUsername != "" && newUsername != oldUsername {
+					return "to:" + newUsername
+				}
+			}
 			if ids, ok := m["ids"].([]interface{}); ok {
 				return fmt.Sprintf("ids:%d", len(ids))
+			}
+		}
+		var items []map[string]interface{}
+		if json.Unmarshal(body, &items) == nil && len(items) > 0 {
+			names := auditNamesFromItems(items)
+			if len(names) > 0 {
+				const maxNames = 12
+				shown := names
+				if len(shown) > maxNames {
+					shown = shown[:maxNames]
+				}
+				detail := fmt.Sprintf("users:%d:%s", len(names), strings.Join(shown, ","))
+				if len(names) > maxNames {
+					detail += ",..."
+				}
+				return detail
 			}
 		}
 	}
@@ -120,6 +149,54 @@ func auditDetail(r *http.Request, body []byte, entityID string) string {
 		return fmt.Sprintf("sub:%s", subID)
 	}
 	return ""
+}
+
+func auditNamesFromItems(items []map[string]interface{}) []string {
+	names := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		for _, key := range []string{"name", "username"} {
+			if v, ok := item[key].(string); ok {
+				name := strings.TrimSpace(v)
+				if name == "" {
+					continue
+				}
+				if _, exists := seen[name]; exists {
+					continue
+				}
+				seen[name] = struct{}{}
+				names = append(names, name)
+				break
+			}
+		}
+	}
+	return names
+}
+
+func shortAuditID(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:12]
+}
+
+func (s *Server) insertAuditEntry(r *http.Request, domain, action, entityID, detail string) {
+	if s.auditStore == nil {
+		return
+	}
+	entry := core.AuditEntry{
+		Ts:       time.Now().Unix(),
+		Actor:    requestActor(r),
+		IP:       requestAuditIP(r),
+		Action:   action,
+		Domain:   domain,
+		EntityID: entityID,
+		Detail:   detail,
+	}
+	if err := s.auditStore.InsertAuditLog(context.Background(), entry); err != nil {
+		log.Printf("audit: insert failed: %v", err)
+	}
 }
 
 // AuditLogger wraps handler h. On 2xx response, writes one audit_log entry
@@ -141,18 +218,7 @@ func (s *Server) AuditLogger(domain, action string, h http.HandlerFunc) http.Han
 				return
 			}
 			entityID, detail := auditEntityAndDetail(r, bodyBytes, domain, action)
-			entry := core.AuditEntry{
-				Ts:       time.Now().Unix(),
-				Actor:    requestActor(r),
-				IP:       requestAuditIP(r),
-				Action:   action,
-				Domain:   domain,
-				EntityID: entityID,
-				Detail:   detail,
-			}
-			if err := s.auditStore.InsertAuditLog(context.Background(), entry); err != nil {
-				log.Printf("audit: insert failed: %v", err)
-			}
+			s.insertAuditEntry(r, domain, action, entityID, detail)
 		}
 	}
 }

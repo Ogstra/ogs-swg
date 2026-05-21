@@ -20,7 +20,7 @@ import (
 func addProtectionRuleForTest(t *testing.T, s *Server, ruleType string, value string) {
 	t.Helper()
 
-	if err := s.store.Queries.InsertProtectionRule(t.Context(), store.InsertProtectionRuleParams{
+	if _, err := s.store.Queries.InsertProtectionRule(t.Context(), store.InsertProtectionRuleParams{
 		RuleType:  ruleType,
 		Value:     value,
 		Note:      "test",

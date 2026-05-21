@@ -1812,13 +1812,14 @@ func (q *Queries) InsertDailyUsage(ctx context.Context, arg InsertDailyUsagePara
 	return err
 }
 
-const insertProtectionRule = `-- name: InsertProtectionRule :exec
+const insertProtectionRule = `-- name: InsertProtectionRule :one
 INSERT INTO subscription_protection_rules (
 	rule_type,
 	value,
 	note,
 	created_at
 ) VALUES (?, ?, ?, ?)
+RETURNING id
 `
 
 type InsertProtectionRuleParams struct {
@@ -1829,14 +1830,16 @@ type InsertProtectionRuleParams struct {
 }
 
 // Subscription Protection Rules Queries --
-func (q *Queries) InsertProtectionRule(ctx context.Context, arg InsertProtectionRuleParams) error {
-	_, err := q.db.ExecContext(ctx, insertProtectionRule,
+func (q *Queries) InsertProtectionRule(ctx context.Context, arg InsertProtectionRuleParams) (int64, error) {
+	row := q.db.QueryRowContext(ctx, insertProtectionRule,
 		arg.RuleType,
 		arg.Value,
 		arg.Note,
 		arg.CreatedAt,
 	)
-	return err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertSample = `-- name: InsertSample :exec
