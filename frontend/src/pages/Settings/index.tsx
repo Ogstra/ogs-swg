@@ -1539,7 +1539,26 @@ function DatabaseTab({
     }, [showToastWithAction, handleUndoDelete, toastError])
 
     useEffect(() => {
-        return () => { pendingDeleteTimers.current.forEach(t => clearTimeout(t)) }
+        const flushPendingDeletes = () => {
+            const ids = Array.from(pendingDeleteTimers.current.keys())
+            if (ids.length === 0) return
+            pendingDeleteTimers.current.forEach(t => clearTimeout(t))
+            pendingDeleteTimers.current.clear()
+            const token = localStorage.getItem('token')
+            const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+            if (token) headers['Authorization'] = `Bearer ${token}`
+            fetch('/api/subscription-requests', {
+                method: 'DELETE',
+                keepalive: true,
+                headers,
+                body: JSON.stringify({ ids }),
+            }).catch(() => {})
+        }
+        window.addEventListener('beforeunload', flushPendingDeletes)
+        return () => {
+            window.removeEventListener('beforeunload', flushPendingDeletes)
+            pendingDeleteTimers.current.forEach(t => clearTimeout(t))
+        }
     }, [])
 
     const [databaseCardHeight, setDatabaseCardHeight] = useState<number | null>(null)
