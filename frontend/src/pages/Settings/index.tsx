@@ -64,8 +64,6 @@ export default function Settings() {
     const subscriptionHistoryLoadingMoreRef = useRef(false)
     const [subscriptionHistorySubId, setSubscriptionHistorySubId] = useState('all')
     const subscriptionHistorySubIdRef = useRef(0)
-    const [subscriptionHistorySelected, setSubscriptionHistorySelected] = useState<Set<number>>(new Set())
-    const [subscriptionHistoryDeleting, setSubscriptionHistoryDeleting] = useState(false)
     const [features, setFeatures] = useState<FeatureFlags>({
         enable_singbox: true,
         enable_wireguard: true,
@@ -198,7 +196,6 @@ export default function Settings() {
         setSubscriptionRequestHistory([])
         setSubscriptionHistoryNextOffset(0)
         setSubscriptionHistoryHasMore(false)
-        setSubscriptionHistorySelected(new Set())
         setSubscriptionHistorySubId(value)
     }, [])
 
@@ -239,7 +236,6 @@ export default function Settings() {
         setSubscriptionRequestHistory([])
         setSubscriptionHistoryNextOffset(0)
         setSubscriptionHistoryHasMore(false)
-        setSubscriptionHistorySelected(new Set())
         const subID = subscriptionHistorySubIdRef.current
         subscriptionHistoryRefreshingRef.current = true
         setSubscriptionHistoryRefreshing(true)
@@ -256,47 +252,15 @@ export default function Settings() {
         }
     }, [])
 
-    const handleDeleteSingleSubscriptionRequest = useCallback(async (id: number) => {
-        if (!window.confirm('Delete this history record?')) return
-        setSubscriptionHistoryDeleting(true)
-        try {
-            await api.deleteSubscriptionRequest(id)
-            success('Record deleted')
-            await hardRefreshSubscriptionHistory()
-        } catch {
-            toastError('Failed to delete record')
-        } finally {
-            setSubscriptionHistoryDeleting(false)
-        }
-    }, [hardRefreshSubscriptionHistory, success, toastError])
-
-    const handleBulkDeleteSubscriptionRequests = useCallback(async (ids: number[]) => {
-        if (ids.length === 0) return
-        if (!window.confirm(`Delete ${ids.length} selected record(s)?`)) return
-        setSubscriptionHistoryDeleting(true)
-        try {
-            await api.bulkDeleteSubscriptionRequests(ids)
-            success(`Deleted ${ids.length} record(s)`)
-            await hardRefreshSubscriptionHistory()
-        } catch {
-            toastError('Failed to bulk delete')
-        } finally {
-            setSubscriptionHistoryDeleting(false)
-        }
-    }, [hardRefreshSubscriptionHistory, success, toastError])
-
     const handleClearSubscriptionRequestsBySubID = useCallback(async (subId: number, label: string) => {
         if (subId === 0) return
         if (!window.confirm(`Clear all history for "${label}"?`)) return
-        setSubscriptionHistoryDeleting(true)
         try {
             await api.clearSubscriptionRequestsBySubID(subId)
             success('History cleared')
             await hardRefreshSubscriptionHistory()
         } catch {
             toastError('Failed to clear history')
-        } finally {
-            setSubscriptionHistoryDeleting(false)
         }
     }, [hardRefreshSubscriptionHistory, success, toastError])
 
@@ -566,11 +530,6 @@ export default function Settings() {
                     subscriptionHistoryRefreshing={subscriptionHistoryRefreshing}
                     subscriptionHistoryLoadingMore={subscriptionHistoryLoadingMore}
                     loadMoreSubscriptionRequestHistory={loadMoreSubscriptionRequestHistory}
-                    subscriptionHistorySelected={subscriptionHistorySelected}
-                    setSubscriptionHistorySelected={setSubscriptionHistorySelected}
-                    subscriptionHistoryDeleting={subscriptionHistoryDeleting}
-                    onDeleteSingleSubscriptionRequest={handleDeleteSingleSubscriptionRequest}
-                    onBulkDeleteSubscriptionRequests={handleBulkDeleteSubscriptionRequests}
                     onClearSubscriptionRequestsBySubID={handleClearSubscriptionRequestsBySubID}
                 />
             )
@@ -1500,11 +1459,6 @@ function DatabaseTab({
     subscriptionHistoryRefreshing,
     subscriptionHistoryLoadingMore,
     loadMoreSubscriptionRequestHistory,
-    subscriptionHistorySelected,
-    setSubscriptionHistorySelected,
-    subscriptionHistoryDeleting,
-    onDeleteSingleSubscriptionRequest,
-    onBulkDeleteSubscriptionRequests,
     onClearSubscriptionRequestsBySubID,
 }: {
     features: FeatureFlags
@@ -1530,13 +1484,53 @@ function DatabaseTab({
     subscriptionHistoryRefreshing: boolean
     subscriptionHistoryLoadingMore: boolean
     loadMoreSubscriptionRequestHistory: () => Promise<void>
-    subscriptionHistorySelected: Set<number>
-    setSubscriptionHistorySelected: Dispatch<SetStateAction<Set<number>>>
-    subscriptionHistoryDeleting: boolean
-    onDeleteSingleSubscriptionRequest: (id: number) => Promise<void>
-    onBulkDeleteSubscriptionRequests: (ids: number[]) => Promise<void>
     onClearSubscriptionRequestsBySubID: (subId: number, label: string) => Promise<void>
 }) {
+    const { error: toastError } = useToast()
+    const [deleteMode, setDeleteMode] = useState(false)
+    const [pendingDeletes, setPendingDeletes] = useState<Map<number, { id: number; originalIndex: number; row: SubscriptionRequestHistoryEntry }>>(new Map())
+    const pendingDeleteTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+
+    const handleOptimisticDelete = useCallback((run: SubscriptionRequestHistoryEntry, index: number) => {
+        const id = run.id
+        setPendingDeletes(prev => {
+            const next = new Map(prev)
+            next.set(id, { id, originalIndex: index, row: run })
+            return next
+        })
+        const timer = setTimeout(async () => {
+            pendingDeleteTimers.current.delete(id)
+            setPendingDeletes(prev => {
+                const next = new Map(prev)
+                next.delete(id)
+                return next
+            })
+            try {
+                await api.deleteSubscriptionRequest(id)
+            } catch {
+                toastError('Failed to delete record')
+            }
+        }, 5000)
+        pendingDeleteTimers.current.set(id, timer)
+    }, [toastError])
+
+    const handleUndoDelete = useCallback((id: number) => {
+        const timer = pendingDeleteTimers.current.get(id)
+        if (timer !== undefined) {
+            clearTimeout(timer)
+            pendingDeleteTimers.current.delete(id)
+        }
+        setPendingDeletes(prev => {
+            const next = new Map(prev)
+            next.delete(id)
+            return next
+        })
+    }, [])
+
+    useEffect(() => {
+        return () => { pendingDeleteTimers.current.forEach(t => clearTimeout(t)) }
+    }, [])
+
     const [databaseCardHeight, setDatabaseCardHeight] = useState<number | null>(null)
     const databaseCardRef = useRef<HTMLDivElement | null>(null)
 
@@ -1929,16 +1923,6 @@ function DatabaseTab({
                     action={
                         <div className="flex items-center gap-2">
                             {subscriptionHistoryRefreshing && <RefreshCw size={12} className="animate-spin" />}
-                            {subscriptionHistorySelected.size > 0 && (
-                                <button
-                                    onClick={() => onBulkDeleteSubscriptionRequests(Array.from(subscriptionHistorySelected))}
-                                    disabled={subscriptionHistoryDeleting}
-                                    className="flex items-center gap-1 rounded bg-red-900/40 px-2 py-1 text-[10px] text-red-400 hover:bg-red-900/60 disabled:opacity-50"
-                                >
-                                    <Trash2 size={10} />
-                                    Delete {subscriptionHistorySelected.size}
-                                </button>
-                            )}
                             {subscriptionHistorySubId !== 'all' && (
                                 <button
                                     onClick={() => {
@@ -1946,12 +1930,19 @@ function DatabaseTab({
                                         const label = subscriptionHistorySubs.find(s => s.id === subId)?.name ?? `#${subId}`
                                         void onClearSubscriptionRequestsBySubID(subId, label)
                                     }}
-                                    disabled={subscriptionHistoryDeleting || subscriptionRequestHistory.length === 0}
+                                    disabled={subscriptionRequestHistory.length === 0}
                                     className="rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-700 disabled:opacity-50"
                                 >
                                     Clear all
                                 </button>
                             )}
+                            <button
+                                onClick={() => setDeleteMode(prev => !prev)}
+                                title={deleteMode ? 'Exit delete mode' : 'Enter delete mode'}
+                                className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-colors ${deleteMode ? 'text-red-400 bg-red-500/10 border-red-500/20 hover:bg-red-500/20' : 'text-slate-500 bg-transparent border-transparent hover:text-slate-300'}`}
+                            >
+                                <Trash2 size={13} />
+                            </button>
                             <select
                                 value={subscriptionHistorySubId}
                                 onChange={e => setSubscriptionHistorySubId(e.target.value)}
@@ -1971,10 +1962,13 @@ function DatabaseTab({
                             className="h-full min-h-0 space-y-0 overflow-y-auto pr-2 text-sm"
                             onScroll={handleSubscriptionHistoryScroll}
                         >
-                            {subscriptionRequestHistory.length === 0 ? (
+                            {subscriptionRequestHistory.filter(r => !pendingDeletes.has(r.id)).length === 0 && pendingDeletes.size === 0 ? (
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
-                                subscriptionRequestHistory.map((run) => {
+                                subscriptionRequestHistory
+                                    .filter(run => !pendingDeletes.has(run.id))
+                                    .map((run) => {
+                                    const originalIndex = subscriptionRequestHistory.findIndex(r => r.id === run.id)
                                     const badge = getSubscriptionHistoryBadge(run)
                                     const isBlocked = Boolean(run.blocked)
                                     const blockedReason = formatBlockedReasonLabel(run.block_reason)
@@ -1990,22 +1984,7 @@ function DatabaseTab({
                                     const appVersion = formatAppVersion(run)
                                     const extraDetails = [deviceDetails, appVersion, country, hwidPrefix ? `HWID ${hwidPrefix}` : ''].filter(Boolean).join(' • ')
                                     return (
-                                    <div key={run.id} className="group flex items-start gap-2 py-2 border-b border-slate-800/50 last:border-0">
-                                        {/* Checkbox */}
-                                        <input
-                                            type="checkbox"
-                                            checked={subscriptionHistorySelected.has(run.id)}
-                                            onChange={e => {
-                                                setSubscriptionHistorySelected(prev => {
-                                                    const next = new Set(prev)
-                                                    if (e.target.checked) next.add(run.id)
-                                                    else next.delete(run.id)
-                                                    return next
-                                                })
-                                            }}
-                                            className="mt-1 shrink-0 accent-slate-500"
-                                        />
-                                        {/* Existing content block */}
+                                    <div key={run.id} className="py-2 border-b border-slate-800/50 last:border-0">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -2019,8 +1998,19 @@ function DatabaseTab({
                                                         </span>
                                                     )}
                                                 </div>
-                                                <div className="max-w-[7.5rem] shrink-0 truncate text-right font-mono text-blue-400 text-xs sm:max-w-[12rem]" title={run.request_ip || '-'}>
-                                                    {run.request_ip || '-'}
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <div className="max-w-[7.5rem] truncate text-right font-mono text-blue-400 text-xs sm:max-w-[12rem]" title={run.request_ip || '-'}>
+                                                        {run.request_ip || '-'}
+                                                    </div>
+                                                    {deleteMode && (
+                                                        <button
+                                                            onClick={() => handleOptimisticDelete(run, originalIndex)}
+                                                            className="shrink-0 text-slate-500 hover:text-red-400 transition-colors"
+                                                            title="Delete entry"
+                                                        >
+                                                            <Trash2 size={12} />
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
                                             <div className="flex items-start justify-between gap-3">
@@ -2038,15 +2028,6 @@ function DatabaseTab({
                                                 </div>
                                             )}
                                         </div>
-                                        {/* Trash icon */}
-                                        <button
-                                            onClick={() => void onDeleteSingleSubscriptionRequest(run.id)}
-                                            disabled={subscriptionHistoryDeleting}
-                                            className="mt-0.5 shrink-0 text-slate-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400 disabled:opacity-30"
-                                            title="Delete record"
-                                        >
-                                            <Trash2 size={12} />
-                                        </button>
                                     </div>
                                 )})
                             )}
@@ -2061,6 +2042,21 @@ function DatabaseTab({
                             )}
                         </div>
                     </div>
+                    {pendingDeletes.size > 0 && (
+                        <div className="flex flex-col gap-1 px-1 pb-1 pt-1">
+                            {Array.from(pendingDeletes.values()).map(pd => (
+                                <div key={pd.id} className="flex items-center justify-between rounded bg-slate-800 px-3 py-1.5 text-xs text-slate-300">
+                                    <span>Deleted · <span className="text-slate-500 text-[10px] truncate max-w-[8rem]">{pd.row.name}</span></span>
+                                    <button
+                                        onClick={() => handleUndoDelete(pd.id)}
+                                        className="ml-3 text-blue-400 hover:text-blue-300 font-medium shrink-0"
+                                    >
+                                        Undo
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </Card>
             </div>
 
