@@ -1696,6 +1696,75 @@ function DatabaseTab({
         return new Date(value * 1000).toLocaleString()
     }
 
+    const formatAuditDescription = (entry: AuditEntry): string => {
+        const e = entry.entity_id
+        const d = entry.detail
+        const q = (s: string) => s ? `"${s}"` : ''
+        switch (entry.domain) {
+            case 'user':
+                if (entry.action === 'create') return `Created user ${q(e)}`
+                if (entry.action === 'update') return `Updated user ${q(e)}`
+                if (entry.action === 'delete') return `Deleted user ${q(e)}`
+                break
+            case 'subscription':
+                if (entry.action === 'create') return 'Created subscription'
+                if (entry.action === 'update') return e ? `Updated subscription #${e}` : 'Updated subscription'
+                if (entry.action === 'delete') return e ? `Deleted subscription #${e}` : 'Deleted subscription'
+                if (entry.action === 'regenerate') return e ? `Regenerated token for subscription #${e}` : 'Regenerated subscription token'
+                break
+            case 'subscription_request':
+                if (entry.action === 'delete') {
+                    if (d?.startsWith('ids:')) return `Deleted ${d.slice(4)} subscription requests`
+                    if (d?.startsWith('sub:')) return `Cleared requests for subscription #${d.slice(4)}`
+                    return e ? `Deleted subscription request #${e}` : 'Deleted subscription request'
+                }
+                break
+            case 'panel_user':
+                if (entry.action === 'create') return `Created admin ${q(e)}`
+                if (entry.action === 'update') return `Updated admin ${q(e)}`
+                if (entry.action === 'delete') return `Deleted admin ${q(e)}`
+                break
+            case 'wireguard':
+                if (entry.action === 'create') return e ? `Created WireGuard interface ${e}` : 'Created WireGuard peer'
+                if (entry.action === 'update') return e ? `Updated WireGuard peer on ${e}` : 'Updated WireGuard peer'
+                if (entry.action === 'delete') return e ? `Deleted WireGuard interface ${e}` : 'Deleted WireGuard peer'
+                if (entry.action === 'enable') return e ? `Enabled interface ${e}` : 'Enabled WireGuard interface'
+                if (entry.action === 'disable') return e ? `Disabled interface ${e}` : 'Disabled WireGuard interface'
+                if (entry.action === 'backup') return e ? `WireGuard backup (${e})` : 'WireGuard config backup'
+                break
+            case 'singbox':
+                if (entry.action === 'create') return e ? `Created inbound ${q(e)}` : 'Created Sing-box inbound'
+                if (entry.action === 'update') return e ? `Updated inbound ${q(e)}` : 'Updated Sing-box config'
+                if (entry.action === 'delete') return e ? `Deleted inbound ${q(e)}` : 'Deleted Sing-box inbound'
+                if (entry.action === 'apply') return 'Applied Sing-box config'
+                break
+            case 'system':
+                if (entry.action === 'restart') return e ? `Restarted ${e}` : 'Restarted service'
+                if (entry.action === 'start') return e ? `Started ${e}` : 'Started service'
+                if (entry.action === 'stop') return e ? `Stopped ${e}` : 'Stopped service'
+                break
+            case 'config':
+                if (entry.action === 'update') return 'Updated panel config'
+                if (entry.action === 'backup') return 'Config backup created'
+                if (entry.action === 'restore') return 'Config restored from backup'
+                break
+            case 'protection':
+                if (entry.action === 'create') return 'Created protection rule'
+                if (entry.action === 'delete') return e ? `Deleted protection rule #${e}` : 'Deleted protection rule'
+                break
+            case 'auth':
+                if (entry.action === 'login') return e ? `Login: ${e}` : 'Login'
+                if (entry.action === 'update') return e ? `Changed credentials for ${e}` : 'Changed credentials'
+                break
+            case 'user_route_tag':
+                if (entry.action === 'create') return e ? `Created route tag ${q(e)}` : 'Created route tag'
+                if (entry.action === 'update') return e ? `Updated route tag #${e}` : 'Updated route tag'
+                if (entry.action === 'delete') return e ? `Deleted route tag #${e}` : 'Deleted route tag'
+                break
+        }
+        return `${entry.domain} · ${entry.action}${e ? ` · ${e}` : ''}`
+    }
+
     const parseClientIdentity = (userAgent?: string) => {
         const ua = (userAgent || '').trim()
         if (!ua) return { clientName: '', clientVersion: '', deviceModel: '', deviceOS: '', deviceOSVersion: '', darwinVersion: '', architecture: '' }
@@ -2268,8 +2337,16 @@ function DatabaseTab({
                                 <option value="create">create</option>
                                 <option value="update">update</option>
                                 <option value="delete">delete</option>
-                                <option value="action">action</option>
                                 <option value="login">login</option>
+                                <option value="apply">apply</option>
+                                <option value="restart">restart</option>
+                                <option value="start">start</option>
+                                <option value="stop">stop</option>
+                                <option value="backup">backup</option>
+                                <option value="restore">restore</option>
+                                <option value="regenerate">regenerate</option>
+                                <option value="enable">enable</option>
+                                <option value="disable">disable</option>
                             </select>
                         </div>
                     }
@@ -2290,37 +2367,28 @@ function DatabaseTab({
                             ) : (
                                 auditLogItems.map((entry) => (
                                     <div key={entry.id} className="py-2 border-b border-slate-800/50 last:border-0">
-                                        <div className="flex items-start justify-between gap-3">
-                                            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-                                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                                                    {entry.domain}
-                                                </span>
-                                                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border ${
-                                                    entry.action === 'delete' ? 'bg-red-900/20 text-red-400 border-red-900/30' :
-                                                    entry.action === 'create' ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' :
-                                                    entry.action === 'update' ? 'bg-blue-900/20 text-blue-400 border-blue-900/30' :
-                                                    entry.action === 'login' ? 'bg-violet-900/20 text-violet-400 border-violet-900/30' :
-                                                    'bg-orange-900/20 text-orange-400 border-orange-900/30'
-                                                }`}>
-                                                    {entry.action}
-                                                </span>
-                                                {entry.entity_id && (
-                                                    <span className="min-w-0 truncate text-xs text-slate-200" title={entry.entity_id}>
-                                                        {entry.entity_id}
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div className="shrink-0 text-right text-slate-500 text-[10px]">
+                                        <div className="flex items-start justify-between gap-2">
+                                            <p className="text-xs text-white font-medium leading-snug min-w-0 flex-1">
+                                                {formatAuditDescription(entry)}
+                                            </p>
+                                            <span className="shrink-0 text-[10px] text-slate-500 whitespace-nowrap">
                                                 {formatHistoryDateTime(entry.ts)}
-                                            </div>
+                                            </span>
                                         </div>
-                                        <div className="flex items-center gap-3 mt-0.5">
-                                            <span className="text-[10px] text-slate-300">{entry.actor}</span>
-                                            {entry.detail && (
-                                                <span className="text-[10px] text-slate-600 truncate max-w-[140px]" title={entry.detail}>
-                                                    {entry.detail}
-                                                </span>
-                                            )}
+                                        <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                                {entry.domain}
+                                            </span>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                                                entry.action === 'delete' || entry.action === 'stop' ? 'bg-red-900/20 text-red-400 border-red-900/30' :
+                                                entry.action === 'create' ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' :
+                                                entry.action === 'update' ? 'bg-blue-900/20 text-blue-400 border-blue-900/30' :
+                                                entry.action === 'login' ? 'bg-violet-900/20 text-violet-400 border-violet-900/30' :
+                                                'bg-orange-900/20 text-orange-400 border-orange-900/30'
+                                            }`}>
+                                                {entry.action}
+                                            </span>
+                                            <span className="text-[10px] text-slate-500">by {entry.actor}</span>
                                         </div>
                                     </div>
                                 ))
