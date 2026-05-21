@@ -176,9 +176,10 @@ FROM samples
 WHERE ts >= ? AND (uplink > 0 OR downlink > 0);
 
 -- name: GetActiveUsersWithTraffic :many
-SELECT DISTINCT user 
-FROM samples 
-WHERE ts >= ? AND (uplink > 0 OR downlink > 0);
+SELECT DISTINCT user
+FROM samples
+WHERE ts >= ? AND (uplink > 0 OR downlink > 0)
+ORDER BY user ASC;
 
 -- name: GetLastSeenUserWithTraffic :one
 SELECT MAX(ts) FROM samples WHERE user = ? AND (uplink > 0 OR downlink > 0);
@@ -196,11 +197,12 @@ WHERE ts >= ? AND ts <= ?
 GROUP BY user;
 
 -- name: GetActiveUsersWithThreshold :many
-SELECT user, SUM(uplink + downlink) as total 
-FROM samples 
-WHERE ts >= ? 
-GROUP BY user 
-HAVING SUM(uplink + downlink) >= ?;
+SELECT user, SUM(uplink + downlink) as total
+FROM samples
+WHERE ts >= ?
+GROUP BY user
+HAVING SUM(uplink + downlink) >= ?
+ORDER BY total DESC, user ASC;
 
 -- name: GetActiveUserCountWithThreshold :one
 SELECT COUNT(*) FROM (
