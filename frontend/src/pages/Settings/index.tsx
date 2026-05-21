@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Dispatch, SetStateAction, UIEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { api, FeatureFlags, SamplerHistoryEntry, Subscription, SubscriptionRequestHistoryEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
+import { api, FeatureFlags, SamplerHistoryEntry, Subscription, SubscriptionRequestHistoryEntry, AuditEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
 import { Save, RefreshCw, UserCog, Shield, ShieldAlert, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
@@ -77,6 +77,18 @@ export default function Settings() {
         aggregation_enabled: false,
         aggregation_days: 7,
     })
+    const [auditLogItems, setAuditLogItems] = useState<AuditEntry[]>([])
+    const [auditLogNextOffset, setAuditLogNextOffset] = useState(0)
+    const [auditLogHasMore, setAuditLogHasMore] = useState(false)
+    const [auditLogRefreshing, setAuditLogRefreshing] = useState(false)
+    const [auditLogLoadingMore, setAuditLogLoadingMore] = useState(false)
+    const [auditLogDomain, setAuditLogDomain] = useState('')
+    const [auditLogAction, setAuditLogAction] = useState('')
+    const auditLogDomainRef = useRef(auditLogDomain)
+    const auditLogActionRef = useRef(auditLogAction)
+    const auditLogRefreshingRef = useRef(false)
+    const auditLogLoadingMoreRef = useRef(false)
+
     const [historyLimit, setHistoryLimit] = useState(20)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
     const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction | null>(null)
@@ -263,6 +275,62 @@ export default function Settings() {
             toastError('Failed to clear history')
         }
     }, [hardRefreshSubscriptionHistory, success, toastError])
+
+    const hardRefreshAuditLog = useCallback(async () => {
+        if (auditLogRefreshingRef.current) return
+        auditLogRefreshingRef.current = true
+        setAuditLogRefreshing(true)
+        try {
+            const page = await api.getAuditLogPage(50, 0, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined)
+            setAuditLogItems(page.items)
+            setAuditLogNextOffset(page.next_offset)
+            setAuditLogHasMore(page.has_more)
+        } catch {
+            // silently ignore
+        } finally {
+            auditLogRefreshingRef.current = false
+            setAuditLogRefreshing(false)
+        }
+    }, [])
+
+    const loadMoreAuditLog = useCallback(async () => {
+        if (auditLogLoadingMoreRef.current || !auditLogHasMore) return
+        auditLogLoadingMoreRef.current = true
+        setAuditLogLoadingMore(true)
+        try {
+            const page = await api.getAuditLogPage(50, auditLogNextOffset, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined)
+            setAuditLogItems(prev => [...prev, ...page.items])
+            setAuditLogNextOffset(prev => Math.max(page.next_offset, prev + page.items.length))
+            setAuditLogHasMore(page.has_more)
+        } catch {
+            // silently ignore
+        } finally {
+            auditLogLoadingMoreRef.current = false
+            setAuditLogLoadingMore(false)
+        }
+    }, [auditLogHasMore, auditLogNextOffset])
+
+    const handleAuditDomainChange = useCallback((value: string) => {
+        auditLogDomainRef.current = value
+        setAuditLogDomain(value)
+        setAuditLogNextOffset(0)
+        setAuditLogHasMore(false)
+        void hardRefreshAuditLog()
+    }, [hardRefreshAuditLog])
+
+    const handleAuditActionChange = useCallback((value: string) => {
+        auditLogActionRef.current = value
+        setAuditLogAction(value)
+        setAuditLogNextOffset(0)
+        setAuditLogHasMore(false)
+        void hardRefreshAuditLog()
+    }, [hardRefreshAuditLog])
+
+    useEffect(() => {
+        void hardRefreshAuditLog()
+        const interval = setInterval(() => void hardRefreshAuditLog(), 30_000)
+        return () => clearInterval(interval)
+    }, [hardRefreshAuditLog])
 
     const loadMoreSubscriptionRequestHistory = useCallback(async () => {
         if (subscriptionHistoryLoadingMoreRef.current || !subscriptionHistoryHasMore) return
@@ -531,6 +599,15 @@ export default function Settings() {
                     subscriptionHistoryLoadingMore={subscriptionHistoryLoadingMore}
                     loadMoreSubscriptionRequestHistory={loadMoreSubscriptionRequestHistory}
                     onClearSubscriptionRequestsBySubID={handleClearSubscriptionRequestsBySubID}
+                    auditLogItems={auditLogItems}
+                    auditLogHasMore={auditLogHasMore}
+                    auditLogRefreshing={auditLogRefreshing}
+                    auditLogLoadingMore={auditLogLoadingMore}
+                    auditLogDomain={auditLogDomain}
+                    auditLogAction={auditLogAction}
+                    onAuditDomainChange={handleAuditDomainChange}
+                    onAuditActionChange={handleAuditActionChange}
+                    loadMoreAuditLog={loadMoreAuditLog}
                 />
             )
         },
@@ -1460,6 +1537,15 @@ function DatabaseTab({
     subscriptionHistoryLoadingMore,
     loadMoreSubscriptionRequestHistory,
     onClearSubscriptionRequestsBySubID,
+    auditLogItems,
+    auditLogHasMore,
+    auditLogRefreshing,
+    auditLogLoadingMore,
+    auditLogDomain,
+    auditLogAction,
+    onAuditDomainChange,
+    onAuditActionChange,
+    loadMoreAuditLog,
 }: {
     features: FeatureFlags
     setFeatures: Dispatch<SetStateAction<FeatureFlags>>
@@ -1485,6 +1571,15 @@ function DatabaseTab({
     subscriptionHistoryLoadingMore: boolean
     loadMoreSubscriptionRequestHistory: () => Promise<void>
     onClearSubscriptionRequestsBySubID: (subId: number, label: string) => Promise<void>
+    auditLogItems: AuditEntry[]
+    auditLogHasMore: boolean
+    auditLogRefreshing: boolean
+    auditLogLoadingMore: boolean
+    auditLogDomain: string
+    auditLogAction: string
+    onAuditDomainChange: (v: string) => void
+    onAuditActionChange: (v: string) => void
+    loadMoreAuditLog: () => Promise<void>
 }) {
     const { error: toastError, showToastWithAction, dismissToast } = useToast()
     const [deleteMode, setDeleteMode] = useState(false)
@@ -2069,6 +2164,112 @@ function DatabaseTab({
                             )}
                             {!subscriptionHistoryHasMore && subscriptionRequestHistory.length > 0 && (
                                 <div className="py-3 text-center text-[10px] text-slate-600">End of history</div>
+                            )}
+                        </div>
+                    </div>
+                </Card>
+            </div>
+
+            <div className="min-h-0 h-[480px] lg:h-auto lg:col-span-2">
+                <Card
+                    title="Audit Log"
+                    className="flex h-full flex-col overflow-hidden"
+                    action={
+                        <div className="flex items-center gap-2">
+                            {auditLogRefreshing && <RefreshCw size={12} className="animate-spin text-slate-400" />}
+                            <select
+                                value={auditLogDomain}
+                                onChange={e => onAuditDomainChange(e.target.value)}
+                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
+                            >
+                                <option value="">All domains</option>
+                                <option value="auth">auth</option>
+                                <option value="user">user</option>
+                                <option value="user_route_tag">user_route_tag</option>
+                                <option value="subscription">subscription</option>
+                                <option value="subscription_request">subscription_request</option>
+                                <option value="panel_user">panel_user</option>
+                                <option value="wireguard">wireguard</option>
+                                <option value="singbox">singbox</option>
+                                <option value="config">config</option>
+                                <option value="protection">protection</option>
+                                <option value="system">system</option>
+                            </select>
+                            <select
+                                value={auditLogAction}
+                                onChange={e => onAuditActionChange(e.target.value)}
+                                className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
+                            >
+                                <option value="">All actions</option>
+                                <option value="create">create</option>
+                                <option value="update">update</option>
+                                <option value="delete">delete</option>
+                                <option value="action">action</option>
+                                <option value="login">login</option>
+                            </select>
+                        </div>
+                    }
+                >
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        <div
+                            className="h-full min-h-0 overflow-y-auto pr-2 text-sm"
+                            onScroll={(e) => {
+                                const el = e.currentTarget
+                                const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
+                                if (remaining < 96 && auditLogHasMore && !auditLogLoadingMore) {
+                                    void loadMoreAuditLog()
+                                }
+                            }}
+                        >
+                            {auditLogItems.length === 0 ? (
+                                <p className="text-slate-500 text-xs italic">No audit entries</p>
+                            ) : (
+                                auditLogItems.map((entry) => (
+                                    <div key={entry.id} className="py-2 border-b border-slate-800/50 last:border-0">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                                                <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                                                    {entry.domain}
+                                                </span>
+                                                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border ${
+                                                    entry.action === 'delete' ? 'bg-red-900/20 text-red-400 border-red-900/30' :
+                                                    entry.action === 'create' ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' :
+                                                    entry.action === 'update' ? 'bg-blue-900/20 text-blue-400 border-blue-900/30' :
+                                                    entry.action === 'login' ? 'bg-violet-900/20 text-violet-400 border-violet-900/30' :
+                                                    'bg-orange-900/20 text-orange-400 border-orange-900/30'
+                                                }`}>
+                                                    {entry.action}
+                                                </span>
+                                                {entry.entity_id && (
+                                                    <span className="min-w-0 truncate text-xs text-slate-200" title={entry.entity_id}>
+                                                        {entry.entity_id}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="shrink-0 text-right text-slate-500 text-[10px]">
+                                                {formatHistoryDateTime(entry.ts)}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3 mt-0.5">
+                                            <span className="text-[10px] text-slate-300">{entry.actor}</span>
+                                            {entry.ip && <span className="text-[10px] text-slate-500 font-mono">{entry.ip}</span>}
+                                            {entry.detail && (
+                                                <span className="text-[10px] text-slate-600 truncate max-w-[140px]" title={entry.detail}>
+                                                    {entry.detail}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                            {auditLogLoadingMore && (
+                                <div className="flex items-center justify-center gap-2 py-3 text-xs text-slate-500">
+                                    <RefreshCw size={12} className="animate-spin" />
+                                    Loading more
+                                </div>
+                            )}
+                            {!auditLogHasMore && auditLogItems.length > 0 && (
+                                <div className="py-3 text-center text-[10px] text-slate-600">End of log</div>
                             )}
                         </div>
                     </div>
