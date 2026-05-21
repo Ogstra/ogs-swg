@@ -13,7 +13,7 @@ export function Card({ children, className = '', title, action }: CardProps) {
             {(title || action) && (
                 <div className="flex flex-wrap gap-2 items-center justify-between mb-4">
                     {title && <h2 className="text-lg font-bold text-white">{title}</h2>}
-                    {action && <div>{action}</div>}
+                    {action && <div className="ml-auto">{action}</div>}
                 </div>
             )}
             {children}
