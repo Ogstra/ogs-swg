@@ -1,7 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -54,21 +58,97 @@ func requestAuditIP(r *http.Request) string {
 	return host
 }
 
-// AuditLogger wraps handler h. On 2xx response, writes one audit_log entry.
+// auditEntityAndDetail extracts entity_id and detail from the request.
+// Priority: path values → query params → body JSON fields.
+// Body is only read for POST/PUT and only up to 8 KB.
+func auditEntityAndDetail(r *http.Request, body []byte, domain, action string) (entityID, detail string) {
+	// 1. Path values (Go 1.22 ServeMux pattern params)
+	for _, key := range []string{"name", "id", "iface", "tag"} {
+		if v := r.PathValue(key); v != "" {
+			entityID = v
+			break
+		}
+	}
+
+	// 2. Query params (for DELETE endpoints that use ?name= or ?username= or ?tag=)
+	if entityID == "" {
+		for _, key := range []string{"name", "username", "tag", "id"} {
+			if v := r.URL.Query().Get(key); v != "" {
+				entityID = v
+				break
+			}
+		}
+	}
+
+	// 3. Body JSON fields (safe fields only — never password/secret fields)
+	if entityID == "" && len(body) > 0 {
+		var m map[string]interface{}
+		if json.Unmarshal(body, &m) == nil {
+			for _, key := range []string{"name", "username", "service", "tag", "public_key", "iface_name", "title"} {
+				if v, ok := m[key].(string); ok && v != "" {
+					entityID = v
+					break
+				}
+			}
+		}
+	}
+
+	// 4. Fallback: use actor for auth/self-service updates without path param
+	if entityID == "" && (domain == "auth" || domain == "panel_user") {
+		if username, ok := currentPanelUsername(r); ok {
+			entityID = username
+		}
+	}
+
+	// detail: bulk ops, or name+id combo when both available
+	detail = auditDetail(r, body, entityID)
+	return
+}
+
+func auditDetail(r *http.Request, body []byte, entityID string) string {
+	// Bulk delete: {"ids": [...]}
+	if len(body) > 0 {
+		var m map[string]interface{}
+		if json.Unmarshal(body, &m) == nil {
+			if ids, ok := m["ids"].([]interface{}); ok {
+				return fmt.Sprintf("ids:%d", len(ids))
+			}
+		}
+	}
+	// Bulk via query param (e.g. ?sub_id=N clears all for a sub)
+	if subID := r.URL.Query().Get("sub_id"); subID != "" {
+		return fmt.Sprintf("sub:%s", subID)
+	}
+	return ""
+}
+
+// AuditLogger wraps handler h. On 2xx response, writes one audit_log entry
+// with entity_id and detail extracted from path values, query params, and body.
 func (s *Server) AuditLogger(domain, action string, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// Buffer body for POST/PUT so we can extract entity info AND still pass it to the handler.
+		var bodyBytes []byte
+		if r.Method == http.MethodPost || r.Method == http.MethodPut {
+			bodyBytes, _ = io.ReadAll(io.LimitReader(r.Body, 8192))
+			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		}
+
 		sw := &statusCapturingWriter{ResponseWriter: w}
 		h(sw, r)
+
 		if code := sw.status200(); code >= 200 && code < 300 {
 			if s.auditStore == nil {
 				return
 			}
+			entityID, detail := auditEntityAndDetail(r, bodyBytes, domain, action)
 			entry := core.AuditEntry{
-				Ts:     time.Now().Unix(),
-				Actor:  requestActor(r),
-				IP:     requestAuditIP(r),
-				Action: action,
-				Domain: domain,
+				Ts:       time.Now().Unix(),
+				Actor:    requestActor(r),
+				IP:       requestAuditIP(r),
+				Action:   action,
+				Domain:   domain,
+				EntityID: entityID,
+				Detail:   detail,
 			}
 			if err := s.auditStore.InsertAuditLog(context.Background(), entry); err != nil {
 				log.Printf("audit: insert failed: %v", err)
