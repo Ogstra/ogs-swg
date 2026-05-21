@@ -380,11 +380,12 @@ func (q *Queries) GetActiveUserCountWithThreshold(ctx context.Context, arg GetAc
 }
 
 const getActiveUsersWithThreshold = `-- name: GetActiveUsersWithThreshold :many
-SELECT user, SUM(uplink + downlink) as total 
-FROM samples 
-WHERE ts >= ? 
-GROUP BY user 
+SELECT user, SUM(uplink + downlink) as total
+FROM samples
+WHERE ts >= ?
+GROUP BY user
 HAVING SUM(uplink + downlink) >= ?
+ORDER BY total DESC, user ASC
 `
 
 type GetActiveUsersWithThresholdParams struct {
@@ -421,9 +422,10 @@ func (q *Queries) GetActiveUsersWithThreshold(ctx context.Context, arg GetActive
 }
 
 const getActiveUsersWithTraffic = `-- name: GetActiveUsersWithTraffic :many
-SELECT DISTINCT user 
-FROM samples 
+SELECT DISTINCT user
+FROM samples
 WHERE ts >= ? AND (uplink > 0 OR downlink > 0)
+ORDER BY user ASC
 `
 
 func (q *Queries) GetActiveUsersWithTraffic(ctx context.Context, ts int64) ([]string, error) {
