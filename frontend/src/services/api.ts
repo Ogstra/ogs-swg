@@ -203,6 +203,23 @@ export interface SubscriptionRequestHistoryPage {
     next_offset: number;
 }
 
+export interface AuditEntry {
+    id: number
+    ts: number
+    actor: string
+    ip: string
+    action: string
+    domain: string
+    entity_id: string
+    detail: string
+}
+
+export interface AuditLogPage {
+    items: AuditEntry[]
+    next_offset: number
+    has_more: boolean
+}
+
 export interface SubscriptionProtectionConfig {
     max_requests: number;
     window_seconds: number;
@@ -1084,6 +1101,14 @@ export const api = {
         const res = await fetch(`/api/subscription-requests/history?${params.toString()}`, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch subscription request history');
         return res.json();
+    },
+    getAuditLogPage: async (limit: number = 50, offset: number = 0, domain?: string, action?: string): Promise<AuditLogPage> => {
+        const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+        if (domain) params.set('domain', domain)
+        if (action) params.set('action', action)
+        const res = await fetch(`/api/audit-log?${params.toString()}`, { headers: buildHeaders() })
+        await handleResponse(res, 'Failed to fetch audit log')
+        return res.json()
     },
     getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> => {
         const res = await fetch('/api/settings/subscription-protection', { headers: buildHeaders() });
