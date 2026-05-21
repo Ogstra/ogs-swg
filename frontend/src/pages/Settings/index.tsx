@@ -1486,10 +1486,26 @@ function DatabaseTab({
     loadMoreSubscriptionRequestHistory: () => Promise<void>
     onClearSubscriptionRequestsBySubID: (subId: number, label: string) => Promise<void>
 }) {
-    const { error: toastError } = useToast()
+    const { error: toastError, showToastWithAction, dismissToast } = useToast()
     const [deleteMode, setDeleteMode] = useState(false)
     const [pendingDeletes, setPendingDeletes] = useState<Map<number, { id: number; originalIndex: number; row: SubscriptionRequestHistoryEntry }>>(new Map())
     const pendingDeleteTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
+    const toastIdByRecord = useRef<Map<number, string>>(new Map())
+
+    const handleUndoDelete = useCallback((id: number) => {
+        const timer = pendingDeleteTimers.current.get(id)
+        if (timer !== undefined) {
+            clearTimeout(timer)
+            pendingDeleteTimers.current.delete(id)
+        }
+        const toastId = toastIdByRecord.current.get(id)
+        if (toastId) { dismissToast(toastId); toastIdByRecord.current.delete(id) }
+        setPendingDeletes(prev => {
+            const next = new Map(prev)
+            next.delete(id)
+            return next
+        })
+    }, [dismissToast])
 
     const handleOptimisticDelete = useCallback((run: SubscriptionRequestHistoryEntry, index: number) => {
         const id = run.id
@@ -1498,8 +1514,16 @@ function DatabaseTab({
             next.set(id, { id, originalIndex: index, row: run })
             return next
         })
+        const toastId = showToastWithAction(
+            `Deleted · ${run.name}`,
+            'warning',
+            { label: 'Undo', onClick: () => handleUndoDelete(id) },
+            5000
+        )
+        toastIdByRecord.current.set(id, toastId)
         const timer = setTimeout(async () => {
             pendingDeleteTimers.current.delete(id)
+            toastIdByRecord.current.delete(id)
             setPendingDeletes(prev => {
                 const next = new Map(prev)
                 next.delete(id)
@@ -1512,20 +1536,7 @@ function DatabaseTab({
             }
         }, 5000)
         pendingDeleteTimers.current.set(id, timer)
-    }, [toastError])
-
-    const handleUndoDelete = useCallback((id: number) => {
-        const timer = pendingDeleteTimers.current.get(id)
-        if (timer !== undefined) {
-            clearTimeout(timer)
-            pendingDeleteTimers.current.delete(id)
-        }
-        setPendingDeletes(prev => {
-            const next = new Map(prev)
-            next.delete(id)
-            return next
-        })
-    }, [])
+    }, [showToastWithAction, handleUndoDelete, toastError])
 
     useEffect(() => {
         return () => { pendingDeleteTimers.current.forEach(t => clearTimeout(t)) }
@@ -2042,21 +2053,6 @@ function DatabaseTab({
                             )}
                         </div>
                     </div>
-                    {pendingDeletes.size > 0 && (
-                        <div className="flex flex-col gap-1 px-1 pb-1 pt-1">
-                            {Array.from(pendingDeletes.values()).map(pd => (
-                                <div key={pd.id} className="flex items-center justify-between rounded bg-slate-800 px-3 py-1.5 text-xs text-slate-300">
-                                    <span>Deleted · <span className="text-slate-500 text-[10px] truncate max-w-[8rem]">{pd.row.name}</span></span>
-                                    <button
-                                        onClick={() => handleUndoDelete(pd.id)}
-                                        className="ml-3 text-blue-400 hover:text-blue-300 font-medium shrink-0"
-                                    >
-                                        Undo
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    )}
                 </Card>
             </div>
 
