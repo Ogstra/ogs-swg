@@ -2170,7 +2170,51 @@ function DatabaseTab({
                 </Card>
             </div>
 
-            <div className="min-h-0 h-[480px] lg:h-auto lg:col-span-2">
+            <Card
+                    title="Sampler History"
+                    className="flex h-[480px] flex-col min-h-[312px] lg:col-start-1 lg:h-[416px]"
+                    action={
+                        <select
+                            value={historyLimit}
+                            onChange={e => setHistoryLimit(parseInt(e.target.value))}
+                            className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
+                        >
+                            <option value={10}>Last 10</option>
+                            <option value={20}>Last 20</option>
+                            <option value={30}>Last 30</option>
+                            <option value={40}>Last 40</option>
+                            <option value={50}>Last 50</option>
+                        </select>
+                    }
+                >
+                    <div className="flex-1 min-h-0">
+                        <div className="space-y-0 text-sm h-full overflow-y-auto pr-2">
+                            {samplerHistory.length === 0 ? (
+                                <p className="text-slate-500 text-xs italic">No history available</p>
+                            ) : (
+                                samplerHistory.map((run, idx) => (
+                                    <div key={idx} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <div className="text-slate-300 text-xs">{formatHistoryTime(run.timestamp ?? run.ts)}</div>
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
+                                                    {run.source === 'wireguard' ? 'WG' : 'Proxy'}
+                                                </span>
+                                            </div>
+                                            {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                            <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
+                                            <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </Card>
+
+            <div className="lg:col-span-2 min-h-0 h-[480px] lg:h-auto">
                 <Card
                     title="Audit Log"
                     className="flex h-full flex-col overflow-hidden"
@@ -2275,50 +2319,6 @@ function DatabaseTab({
                     </div>
                 </Card>
             </div>
-
-            <Card
-                    title="Sampler History"
-                    className="flex h-[480px] flex-col min-h-[312px] lg:col-start-1 lg:h-[416px]"
-                    action={
-                        <select
-                            value={historyLimit}
-                            onChange={e => setHistoryLimit(parseInt(e.target.value))}
-                            className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
-                        >
-                            <option value={10}>Last 10</option>
-                            <option value={20}>Last 20</option>
-                            <option value={30}>Last 30</option>
-                            <option value={40}>Last 40</option>
-                            <option value={50}>Last 50</option>
-                        </select>
-                    }
-                >
-                    <div className="flex-1 min-h-0">
-                        <div className="space-y-0 text-sm h-full overflow-y-auto pr-2">
-                            {samplerHistory.length === 0 ? (
-                                <p className="text-slate-500 text-xs italic">No history available</p>
-                            ) : (
-                                samplerHistory.map((run, idx) => (
-                                    <div key={idx} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
-                                        <div className="min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <div className="text-slate-300 text-xs">{formatHistoryTime(run.timestamp ?? run.ts)}</div>
-                                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
-                                                    {run.source === 'wireguard' ? 'WG' : 'Proxy'}
-                                                </span>
-                                            </div>
-                                            {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
-                                        </div>
-                                        <div className="shrink-0 text-right">
-                                            <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
-                                            <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    </div>
-                </Card>
         </div>
     )
 }
