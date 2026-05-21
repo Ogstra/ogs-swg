@@ -41,6 +41,7 @@ type Config struct {
 	WGRetentionDays       int      `json:"wg_retention_days" env:"OGS_WG_RETENTION_DAYS" env-default:"30"`
 	AggregationEnabled    bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
 	AggregationDays       int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
+	AuditLogMaxMB         int      `json:"audit_log_max_mb" env:"OGS_AUDIT_LOG_MAX_MB" env-default:"50"`
 	PublicIP              string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
 	SubscriptionDomain    string   `json:"subscription_domain" env:"OGS_SUBSCRIPTION_DOMAIN"`
 	CFWorkerURL           string   `json:"cf_worker_url" env:"OGS_CF_WORKER_URL"`

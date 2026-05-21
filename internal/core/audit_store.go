@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -31,7 +33,8 @@ type AuditLogPage struct {
 
 // AuditStore is a separate SQLite DB holding only the audit_log table.
 type AuditStore struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 // AuditDBPathFor derives the audit DB path from the main DB path.
@@ -60,7 +63,7 @@ func NewAuditStore(dbPath string) (*AuditStore, error) {
 	if err := initAuditSchema(db); err != nil {
 		return nil, fmt.Errorf("audit store schema: %w", err)
 	}
-	return &AuditStore{db: db}, nil
+	return &AuditStore{db: db, path: dbPath}, nil
 }
 
 func initAuditSchema(db *sql.DB) error {
@@ -84,6 +87,43 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_domain ON audit_log(domain, ts DESC);
 func (a *AuditStore) Close() {
 	if a.db != nil {
 		_ = a.db.Close()
+	}
+}
+
+// SizeBytes returns the current on-disk size of the audit DB file.
+func (a *AuditStore) SizeBytes() int64 {
+	info, err := os.Stat(a.path)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// PruneToSize deletes the oldest rows in batches until the file is at or
+// below maxBytes, then runs PRAGMA incremental_vacuum to reclaim space.
+// Batch size is 500 rows; stops after 50 iterations to bound runtime.
+func (a *AuditStore) PruneToSize(maxBytes int64) {
+	const batchSize = 500
+	const maxIter = 50
+	for i := 0; i < maxIter; i++ {
+		if a.SizeBytes() <= maxBytes {
+			break
+		}
+		res, err := a.db.Exec(
+			`DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log ORDER BY ts ASC LIMIT ?)`,
+			batchSize,
+		)
+		if err != nil {
+			log.Printf("audit prune: delete batch error: %v", err)
+			return
+		}
+		affected, _ := res.RowsAffected()
+		if affected == 0 {
+			break
+		}
+	}
+	if _, err := a.db.Exec(`PRAGMA incremental_vacuum`); err != nil {
+		log.Printf("audit prune: incremental_vacuum error: %v", err)
 	}
 }
 

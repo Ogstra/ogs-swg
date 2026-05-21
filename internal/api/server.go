@@ -571,6 +571,15 @@ func StartServer(cfg *core.Config) *Server {
 					}
 				}
 
+				// Audit Log size-based retention
+				if cfg.AuditLogMaxMB > 0 {
+					maxBytes := int64(cfg.AuditLogMaxMB) * 1024 * 1024
+					if server.auditStore != nil && server.auditStore.SizeBytes() > maxBytes {
+						server.auditStore.PruneToSize(maxBytes)
+						log.Printf("Audit log pruned to %d MB limit", cfg.AuditLogMaxMB)
+					}
+				}
+
 				if vacuumNeeded {
 					if err := store.Vacuum(); err != nil {
 						log.Printf("DB Maintenance: Vacuum failed: %v", err)
