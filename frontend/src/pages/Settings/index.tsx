@@ -2296,7 +2296,6 @@ function DatabaseTab({
                                         </div>
                                         <div className="flex items-center gap-3 mt-0.5">
                                             <span className="text-[10px] text-slate-300">{entry.actor}</span>
-                                            {entry.ip && <span className="text-[10px] text-slate-500 font-mono">{entry.ip}</span>}
                                             {entry.detail && (
                                                 <span className="text-[10px] text-slate-600 truncate max-w-[140px]" title={entry.detail}>
                                                     {entry.detail}
