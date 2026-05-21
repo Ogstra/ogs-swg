@@ -27,7 +27,7 @@ import {
 } from '../../utils/wireguardForms'
 
 type ServiceStatus = { singbox: boolean | null; wireguard: boolean | null }
-type DbInfo = { rows: number; sizeMB: number }
+type DbInfo = { rows: number; sizeMB: number; auditSizeMB: number }
 type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; activeUserWindowMinutes: number; detailChartTargetPoints: number }
 type PendingServiceAction = { service: string; action: 'restart' | 'stop' | 'start' }
 const SUBSCRIPTION_HISTORY_PAGE_SIZE = 20
@@ -52,7 +52,7 @@ export default function Settings() {
     const canReadUsers = !!permissions?.can_read_users
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
-    const [dbInfo, setDbInfo] = useState<{ rows: number; sizeMB: number }>({ rows: 0, sizeMB: 0 })
+    const [dbInfo, setDbInfo] = useState<DbInfo>({ rows: 0, sizeMB: 0, auditSizeMB: 0 })
     const [samplerHistory, setSamplerHistory] = useState<SamplerHistoryEntry[]>([])
     const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
     const [subscriptionHistoryNextOffset, setSubscriptionHistoryNextOffset] = useState(0)
@@ -76,6 +76,7 @@ export default function Settings() {
         wg_retention_days: 30,
         aggregation_enabled: false,
         aggregation_days: 7,
+        audit_log_max_mb: 50,
     })
     const [auditLogItems, setAuditLogItems] = useState<AuditEntry[]>([])
     const [auditLogNextOffset, setAuditLogNextOffset] = useState(0)
@@ -162,7 +163,8 @@ export default function Settings() {
         if (!status) return
         const sizeBytes = status.db_size_bytes ?? 0
         const rows = status.samples_count ?? 0
-        setDbInfo({ rows, sizeMB: parseFloat((sizeBytes / (1024 * 1024)).toFixed(2)) })
+        const auditSizeBytes = status.audit_log_size_bytes ?? 0
+        setDbInfo({ rows, sizeMB: parseFloat((sizeBytes / (1024 * 1024)).toFixed(2)), auditSizeMB: parseFloat((auditSizeBytes / (1024 * 1024)).toFixed(2)) })
         if (status.sampler_paused !== undefined) {
             setFeatures(f => ({ ...f, sampler_paused: status.sampler_paused }))
         }
@@ -1923,14 +1925,21 @@ function DatabaseTab({
                         </div>
                     }
                 >
-                    <div className="grid grid-cols-2 gap-4 mb-6">
+                    <div className="grid grid-cols-3 gap-4 mb-6">
                         <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
                             <p className="text-[10px] uppercase text-slate-500 font-bold">Total Rows</p>
                             <p className="text-xl font-mono text-white mt-1">{dbInfo.rows.toLocaleString()}</p>
                         </div>
                         <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                            <p className="text-[10px] uppercase text-slate-500 font-bold">Size (MB)</p>
-                            <p className="text-xl font-mono text-white mt-1">{dbInfo.sizeMB}</p>
+                            <p className="text-[10px] uppercase text-slate-500 font-bold">Stats DB</p>
+                            <p className="text-xl font-mono text-white mt-1">{dbInfo.sizeMB} MB</p>
+                        </div>
+                        <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
+                            <p className="text-[10px] uppercase text-slate-500 font-bold">Audit Log</p>
+                            <p className="text-xl font-mono text-white mt-1">{dbInfo.auditSizeMB} MB</p>
+                            {(features.audit_log_max_mb ?? 50) > 0 && (
+                                <p className="text-[10px] text-slate-500 mt-0.5">/ {features.audit_log_max_mb ?? 50} MB max</p>
+                            )}
                         </div>
                     </div>
 
@@ -1999,6 +2008,17 @@ function DatabaseTab({
                                     min={0}
                                     value={features.active_threshold_bytes ?? 1024}
                                     onChange={e => setFeatures(prev => ({ ...prev, active_threshold_bytes: parseInt(e.target.value) }))}
+                                    disabled={!canWriteSettings}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Audit Log Max (MB)</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={features.audit_log_max_mb ?? 50}
+                                    onChange={e => setFeatures(prev => ({ ...prev, audit_log_max_mb: parseInt(e.target.value) }))}
                                     disabled={!canWriteSettings}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />

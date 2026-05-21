@@ -443,6 +443,7 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 		"singbox_sys_stats":           sysStats,
 		"samples_count":               samplesCount,
 		"db_size_bytes":               dbSizeBytes,
+		"audit_log_size_bytes":        s.auditStore.SizeBytes(),
 		"sampler_paused":              samplerPaused,
 		"systemctl_available":         s.executor != nil,
 		"journalctl_available":        s.executor != nil,
@@ -834,6 +835,7 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"active_threshold_bytes":  s.config.ActiveThresholdBytes,
 		"aggregation_enabled":     s.config.AggregationEnabled,
 		"aggregation_days":        s.config.AggregationDays,
+		"audit_log_max_mb":        s.config.AuditLogMaxMB,
 		"log_source":              s.config.LogSource,
 		"access_log_path":         s.config.AccessLogPath,
 		"systemctl_available":     s.executor != nil,
@@ -914,6 +916,17 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.config.WGSamplerIntervalSec < 15 {
 			s.config.WGSamplerIntervalSec = 15
+		}
+	}
+	if v, ok := payload["audit_log_max_mb"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.AuditLogMaxMB = int(t)
+		case int:
+			s.config.AuditLogMaxMB = t
+		}
+		if s.config.AuditLogMaxMB < 1 {
+			s.config.AuditLogMaxMB = 1
 		}
 	}
 	if val, ok := payload["aggregation_enabled"].(bool); ok {

@@ -88,6 +88,7 @@ export interface FeatureFlags {
     wg_retention_days?: number;
     aggregation_enabled?: boolean;
     aggregation_days?: number;
+    audit_log_max_mb?: number;
     log_source?: 'journal' | 'file';
     access_log_path?: string;
     systemctl_available?: boolean;
@@ -1069,7 +1070,7 @@ export const api = {
         await handleResponse(res, 'Failed to fetch stats');
         return res.json();
     },
-    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; wireguard_pending_restart?: boolean; wg_sample_interval_sec?: number; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> => {
+    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; wireguard_pending_restart?: boolean; wg_sample_interval_sec?: number; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; audit_log_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> => {
         const res = await fetch('/api/status', { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch system status');
         return res.json();
