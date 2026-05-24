@@ -537,7 +537,13 @@ func (s *Server) handleSamplerHistory(w http.ResponseWriter, r *http.Request) {
 			limit = v
 		}
 	}
-	runs, err := s.store.GetSamplerRuns(limit)
+	offset := 0
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil {
+			offset = v
+		}
+	}
+	runs, err := s.store.GetSamplerRuns(limit, offset)
 	if err != nil {
 		http.Error(w, "Failed to read sampler history: "+err.Error(), http.StatusInternalServerError)
 		return
