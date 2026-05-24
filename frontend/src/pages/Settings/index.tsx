@@ -31,6 +31,7 @@ type DbInfo = { rows: number; sizeMB: number; auditSizeMB: number }
 type DashboardPrefs = { defaultService: 'singbox' | 'wireguard'; refreshMs: number; defaultRange: string; activeUserWindowMinutes: number; detailChartTargetPoints: number }
 type PendingServiceAction = { service: string; action: 'restart' | 'stop' | 'start' }
 const SUBSCRIPTION_HISTORY_PAGE_SIZE = 20
+const SAMPLER_HISTORY_PAGE_SIZE = 20
 
 const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | null): DashboardPrefs => ({
     defaultService: prefs?.default_service === 'wireguard' ? 'wireguard' : 'singbox',
@@ -54,6 +55,13 @@ export default function Settings() {
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<DbInfo>({ rows: 0, sizeMB: 0, auditSizeMB: 0 })
     const [samplerHistory, setSamplerHistory] = useState<SamplerHistoryEntry[]>([])
+    const [samplerHistoryNextOffset, setSamplerHistoryNextOffset] = useState(0)
+    const [samplerHistoryHasMore, setSamplerHistoryHasMore] = useState(false)
+    const [samplerHistoryRefreshing, setSamplerHistoryRefreshing] = useState(false)
+    const [samplerHistoryLoadingMore, setSamplerHistoryLoadingMore] = useState(false)
+    const samplerHistoryRef = useRef<SamplerHistoryEntry[]>([])
+    const samplerHistoryRefreshingRef = useRef(false)
+    const samplerHistoryLoadingMoreRef = useRef(false)
     const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
     const [subscriptionHistoryNextOffset, setSubscriptionHistoryNextOffset] = useState(0)
     const [subscriptionHistoryHasMore, setSubscriptionHistoryHasMore] = useState(false)
@@ -90,7 +98,6 @@ export default function Settings() {
     const auditLogRefreshingRef = useRef(false)
     const auditLogLoadingMoreRef = useRef(false)
 
-    const [historyLimit, setHistoryLimit] = useState(20)
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
     const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction | null>(null)
     const [serviceActionLoading, setServiceActionLoading] = useState(false)
@@ -120,13 +127,6 @@ export default function Settings() {
         queryKey: ['settings-system-status'],
         queryFn: () => api.getSystemStatus(),
         placeholderData: previousData => previousData,
-    })
-
-    const samplerHistoryQuery = useQuery({
-        queryKey: ['settings-sampler-history', historyLimit],
-        queryFn: () => api.getSamplerHistory(historyLimit),
-        placeholderData: previousData => previousData,
-        refetchInterval: Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000),
     })
 
     const subscriptionsQuery = useQuery({
@@ -178,10 +178,8 @@ export default function Settings() {
     }, [statusQuery.data])
 
     useEffect(() => {
-        const h = samplerHistoryQuery.data
-        if (!h) return
-        setSamplerHistory(Array.isArray(h) ? h : [])
-    }, [samplerHistoryQuery.data])
+        samplerHistoryRef.current = samplerHistory
+    }, [samplerHistory])
 
     useEffect(() => {
         if (typeof publicIPQuery.data !== 'string') return
@@ -375,6 +373,54 @@ export default function Settings() {
         return () => window.clearInterval(interval)
     }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, refreshSubscriptionRequestHistory])
 
+    const hardRefreshSamplerHistory = useCallback(async () => {
+        if (samplerHistoryRefreshingRef.current) return
+        samplerHistoryRefreshingRef.current = true
+        setSamplerHistoryRefreshing(true)
+        try {
+            const items = await api.getSamplerHistory(SAMPLER_HISTORY_PAGE_SIZE, 0)
+            samplerHistoryRef.current = items
+            setSamplerHistory(items)
+            setSamplerHistoryNextOffset(items.length)
+            setSamplerHistoryHasMore(items.length === SAMPLER_HISTORY_PAGE_SIZE)
+        } catch {
+            // silently ignore
+        } finally {
+            samplerHistoryRefreshingRef.current = false
+            setSamplerHistoryRefreshing(false)
+        }
+    }, [])
+
+    const loadMoreSamplerHistory = useCallback(async () => {
+        if (samplerHistoryLoadingMoreRef.current || !samplerHistoryHasMore) return
+        samplerHistoryLoadingMoreRef.current = true
+        setSamplerHistoryLoadingMore(true)
+        try {
+            const items = await api.getSamplerHistory(SAMPLER_HISTORY_PAGE_SIZE, samplerHistoryNextOffset)
+            const existingKeys = new Set(samplerHistoryRef.current.map(r => `${r.ts ?? r.timestamp}:${r.source}`))
+            const merged = [
+                ...samplerHistoryRef.current,
+                ...items.filter(r => !existingKeys.has(`${r.ts ?? r.timestamp}:${r.source}`)),
+            ]
+            samplerHistoryRef.current = merged
+            setSamplerHistory(merged)
+            setSamplerHistoryNextOffset(prev => prev + items.length)
+            setSamplerHistoryHasMore(items.length === SAMPLER_HISTORY_PAGE_SIZE)
+        } catch {
+            // silently ignore
+        } finally {
+            samplerHistoryLoadingMoreRef.current = false
+            setSamplerHistoryLoadingMore(false)
+        }
+    }, [samplerHistoryHasMore, samplerHistoryNextOffset])
+
+    useEffect(() => {
+        void hardRefreshSamplerHistory()
+        const intervalMs = Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000)
+        const interval = window.setInterval(() => void hardRefreshSamplerHistory(), intervalMs)
+        return () => window.clearInterval(interval)
+    }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, hardRefreshSamplerHistory])
+
     const loadFeatures = async () => {
         await featuresQuery.refetch()
     }
@@ -385,7 +431,7 @@ export default function Settings() {
 
     const loadSamplerHistory = async () => {
         await Promise.all([
-            samplerHistoryQuery.refetch(),
+            hardRefreshSamplerHistory(),
             refreshSubscriptionRequestHistory(),
         ])
     }
@@ -594,9 +640,11 @@ export default function Settings() {
                     samplerRunning={samplerRunning}
                     handleSaveFeatures={handleSaveFeatures}
                     loadDatabasePanel={loadAll}
-                    historyLimit={historyLimit}
-                    setHistoryLimit={setHistoryLimit}
                     samplerHistory={samplerHistory}
+                    samplerHistoryHasMore={samplerHistoryHasMore}
+                    samplerHistoryRefreshing={samplerHistoryRefreshing}
+                    samplerHistoryLoadingMore={samplerHistoryLoadingMore}
+                    loadMoreSamplerHistory={loadMoreSamplerHistory}
                     subscriptionRequestHistory={subscriptionRequestHistory}
                     subscriptionHistorySubs={subscriptionsQuery.data || []}
                     subscriptionHistorySubId={subscriptionHistorySubId}
@@ -1533,9 +1581,11 @@ function DatabaseTab({
     samplerRunning,
     handleSaveFeatures,
     loadDatabasePanel,
-    historyLimit,
-    setHistoryLimit,
     samplerHistory,
+    samplerHistoryHasMore,
+    samplerHistoryRefreshing,
+    samplerHistoryLoadingMore,
+    loadMoreSamplerHistory,
     subscriptionRequestHistory,
     subscriptionHistorySubs,
     subscriptionHistorySubId,
@@ -1568,9 +1618,11 @@ function DatabaseTab({
     samplerRunning: boolean
     handleSaveFeatures: () => void
     loadDatabasePanel: () => Promise<void>
-    historyLimit: number
-    setHistoryLimit: Dispatch<SetStateAction<number>>
     samplerHistory: SamplerHistoryEntry[]
+    samplerHistoryHasMore: boolean
+    samplerHistoryRefreshing: boolean
+    samplerHistoryLoadingMore: boolean
+    loadMoreSamplerHistory: () => Promise<void>
     subscriptionRequestHistory: SubscriptionRequestHistoryEntry[]
     subscriptionHistorySubs: Subscription[]
     subscriptionHistorySubId: string
@@ -2305,22 +2357,19 @@ function DatabaseTab({
             <Card
                     title="Sampler History"
                     className="flex h-[480px] flex-col min-h-[312px] lg:col-start-1 lg:h-[416px]"
-                    action={
-                        <select
-                            value={historyLimit}
-                            onChange={e => setHistoryLimit(parseInt(e.target.value))}
-                            className="select-field bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-400 text-xs outline-none focus:border-slate-700"
-                        >
-                            <option value={10}>Last 10</option>
-                            <option value={20}>Last 20</option>
-                            <option value={30}>Last 30</option>
-                            <option value={40}>Last 40</option>
-                            <option value={50}>Last 50</option>
-                        </select>
-                    }
+                    action={samplerHistoryRefreshing ? <RefreshCw size={12} className="animate-spin text-slate-400" /> : undefined}
                 >
                     <div className="flex-1 min-h-0">
-                        <div className="space-y-0 text-sm h-full overflow-y-auto pr-2">
+                        <div
+                            className="space-y-0 text-sm h-full overflow-y-auto pr-2"
+                            onScroll={e => {
+                                const el = e.currentTarget
+                                const remaining = el.scrollHeight - el.scrollTop - el.clientHeight
+                                if (remaining < 96 && samplerHistoryHasMore && !samplerHistoryLoadingMore) {
+                                    void loadMoreSamplerHistory()
+                                }
+                            }}
+                        >
                             {samplerHistory.length === 0 ? (
                                 <p className="text-slate-500 text-xs italic">No history available</p>
                             ) : (
@@ -2341,6 +2390,15 @@ function DatabaseTab({
                                         </div>
                                     </div>
                                 ))
+                            )}
+                            {samplerHistoryLoadingMore && (
+                                <div className="flex items-center justify-center gap-2 py-3 text-xs text-slate-500">
+                                    <RefreshCw size={12} className="animate-spin" />
+                                    Loading more
+                                </div>
+                            )}
+                            {!samplerHistoryHasMore && samplerHistory.length > 0 && (
+                                <div className="py-3 text-center text-[10px] text-slate-600">End of history</div>
                             )}
                         </div>
                     </div>
