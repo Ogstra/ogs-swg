@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -24,6 +25,18 @@ import (
 	"github.com/dgraph-io/ristretto"
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
+)
+
+const (
+	cacheKeyAllUsers         = "api:users:all"
+	cacheKeyAllInboundMeta   = "api:inbound-meta:all"
+	cacheKeyAllSubscriptions = "api:subscriptions:all"
+	cacheKeyAllRouteTags     = "api:route-tags:all"
+	cacheKeyHappConfig       = "api:happ-config"
+	cacheKeyAllPanelUsers    = "api:panel-users:all"
+	cacheKeySamplerHistory   = "api:db:sampler-history"
+	cacheKeySubHistory       = "api:db:subscription-history"
+	cacheKeyAuditLog         = "api:db:audit-log"
 )
 
 type Server struct {
@@ -36,6 +49,9 @@ type Server struct {
 	pool                 *pond.WorkerPool
 	validate             *validator.Validate
 	cache                *ristretto.Cache
+	samplerHistoryVer    atomic.Int64
+	subHistoryVer        atomic.Int64
+	auditLogVer          atomic.Int64
 	wgPendingRestart     bool
 	wgQRCache            map[string]qrEntry
 	wgQRCacheMutex       sync.RWMutex
@@ -52,6 +68,18 @@ type Server struct {
 	// logSearchSem caps the number of concurrent log-search scans so that
 	// rapid or parallel search requests cannot saturate all CPU cores.
 	logSearchSem chan struct{}
+}
+
+func (s *Server) invalidateSamplerHistoryCache() {
+	s.samplerHistoryVer.Add(1)
+}
+
+func (s *Server) invalidateSubscriptionHistoryCache() {
+	s.subHistoryVer.Add(1)
+}
+
+func (s *Server) invalidateAuditLogCache() {
+	s.auditLogVer.Add(1)
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {
@@ -799,6 +827,13 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
+	if cached, found := s.cache.Get(cacheKeyAllUsers); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(b)
+			return
+		}
+	}
 	// 1. Load active users from Singbox Config
 	activeUsers, err := s.config.GetActiveUsers()
 	if err != nil {
@@ -1044,8 +1079,10 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	b, _ := json.Marshal(result)
+	s.cache.SetWithTTL(cacheKeyAllUsers, b, int64(len(b)), 30*time.Second)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	w.Write(b)
 }
 
 type CreateUserRequest struct {
@@ -1132,6 +1169,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -1302,6 +1340,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1336,6 +1375,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1363,6 +1403,7 @@ func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1435,6 +1476,7 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1480,6 +1522,7 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	w.WriteHeader(http.StatusCreated)
 }
 

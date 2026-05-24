@@ -1084,8 +1084,12 @@ export const api = {
         });
         await handleResponse(res, 'Failed to run sampler');
     },
-    getSamplerHistory: async (limit?: number): Promise<SamplerHistoryEntry[]> => {
-        const url = limit ? `/api/sampler/history?limit=${limit}` : '/api/sampler/history';
+    getSamplerHistory: async (limit?: number, offset?: number): Promise<SamplerHistoryEntry[]> => {
+        const params = new URLSearchParams()
+        if (typeof limit === 'number') params.set('limit', String(limit))
+        if (typeof offset === 'number' && offset > 0) params.set('offset', String(offset))
+        const qs = params.toString()
+        const url = qs ? `/api/sampler/history?${qs}` : '/api/sampler/history'
         const res = await fetch(url, { headers: buildHeaders() });
         await handleResponse(res, 'Failed to fetch sampler history');
         return res.json();
