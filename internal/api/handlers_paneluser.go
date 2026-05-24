@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
@@ -45,13 +46,28 @@ func ensureGrantablePermissions(caller *core.PanelUserPermissions, requested cor
 }
 
 func (s *Server) handleGetPanelUsers(w http.ResponseWriter, r *http.Request) {
+	if cached, found := s.cache.Get(cacheKeyAllPanelUsers); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
 	users, err := s.store.GetAllPanelUsers()
 	if err != nil {
 		http.Error(w, "Failed to fetch panel users: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	b, err := json.Marshal(users)
+	if err != nil {
+		http.Error(w, "Failed to encode panel users: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.cache.SetWithTTL(cacheKeyAllPanelUsers, b, int64(len(b)), 30*time.Second)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(users)
+	_, _ = w.Write(b)
 }
 
 type createPanelUserRequest struct {
@@ -88,6 +104,7 @@ func (s *Server) handleCreatePanelUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.cache.Del(cacheKeyAllPanelUsers)
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -120,6 +137,7 @@ func (s *Server) handleUpdatePanelUserPermissions(w http.ResponseWriter, r *http
 		return
 	}
 
+	s.cache.Del(cacheKeyAllPanelUsers)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -149,6 +167,7 @@ func (s *Server) handleUpdatePanelUserUsername(w http.ResponseWriter, r *http.Re
 	}
 
 	s.insertAuditEntry(r, "panel_user", "update", req.Username, "to:"+req.NewUsername)
+	s.cache.Del(cacheKeyAllPanelUsers)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -173,6 +192,7 @@ func (s *Server) handleUpdatePanelUserPassword(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	s.cache.Del(cacheKeyAllPanelUsers)
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -195,5 +215,6 @@ func (s *Server) handleDeletePanelUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.cache.Del(cacheKeyAllPanelUsers)
 	w.WriteHeader(http.StatusOK)
 }
