@@ -367,6 +367,7 @@ func (s *Server) handleUpdateUserRouteTags(w http.ResponseWriter, r *http.Reques
 		statuses = append(statuses, status)
 	}
 
+	s.cache.Del(cacheKeyAllUsers)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(UpdateUserRouteTagsResponse{
 		Success:               true,
