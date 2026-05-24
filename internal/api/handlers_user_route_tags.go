@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
@@ -117,6 +118,13 @@ func (s *Server) handleGetUserRouteTags(w http.ResponseWriter, _ *http.Request) 
 	if !s.requireUserRouteTagDependencies(w) {
 		return
 	}
+	if cached, found := s.cache.Get(cacheKeyAllRouteTags); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(b)
+			return
+		}
+	}
 
 	tags, err := s.store.ListUserRouteTags()
 	if err != nil {
@@ -133,9 +141,15 @@ func (s *Server) handleGetUserRouteTags(w http.ResponseWriter, _ *http.Request) 
 		}
 		statuses = append(statuses, status)
 	}
+	b, err := json.Marshal(statuses)
+	if err != nil {
+		http.Error(w, "Failed to encode route tags: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.cache.SetWithTTL(cacheKeyAllRouteTags, b, int64(len(b)), 30*time.Second)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(statuses)
+	_, _ = w.Write(b)
 }
 
 func (s *Server) handleGetCompatibleUserRouteRules(w http.ResponseWriter, _ *http.Request) {
@@ -224,6 +238,8 @@ func (s *Server) handleCreateUserRouteTag(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	s.cache.Del(cacheKeyAllRouteTags)
+	s.cache.Del(cacheKeyAllUsers)
 	s.insertAuditEntry(r, "user_route_tag", "create", tag.Name, fmt.Sprintf("id:%d", tag.ID))
 	_ = json.NewEncoder(w).Encode(status)
 }
@@ -294,6 +310,8 @@ func (s *Server) handleUpdateUserRouteTag(w http.ResponseWriter, r *http.Request
 	if tag.Name != existing.Name {
 		detail += ",to:" + tag.Name
 	}
+	s.cache.Del(cacheKeyAllRouteTags)
+	s.cache.Del(cacheKeyAllUsers)
 	s.insertAuditEntry(r, "user_route_tag", "update", existing.Name, detail)
 	_ = json.NewEncoder(w).Encode(status)
 }
@@ -321,6 +339,8 @@ func (s *Server) handleDeleteUserRouteTag(w http.ResponseWriter, r *http.Request
 		http.Error(w, "Failed to delete route tag: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.cache.Del(cacheKeyAllRouteTags)
+	s.cache.Del(cacheKeyAllUsers)
 	s.insertAuditEntry(r, "user_route_tag", "delete", existing.Name, fmt.Sprintf("id:%d", id))
 	w.WriteHeader(http.StatusNoContent)
 }
