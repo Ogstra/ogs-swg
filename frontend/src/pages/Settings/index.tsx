@@ -266,6 +266,13 @@ export default function Settings() {
         }
     }, [])
 
+    const removeSubscriptionRequestHistoryEntry = useCallback((id: number) => {
+        const next = subscriptionRequestHistoryRef.current.filter(item => item.id !== id)
+        subscriptionRequestHistoryRef.current = next
+        setSubscriptionRequestHistory(next)
+        setSubscriptionHistoryNextOffset(off => Math.max(0, off - 1))
+    }, [])
+
     const handleClearSubscriptionRequestsBySubID = useCallback(async (subId: number, label: string) => {
         if (subId === 0) return
         if (!window.confirm(`Clear all history for "${label}"?`)) return
@@ -601,6 +608,7 @@ export default function Settings() {
                     subscriptionHistoryLoadingMore={subscriptionHistoryLoadingMore}
                     loadMoreSubscriptionRequestHistory={loadMoreSubscriptionRequestHistory}
                     onClearSubscriptionRequestsBySubID={handleClearSubscriptionRequestsBySubID}
+                    removeSubscriptionRequestHistoryEntry={removeSubscriptionRequestHistoryEntry}
                     auditLogItems={auditLogItems}
                     auditLogHasMore={auditLogHasMore}
                     auditLogRefreshing={auditLogRefreshing}
@@ -1539,6 +1547,7 @@ function DatabaseTab({
     subscriptionHistoryLoadingMore,
     loadMoreSubscriptionRequestHistory,
     onClearSubscriptionRequestsBySubID,
+    removeSubscriptionRequestHistoryEntry,
     auditLogItems,
     auditLogHasMore,
     auditLogRefreshing,
@@ -1573,6 +1582,7 @@ function DatabaseTab({
     subscriptionHistoryLoadingMore: boolean
     loadMoreSubscriptionRequestHistory: () => Promise<void>
     onClearSubscriptionRequestsBySubID: (subId: number, label: string) => Promise<void>
+    removeSubscriptionRequestHistoryEntry: (id: number) => void
     auditLogItems: AuditEntry[]
     auditLogHasMore: boolean
     auditLogRefreshing: boolean
@@ -1621,19 +1631,25 @@ function DatabaseTab({
         const timer = setTimeout(async () => {
             pendingDeleteTimers.current.delete(id)
             toastIdByRecord.current.delete(id)
-            setPendingDeletes(prev => {
-                const next = new Map(prev)
-                next.delete(id)
-                return next
-            })
             try {
                 await api.deleteSubscriptionRequest(id)
+                removeSubscriptionRequestHistoryEntry(id)
+                setPendingDeletes(prev => {
+                    const next = new Map(prev)
+                    next.delete(id)
+                    return next
+                })
             } catch {
+                setPendingDeletes(prev => {
+                    const next = new Map(prev)
+                    next.delete(id)
+                    return next
+                })
                 toastError('Failed to delete record')
             }
         }, 5000)
         pendingDeleteTimers.current.set(id, timer)
-    }, [showToastWithAction, handleUndoDelete, toastError])
+    }, [showToastWithAction, handleUndoDelete, toastError, removeSubscriptionRequestHistoryEntry])
 
     useEffect(() => {
         const flushPendingDeletes = () => {
