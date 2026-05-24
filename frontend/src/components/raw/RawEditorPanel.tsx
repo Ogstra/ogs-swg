@@ -131,9 +131,8 @@ export function RawEditorPanel({
         } else if (e.key === 'F3') {
             e.preventDefault()
             performFind(e.shiftKey ? 'prev' : 'next')
-        } else if (e.key === '/' && !e.shiftKey) {
-            e.preventDefault()
-            searchInputRef.current?.focus()
+        } else if (e.key === '/') {
+            e.stopPropagation()
         }
     }
 
