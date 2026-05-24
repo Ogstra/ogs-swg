@@ -196,7 +196,9 @@ func (s *Server) insertAuditEntry(r *http.Request, domain, action, entityID, det
 	}
 	if err := s.auditStore.InsertAuditLog(context.Background(), entry); err != nil {
 		log.Printf("audit: insert failed: %v", err)
+		return
 	}
+	s.invalidateAuditLogCache()
 }
 
 // AuditLogger wraps handler h. On 2xx response, writes one audit_log entry

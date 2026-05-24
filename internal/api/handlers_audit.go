@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 func (s *Server) handleGetAuditLog(w http.ResponseWriter, r *http.Request) {
@@ -17,13 +19,27 @@ func (s *Server) handleGetAuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 	domain := r.URL.Query().Get("domain")
 	action := r.URL.Query().Get("action")
+	cacheKey := fmt.Sprintf("%s:v%d:limit=%d:offset=%d:domain=%s:action=%s", cacheKeyAuditLog, s.auditLogVer.Load(), limit, offset, domain, action)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(b)
+			return
+		}
+	}
 
 	page, err := s.auditStore.QueryAuditLog(r.Context(), limit, offset, domain, action)
 	if err != nil {
 		http.Error(w, "Failed to query audit log: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	b, err := json.Marshal(page)
+	if err != nil {
+		http.Error(w, "Failed to encode audit log: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.cache.SetWithTTL(cacheKey, b, int64(len(b)), 15*time.Second)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(page)
+	_, _ = w.Write(b)
 }

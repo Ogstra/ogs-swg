@@ -45,6 +45,8 @@ const normalizeDashboardPrefs = (prefs?: Partial<StoredDashboardPreferences> | n
 
 export default function Settings() {
     const [searchParams, setSearchParams] = useSearchParams()
+    const requestedTab = searchParams.get('tab') || ''
+    const isDatabaseTabActive = requestedTab === 'database'
     const queryClient = useQueryClient()
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -132,7 +134,7 @@ export default function Settings() {
     const subscriptionsQuery = useQuery({
         queryKey: ['settings-subscriptions-for-history-filter'],
         queryFn: () => api.getSubscriptions(),
-        enabled: canReadUsers,
+        enabled: canReadUsers && isDatabaseTabActive,
         placeholderData: previousData => previousData,
     })
 
@@ -322,22 +324,25 @@ export default function Settings() {
         setAuditLogDomain(value)
         setAuditLogNextOffset(0)
         setAuditLogHasMore(false)
+        if (!isDatabaseTabActive) return
         void hardRefreshAuditLog()
-    }, [hardRefreshAuditLog])
+    }, [hardRefreshAuditLog, isDatabaseTabActive])
 
     const handleAuditActionChange = useCallback((value: string) => {
         auditLogActionRef.current = value
         setAuditLogAction(value)
         setAuditLogNextOffset(0)
         setAuditLogHasMore(false)
+        if (!isDatabaseTabActive) return
         void hardRefreshAuditLog()
-    }, [hardRefreshAuditLog])
+    }, [hardRefreshAuditLog, isDatabaseTabActive])
 
     useEffect(() => {
+        if (!isDatabaseTabActive) return
         void hardRefreshAuditLog()
         const interval = setInterval(() => void hardRefreshAuditLog(), 30_000)
         return () => clearInterval(interval)
-    }, [hardRefreshAuditLog])
+    }, [hardRefreshAuditLog, isDatabaseTabActive])
 
     const loadMoreSubscriptionRequestHistory = useCallback(async () => {
         if (subscriptionHistoryLoadingMoreRef.current || !subscriptionHistoryHasMore) return
@@ -365,13 +370,14 @@ export default function Settings() {
     }, [selectedSubscriptionHistorySubId, subscriptionHistoryHasMore, subscriptionHistoryNextOffset])
 
     useEffect(() => {
+        if (!isDatabaseTabActive) return
         void refreshSubscriptionRequestHistory()
         const intervalMs = Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000)
         const interval = window.setInterval(() => {
             void refreshSubscriptionRequestHistory()
         }, intervalMs)
         return () => window.clearInterval(interval)
-    }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, refreshSubscriptionRequestHistory])
+    }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, isDatabaseTabActive, refreshSubscriptionRequestHistory])
 
     const hardRefreshSamplerHistory = useCallback(async () => {
         if (samplerHistoryRefreshingRef.current) return
@@ -415,11 +421,12 @@ export default function Settings() {
     }, [samplerHistoryHasMore, samplerHistoryNextOffset])
 
     useEffect(() => {
+        if (!isDatabaseTabActive) return
         void hardRefreshSamplerHistory()
         const intervalMs = Math.max(15_000, Math.min(features.sampler_interval_sec ?? 120, features.wg_sampler_interval_sec ?? 60) * 1000)
         const interval = window.setInterval(() => void hardRefreshSamplerHistory(), intervalMs)
         return () => window.clearInterval(interval)
-    }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, hardRefreshSamplerHistory])
+    }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, hardRefreshSamplerHistory, isDatabaseTabActive])
 
     const loadFeatures = async () => {
         await featuresQuery.refetch()
@@ -430,9 +437,12 @@ export default function Settings() {
     }
 
     const loadSamplerHistory = async () => {
+        if (!isDatabaseTabActive) return
         await Promise.all([
             hardRefreshSamplerHistory(),
             refreshSubscriptionRequestHistory(),
+            hardRefreshAuditLog(),
+            canReadUsers ? subscriptionsQuery.refetch() : Promise.resolve(),
         ])
     }
 
@@ -692,7 +702,6 @@ export default function Settings() {
     })
 
     const validTabIds = tabs.map(tab => tab.id)
-    const requestedTab = searchParams.get('tab') || ''
     const activeTab = validTabIds.includes(requestedTab) ? requestedTab : tabs[0]?.id
 
     useEffect(() => {

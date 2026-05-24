@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -33,6 +34,9 @@ const (
 	cacheKeyAllRouteTags     = "api:route-tags:all"
 	cacheKeyHappConfig       = "api:happ-config"
 	cacheKeyAllPanelUsers    = "api:panel-users:all"
+	cacheKeySamplerHistory   = "api:db:sampler-history"
+	cacheKeySubHistory       = "api:db:subscription-history"
+	cacheKeyAuditLog         = "api:db:audit-log"
 )
 
 type Server struct {
@@ -45,6 +49,9 @@ type Server struct {
 	pool                 *pond.WorkerPool
 	validate             *validator.Validate
 	cache                *ristretto.Cache
+	samplerHistoryVer    atomic.Int64
+	subHistoryVer        atomic.Int64
+	auditLogVer          atomic.Int64
 	wgPendingRestart     bool
 	wgQRCache            map[string]qrEntry
 	wgQRCacheMutex       sync.RWMutex
@@ -61,6 +68,18 @@ type Server struct {
 	// logSearchSem caps the number of concurrent log-search scans so that
 	// rapid or parallel search requests cannot saturate all CPU cores.
 	logSearchSem chan struct{}
+}
+
+func (s *Server) invalidateSamplerHistoryCache() {
+	s.samplerHistoryVer.Add(1)
+}
+
+func (s *Server) invalidateSubscriptionHistoryCache() {
+	s.subHistoryVer.Add(1)
+}
+
+func (s *Server) invalidateAuditLogCache() {
+	s.auditLogVer.Add(1)
 }
 
 func NewServer(store *core.Store, config *core.Config, executor core.SystemExecutor) *Server {

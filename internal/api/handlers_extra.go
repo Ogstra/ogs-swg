@@ -490,6 +490,7 @@ func (s *Server) handleRunSampler(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAnyService(w) {
 		return
 	}
+	s.invalidateSamplerHistoryCache()
 	if s.sampler != nil {
 		s.sampler.TriggerOnce()
 	}
@@ -543,13 +544,29 @@ func (s *Server) handleSamplerHistory(w http.ResponseWriter, r *http.Request) {
 			offset = v
 		}
 	}
+	cacheKey := fmt.Sprintf("%s:v%d:limit=%d:offset=%d", cacheKeySamplerHistory, s.samplerHistoryVer.Load(), limit, offset)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
 	runs, err := s.store.GetSamplerRuns(limit, offset)
 	if err != nil {
 		http.Error(w, "Failed to read sampler history: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	b, err := json.Marshal(runs)
+	if err != nil {
+		http.Error(w, "Failed to encode sampler history: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.cache.SetWithTTL(cacheKey, b, int64(len(b)), 15*time.Second)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(runs)
+	_, _ = w.Write(b)
 }
 
 type subscriptionRequestHistoryPageResponse struct {
@@ -611,6 +628,7 @@ func (s *Server) handleDeleteSubscriptionRequest(w http.ResponseWriter, r *http.
 		http.Error(w, "failed to delete: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.invalidateSubscriptionHistoryCache()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -627,6 +645,7 @@ func (s *Server) handleDeleteSubscriptionRequests(w http.ResponseWriter, r *http
 			http.Error(w, "failed to clear: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.invalidateSubscriptionHistoryCache()
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
@@ -642,16 +661,15 @@ func (s *Server) handleDeleteSubscriptionRequests(w http.ResponseWriter, r *http
 		http.Error(w, "failed to bulk delete: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.invalidateSubscriptionHistoryCache()
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) getSubscriptionRequestHistoryPage(ctx context.Context, limit, offset, subID int, censor bool) (subscriptionRequestHistoryPageResponse, error) {
-	cacheKey := fmt.Sprintf("subscription-request-history:v2:censor=%t:sub=%d:limit=%d:offset=%d", censor, subID, limit, offset)
-	if offset > 0 {
-		if cached, found := s.cache.Get(cacheKey); found {
-			if page, ok := cached.(subscriptionRequestHistoryPageResponse); ok {
-				return page, nil
-			}
+	cacheKey := fmt.Sprintf("%s:v%d:censor=%t:sub=%d:limit=%d:offset=%d", cacheKeySubHistory, s.subHistoryVer.Load(), censor, subID, limit, offset)
+	if cached, found := s.cache.Get(cacheKey); found {
+		if page, ok := cached.(subscriptionRequestHistoryPageResponse); ok {
+			return page, nil
 		}
 	}
 
@@ -659,9 +677,7 @@ func (s *Server) getSubscriptionRequestHistoryPage(ctx context.Context, limit, o
 	if err != nil {
 		return subscriptionRequestHistoryPageResponse{}, err
 	}
-	if offset > 0 {
-		s.cache.SetWithTTL(cacheKey, page, 1, 30*time.Second)
-	}
+	s.cache.SetWithTTL(cacheKey, page, 1, 15*time.Second)
 	return page, nil
 }
 
@@ -670,7 +686,7 @@ func (s *Server) prefetchSubscriptionRequestHistoryPage(limit, offset, subID int
 		return
 	}
 
-	cacheKey := fmt.Sprintf("subscription-request-history:v2:censor=%t:sub=%d:limit=%d:offset=%d", censor, subID, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%d:censor=%t:sub=%d:limit=%d:offset=%d", cacheKeySubHistory, s.subHistoryVer.Load(), censor, subID, limit, offset)
 	if _, found := s.cache.Get(cacheKey); found {
 		return
 	}
