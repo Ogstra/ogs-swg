@@ -492,7 +492,7 @@ func happSubscriptionBodyLine(param happSubscriptionParam) string {
 
 func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool) {
 	meta := extractSubscriptionRequestMetadata(r)
-	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
+	if err := s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
 		SubID:           subID,
 		UserName:        strings.Join(users, ", "),
 		RequestIp:       resolveSubscriptionRequestIP(r),
@@ -510,7 +510,9 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 		ServedFromCache: servedFromCacheToInt64(servedFromCache),
 		Blocked:         0,
 		BlockReason:     "",
-	})
+	}); err == nil {
+		s.invalidateSubscriptionHistoryCache()
+	}
 }
 
 // blockedRecordDedupTTL is the window within which a duplicate blocked-request
@@ -538,7 +540,7 @@ func (s *Server) recordBlockedSubscriptionRequest(r *http.Request, subID int64, 
 	s.blockedRecordDedupMu.Unlock()
 
 	meta := extractSubscriptionRequestMetadata(r)
-	_ = s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
+	if err := s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
 		SubID:           subID,
 		UserName:        strings.Join(users, ", "),
 		RequestIp:       resolveSubscriptionRequestIP(r),
@@ -556,7 +558,9 @@ func (s *Server) recordBlockedSubscriptionRequest(r *http.Request, subID int64, 
 		ServedFromCache: 0,
 		Blocked:         1,
 		BlockReason:     blockReason,
-	})
+	}); err == nil {
+		s.invalidateSubscriptionHistoryCache()
+	}
 }
 
 func isSubscriptionClientUA(ua string) bool {

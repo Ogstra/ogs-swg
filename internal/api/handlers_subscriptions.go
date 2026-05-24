@@ -269,14 +269,28 @@ func (s *Server) handleGetSubscriptionDefaultDestinations(w http.ResponseWriter,
 }
 
 func (s *Server) handleGetSubscriptionHappConfig(w http.ResponseWriter, r *http.Request) {
+	if cached, found := s.cache.Get(cacheKeyHappConfig); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
 	config, err := s.store.GetSubscriptionHappConfig(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to get Happ config", http.StatusInternalServerError)
 		return
 	}
+	b, err := json.Marshal(config)
+	if err != nil {
+		http.Error(w, "Failed to encode Happ config", http.StatusInternalServerError)
+		return
+	}
+	s.cache.SetWithTTL(cacheKeyHappConfig, b, int64(len(b)), 60*time.Second)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(config)
+	_, _ = w.Write(b)
 }
 
 func (s *Server) handleUpdateSubscriptionHappConfig(w http.ResponseWriter, r *http.Request) {
@@ -298,6 +312,7 @@ func (s *Server) handleUpdateSubscriptionHappConfig(w http.ResponseWriter, r *ht
 	}
 
 	s.InvalidateSubCache()
+	s.cache.Del(cacheKeyHappConfig)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(config)
 }
@@ -359,6 +374,14 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 }
 
 func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) {
+	if cached, found := s.cache.Get(cacheKeyAllSubscriptions); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write(b)
+			return
+		}
+	}
+
 	subs, err := s.store.Queries.GetAllSubscriptions(r.Context())
 	if err != nil {
 		http.Error(w, "Failed to get subscriptions: "+err.Error(), http.StatusInternalServerError)
@@ -400,8 +423,15 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			UpdatedAt:                  sub.UpdatedAt.Int64,
 		})
 	}
+	b, err := json.Marshal(res)
+	if err != nil {
+		http.Error(w, "Failed to encode subscriptions", http.StatusInternalServerError)
+		return
+	}
+	s.cache.SetWithTTL(cacheKeyAllSubscriptions, b, int64(len(b)), 15*time.Second)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(res)
+	_, _ = w.Write(b)
 }
 
 type CreateSubscriptionRequest struct {
@@ -521,6 +551,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	s.InvalidateSubCache()
+	s.cache.Del(cacheKeyAllSubscriptions)
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "token": token})
 }
@@ -637,6 +668,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	go s.store.EnforceSubscriptionQuotas(s.config)
 
 	s.InvalidateSubCache()
+	s.cache.Del(cacheKeyAllSubscriptions)
 	detail := fmt.Sprintf("id:%d", id)
 	if strings.TrimSpace(req.Name) != "" && req.Name != current.Name {
 		detail += ",to:" + req.Name
@@ -773,6 +805,7 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	s.InvalidateSubCache()
+	s.cache.Del(cacheKeyAllSubscriptions)
 	s.insertAuditEntry(r, "subscription", "delete", sub.Name, fmt.Sprintf("id:%d", id))
 	w.WriteHeader(http.StatusOK)
 }
@@ -802,6 +835,7 @@ func (s *Server) handleRegenerateSubscriptionToken(w http.ResponseWriter, r *htt
 	}
 
 	s.InvalidateSubCache()
+	s.cache.Del(cacheKeyAllSubscriptions)
 	s.insertAuditEntry(r, "subscription", "regenerate", sub.Name, fmt.Sprintf("id:%d", id))
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"token": token})

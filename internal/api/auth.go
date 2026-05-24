@@ -95,14 +95,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(LoginResponse{Token: tokenString, Permissions: *perms})
 
 	if s.auditStore != nil {
-		_ = s.auditStore.InsertAuditLog(r.Context(), core.AuditEntry{
+		if err := s.auditStore.InsertAuditLog(r.Context(), core.AuditEntry{
 			Ts:       time.Now().Unix(),
 			Actor:    req.Username,
 			IP:       requestAuditIP(r),
 			Action:   "login",
 			Domain:   "auth",
 			EntityID: req.Username,
-		})
+		}); err == nil {
+			s.invalidateAuditLogCache()
+		}
 	}
 }
 

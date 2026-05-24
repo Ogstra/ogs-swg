@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
@@ -140,7 +141,19 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 	}
 
 	if s.store != nil {
-		if meta, err := s.store.GetAllInboundMeta(); err == nil {
+		var meta map[string]core.InboundMeta
+		if cached, found := s.cache.Get(cacheKeyAllInboundMeta); found {
+			if cachedMeta, ok := cached.(map[string]core.InboundMeta); ok {
+				meta = cachedMeta
+			}
+		}
+		if meta == nil {
+			if loadedMeta, err := s.store.GetAllInboundMeta(); err == nil {
+				meta = loadedMeta
+				s.cache.SetWithTTL(cacheKeyAllInboundMeta, meta, 1, 30*time.Second)
+			}
+		}
+		if meta != nil {
 			for i := range inboundViews {
 				tag := inboundViews[i].Tag
 				if tag == "" {
@@ -1102,6 +1115,10 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	s.cache.Del(cacheKeyAllInboundMeta)
+	if tagChanged {
+		s.cache.Del(cacheKeyAllUsers)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(inboundUpdateResponse{Warnings: warnings})
@@ -1211,6 +1228,8 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 	}
 
 	s.InvalidateSubCache()
+	s.cache.Del(cacheKeyAllInboundMeta)
+	s.cache.Del(cacheKeyAllUsers)
 	w.WriteHeader(http.StatusOK)
 }
 

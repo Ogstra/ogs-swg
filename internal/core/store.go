@@ -1473,11 +1473,14 @@ func (s *Store) LogSamplerRun(ts int64, durationMs int64, inserted int64, errStr
 	}
 }
 
-func (s *Store) GetSamplerRuns(limit int) ([]SamplerRun, error) {
+func (s *Store) GetSamplerRuns(limit, offset int) ([]SamplerRun, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	rows, err := s.db.Query("SELECT ts, duration_ms, inserted, COALESCE(error,''), COALESCE(source, 'sing-box') FROM sampler_runs ORDER BY ts DESC LIMIT ?", limit)
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.Query("SELECT ts, duration_ms, inserted, COALESCE(error,''), COALESCE(source, 'sing-box') FROM sampler_runs ORDER BY ts DESC LIMIT ? OFFSET ?", limit, offset)
 	if err != nil {
 		return nil, err
 	}
