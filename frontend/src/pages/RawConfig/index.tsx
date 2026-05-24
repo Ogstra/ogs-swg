@@ -194,7 +194,6 @@ export default function RawConfig() {
         setSaving(true)
         try {
             if (activeTab === 'raw-singbox') {
-                JSON.parse(singboxConfig)
                 await api.updateSingboxConfig(singboxConfig)
                 setOriginalSingboxConfig(singboxConfig)
             } else if (canReadWireguard) {
