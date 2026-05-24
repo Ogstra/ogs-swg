@@ -1593,11 +1593,32 @@ function DatabaseTab({
     onAuditActionChange: (v: string) => void
     loadMoreAuditLog: () => Promise<void>
 }) {
-    const { error: toastError, showToastWithAction, dismissToast } = useToast()
+    const { success, error: toastError, showToastWithAction, dismissToast } = useToast()
     const [deleteMode, setDeleteMode] = useState(false)
     const [pendingDeletes, setPendingDeletes] = useState<Map<number, { id: number; originalIndex: number; row: SubscriptionRequestHistoryEntry }>>(new Map())
     const pendingDeleteTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map())
     const toastIdByRecord = useRef<Map<number, string>>(new Map())
+
+    const handleCopyIP = useCallback(async (ip: string) => {
+        if (!ip || ip === '-') return
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(ip)
+            } else {
+                const ta = document.createElement('textarea')
+                ta.value = ip
+                ta.style.position = 'fixed'
+                ta.style.opacity = '0'
+                document.body.appendChild(ta)
+                ta.select()
+                document.execCommand('copy')
+                document.body.removeChild(ta)
+            }
+            success(`Copied ${ip} to clipboard`)
+        } catch {
+            toastError('Failed to copy IP to clipboard')
+        }
+    }, [success, toastError])
 
     const handleUndoDelete = useCallback((id: number) => {
         const timer = pendingDeleteTimers.current.get(id)
@@ -2229,9 +2250,15 @@ function DatabaseTab({
                                                     )}
                                                 </div>
                                                 <div className="flex items-center gap-2 shrink-0">
-                                                    <div className="max-w-[7.5rem] truncate text-right font-mono text-blue-400 text-xs sm:max-w-[12rem]" title={run.request_ip || '-'}>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleCopyIP(run.request_ip || '')}
+                                                        disabled={!run.request_ip}
+                                                        className="max-w-[7.5rem] truncate text-right font-mono text-blue-400 text-xs sm:max-w-[12rem] hover:text-blue-300 hover:underline disabled:cursor-default disabled:hover:no-underline disabled:hover:text-blue-400 cursor-pointer transition-colors"
+                                                        title={run.request_ip ? `Click to copy ${run.request_ip}` : '-'}
+                                                    >
                                                         {run.request_ip || '-'}
-                                                    </div>
+                                                    </button>
                                                     {deleteMode && (
                                                         <button
                                                             onClick={() => handleOptimisticDelete(run, originalIndex)}
