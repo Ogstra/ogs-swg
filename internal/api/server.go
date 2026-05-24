@@ -26,6 +26,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	cacheKeyAllUsers         = "api:users:all"
+	cacheKeyAllInboundMeta   = "api:inbound-meta:all"
+	cacheKeyAllSubscriptions = "api:subscriptions:all"
+	cacheKeyAllRouteTags     = "api:route-tags:all"
+	cacheKeyHappConfig       = "api:happ-config"
+	cacheKeyAllPanelUsers    = "api:panel-users:all"
+)
+
 type Server struct {
 	store                *core.Store
 	auditStore           *core.AuditStore
@@ -799,6 +808,13 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
+	if cached, found := s.cache.Get(cacheKeyAllUsers); found {
+		if b, ok := cached.([]byte); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(b)
+			return
+		}
+	}
 	// 1. Load active users from Singbox Config
 	activeUsers, err := s.config.GetActiveUsers()
 	if err != nil {
@@ -1044,8 +1060,10 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	b, _ := json.Marshal(result)
+	s.cache.SetWithTTL(cacheKeyAllUsers, b, int64(len(b)), 30*time.Second)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	w.Write(b)
 }
 
 type CreateUserRequest struct {
@@ -1132,6 +1150,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	w.WriteHeader(http.StatusCreated)
 }
 
@@ -1302,6 +1321,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1336,6 +1356,7 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1363,6 +1384,7 @@ func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1435,6 +1457,7 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
 }
@@ -1480,6 +1503,7 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.cache.Del("api:status")
+	s.cache.Del(cacheKeyAllUsers)
 	w.WriteHeader(http.StatusCreated)
 }
 
