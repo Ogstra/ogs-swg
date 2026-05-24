@@ -2346,7 +2346,7 @@ function DatabaseTab({
                     </div>
                 </Card>
 
-            <div className="lg:col-span-2 min-h-0 h-[480px] lg:h-auto">
+            <div className="min-h-0 h-[480px] lg:h-[416px] lg:col-start-2">
                 <Card
                     title="Audit Log"
                     className="flex h-full flex-col overflow-hidden"
