@@ -154,15 +154,6 @@ export default function SingboxConfigEditor() {
     const handleSave = async () => {
         setSaving(true)
         try {
-            // Validate JSON before sending
-            try {
-                JSON.parse(config)
-            } catch (e: any) {
-                toastError(`Invalid JSON: ${e.message}`)
-                setSaving(false)
-                return
-            }
-
             await api.updateSingboxConfig(config)
             setOriginalConfig(config)
             success('Configuration saved and service restarted!')
