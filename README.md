@@ -77,7 +77,9 @@ Required mounts:
 ```yaml
 environment:
   - OGS_EXECUTION_MODE=docker_local
+  - OGS_ACCESS_LOG_PATH=/app/access-logs/access.log
 volumes:
+  - ${OGS_ACCESS_LOG_HOST_DIR:-./data}:/app/access-logs:ro
   - /etc/sing-box:/etc/sing-box
   - /etc/wireguard:/etc/wireguard
   - /run/dbus:/run/dbus
@@ -87,6 +89,8 @@ volumes:
 ```
 
 Ready-to-use compose at [`docker/docker-local/docker-compose.yml`](docker/docker-local/docker-compose.yml).
+
+If sing-box writes to another host log path, mount its containing directory with `OGS_ACCESS_LOG_HOST_DIR` and point `OGS_ACCESS_LOG_PATH` at the file inside `/app/access-logs`.
 
 For blue/green local slots, use:
 
