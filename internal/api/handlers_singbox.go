@@ -26,11 +26,6 @@ func validateRawSingboxConfigPayload(content []byte) error {
 	if strings.TrimSpace(string(content)) == "" {
 		return errors.New("config cannot be empty")
 	}
-
-	var js map[string]interface{}
-	if err := json.Unmarshal(content, &js); err != nil {
-		return fmt.Errorf("invalid json: %w", err)
-	}
 	return nil
 }
 
