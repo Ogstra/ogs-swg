@@ -135,55 +135,6 @@ func (e *DockerLocalExecutor) GetSysctl(ctx context.Context, key string) (string
 	return strings.TrimSpace(string(output)), nil
 }
 
-// Journal: query from host context via systemd-run.
-
-func (e *DockerLocalExecutor) ReadJournal(ctx context.Context, unit string, limit int) ([]string, error) {
-	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "-n", strconv.Itoa(limit), "--no-pager")
-	if err != nil {
-		return nil, analyzeJournalError(out, err)
-	}
-	return parseJournalOutput(out), nil
-}
-
-func (e *DockerLocalExecutor) ReadAllJournal(ctx context.Context, unit string) ([]string, error) {
-	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "--no-pager", "--merge", "-o", "cat")
-	if err != nil {
-		return nil, analyzeJournalError(out, err)
-	}
-	return parseJournalOutput(out), nil
-}
-
-func (e *DockerLocalExecutor) SearchJournal(ctx context.Context, unit, query string, limit int) ([]string, error) {
-	// NOTE: --merge includes all rotated journal segments (system@*.journal).
-	// Without it, journalctl only scans the active file, missing older entries.
-	// We omit -n to let Go-level filtering collect up to limit matches across full history.
-	out, err := runViaSystemdRun(ctx, "journalctl", "--system", "-u", unit, "--no-pager", "--merge")
-	if err != nil {
-		return nil, analyzeJournalError(out, err)
-	}
-
-	lines := parseJournalOutput(out)
-	var filtered []string
-	q := strings.ToLower(query)
-	for i := len(lines) - 1; i >= 0 && len(filtered) < limit; i-- {
-		if strings.Contains(strings.ToLower(lines[i]), q) {
-			filtered = append(filtered, lines[i])
-		}
-	}
-	for i, j := 0, len(filtered)-1; i < j; i, j = i+1, j-1 {
-		filtered[i], filtered[j] = filtered[j], filtered[i]
-	}
-	return filtered, nil
-}
-
-func (e *DockerLocalExecutor) WalkJournal(ctx context.Context, unit string, newestFirst bool, visit func(string) error) error {
-	args := []string{"journalctl", "--system", "-u", unit, "--no-pager", "--merge", "-o", "cat"}
-	if newestFirst {
-		args = append(args, "--reverse")
-	}
-	return streamViaSystemdRun(ctx, args, visit)
-}
-
 // Connectivity: same host, always reachable.
 
 func (e *DockerLocalExecutor) CheckConnectivity(ctx context.Context) error {
