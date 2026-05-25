@@ -9,7 +9,7 @@
   "enable_wireguard": true,
   "use_stats_sampler": true,
   "log_source": "journal",
-  "access_log_path": "/var/log/singbox.log",
+  "access_log_path": "data/access.log",
   "database_path": "./data/stats.db",
   "singbox_config_path": "/etc/sing-box/config.json",
   "singbox_api_addr": "127.0.0.1:8080",
