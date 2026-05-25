@@ -19,7 +19,6 @@
     "direct"
   ],
   "access_log_path": "/app/data/access.log",
-  "log_source": "file",
   "database_path": "/app/data/stats.db",
   "listen_addr": ":8080",
   "wireguard_config_path": "/app/data/wireguard/wg0.conf",
