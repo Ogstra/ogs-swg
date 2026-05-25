@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -56,7 +57,8 @@ func (s *Server) handleGetLogStoreStats(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleDownloadDBBackup streams a tar.gz backup of the requested database.
-// GET /api/settings/backup/download?target=main|audit|logs
+// GET /api/settings/backup/download?target=main|audit|logs[&include_cold=all|N]
+// include_cold only applies when target=logs.
 func (s *Server) handleDownloadDBBackup(w http.ResponseWriter, r *http.Request) {
 	target := r.URL.Query().Get("target")
 
@@ -75,7 +77,17 @@ func (s *Server) handleDownloadDBBackup(w http.ResponseWriter, r *http.Request) 
 	tmp.Close()
 	defer os.Remove(tmpPath)
 
-	if err := core.BackupDBToTarGz(r.Context(), db, archiveName, tmpPath); err != nil {
+	var coldFiles []string
+	if target == "logs" && s.logStore != nil {
+		coldFiles = s.resolveColdFiles(r.Context(), r.URL.Query().Get("include_cold"))
+	}
+
+	if len(coldFiles) > 0 {
+		err = core.BackupDBWithColdToTarGz(r.Context(), db, archiveName, tmpPath, coldFiles)
+	} else {
+		err = core.BackupDBToTarGz(r.Context(), db, archiveName, tmpPath)
+	}
+	if err != nil {
 		http.Error(w, "backup failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -83,6 +95,35 @@ func (s *Server) handleDownloadDBBackup(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
 	http.ServeFile(w, r, tmpPath)
+}
+
+// resolveColdFiles returns absolute paths for cold segment files based on the
+// include_cold param: "all" → all segments, "N" (integer) → last N newest, else none.
+func (s *Server) resolveColdFiles(ctx context.Context, param string) []string {
+	if param == "" || param == "none" || s.logStore == nil {
+		return nil
+	}
+	limit := -1
+	if param != "all" {
+		n, err := strconv.Atoi(param)
+		if err != nil || n <= 0 {
+			return nil
+		}
+		limit = n
+	}
+	segs, err := s.logStore.ListSegments(ctx, limit)
+	if err != nil || len(segs) == 0 {
+		return nil
+	}
+	coldDir := s.config.LogColdDir
+	if coldDir == "" {
+		coldDir = filepath.Join(filepath.Dir(s.config.DatabasePath), "logs")
+	}
+	paths := make([]string, 0, len(segs))
+	for _, seg := range segs {
+		paths = append(paths, filepath.Join(coldDir, seg.Filename))
+	}
+	return paths
 }
 
 // handleTriggerDBBackup writes backup archives for all three databases to DBBackupPath.

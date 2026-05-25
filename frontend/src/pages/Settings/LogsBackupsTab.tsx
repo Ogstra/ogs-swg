@@ -39,6 +39,8 @@ export default function LogsBackupsTab({
     const [backupTriggering, setBackupTriggering] = useState(false)
     const [stats, setStats] = useState<LogStoreStats | null>(null)
     const [statsError, setStatsError] = useState(false)
+    const [coldMode, setColdMode] = useState<'none' | 'last-n' | 'all'>('none')
+    const [coldN, setColdN] = useState(5)
 
     useEffect(() => {
         let cancelled = false
@@ -317,8 +319,8 @@ export default function LogsBackupsTab({
 
                     <div>
                         <div className="text-sm font-medium text-slate-300 mb-2">Download backups</div>
-                        <div className="flex flex-wrap gap-2">
-                            {(['main', 'audit', 'logs'] as const).map(target => (
+                        <div className="flex flex-wrap gap-2 mb-3">
+                            {(['main', 'audit'] as const).map(target => (
                                 <button
                                     key={target}
                                     onClick={() => downloadDBBackup(target).catch(() => toastError(`Failed to download ${target} backup`))}
@@ -328,6 +330,37 @@ export default function LogsBackupsTab({
                                     {target.charAt(0).toUpperCase() + target.slice(1)} DB
                                 </button>
                             ))}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm text-slate-400">Logs DB — cold segments:</span>
+                            <select
+                                value={coldMode}
+                                onChange={e => setColdMode(e.target.value as typeof coldMode)}
+                                className="bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded px-2 py-1"
+                            >
+                                <option value="none">None</option>
+                                <option value="last-n">Last N</option>
+                                <option value="all">All</option>
+                            </select>
+                            {coldMode === 'last-n' && (
+                                <input
+                                    type="number"
+                                    min={1}
+                                    value={coldN}
+                                    onChange={e => setColdN(Math.max(1, parseInt(e.target.value) || 1))}
+                                    className="w-16 bg-slate-800 border border-slate-700 text-slate-300 text-sm rounded px-2 py-1"
+                                />
+                            )}
+                            <button
+                                onClick={() => {
+                                    const ic = coldMode === 'all' ? 'all' : coldMode === 'last-n' ? String(coldN) : undefined
+                                    downloadDBBackup('logs', ic).catch(() => toastError('Failed to download logs backup'))
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 hover:text-white transition-colors"
+                            >
+                                <Download size={14} />
+                                Logs DB
+                            </button>
                         </div>
                     </div>
 
