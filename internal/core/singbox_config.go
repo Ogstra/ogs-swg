@@ -382,16 +382,11 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// 1. Validate JSON structure
 	if strings.TrimSpace(content) == "" {
 		return fmt.Errorf("config cannot be empty")
 	}
-	var validCheck map[string]interface{}
-	if err := json.Unmarshal([]byte(content), &validCheck); err != nil {
-		return fmt.Errorf("invalid json: %v", err)
-	}
 
-	// 2. Write to file
+	// Write to file
 	if c.executor != nil {
 		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, []byte(content), 0644); err != nil {
 			return err

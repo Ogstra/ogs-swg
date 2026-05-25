@@ -400,18 +400,6 @@ const validateRawSingboxConfig = (config: string) => {
     if (!config.trim()) {
         throw new Error('Config cannot be empty');
     }
-
-    try {
-        const parsed = JSON.parse(config);
-        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-            throw new Error('Config must be a JSON object');
-        }
-    } catch (err: any) {
-        if (err?.message === 'Config must be a JSON object') {
-            throw err;
-        }
-        throw new Error(`Invalid JSON: ${err?.message || err}`);
-    }
 };
 
 export const api = {
