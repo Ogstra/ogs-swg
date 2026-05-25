@@ -41,6 +41,13 @@ type Config struct {
 	AggregationEnabled    bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
 	AggregationDays       int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
 	AuditLogMaxMB         int      `json:"audit_log_max_mb" env:"OGS_AUDIT_LOG_MAX_MB" env-default:"50"`
+	LogRetentionMode      string   `json:"log_retention_mode" env:"OGS_LOG_RETENTION_MODE" env-default:"size"`      // "size" or "time"
+	LogRetentionMB        int      `json:"log_retention_mb" env:"OGS_LOG_RETENTION_MB" env-default:"200"`
+	LogRetentionDays      int      `json:"log_retention_days" env:"OGS_LOG_RETENTION_DAYS" env-default:"30"`
+	LogRetentionUnit      string   `json:"log_retention_unit" env:"OGS_LOG_RETENTION_UNIT" env-default:"days"`      // "days"|"weeks"|"months"
+	LogColdDir            string   `json:"log_cold_dir" env:"OGS_LOG_COLD_DIR" env-default:"data/logs"`
+	DBBackupPath          string   `json:"db_backup_path" env:"OGS_DB_BACKUP_PATH" env-default:"data/backups"`
+	DBBackupIntervalHours int      `json:"db_backup_interval_hours" env:"OGS_DB_BACKUP_INTERVAL_HOURS" env-default:"24"`
 	PublicIP              string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
 	SubscriptionDomain    string   `json:"subscription_domain" env:"OGS_SUBSCRIPTION_DOMAIN"`
 	CFWorkerURL           string   `json:"cf_worker_url" env:"OGS_CF_WORKER_URL"`
