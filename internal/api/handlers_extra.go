@@ -179,9 +179,8 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to read body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	var js interface{}
-	if err := json.Unmarshal(content, &js); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := validateRawSingboxConfigPayload(content); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

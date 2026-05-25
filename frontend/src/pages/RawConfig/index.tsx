@@ -194,6 +194,10 @@ export default function RawConfig() {
         setSaving(true)
         try {
             if (activeTab === 'raw-singbox') {
+                if (!singboxConfig.trim()) {
+                    toastError('Config cannot be empty')
+                    return
+                }
                 await api.updateSingboxConfig(singboxConfig)
                 setOriginalSingboxConfig(singboxConfig)
             } else if (canReadWireguard) {

@@ -183,8 +183,8 @@ export function RawEditorPanel({
                 </button>
                 <button
                     onClick={onSave}
-                    disabled={!canWrite || !hasChanges || saving}
-                    className={`flex items-center justify-center gap-2 w-9 h-9 p-0 sm:w-auto sm:h-auto sm:px-4 sm:py-2 rounded-lg shadow-lg font-medium text-sm transition-all ${!canWrite || !hasChanges || saving
+                    disabled={!canWrite || !hasChanges || loading || saving}
+                    className={`flex items-center justify-center gap-2 w-9 h-9 p-0 sm:w-auto sm:h-auto sm:px-4 sm:py-2 rounded-lg shadow-lg font-medium text-sm transition-all ${!canWrite || !hasChanges || loading || saving
                         ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-500/20'
                         }`}

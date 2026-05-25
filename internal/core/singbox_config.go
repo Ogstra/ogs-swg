@@ -383,6 +383,9 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 	defer c.mu.Unlock()
 
 	// 1. Validate JSON structure
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("config cannot be empty")
+	}
 	var validCheck map[string]interface{}
 	if err := json.Unmarshal([]byte(content), &validCheck); err != nil {
 		return fmt.Errorf("invalid json: %v", err)
