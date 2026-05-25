@@ -3,7 +3,7 @@ import { useLocation, Link, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson, Link as LinkIcon, ChevronDown, ChevronRight, Server, Database, ShieldAlert, UserCog } from 'lucide-react';
+import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson, Link as LinkIcon, ChevronDown, ChevronRight, Server, Database, ShieldAlert, UserCog, HardDrive } from 'lucide-react';
 
 export const Layout: React.FC = () => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -49,6 +49,7 @@ export const Layout: React.FC = () => {
         { id: 'dashboard', label: 'Dashboard', icon: Settings, permission: 'can_read_settings' as const },
         { id: 'database', label: 'Database', icon: Database, permission: 'can_read_settings' as const },
         { id: 'security', label: 'Sub Security', icon: ShieldAlert, permission: 'can_read_settings' as const },
+        { id: 'logs-backups', label: 'Logs & Backups', icon: HardDrive, permission: 'can_read_settings' as const },
         { id: 'panel-users', label: 'Admins', icon: UserCog, permission: 'can_read_panel_users' as const },
     ].filter(item => permissions?.[item.permission] === true);
 
