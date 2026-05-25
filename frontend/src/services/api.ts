@@ -89,7 +89,6 @@ export interface FeatureFlags {
     aggregation_enabled?: boolean;
     aggregation_days?: number;
     audit_log_max_mb?: number;
-    log_source?: 'journal' | 'file';
     access_log_path?: string;
     systemctl_available?: boolean;
     journalctl_available?: boolean;
@@ -1458,8 +1457,10 @@ export function downloadDBBackupURL(target: 'main' | 'audit' | 'logs'): string {
     return `/api/settings/backup/download?target=${target}`;
 }
 
-export async function downloadDBBackup(target: 'main' | 'audit' | 'logs'): Promise<void> {
-    const res = await fetch(`/api/settings/backup/download?target=${target}`, {
+export async function downloadDBBackup(target: 'main' | 'audit' | 'logs', includeCold?: string): Promise<void> {
+    let url = `/api/settings/backup/download?target=${target}`;
+    if (target === 'logs' && includeCold && includeCold !== 'none') url += `&include_cold=${includeCold}`;
+    const res = await fetch(url, {
         headers: buildHeaders(),
     });
     if (!res.ok) throw new Error(`Backup download failed: ${res.status}`);
@@ -1467,10 +1468,10 @@ export async function downloadDBBackup(target: 'main' | 'audit' | 'logs'): Promi
     const match = disposition.match(/filename="([^"]+)"/);
     const filename = match ? match[1] : `${target}-backup.tar.gz`;
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = blobUrl;
     a.download = filename;
     a.click();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(blobUrl);
 }

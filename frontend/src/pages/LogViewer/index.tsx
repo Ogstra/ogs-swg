@@ -157,7 +157,6 @@ export default function LogViewer() {
     const [refreshInterval, setRefreshInterval] = useState<number>(5000)
     const [query, setQuery] = useState<string>('')
     const [searchQuery, setSearchQuery] = useState<string>('')
-    const [logSource, setLogSource] = useState<'journal' | 'file'>('journal')
     const containerRef = useRef<HTMLDivElement>(null)
     const initialTailScrollPendingRef = useRef(true)
     const [autoScroll, setAutoScroll] = useState(true)
@@ -175,7 +174,6 @@ export default function LogViewer() {
     // chunks the backend sends in quick succession.
     const pendingLinesRef = useRef<string[]>([])
     const rafRef = useRef<number | null>(null)
-    const demoMode = typeof window !== 'undefined' && localStorage.getItem('demo_mode') === '1'
     const backendTailQuery = shouldUseServerTailQuery(query) ? query.trim() : ''
 
     const fetchLogs = (silent = false, currentQuery = query) => {
@@ -210,18 +208,6 @@ export default function LogViewer() {
             }
         })
     }
-
-    useEffect(() => {
-        api.getFeatures().then(f => {
-            if (f.log_source === 'journal' || f.log_source === 'file') {
-                if (demoMode && f.log_source === 'file') {
-                    setLogSource('journal')
-                } else {
-                    setLogSource(f.log_source)
-                }
-            }
-        }).catch(err => console.error('Failed to load features', err))
-    }, [demoMode])
 
     useEffect(() => {
         if (viewMode !== 'tail') {
@@ -400,8 +386,8 @@ export default function LogViewer() {
                 <div>
                     <h1 className="text-2xl font-bold text-white hidden sm:block">sing-box</h1>
                     <div className="hidden sm:flex items-center gap-2 mt-1">
-                        <span className={`text-xs px-2 py-0.5 rounded border ${logSource === 'journal' ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-amber-500/10 text-amber-400 border-amber-500/20'}`}>
-                            {logSource === 'journal' ? 'journalctl' : 'File'}
+                        <span className="text-xs px-2 py-0.5 rounded border bg-indigo-500/10 text-indigo-400 border-indigo-500/20">
+                            Access log
                         </span>
                     </div>
                 </div>

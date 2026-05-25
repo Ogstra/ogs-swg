@@ -17,6 +17,8 @@ The current pipeline deploys the panel in **docker_local** mode only:
 | `DEPLOY_PATH` | Yes | Base path where blue/green files are stored |
 | `OGS_API_KEY` | Recommended | API key injected into app slots |
 | `OGS_ADMIN_USER` / `OGS_ADMIN_PASSWORD` | Optional | First-run bootstrap/fallback auth |
+| `OGS_ACCESS_LOG_HOST_DIR` | Optional | Host directory containing the access log (default `${DEPLOY_PATH}/data`) |
+| `OGS_ACCESS_LOG_PATH` | Optional | Container path to the access log (default `/app/access-logs/access.log`) |
 | `OGS_PORT` | Optional | Public proxy port (default `8080`) |
 | `DEPLOY_ARCH` | Optional | Docker buildx target (default `linux/amd64,linux/arm64`) |
 
@@ -46,6 +48,8 @@ On the VPS where containers run:
    - `/run/log/journal`
 
 The deployed slot containers use these mounts to perform service/log/sysctl/wg operations from inside Docker.
+
+If sing-box writes access logs outside `${DEPLOY_PATH}/data/access.log`, set both optional secrets together. For example, for `/var/log/singbox.log`, set `OGS_ACCESS_LOG_HOST_DIR=/var/log` and `OGS_ACCESS_LOG_PATH=/app/access-logs/singbox.log`.
 
 ## Runtime State Files
 

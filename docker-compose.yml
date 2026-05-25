@@ -21,14 +21,12 @@ services:
 
     volumes:
       - ./data:/app/data
+      - ${OGS_ACCESS_LOG_HOST_DIR:-./data}:/app/access-logs:ro
       - ./config.json:/app/config.json
 
       # Bind-mount host config dirs at the same path (local + docker_local modes)
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
-
-      # Sing-box access log — read-only; path must match access_log_path in config.json
-      - /var/log/singbox.log:/var/log/singbox.log:ro
 
       # docker_local mode requires host runtime sockets for systemd/dbus/journal
       # - /run/dbus:/run/dbus
@@ -39,6 +37,7 @@ services:
     environment:
       - OGS_LISTEN_ADDR=:8080
       - OGS_DB_PATH=/app/data/stats.db
+      - OGS_ACCESS_LOG_PATH=${OGS_ACCESS_LOG_PATH:-/app/access-logs/access.log}
       - OGS_API_KEY=${OGS_API_KEY}
 
       # First-run admin bootstrap — remove after initial login
