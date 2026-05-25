@@ -93,6 +93,22 @@ export interface FeatureFlags {
     access_log_path?: string;
     systemctl_available?: boolean;
     journalctl_available?: boolean;
+    log_retention_mode?: 'size' | 'time';
+    log_retention_mb?: number;
+    log_retention_days?: number;
+    log_retention_unit?: 'days' | 'weeks' | 'months';
+    log_cold_dir?: string;
+    db_backup_path?: string;
+    db_backup_interval_hours?: number;
+}
+
+export interface LogStoreStats {
+    size_bytes: number;
+    row_count: number;
+    oldest_ts: number;
+    newest_ts: number;
+    segment_count: number;
+    segment_total_bytes: number;
 }
 
 export interface ConfigBackupEntry {
@@ -589,10 +605,11 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update sing-box outbound domain_strategy values');
     },
-    getLogs: async (params?: { q?: string; limit?: number; signal?: AbortSignal }): Promise<{ logs: string[] }> => {
+    getLogs: async (params?: { q?: string; limit?: number; after_id?: number; signal?: AbortSignal }): Promise<{ logs: string[]; max_id?: number }> => {
         const query = new URLSearchParams();
         if (params?.q) query.set('q', params.q);
         if (params?.limit) query.set('limit', String(params.limit));
+        if (params?.after_id && params.after_id > 0) query.set('after_id', String(params.after_id));
         const url = query.toString() ? `/api/logs?${query.toString()}` : '/api/logs';
         const res = await fetch(url, { headers: buildHeaders(), signal: params?.signal });
         await handleResponse(res, 'Failed to fetch logs');
@@ -1420,4 +1437,23 @@ export const api = {
         });
         await handleResponse(res, 'Failed to update CF Worker URL');
     },
+
+    getLogStoreStats: async (): Promise<LogStoreStats> => {
+        const res = await fetch('/api/settings/logs/stats', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch log store stats');
+        return res.json();
+    },
+
+    triggerDBBackup: async (): Promise<{ created: string[] }> => {
+        const res = await fetch('/api/settings/backup/trigger', {
+            method: 'POST',
+            headers: buildHeaders(),
+        });
+        await handleResponse(res, 'Failed to trigger backup');
+        return res.json();
+    },
 };
+
+export function downloadDBBackupURL(target: 'main' | 'audit' | 'logs'): string {
+    return `/api/settings/backup/download?target=${target}`;
+}
