@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+import { Suspense, lazy, Component, type ReactNode, type ErrorInfo } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastProvider } from './context/ToastContext';
 import { Login } from './pages/Login';
@@ -14,6 +14,13 @@ const LogViewer = lazy(() => import('./pages/LogViewer'));
 const RawConfig = lazy(() => import('./pages/RawConfig'));
 const Subscriptions = lazy(() => import('./pages/Subscriptions'));
 
+class ChunkErrorBoundary extends Component<{ children: ReactNode }, { errored: boolean }> {
+    state = { errored: false }
+    static getDerivedStateFromError() { return { errored: true } }
+    componentDidCatch(_err: Error, _info: ErrorInfo) { window.location.reload() }
+    render() { return this.state.errored ? null : this.props.children }
+}
+
 function RouteFallback() {
     return (
         <div className="flex min-h-[240px] items-center justify-center text-sm text-slate-400">
@@ -27,6 +34,7 @@ function App() {
         <AuthProvider>
             <ToastProvider>
                 <Router>
+                    <ChunkErrorBoundary>
                     <Suspense fallback={<RouteFallback />}>
                         <Routes>
                             <Route path="/login" element={<Login />} />
@@ -69,6 +77,7 @@ function App() {
                             </Route>
                         </Routes>
                     </Suspense>
+                    </ChunkErrorBoundary>
                 </Router>
             </ToastProvider>
         </AuthProvider>

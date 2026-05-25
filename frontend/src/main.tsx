@@ -34,6 +34,12 @@ const disableMobileZoom = () => {
 
 disableMobileZoom()
 
+// After a new deploy, old chunk URLs 404. Vite fires this event before React
+// ever sees the error — reload so the browser fetches fresh assets.
+window.addEventListener('vite:preloadError', () => {
+    window.location.reload()
+})
+
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js').catch(err => {
