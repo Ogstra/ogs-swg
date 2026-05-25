@@ -3,22 +3,23 @@ set -euo pipefail
 
 DB_PATH="${DEMO_DB_PATH:-/app/data/stats.db}"
 LOG_PATH="${DEMO_LOG_PATH:-/app/data/access.log}"
+LOG_DB_PATH="${DEMO_LOG_DB_PATH:-$(dirname "$DB_PATH")/singbox_logs.db}"
 MODE="${1:-sample}"
 LIVE_INTERVAL="${DEMO_LIVE_INTERVAL_SEC:-60}"
 LOG_INTERVAL="${DEMO_LOG_INTERVAL_SEC:-3}"
 SUB_REQUEST_INTERVAL="${DEMO_SUB_REQUEST_INTERVAL_SEC:-8}"
 RETENTION="${DEMO_RETENTION_SECONDS:-172800}"
 
-USERS=(user-01 user-02 user-03 user-04 user-05 user-06 user-07 user-08)
-INBOUNDS=(demo-vless-reality demo-vmess-ws demo-trojan-tls demo-hysteria2 demo-shadowsocks-2022)
-INBOUND_PROTOCOLS=(vless vmess trojan hysteria2 shadowsocks)
+USERS=(user-01 user-02 user-03 user-04 user-05 user-06 user-07 user-08 user-09 user-10)
+INBOUNDS=(demo-vless-reality demo-vmess-ws demo-trojan-tls demo-hysteria2 demo-shadowsocks-2022 demo-anytls demo-naive)
+INBOUND_PROTOCOLS=(vless vmess trojan hysteria2 shadowsocks anytls naive)
 
-SUB_TOKENS=(demo-sub-mobile demo-sub-overquota demo-sub-cached demo-sub-unlimited)
-SUB_NAMES=("Reality Mobile" "Mixed Office Over Quota" "Cached VMess/Trojan" "Unlimited UDP Lab")
-SUB_QUOTAS=($((60 * 1024 * 1024 * 1024)) $((3 * 1024 * 1024 * 1024)) $((24 * 1024 * 1024 * 1024)) 0)
-SUB_INTERVALS=(24 6 12 0)
-SUB_UPDATE_ALWAYS=(0 1 0 1)
-SUB_USERS=("user-01,user-02" "user-03,user-05" "user-04,user-06" "user-07,user-08")
+SUB_TOKENS=(demo-sub-mobile demo-sub-overquota demo-sub-cached demo-sub-unlimited demo-sub-modern)
+SUB_NAMES=("Reality Mobile" "Mixed Office Over Quota" "Cached VMess/Trojan" "Unlimited UDP Lab" "AnyTLS and Naive Lab")
+SUB_QUOTAS=($((60 * 1024 * 1024 * 1024)) $((3 * 1024 * 1024 * 1024)) $((24 * 1024 * 1024 * 1024)) 0 $((18 * 1024 * 1024 * 1024)))
+SUB_INTERVALS=(24 6 12 0 8)
+SUB_UPDATE_ALWAYS=(0 1 0 1 0)
+SUB_USERS=("user-01,user-02" "user-03,user-05" "user-04,user-06" "user-07,user-08" "user-09,user-10")
 
 REQUEST_UAS=(
   "Shadowrocket/2.2.82 CFNetwork/1568.200.51 Darwin/24.1.0"
@@ -89,6 +90,8 @@ subscription_alias_for_user() {
     user-06) printf 'Hysteria2 Travel' ;;
     user-07) printf 'Shadowsocks TCP' ;;
     user-08) printf 'Shadowsocks UDP' ;;
+    user-09) printf 'AnyTLS Laptop' ;;
+    user-10) printf 'Naive Browser' ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -97,6 +100,38 @@ wait_for_db() {
   until sqlite3 "$DB_PATH" "SELECT 1 FROM samples LIMIT 1;" >/dev/null 2>&1; do
     sleep 1
   done
+}
+
+wait_for_log_db() {
+  until sqlite3 "$LOG_DB_PATH" "SELECT 1 FROM singbox_logs LIMIT 1;" >/dev/null 2>&1; do
+    sleep 1
+  done
+}
+
+sql_quote() {
+  printf "%s" "$1" | sed "s/'/''/g"
+}
+
+insert_demo_log_lines() {
+  local ts_ms="$1"
+  local first_line="$2"
+  local second_line="$3"
+  local user="$4"
+  local first_quoted second_quoted user_quoted
+
+  first_quoted="$(sql_quote "$first_line")"
+  second_quoted="$(sql_quote "$second_line")"
+  user_quoted="$(sql_quote "[$user]")"
+
+  sqlite3 "$LOG_DB_PATH" <<SQL >/dev/null 2>&1 || true
+PRAGMA busy_timeout = 5000;
+BEGIN;
+INSERT INTO singbox_logs(ts,raw,level,user) VALUES(${ts_ms},'${first_quoted}','INFO','');
+INSERT INTO singbox_logs_fts(rowid, raw) VALUES(last_insert_rowid(),'${first_quoted}');
+INSERT INTO singbox_logs(ts,raw,level,user) VALUES(${ts_ms},'${second_quoted}','INFO','${user_quoted}');
+INSERT INTO singbox_logs_fts(rowid, raw) VALUES(last_insert_rowid(),'${second_quoted}');
+COMMIT;
+SQL
 }
 
 seed_core_entities() {
@@ -146,6 +181,14 @@ seed_core_entities() {
       user-08)
         credential="ZmVkY2JhOTg3NjU0MzIxMA=="
         inbound_tags='["demo-shadowsocks-2022"]'
+        ;;
+      user-09)
+        credential="demo-anytls-user-09-pass"
+        inbound_tags='["demo-anytls"]'
+        ;;
+      user-10)
+        credential="demo-naive-user-10-pass"
+        inbound_tags='["demo-naive"]'
         ;;
     esac
     sql+="INSERT INTO users(email,quota_limit,quota_period,reset_day,enabled,credential,flow,vmess_security,inbound_tags) VALUES('${user}',${quota},'monthly',1,1,'${credential}','${flow}','${vmess_security}','${inbound_tags}') ON CONFLICT(email) DO UPDATE SET quota_limit=excluded.quota_limit,enabled=1,credential=excluded.credential,flow=excluded.flow,vmess_security=excluded.vmess_security,inbound_tags=excluded.inbound_tags;"
@@ -363,8 +406,9 @@ do_log_loop() {
   local -a CLIENTS=(198.51.100.210 2001:db8:feed:beef::212 192.0.2.214 2001:db8:abcd:12::211 192.0.2.215)
   local -a TARGETS=(cdn-edge.demo.invalid:443 api-gw.demo.invalid:443 media.demo.invalid:443 updates.demo.invalid:443 198.51.100.44:443)
 
+  wait_for_log_db
   while true; do
-    local sys_ts panel_ts tz inbound_idx inbound protocol user conn latency port client target fsize
+    local sys_ts panel_ts ts_ms tz inbound_idx inbound protocol user conn latency port client target fsize line1 line2
     fsize=$(stat -c%s "$LOG_PATH" 2>/dev/null || echo 0)
     if (( fsize > 1048576 )); then
       : > "$LOG_PATH"
@@ -372,6 +416,7 @@ do_log_loop() {
 
     sys_ts=$(date +"%b %d %H:%M:%S")
     panel_ts=$(date +"%Y-%m-%d %H:%M:%S")
+    ts_ms=$(( $(date +%s) * 1000 ))
     tz=$(date +"%z")
     inbound_idx=$((RANDOM % ${#INBOUNDS[@]}))
     inbound="${INBOUNDS[$inbound_idx]}"
@@ -383,10 +428,13 @@ do_log_loop() {
     client="${CLIENTS[$((RANDOM % ${#CLIENTS[@]}))]}"
     target="${TARGETS[$((RANDOM % ${#TARGETS[@]}))]}"
 
-    printf "%s localhost sing-box[2783211]: %s %s INFO [%s 0ms] inbound/%s[%s]: inbound connection from %s:%s\n" \
-      "$sys_ts" "$tz" "$panel_ts" "$conn" "$protocol" "$inbound" "$client" "$port" >> "$LOG_PATH"
-    printf "%s localhost sing-box[2783211]: %s %s INFO [%s %sms] inbound/%s[%s]: [%s] inbound connection to %s\n" \
-      "$sys_ts" "$tz" "$panel_ts" "$conn" "$latency" "$protocol" "$inbound" "$user" "$target" >> "$LOG_PATH"
+    line1=$(printf "%s localhost sing-box[2783211]: %s %s INFO [%s 0ms] inbound/%s[%s]: inbound connection from %s:%s" \
+      "$sys_ts" "$tz" "$panel_ts" "$conn" "$protocol" "$inbound" "$client" "$port")
+    line2=$(printf "%s localhost sing-box[2783211]: %s %s INFO [%s %sms] inbound/%s[%s]: [%s] inbound connection to %s" \
+      "$sys_ts" "$tz" "$panel_ts" "$conn" "$latency" "$protocol" "$inbound" "$user" "$target")
+
+    printf "%s\n%s\n" "$line1" "$line2" >> "$LOG_PATH"
+    insert_demo_log_lines "$ts_ms" "$line1" "$line2" "$user"
 
     sleep "$LOG_INTERVAL"
   done
@@ -397,7 +445,7 @@ do_subscription_loop() {
 
   while true; do
     ts=$(date +%s)
-    sub_idx=$(( RANDOM % 3 ))
+    sub_idx=$(( RANDOM % ${#SUB_TOKENS[@]} ))
     ua_idx=$(( RANDOM % ${#REQUEST_UAS[@]} ))
     ip_idx=$(( RANDOM % ${#REQUEST_IPS[@]} ))
     mode=$(( RANDOM % 10 ))
