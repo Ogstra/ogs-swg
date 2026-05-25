@@ -8,7 +8,8 @@ MODE="${1:-sample}"
 LIVE_INTERVAL="${DEMO_LIVE_INTERVAL_SEC:-60}"
 LOG_INTERVAL="${DEMO_LOG_INTERVAL_SEC:-3}"
 SUB_REQUEST_INTERVAL="${DEMO_SUB_REQUEST_INTERVAL_SEC:-8}"
-RETENTION="${DEMO_RETENTION_SECONDS:-172800}"
+RETENTION="${DEMO_RETENTION_SECONDS:-3600}"
+MAX_DB_BYTES="${DEMO_MAX_DB_BYTES:-52428800}"
 
 USERS=(user-01 user-02 user-03 user-04 user-05 user-06 user-07 user-08 user-09 user-10)
 INBOUNDS=(demo-vless-reality demo-vmess-ws demo-trojan-tls demo-hysteria2 demo-shadowsocks-2022 demo-anytls demo-naive)
@@ -59,6 +60,81 @@ WG_ALIASES=(peer-01 peer-02 peer-03 peer-04 peer-05 peer-06 peer-07 peer-08 peer
 # Cumulative WG rx/tx tracked in memory throughout the process lifetime.
 WG_RX=()
 WG_TX=()
+
+demo_db_dir() {
+  dirname "$DB_PATH"
+}
+
+db_size_bytes() {
+  local total=0 f
+  for f in "$(demo_db_dir)"/*.db "$(demo_db_dir)"/*.db-wal "$(demo_db_dir)"/*.db-shm; do
+    [[ -e "$f" ]] || continue
+    total=$(( total + $(stat -c%s "$f" 2>/dev/null || echo 0) ))
+  done
+  printf '%s' "$total"
+}
+
+checkpoint_demo_dbs() {
+  sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+  sqlite3 "$LOG_DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+  sqlite3 "$(demo_db_dir)/audit.db" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+}
+
+checkpoint_log_db() {
+  sqlite3 "$LOG_DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+}
+
+compact_demo_dbs() {
+  sqlite3 "$DB_PATH" "VACUUM;" >/dev/null 2>&1 || true
+  sqlite3 "$LOG_DB_PATH" "VACUUM;" >/dev/null 2>&1 || true
+  sqlite3 "$(demo_db_dir)/audit.db" "VACUUM;" >/dev/null 2>&1 || true
+  checkpoint_demo_dbs
+}
+
+prune_main_db() {
+  apply_sql "DELETE FROM samples WHERE ts < strftime('%s','now') - ${RETENTION};
+             DELETE FROM wg_samples WHERE ts < strftime('%s','now') - ${RETENTION};
+             DELETE FROM sampler_runs WHERE ts < strftime('%s','now') - ${RETENTION};
+             DELETE FROM subscription_requests WHERE requested_at < strftime('%s','now') - ${RETENTION};"
+}
+
+prune_log_db() {
+  local cutoff_ms=$(( ($(date +%s) - RETENTION) * 1000 ))
+  sqlite3 "$LOG_DB_PATH" <<SQL >/dev/null 2>&1 || true
+PRAGMA busy_timeout = 5000;
+BEGIN;
+DELETE FROM singbox_logs_fts WHERE rowid IN (SELECT id FROM singbox_logs WHERE ts < ${cutoff_ms});
+DELETE FROM singbox_logs WHERE ts < ${cutoff_ms};
+COMMIT;
+SQL
+}
+
+prune_audit_db() {
+  local audit_db
+  audit_db="$(demo_db_dir)/audit.db"
+  [[ -f "$audit_db" ]] || return 0
+  sqlite3 "$audit_db" <<SQL >/dev/null 2>&1 || true
+PRAGMA busy_timeout = 5000;
+DELETE FROM audit_log WHERE ts < strftime('%s','now') - ${RETENTION};
+SQL
+}
+
+enforce_demo_db_budget() {
+  prune_main_db
+  prune_log_db
+  prune_audit_db
+  checkpoint_demo_dbs
+
+  if (( $(db_size_bytes) > MAX_DB_BYTES )); then
+    compact_demo_dbs
+  fi
+
+  if (( $(db_size_bytes) > MAX_DB_BYTES )); then
+    # Keep the last hour intact. If this still exceeds the cap, emit a warning
+    # rather than deleting current demo data.
+    echo "[demo-seeder] warning: DB files exceed ${MAX_DB_BYTES} bytes after pruning last ${RETENTION}s" >&2
+  fi
+}
 
 apply_sql() {
   local sql="$1"
@@ -232,8 +308,8 @@ seed_traffic_history() {
     WG_TX[$i]=$(( 12 * 1024 * 1024 + RANDOM % (60 * 1024 * 1024) ))
   done
 
-  for ((b = 0; b < 48; b++)); do
-    ts=$(( now - (48 - b) * 1800 ))
+  for ((b = 0; b < 12; b++)); do
+    ts=$(( now - (12 - b) * 300 ))
     hour=$(( (ts / 3600) % 24 ))
 
     if   (( hour >= 0  && hour < 6  )); then base_mb=$(( 50  + RANDOM % 150 ))
@@ -276,10 +352,10 @@ seed_subscription_history() {
   local sql="" i sub_idx ua_idx ip_idx req_ts served_from_cache blocked reason req_ua request_count=0
 
   for ((i = 0; i < 18; i++)); do
-    sub_idx=$(( i % 4 ))
+    sub_idx=$(( i % ${#SUB_TOKENS[@]} ))
     ua_idx=$(( i % ${#REQUEST_UAS[@]} ))
     ip_idx=$(( i % ${#REQUEST_IPS[@]} ))
-    req_ts=$(( now - (18 - i) * 480 ))
+    req_ts=$(( now - (18 - i) * 180 ))
     served_from_cache=0
     blocked=0
     reason=""
@@ -352,6 +428,7 @@ do_bootstrap() {
   inserted_total=$(( inserted_traffic + inserted_requests ))
 
   apply_sql "INSERT INTO sampler_runs(ts,duration_ms,inserted,error,source) VALUES(${now},500,${inserted_total},'','demo-seed');"
+  enforce_demo_db_budget
   echo "[demo-seeder] bootstrap: ${inserted_total} rows seeded"
 }
 
@@ -389,13 +466,11 @@ do_sample_loop() {
 
     sql+="INSERT INTO sampler_runs(ts,duration_ms,inserted,error,source) VALUES(${ts},50,${inserted},'','demo-live');"
     apply_sql "$sql"
+    prune_main_db
 
     loops=$(( loops + 1 ))
     if (( loops % 30 == 0 )); then
-      apply_sql "DELETE FROM samples WHERE ts < strftime('%s','now') - ${RETENTION};
-                 DELETE FROM wg_samples WHERE ts < strftime('%s','now') - ${RETENTION};
-                 DELETE FROM sampler_runs WHERE ts < strftime('%s','now') - ${RETENTION};"
-      sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+      enforce_demo_db_budget
     fi
 
     sleep "$LIVE_INTERVAL"
@@ -435,6 +510,8 @@ do_log_loop() {
 
     printf "%s\n%s\n" "$line1" "$line2" >> "$LOG_PATH"
     insert_demo_log_lines "$ts_ms" "$line1" "$line2" "$user"
+    prune_log_db
+    checkpoint_log_db
 
     sleep "$LOG_INTERVAL"
   done
@@ -484,10 +561,11 @@ do_subscription_loop() {
     sql+="'L$((ts % 1000))',"
     sql+="${ts},${served_from_cache},${blocked},'${reason}');"
     apply_sql "$sql"
+    prune_main_db
 
     loops=$(( loops + 1 ))
     if (( loops % 30 == 0 )); then
-      apply_sql "DELETE FROM subscription_requests WHERE requested_at < strftime('%s','now') - ${RETENTION};"
+      enforce_demo_db_budget
     fi
 
     sleep "$SUB_REQUEST_INTERVAL"
