@@ -38,7 +38,7 @@ A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstr
 *   **WireGuard Interfaces**: create, configure, enable/disable, and delete WireGuard interfaces; raw `.conf` editing per interface.
 *   **Subscriptions**: create tokenized subscription bundles with per-member aliases, quota limits, refresh policies, request history, and supported QR variants for Direct and Shadowrocket.
 *   **Service Control**: restart/stop Sing-box and WireGuard services and reload configurations without leaving the UI.
-*   **Logs**: tail and filter Sing-box access logs and systemd journal entries in real time.
+*   **Logs**: tail and filter Sing-box access logs in real time.
 *   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.
 *   **Raw Configuration**: full JSON editor for the Sing-box config file (Experimental).
 
@@ -143,7 +143,6 @@ Parameters are merged from `config.json`, `.env`, and environment variables.
   "enable_singbox": true,
   "enable_wireguard": true,
   "use_stats_sampler": true,
-  "log_source": "journal",
   "access_log_path": "data/access.log",
   "database_path": "./data/stats.db",
   "singbox_config_path": "/etc/sing-box/config.json",

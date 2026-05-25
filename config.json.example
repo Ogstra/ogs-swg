@@ -8,7 +8,6 @@
   "enable_singbox": true,
   "enable_wireguard": true,
   "use_stats_sampler": true,
-  "log_source": "journal",
   "access_log_path": "data/access.log",
   "database_path": "./data/stats.db",
   "singbox_config_path": "/etc/sing-box/config.json",

@@ -89,7 +89,6 @@ export interface FeatureFlags {
     aggregation_enabled?: boolean;
     aggregation_days?: number;
     audit_log_max_mb?: number;
-    log_source?: 'journal' | 'file';
     access_log_path?: string;
     systemctl_available?: boolean;
     journalctl_available?: boolean;
