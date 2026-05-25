@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import { Save, Download, HardDrive } from 'lucide-react'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
-import { api, type FeatureFlags, type LogStoreStats, downloadDBBackupURL } from '../../services/api'
+import { api, type FeatureFlags, type LogStoreStats, downloadDBBackup } from '../../services/api'
 
 interface LogsBackupsTabProps {
     features: FeatureFlags
@@ -24,7 +24,7 @@ function formatBytes(bytes: number): string {
 
 function formatTs(ts: number): string {
     if (!ts) return '—'
-    return new Date(ts * 1000).toLocaleString()
+    return new Date(ts).toLocaleString()
 }
 
 export default function LogsBackupsTab({
@@ -318,30 +318,16 @@ export default function LogsBackupsTab({
                     <div>
                         <div className="text-sm font-medium text-slate-300 mb-2">Download backups</div>
                         <div className="flex flex-wrap gap-2">
-                            <a
-                                href={downloadDBBackupURL('main')}
-                                download
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 hover:text-white transition-colors"
-                            >
-                                <Download size={14} />
-                                Main DB
-                            </a>
-                            <a
-                                href={downloadDBBackupURL('audit')}
-                                download
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 hover:text-white transition-colors"
-                            >
-                                <Download size={14} />
-                                Audit DB
-                            </a>
-                            <a
-                                href={downloadDBBackupURL('logs')}
-                                download
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 hover:text-white transition-colors"
-                            >
-                                <Download size={14} />
-                                Logs DB
-                            </a>
+                            {(['main', 'audit', 'logs'] as const).map(target => (
+                                <button
+                                    key={target}
+                                    onClick={() => downloadDBBackup(target).catch(() => toastError(`Failed to download ${target} backup`))}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 hover:text-white transition-colors"
+                                >
+                                    <Download size={14} />
+                                    {target.charAt(0).toUpperCase() + target.slice(1)} DB
+                                </button>
+                            ))}
                         </div>
                     </div>
 
