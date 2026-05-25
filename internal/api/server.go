@@ -471,7 +471,6 @@ func (s *Server) Stop() {
 
 func StartServer(cfg *core.Config) *Server {
 	cfg.ApplyWireGuardTestModeDefaults()
-	cfg.LogSource = detectLogSource(cfg)
 
 	store, err := core.NewStore(cfg.DatabasePath)
 	if err != nil {
@@ -1919,12 +1918,3 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func detectLogSource(cfg *core.Config) string {
-	if cfg.LogSource != "" {
-		return cfg.LogSource
-	}
-	if _, err := os.Stat(cfg.AccessLogPath); err == nil && cfg.AccessLogPath != "" {
-		return "file"
-	}
-	return "journal"
-}

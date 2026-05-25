@@ -1,12 +1,7 @@
 package api
 
 import (
-	"bufio"
-	"context"
 	"errors"
-	"log"
-	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -350,70 +345,3 @@ func (s *Server) compileLogQuery(raw string) compiledLogQuery {
 	return compileLogQuery(raw)
 }
 
-func (s *Server) readAllSearchableLogLines(ctx context.Context) ([]string, error) {
-	if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		return s.readAllJournalLogLines(ctx)
-	}
-
-	lines, err := readAllFileLines(s.config.AccessLogPath)
-	if err == nil {
-		return lines, nil
-	}
-	if s.config.LogSource == "file" {
-		return s.readAllJournalLogLines(ctx)
-	}
-	return nil, err
-}
-
-func (s *Server) readAllJournalLogLines(ctx context.Context) ([]string, error) {
-	if s.executor != nil {
-		return s.executor.ReadAllJournal(ctx, "sing-box")
-	}
-	return readAllJournalLines(ctx, "sing-box")
-}
-
-func readAllJournalLines(ctx context.Context, unit string) ([]string, error) {
-	if _, err := exec.LookPath("journalctl"); err != nil {
-		log.Printf("journalctl not found: %v", err)
-		return []string{"(journalctl not available on this system)"}, nil
-	}
-
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
-	out, err := cmd.CombinedOutput()
-	if ctx != nil && ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-
-	data := strings.TrimSpace(string(out))
-	if data == "" {
-		return []string{}, nil
-	}
-	return strings.Split(data, "\n"), nil
-}
-
-func readAllFileLines(path string) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-
-	var lines []string
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return lines, nil
-}
