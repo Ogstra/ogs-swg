@@ -208,8 +208,11 @@ func (s *Server) AuditLogger(domain, action string, h http.HandlerFunc) http.Han
 		// Buffer body for POST/PUT so we can extract entity info AND still pass it to the handler.
 		var bodyBytes []byte
 		if r.Method == http.MethodPost || r.Method == http.MethodPut {
-			bodyBytes, _ = io.ReadAll(io.LimitReader(r.Body, 8192))
+			bodyBytes, _ = io.ReadAll(r.Body)
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			if len(bodyBytes) > 8192 {
+				bodyBytes = bodyBytes[:8192]
+			}
 		}
 
 		sw := &statusCapturingWriter{ResponseWriter: w}
