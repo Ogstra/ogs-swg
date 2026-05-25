@@ -856,10 +856,17 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"active_threshold_bytes":  s.config.ActiveThresholdBytes,
 		"aggregation_enabled":     s.config.AggregationEnabled,
 		"aggregation_days":        s.config.AggregationDays,
-		"audit_log_max_mb":        s.config.AuditLogMaxMB,
-		"access_log_path":         s.config.AccessLogPath,
-		"systemctl_available":     s.executor != nil,
-		"journalctl_available":    s.executor != nil,
+		"audit_log_max_mb":           s.config.AuditLogMaxMB,
+		"access_log_path":            s.config.AccessLogPath,
+		"log_retention_mode":         s.config.LogRetentionMode,
+		"log_retention_mb":           s.config.LogRetentionMB,
+		"log_retention_days":         s.config.LogRetentionDays,
+		"log_retention_unit":         s.config.LogRetentionUnit,
+		"log_cold_dir":               s.config.LogColdDir,
+		"db_backup_path":             s.config.DBBackupPath,
+		"db_backup_interval_hours":   s.config.DBBackupIntervalHours,
+		"systemctl_available":        s.executor != nil,
+		"journalctl_available":       s.executor != nil,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -961,6 +968,74 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.config.AggregationDays < 1 {
 			s.config.AggregationDays = 1
+		}
+	}
+	if v, ok := payload["log_retention_mode"].(string); ok {
+		if v != "size" && v != "time" {
+			http.Error(w, "log_retention_mode must be \"size\" or \"time\"", http.StatusBadRequest)
+			return
+		}
+		s.config.LogRetentionMode = v
+	}
+	if v, ok := payload["log_retention_mb"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.LogRetentionMB = int(t)
+		case int:
+			s.config.LogRetentionMB = t
+		}
+		if s.config.LogRetentionMB < 10 {
+			http.Error(w, "log_retention_mb must be >= 10", http.StatusBadRequest)
+			return
+		}
+		if s.config.LogRetentionMB > 100_000 {
+			http.Error(w, "log_retention_mb must be <= 100000", http.StatusBadRequest)
+			return
+		}
+	}
+	if v, ok := payload["log_retention_days"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.LogRetentionDays = int(t)
+		case int:
+			s.config.LogRetentionDays = t
+		}
+		if s.config.LogRetentionDays < 1 {
+			http.Error(w, "log_retention_days must be >= 1", http.StatusBadRequest)
+			return
+		}
+		if s.config.LogRetentionDays > 3650 {
+			http.Error(w, "log_retention_days must be <= 3650", http.StatusBadRequest)
+			return
+		}
+	}
+	if v, ok := payload["log_retention_unit"].(string); ok {
+		if v != "days" && v != "weeks" && v != "months" {
+			http.Error(w, "log_retention_unit must be \"days\", \"weeks\", or \"months\"", http.StatusBadRequest)
+			return
+		}
+		s.config.LogRetentionUnit = v
+	}
+	if v, ok := payload["log_cold_dir"].(string); ok {
+		s.config.LogColdDir = strings.TrimSpace(v)
+	}
+	if v, ok := payload["db_backup_path"].(string); ok {
+		s.config.DBBackupPath = strings.TrimSpace(v)
+	}
+	if v, ok := payload["db_backup_interval_hours"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.DBBackupIntervalHours = int(t)
+		case int:
+			s.config.DBBackupIntervalHours = t
+		}
+		if s.config.DBBackupIntervalHours < 1 {
+			http.Error(w, "db_backup_interval_hours must be >= 1", http.StatusBadRequest)
+			return
+		}
+		if s.config.DBBackupIntervalHours > 8760 {
+			http.Error(w, "db_backup_interval_hours must be <= 8760", http.StatusBadRequest)
+			return
 		}
 	}
 
