@@ -259,7 +259,7 @@ func (s *Server) handleGetSubscriptionDefaultDestinations(w http.ResponseWriter,
 
 	var lines []string
 	if s.logStore != nil {
-		_ = s.logStore.WalkHot(r.Context(), "[OGS] inbound connection to", 0, 0, func(row core.LogRow) error {
+		_ = s.logStore.WalkHot(r.Context(), "[OGS] inbound", 0, 0, func(row core.LogRow) error {
 			lines = append(lines, row.Raw)
 			if len(lines) >= 200 {
 				return errStopLogWalk

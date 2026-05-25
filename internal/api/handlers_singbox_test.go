@@ -55,15 +55,6 @@ func (s *singboxConfigExecutorStub) ApplySysctl(context.Context, string, string)
 func (s *singboxConfigExecutorStub) GetSysctl(context.Context, string) (string, error) {
 	return "", nil
 }
-func (s *singboxConfigExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
-	return nil, nil
-}
-func (s *singboxConfigExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-func (s *singboxConfigExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
-	return nil, nil
-}
 func (s *singboxConfigExecutorStub) SyncWireGuard(context.Context, string, []byte) error { return nil }
 func (s *singboxConfigExecutorStub) RestartWireGuard(context.Context, string) error      { return nil }
 func (s *singboxConfigExecutorStub) ListWireGuardInterfaces(context.Context) ([]string, error) {

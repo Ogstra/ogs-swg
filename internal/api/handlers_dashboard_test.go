@@ -88,15 +88,6 @@ func (s *dashboardExecutorStub) ReadConfig(_ context.Context, path string) ([]by
 }
 func (s *dashboardExecutorStub) ApplySysctl(context.Context, string, string) error { return nil }
 func (s *dashboardExecutorStub) GetSysctl(context.Context, string) (string, error) { return "", nil }
-func (s *dashboardExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
-	return nil, nil
-}
-func (s *dashboardExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-func (s *dashboardExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
-	return nil, nil
-}
 func (s *dashboardExecutorStub) SyncWireGuard(context.Context, string, []byte) error { return nil }
 func (s *dashboardExecutorStub) RestartWireGuard(context.Context, string) error      { return nil }
 func (s *dashboardExecutorStub) ListWireGuardInterfaces(context.Context) ([]string, error) {

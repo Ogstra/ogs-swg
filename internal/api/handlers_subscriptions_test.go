@@ -287,8 +287,6 @@ func TestHandleGetSubscriptionDefaultDestinations(t *testing.T) {
 
 	t.Run("returns empty list when logs unavailable", func(t *testing.T) {
 		server, _ := newLogsTestServer(t, nil)
-		server.config.LogSource = "file"
-		server.config.AccessLogPath = "/nonexistent/subscription-defaults.log"
 		server.config.JWTSecret = "subscription-default-destinations-secret"
 		server.store.CreatePanelUser("alice-panel", "secret", core.PanelUserPermissions{CanReadUsers: true, CanWriteUsers: true})
 

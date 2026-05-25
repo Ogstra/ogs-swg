@@ -48,15 +48,6 @@ func (s *wireGuardExecutorStub) ReadConfig(_ context.Context, path string) ([]by
 }
 func (s *wireGuardExecutorStub) ApplySysctl(context.Context, string, string) error { return nil }
 func (s *wireGuardExecutorStub) GetSysctl(context.Context, string) (string, error) { return "", nil }
-func (s *wireGuardExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
-	return nil, nil
-}
-func (s *wireGuardExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-func (s *wireGuardExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
-	return nil, nil
-}
 func (s *wireGuardExecutorStub) SyncWireGuard(_ context.Context, interfaceName string, configContent []byte) error {
 	s.syncCalls++
 	s.lastSyncIface = interfaceName
