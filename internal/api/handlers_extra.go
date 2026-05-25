@@ -857,7 +857,6 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"aggregation_enabled":     s.config.AggregationEnabled,
 		"aggregation_days":        s.config.AggregationDays,
 		"audit_log_max_mb":        s.config.AuditLogMaxMB,
-		"log_source":              s.config.LogSource,
 		"access_log_path":         s.config.AccessLogPath,
 		"systemctl_available":     s.executor != nil,
 		"journalctl_available":    s.executor != nil,
