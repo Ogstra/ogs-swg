@@ -68,6 +68,8 @@ type Server struct {
 	// logSearchSem caps the number of concurrent log-search scans so that
 	// rapid or parallel search requests cannot saturate all CPU cores.
 	logSearchSem chan struct{}
+	logStore     *core.LogStore
+	logIngester  *core.LogIngester
 }
 
 func (s *Server) invalidateSamplerHistoryCache() {
@@ -459,6 +461,13 @@ func (s *Server) Stop() {
 	if s.auditStore != nil {
 		s.auditStore.Close()
 	}
+
+	if s.logIngester != nil {
+		s.logIngester.Stop()
+	}
+	if s.logStore != nil {
+		s.logStore.Close()
+	}
 }
 
 func StartServer(cfg *core.Config) *Server {
@@ -477,6 +486,11 @@ func StartServer(cfg *core.Config) *Server {
 	auditStore, err := core.NewAuditStore(core.AuditDBPathFor(cfg.DatabasePath))
 	if err != nil {
 		panic("StartServer: failed to open audit database: " + err.Error())
+	}
+
+	logStore, err := core.NewLogStore(core.LogDBPathFor(cfg.DatabasePath))
+	if err != nil {
+		panic("StartServer: failed to open log database: " + err.Error())
 	}
 
 	var executor core.SystemExecutor
@@ -510,6 +524,15 @@ func StartServer(cfg *core.Config) *Server {
 
 	server := NewServer(store, cfg, executor)
 	server.auditStore = auditStore
+	server.logStore = logStore
+
+	// Start log ingester whenever sing-box access logging is configured, regardless
+	// of sampling mode — this ensures lines reach the hot SQLite tier in all cases.
+	if cfg.EnableSingbox && cfg.AccessLogPath != "" && !cfg.DemoMode {
+		ingester := core.NewLogIngester(cfg.AccessLogPath, logStore)
+		ingester.Start()
+		server.logIngester = ingester
+	}
 
 	if cfg.EnableSingbox && !cfg.DemoMode {
 		sbClient := core.NewSingboxClient(cfg.SingboxAPIAddr, executor)
@@ -518,13 +541,11 @@ func StartServer(cfg *core.Config) *Server {
 			sampler.Start()
 			server.sampler = sampler
 		} else {
-			watcher := core.NewWatcher(cfg.AccessLogPath)
-			watcher.Start()
 			inboundTags := cfg.StatsInbounds
 			if len(inboundTags) == 0 {
 				inboundTags = cfg.ManagedInbounds
 			}
-			calc := core.NewCalculator(watcher, sbClient, store, inboundTags)
+			calc := core.NewCalculator(server.logIngester, sbClient, store, inboundTags)
 			calc.Start()
 		}
 	} else if cfg.EnableSingbox && cfg.DemoMode {

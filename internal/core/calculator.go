@@ -5,8 +5,14 @@ import (
 	"time"
 )
 
+// activeUserSource is satisfied by both Watcher and LogIngester so Calculator
+// doesn't need to know which one is in use.
+type activeUserSource interface {
+	GetActiveUsers(windowSeconds int64) []string
+}
+
 type Calculator struct {
-	watcher     *Watcher
+	watcher     activeUserSource
 	sbClient    *SingboxClient
 	store       *Store
 	inboundTags []string
@@ -16,7 +22,7 @@ type Calculator struct {
 	initialized  bool
 }
 
-func NewCalculator(w *Watcher, sb *SingboxClient, s *Store, inboundTags []string) *Calculator {
+func NewCalculator(w activeUserSource, sb *SingboxClient, s *Store, inboundTags []string) *Calculator {
 	return &Calculator{
 		watcher:     w,
 		sbClient:    sb,
