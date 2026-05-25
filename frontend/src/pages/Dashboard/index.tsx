@@ -18,6 +18,8 @@ type DashboardPrefs = {
     detailChartTargetPoints?: number
 }
 
+type TrafficChartView = 'cumulative' | 'sample'
+
 type DensifiedChartCache = {
     cacheKey: string
     source: UnifiedChartPoint[]
@@ -201,6 +203,31 @@ const densifyChartSeriesIncremental = (
     }
 }
 
+const toPerSampleChartData = (points: UnifiedChartPoint[]): UnifiedChartPoint[] => {
+    if (points.length === 0) return points
+
+    return points.map((point, index) => {
+        const previous = points[index - 1]
+        if (!previous) {
+            return {
+                ...point,
+                up_sb: 0,
+                down_sb: 0,
+                up_wg: 0,
+                down_wg: 0,
+            }
+        }
+
+        return {
+            ts: point.ts,
+            up_sb: Math.max(point.up_sb - previous.up_sb, 0),
+            down_sb: Math.max(point.down_sb - previous.down_sb, 0),
+            up_wg: Math.max(point.up_wg - previous.up_wg, 0),
+            down_wg: Math.max(point.down_wg - previous.down_wg, 0),
+        }
+    })
+}
+
 // Custom SVG Icons
 const SingBoxIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
     <svg viewBox="0 0 1027 1109" className={className} fill="currentColor">
@@ -227,6 +254,7 @@ export default function Dashboard() {
     const [initialDashboardPrefs] = useState(() => readStoredDashboardPrefs())
     const [timeRange, setTimeRange] = useState<DashboardRange>(initialDashboardPrefs?.defaultRange || '24h')
     const [chartMode, setChartMode] = useState<'singbox' | 'wireguard'>(initialDashboardPrefs?.defaultService || 'singbox')
+    const [trafficChartView, setTrafficChartView] = useState<TrafficChartView>('cumulative')
     const [refreshInterval, setRefreshInterval] = useState<number>(initialDashboardPrefs?.refreshMs || 10000)
     const [prefsLoaded, setPrefsLoaded] = useState(true)
     const [selectedConsumers, setSelectedConsumers] = useState<Record<'singbox' | 'wireguard', Consumer | null>>({
@@ -447,7 +475,12 @@ export default function Dashboard() {
         detailChartCacheRef.current = nextCache
         return nextCache.dense
     }, [chartMode, detailChartData, requestWindow, selectedConsumer, selectedConsumerSelectionId])
-    const activeChartData = selectedConsumer ? denseDetailChartData : chartData
+    const cumulativeChartData = selectedConsumer ? denseDetailChartData : chartData
+    const sampleChartData = selectedConsumer ? detailChartData : chartData
+    const chartDisplayData = useMemo(
+        () => trafficChartView === 'sample' ? toPerSampleChartData(sampleChartData) : cumulativeChartData,
+        [cumulativeChartData, sampleChartData, trafficChartView],
+    )
 
     useEffect(() => {
         setSelectedConsumers(prev => {
@@ -680,9 +713,10 @@ export default function Dashboard() {
                 <div className="lg:col-span-2">
                     <Card
                         title={selectedConsumer ? `Traffic Overview · ${selectedConsumer.name}` : "Traffic Overview"}
+                        titleClassName="hidden sm:block"
                         className="h-full"
                         action={
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center justify-end gap-2">
                                 {selectedConsumer && (
                                     <button
                                         onClick={() => setSelectedConsumers(prev => ({ ...prev, [chartMode]: null }))}
@@ -692,7 +726,7 @@ export default function Dashboard() {
                                         Clear
                                     </button>
                                 )}
-                                <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                                <div className="flex shrink-0 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
                                     <button
                                         onClick={() => setChartMode('singbox')}
                                         className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
@@ -706,6 +740,24 @@ export default function Dashboard() {
                                         WireGuard
                                     </button>
                                 </div>
+                                <div className="flex shrink-0 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                                    <button
+                                        type="button"
+                                        title="Cumulative traffic"
+                                        onClick={() => setTrafficChartView('cumulative')}
+                                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${trafficChartView === 'cumulative' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                    >
+                                        Total
+                                    </button>
+                                    <button
+                                        type="button"
+                                        title="Traffic per sample"
+                                        onClick={() => setTrafficChartView('sample')}
+                                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${trafficChartView === 'sample' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+                                    >
+                                        Sample
+                                    </button>
+                                </div>
                             </div>
                         }
                     >
@@ -714,7 +766,7 @@ export default function Dashboard() {
                                 <AreaChart
                                     width={chartSize.width}
                                     height={chartSize.height}
-                                    data={activeChartData}
+                                    data={chartDisplayData}
                                     margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
                                 >
                                     <defs>
@@ -761,7 +813,7 @@ export default function Dashboard() {
                                         labelFormatter={(ts) => new Date(ts * 1000).toLocaleString()}
                                     />
                                     <Area
-                                        type="monotone"
+                                        type={trafficChartView === 'sample' ? 'stepAfter' : 'monotone'}
                                         dataKey={chartMode === 'singbox' ? "up_sb" : "up_wg"}
                                         name={chartMode === 'singbox' ? "Received" : "Sent"}
                                         stroke={chartMode === 'singbox' ? "#3b82f6" : "#10b981"}
@@ -771,7 +823,7 @@ export default function Dashboard() {
                                         fill={chartMode === 'singbox' ? "url(#colorUp)" : "url(#colorDown)"}
                                     />
                                     <Area
-                                        type="monotone"
+                                        type={trafficChartView === 'sample' ? 'stepAfter' : 'monotone'}
                                         dataKey={chartMode === 'singbox' ? "down_sb" : "down_wg"}
                                         name={chartMode === 'singbox' ? "Sent" : "Received"}
                                         stroke={chartMode === 'singbox' ? "#10b981" : "#3b82f6"}

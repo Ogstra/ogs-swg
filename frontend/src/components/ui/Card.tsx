@@ -4,15 +4,16 @@ interface CardProps {
     children: React.ReactNode
     className?: string
     title?: string
+    titleClassName?: string
     action?: React.ReactNode
 }
 
-export function Card({ children, className = '', title, action }: CardProps) {
+export function Card({ children, className = '', title, titleClassName = '', action }: CardProps) {
     return (
         <div className={`bg-slate-900 border border-slate-800 rounded-xl p-6 ${className}`}>
             {(title || action) && (
                 <div className="flex flex-wrap gap-2 items-center justify-between mb-4">
-                    {title && <h2 className="text-lg font-bold text-white">{title}</h2>}
+                    {title && <h2 className={`text-lg font-bold text-white ${titleClassName}`}>{title}</h2>}
                     {action && <div className="ml-auto">{action}</div>}
                 </div>
             )}
