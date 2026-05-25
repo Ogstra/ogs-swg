@@ -150,7 +150,6 @@ func (i *LogIngester) processNewLines(start, end int64) {
 		return
 	}
 
-	// 8 MB scanner buffer — matches readAllFileLines in other log handlers.
 	const maxBuf = 8 * 1024 * 1024
 	buf := make([]byte, maxBuf)
 	scanner := bufio.NewScanner(f)
