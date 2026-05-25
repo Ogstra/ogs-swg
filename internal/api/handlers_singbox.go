@@ -21,6 +21,18 @@ type inboundUpdateResponse struct {
 	Warnings []string `json:"warnings"`
 }
 
+func validateRawSingboxConfigPayload(content []byte) error {
+	if strings.TrimSpace(string(content)) == "" {
+		return errors.New("config cannot be empty")
+	}
+
+	var js map[string]interface{}
+	if err := json.Unmarshal(content, &js); err != nil {
+		return fmt.Errorf("invalid json: %w", err)
+	}
+	return nil
+}
+
 func (s *Server) handleGetSingboxConfig(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
@@ -62,6 +74,11 @@ func (s *Server) handleUpdateSingboxConfig(w http.ResponseWriter, r *http.Reques
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Failed to read body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := validateRawSingboxConfigPayload(body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 

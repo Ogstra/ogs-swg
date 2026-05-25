@@ -128,6 +128,47 @@ func TestHandleApplySingboxChanges_ReturnsRestartRequired(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateSingboxConfig_RejectsEmptyBody(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		path    string
+		handler func(*Server, http.ResponseWriter, *http.Request)
+	}{
+		{
+			name: "singbox config endpoint",
+			path: "/api/singbox/config",
+			handler: func(s *Server, w http.ResponseWriter, r *http.Request) {
+				s.handleUpdateSingboxConfig(w, r)
+			},
+		},
+		{
+			name: "legacy config endpoint",
+			path: "/api/config",
+			handler: func(s *Server, w http.ResponseWriter, r *http.Request) {
+				s.handleUpdateConfig(w, r)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server, stub := newSingboxHandlerTestServer(`{"inbounds":[]}`)
+			req := httptest.NewRequest(http.MethodPut, tc.path, bytes.NewBufferString("  \n\t"))
+			rec := httptest.NewRecorder()
+
+			tc.handler(server, rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "config cannot be empty") {
+				t.Fatalf("body=%q, want empty config message", rec.Body.String())
+			}
+			if stub.writeCount != 0 {
+				t.Fatalf("writeCount=%d, want 0", stub.writeCount)
+			}
+		})
+	}
+}
+
 func newSingboxHandlerTestServerWithStore(t *testing.T, initialJSON string) (*Server, *singboxConfigExecutorStub, *core.Store) {
 	return newSingboxHandlerTestServerWithStoreAndManagedInbounds(t, initialJSON, []string{"test-vless"})
 }
