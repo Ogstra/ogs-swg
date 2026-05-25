@@ -9,7 +9,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -1706,107 +1705,77 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
-	filterUser := strings.TrimSpace(r.URL.Query().Get("q"))
-	if filterUser == "" {
-		filterUser = strings.TrimSpace(r.URL.Query().Get("user"))
+	if s.logStore == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"logs": []string{}, "max_id": 0})
+		return
 	}
+
 	limit := 200
 	if l := r.URL.Query().Get("limit"); l != "" {
-		if v, err := strconv.Atoi(l); err == nil {
-			if v < 20 {
-				v = 20
-			} else if v > 1000 {
-				v = 1000
-			}
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 5000 {
 			limit = v
 		}
 	}
 
-	var lines []string
-	var err error
-	compiledQuery := s.compileLogQuery(filterUser)
-	postFilterTail := filterUser != "" && compiledQuery.requiresPostFilter()
-	censoredTail := func() bool {
+	censored := func() bool {
 		p := getPermissions(r)
 		return p != nil && p.CanReadLogsCensored
 	}()
 
-	if postFilterTail {
-		lines, err = s.readAllSearchableLogLines(r.Context())
-	} else if s.config.LogSource == "journal" || s.config.AccessLogPath == "" {
-		if s.executor != nil {
-			lines, err = s.executor.ReadJournal(r.Context(), "sing-box", limit)
-		} else {
-			lines, err = readJournalLines(r.Context(), "sing-box", limit)
-		}
+	qRaw := strings.TrimSpace(r.URL.Query().Get("q"))
+	if qRaw == "" {
+		qRaw = strings.TrimSpace(r.URL.Query().Get("user"))
+	}
+	compiledQuery := compileLogQuery(qRaw)
+
+	// For queries that require post-filter (user correlation, AND/OR), fetch a
+	// larger window so connection-ID correlation can see the full context.
+	fetchLimit := limit
+	if qRaw != "" && compiledQuery.requiresPostFilter() {
+		fetchLimit = 5000
+	}
+
+	var rows []core.LogRow
+	var err error
+	if afterStr := r.URL.Query().Get("after_id"); afterStr != "" {
+		afterID, _ := strconv.ParseInt(afterStr, 10, 64)
+		rows, err = s.logStore.PollAfterID(r.Context(), afterID, fetchLimit)
 	} else {
-		lines, err = tailFileLines(s.config.AccessLogPath, 256*1024, limit)
-		if err != nil && s.config.LogSource == "file" {
-			// Fallback to journal if file missing or unreadable
-			if s.executor != nil {
-				if linesJ, jErr := s.executor.ReadJournal(r.Context(), "sing-box", limit); jErr == nil {
-					lines = linesJ
-					err = nil
-				}
-			} else if linesJ, jErr := readJournalLines(r.Context(), "sing-box", limit); jErr == nil {
-				lines = linesJ
-				err = nil
-			}
-		}
+		rows, err = s.logStore.TailHot(r.Context(), fetchLimit)
 	}
 	if errors.Is(err, context.Canceled) {
 		return
 	}
 	if err != nil {
-		log.Printf("handleGetLogs: cannot read logs: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"logs": []string{"Failed to read logs: " + err.Error()},
-		})
+		http.Error(w, "log read failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	sanitizeLogLines(lines)
-	if !postFilterTail {
-		if censoredTail {
-			for i, ln := range lines {
-				lines[i] = core.CensorLine(ln)
-			}
+
+	lines := make([]string, 0, len(rows))
+	var maxID int64
+	for _, row := range rows {
+		if row.ID > maxID {
+			maxID = row.ID
 		}
-		if filterUser != "" {
-			lines = filterLogLines(lines, compiledQuery)
+		line := sanitizeLogLine(row.Raw)
+		if censored {
+			line = core.CensorLine(line)
 		}
-	} else {
-		if censoredTail {
-			for i, ln := range lines {
-				lines[i] = core.CensorLine(ln)
-			}
-		}
-		lines = filterLogLines(lines, compiledQuery)
-		if len(lines) == 0 && s.config.LogSource == "file" {
-			if journalLines, jErr := s.readAllJournalLogLines(r.Context()); jErr == nil {
-				lines = journalLines
-				sanitizeLogLines(lines)
-				if censoredTail {
-					for i, ln := range lines {
-						lines[i] = core.CensorLine(ln)
-					}
-				}
-				lines = filterLogLines(lines, compiledQuery)
-			}
-		}
-		lines, _ = truncateRecentLogMatches(lines, limit)
+		lines = append(lines, line)
 	}
-	if len(lines) == 0 {
-		if s.config.LogSource == "journal" {
-			lines = []string{"(no log lines found in journal for sing-box)"}
-		} else {
-			lines = []string{"(no log lines found in " + s.config.AccessLogPath + ")"}
-		}
+
+	if !compiledQuery.isEmpty() {
+		lines = filterLogLines(lines, compiledQuery)
+	}
+	if qRaw != "" && compiledQuery.requiresPostFilter() {
+		lines, _ = truncateRecentLogMatches(lines, limit)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"logs": lines,
+		"logs":   lines,
+		"max_id": maxID,
 	})
 }
 
@@ -1950,45 +1919,6 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func tailFileLines(path string, maxBytes int64, maxLines int) ([]string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	info, err := f.Stat()
-	if err != nil {
-		return nil, err
-	}
-
-	var start int64
-	if info.Size() > maxBytes {
-		start = info.Size() - maxBytes
-	}
-
-	if _, err := f.Seek(start, io.SeekStart); err != nil {
-		return nil, err
-	}
-
-	data, err := io.ReadAll(f)
-	if err != nil {
-		return nil, err
-	}
-
-	lines := strings.Split(string(data), "\n")
-	if start > 0 && len(lines) > 0 {
-		lines = lines[1:]
-	}
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
-	}
-	if n := len(lines); n > 0 && lines[n-1] == "" {
-		lines = lines[:n-1]
-	}
-	return lines, nil
-}
-
 func detectLogSource(cfg *core.Config) string {
 	if cfg.LogSource != "" {
 		return cfg.LogSource
@@ -1997,67 +1927,4 @@ func detectLogSource(cfg *core.Config) string {
 		return "file"
 	}
 	return "journal"
-}
-
-func readJournalLines(ctx context.Context, unit string, maxLines int) ([]string, error) {
-	if _, err := exec.LookPath("journalctl"); err != nil {
-		log.Printf("journalctl not found: %v", err)
-		return []string{"(journalctl not available on this system)"}, nil
-	}
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "-n", strconv.Itoa(maxLines), "--no-pager")
-	out, err := cmd.CombinedOutput()
-	if ctx != nil && ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	data := strings.TrimSpace(string(out))
-	if data == "" {
-		return []string{}, nil
-	}
-	return strings.Split(data, "\n"), nil
-}
-
-func searchJournalLines(ctx context.Context, unit, query string, maxLines int) ([]string, error) {
-	if _, err := exec.LookPath("journalctl"); err != nil {
-		log.Printf("journalctl not found: %v", err)
-		return []string{"(journalctl not available on this system)"}, nil
-	}
-	// NOTE for search: --merge includes all rotated journal segments (system@*.journal).
-	// Without it, journalctl may only scan the active journal file, missing older entries.
-	// -o cat strips the syslog timestamp prefix so filters match message content only.
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", unit, "--no-pager", "--merge", "-o", "cat")
-	out, err := cmd.CombinedOutput()
-	if ctx != nil && ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" || strings.Contains(strings.ToLower(msg), "no entries") || len(out) == 0 {
-			return []string{}, nil
-		}
-		return nil, err
-	}
-	data := strings.TrimSpace(string(out))
-	if data == "" {
-		return []string{}, nil
-	}
-	lines := strings.Split(data, "\n")
-	q := strings.ToLower(query)
-	matched := make([]string, 0, maxLines)
-	for i := len(lines) - 1; i >= 0 && len(matched) < maxLines; i-- {
-		if strings.Contains(strings.ToLower(lines[i]), q) {
-			matched = append(matched, lines[i])
-		}
-	}
-	// reverse to get chronological order
-	for i, j := 0, len(matched)-1; i < j; i, j = i+1, j-1 {
-		matched[i], matched[j] = matched[j], matched[i]
-	}
-	return matched, nil
 }
