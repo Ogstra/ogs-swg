@@ -396,6 +396,24 @@ const handleResponse = async (res: Response, errorMsg: string = 'Request failed'
 
 const wireGuardInterfaceBase = (iface: string) => `/api/wireguard/interfaces/${encodeURIComponent(iface)}`;
 
+const validateRawSingboxConfig = (config: string) => {
+    if (!config.trim()) {
+        throw new Error('Config cannot be empty');
+    }
+
+    try {
+        const parsed = JSON.parse(config);
+        if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+            throw new Error('Config must be a JSON object');
+        }
+    } catch (err: any) {
+        if (err?.message === 'Config must be a JSON object') {
+            throw err;
+        }
+        throw new Error(`Invalid JSON: ${err?.message || err}`);
+    }
+};
+
 export const api = {
     getUsers: async (): Promise<UserStatus[]> => {
         const res = await fetch('/api/users', { headers: buildHeaders() });
@@ -965,9 +983,10 @@ export const api = {
         return res.text();
     },
     updateSingboxConfig: async (config: string): Promise<void> => {
+        validateRawSingboxConfig(config);
         const res = await fetch('/api/singbox/config', {
             method: 'PUT',
-            headers: buildHeaders('text/plain'),
+            headers: buildHeaders('application/json'),
             body: config
         });
         await handleResponse(res, 'Failed to update Sing-box config');
