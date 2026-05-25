@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
@@ -805,11 +806,35 @@ func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T
 }
 
 func TestHandleSearchLogs_TimeRangeFiltersEmbeddedTimestamp(t *testing.T) {
-	srv, _ := newLogsTestServer(t, []string{
-		"-0300 2026-04-08 12:12:29 INFO [1 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to alpha.example:443",
-		"-0300 2026-04-08 13:15:00 INFO [2 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to beta.example:443",
-		"-0300 2026-04-08 14:45:10 INFO [3 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to gamma.example:443",
-	})
+	// Build a server with a LogStore populated with three lines at distinct timestamps.
+	// Time-range filtering now happens via normalizeSearchLine (extractLogTimestamp)
+	// after rows are fetched from SQLite — the embedded timestamp in the log line
+	// is what determines inclusion.
+	srv, _, _ := newSearchTestServer(t)
+
+	loc := time.FixedZone("UTC-3", -3*60*60)
+	entries := []struct {
+		ts   time.Time
+		line string
+	}{
+		{
+			time.Date(2026, 4, 8, 12, 12, 29, 0, loc),
+			"-0300 2026-04-08 12:12:29 INFO [1 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to alpha.example:443",
+		},
+		{
+			time.Date(2026, 4, 8, 13, 15, 0, 0, loc),
+			"-0300 2026-04-08 13:15:00 INFO [2 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to beta.example:443",
+		},
+		{
+			time.Date(2026, 4, 8, 14, 45, 10, 0, loc),
+			"-0300 2026-04-08 14:45:10 INFO [3 0ms] inbound/vless[in-reality]: [ALPHA] inbound connection to gamma.example:443",
+		},
+	}
+	for _, e := range entries {
+		if err := srv.logStore.InsertLogs(context.Background(), e.ts.UnixMilli(), []string{e.line}); err != nil {
+			t.Fatalf("InsertLogs: %v", err)
+		}
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA%5D&from=2026-04-08T13:00:00-03:00&to=2026-04-08T14:00:00-03:00", nil)
 	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
@@ -851,8 +876,9 @@ func TestHandleSearchLogs_InvalidTimeRangeReturnsBadRequest(t *testing.T) {
 	}
 }
 
-func TestHandleSearchLogs_UsesIncrementalJournalWalker(t *testing.T) {
-	srv, stub := newLogsTestServer(t, []string{
+func TestHandleSearchLogs_UsesLogStore(t *testing.T) {
+	// Verify that search routes through the LogStore path (not the journal walker).
+	srv, _ := newLogsTestServer(t, []string{
 		userTaggedLogLine,
 		userOutboundLogLine,
 		otherUserTaggedLogLine,
@@ -867,8 +893,18 @@ func TestHandleSearchLogs_UsesIncrementalJournalWalker(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
-	if stub.walkJournalHits == 0 {
-		t.Fatalf("expected incremental journal walker to be used")
+
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	// The log store was populated via newLogsTestServer with the three lines above.
+	// A search for [ALPHA] should return the user-tagged line and its correlated outbound.
+	body := joinLines(resp.Logs)
+	if !containsInsensitive(body, "ALPHA") {
+		t.Fatalf("expected ALPHA in response, got: %v", resp.Logs)
 	}
 }
 

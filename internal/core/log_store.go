@@ -391,18 +391,36 @@ func (l *LogStore) SegmentsInRange(ctx context.Context, fromMs, toMs int64) ([]L
 		sqlRows *sql.Rows
 		err     error
 	)
-	if fromMs <= 0 && toMs <= 0 {
+	switch {
+	case fromMs <= 0 && toMs <= 0:
+		// No range: return all segments.
 		sqlRows, err = l.db.QueryContext(ctx,
 			`SELECT id, filename, start_ts, end_ts, row_count, size_bytes
 			 FROM log_segments ORDER BY start_ts DESC`)
-	} else {
-		// Overlap condition: seg.start_ts <= toMs AND seg.end_ts >= fromMs
+	case fromMs > 0 && toMs > 0:
+		// Overlap: seg.start_ts <= toMs AND seg.end_ts >= fromMs
 		sqlRows, err = l.db.QueryContext(ctx,
 			`SELECT id, filename, start_ts, end_ts, row_count, size_bytes
 			 FROM log_segments
 			 WHERE start_ts <= ? AND end_ts >= ?
 			 ORDER BY start_ts DESC`,
 			toMs, fromMs)
+	case fromMs > 0:
+		// No upper bound: any segment with end_ts >= fromMs overlaps.
+		sqlRows, err = l.db.QueryContext(ctx,
+			`SELECT id, filename, start_ts, end_ts, row_count, size_bytes
+			 FROM log_segments
+			 WHERE end_ts >= ?
+			 ORDER BY start_ts DESC`,
+			fromMs)
+	default:
+		// Only toMs set: any segment with start_ts <= toMs overlaps.
+		sqlRows, err = l.db.QueryContext(ctx,
+			`SELECT id, filename, start_ts, end_ts, row_count, size_bytes
+			 FROM log_segments
+			 WHERE start_ts <= ?
+			 ORDER BY start_ts DESC`,
+			toMs)
 	}
 	if err != nil {
 		return nil, err
