@@ -457,6 +457,37 @@ func (l *LogStore) SegmentsInRange(ctx context.Context, fromMs, toMs int64) ([]L
 // Cold export and retention
 // --------------------------------------------------------------------------
 
+// ListSegments returns segments ordered by start_ts DESC (newest first).
+// limit <= 0 returns all segments.
+func (l *LogStore) ListSegments(ctx context.Context, limit int) ([]LogSegment, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if limit > 0 {
+		rows, err = l.db.QueryContext(ctx,
+			`SELECT id, filename, start_ts, end_ts, row_count, size_bytes
+			 FROM log_segments ORDER BY start_ts DESC LIMIT ?`, limit)
+	} else {
+		rows, err = l.db.QueryContext(ctx,
+			`SELECT id, filename, start_ts, end_ts, row_count, size_bytes
+			 FROM log_segments ORDER BY start_ts DESC`)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var segs []LogSegment
+	for rows.Next() {
+		var s LogSegment
+		if err := rows.Scan(&s.ID, &s.Filename, &s.StartTs, &s.EndTs, &s.RowCount, &s.SizeBytes); err != nil {
+			return nil, err
+		}
+		segs = append(segs, s)
+	}
+	return segs, rows.Err()
+}
+
 // ExportToCold streams rows with id <= maxID into coldDir/singbox_YYYYMMDD-YYYYMMDD.log.gz,
 // inserts a log_segments row, deletes the exported rows from singbox_logs and
 // singbox_logs_fts in one transaction, then runs PRAGMA incremental_vacuum.
