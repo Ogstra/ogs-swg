@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -110,6 +111,17 @@ func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub
 	}
 	t.Cleanup(func() { _ = store.Close() })
 
+	logStore, err := core.NewLogStore(filepath.Join(tmp, "singbox_logs.db"))
+	if err != nil {
+		t.Fatalf("NewLogStore: %v", err)
+	}
+	t.Cleanup(func() { logStore.Close() })
+	if len(lines) > 0 {
+		if err := logStore.InsertLogs(context.Background(), 0, lines); err != nil {
+			t.Fatalf("InsertLogs: %v", err)
+		}
+	}
+
 	stub := &logsExecutorStub{
 		singboxConfigExecutorStub: singboxConfigExecutorStub{data: []byte(`{
 			"inbounds": [
@@ -133,7 +145,9 @@ func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub
 		StatsInbounds:     []string{"in-reality"},
 	}
 	cfg.SetExecutor(stub)
-	return NewServer(store, cfg, stub), stub
+	srv := NewServer(store, cfg, stub)
+	srv.logStore = logStore
+	return srv, stub
 }
 
 func newLogsTestServerWithFileSource(t *testing.T, journalLines, fileLines []string) (*Server, *logsExecutorStub) {
@@ -917,6 +931,175 @@ func TestHandleSearchLogsStream_EmitsChunksAndDone(t *testing.T) {
 	}
 	if !foundDone {
 		t.Fatalf("expected done event, got %v", events)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TestHandleGetLogs_LogStore* — new tests exercising the LogStore-backed handler
+// ---------------------------------------------------------------------------
+
+func TestHandleGetLogs_TailReturnsRecentRows(t *testing.T) {
+	lines := []string{
+		"2026/01/01 00:00:01 INFO line-1",
+		"2026/01/01 00:00:02 INFO line-2",
+		"2026/01/01 00:00:03 INFO line-3",
+		"2026/01/01 00:00:04 INFO line-4",
+		"2026/01/01 00:00:05 INFO line-5",
+		"2026/01/01 00:00:06 INFO line-6",
+		"2026/01/01 00:00:07 INFO line-7",
+		"2026/01/01 00:00:08 INFO line-8",
+		"2026/01/01 00:00:09 INFO line-9",
+		"2026/01/01 00:00:10 INFO line-10",
+	}
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Logs  []string `json:"logs"`
+		MaxID int64    `json:"max_id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Logs) != 10 {
+		t.Fatalf("expected 10 lines, got %d: %v", len(resp.Logs), resp.Logs)
+	}
+	// chronological order: line-1 first, line-10 last
+	if !containsInsensitive(resp.Logs[0], "line-1") {
+		t.Fatalf("expected first line to be line-1, got %q", resp.Logs[0])
+	}
+	if !containsInsensitive(resp.Logs[9], "line-10") {
+		t.Fatalf("expected last line to be line-10, got %q", resp.Logs[9])
+	}
+	if resp.MaxID <= 0 {
+		t.Fatalf("expected max_id > 0, got %d", resp.MaxID)
+	}
+}
+
+func TestHandleGetLogs_AfterIDReturnsOnlyNewer(t *testing.T) {
+	lines := []string{
+		"2026/01/01 00:00:01 INFO row-1",
+		"2026/01/01 00:00:02 INFO row-2",
+		"2026/01/01 00:00:03 INFO row-3",
+		"2026/01/01 00:00:04 INFO row-4",
+		"2026/01/01 00:00:05 INFO row-5",
+	}
+	srv, _ := newLogsTestServer(t, lines)
+
+	// First fetch all rows to discover IDs.
+	req0 := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	req0 = requestWithPerms(req0, &core.PanelUserPermissions{CanReadLogs: true})
+	rr0 := httptest.NewRecorder()
+	srv.handleGetLogs(rr0, req0)
+	var first struct {
+		Logs  []string `json:"logs"`
+		MaxID int64    `json:"max_id"`
+	}
+	if err := json.NewDecoder(rr0.Body).Decode(&first); err != nil {
+		t.Fatalf("decode first: %v", err)
+	}
+	if len(first.Logs) != 5 {
+		t.Fatalf("expected 5 initial rows, got %d", len(first.Logs))
+	}
+	// after_id = ID of row-3 = first.MaxID - 2
+	afterID := first.MaxID - 2
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?after_id="+
+		strconv.FormatInt(afterID, 10), nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Logs  []string `json:"logs"`
+		MaxID int64    `json:"max_id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Logs) != 2 {
+		t.Fatalf("expected 2 rows (row-4 and row-5), got %d: %v", len(resp.Logs), resp.Logs)
+	}
+	if resp.MaxID != first.MaxID {
+		t.Fatalf("expected max_id=%d, got %d", first.MaxID, resp.MaxID)
+	}
+}
+
+func TestHandleGetLogs_QueryFilters(t *testing.T) {
+	lines := []string{
+		"2026/01/01 00:00:01 ERROR connection failed",
+		"2026/01/01 00:00:02 INFO inbound connection opened",
+		"2026/01/01 00:00:03 ERROR timeout dialing upstream",
+		"2026/01/01 00:00:04 INFO outbound connection closed",
+	}
+	srv, _ := newLogsTestServer(t, lines)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?q=ERROR", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Logs []string `json:"logs"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Logs) != 2 {
+		t.Fatalf("expected 2 error lines, got %d: %v", len(resp.Logs), resp.Logs)
+	}
+	for _, l := range resp.Logs {
+		if !containsInsensitive(l, "ERROR") {
+			t.Fatalf("expected ERROR in line %q", l)
+		}
+	}
+}
+
+func TestHandleGetLogs_NoStoreReturnsEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	store, err := core.NewStore(filepath.Join(tmp, "test.db"))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	cfg := &core.Config{EnableSingbox: true, SingboxConfigPath: "/test/config.json"}
+	srv := NewServer(store, cfg, nil)
+	// logStore intentionally left nil
+
+	req := httptest.NewRequest(http.MethodGet, "/api/logs", nil)
+	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
+	rr := httptest.NewRecorder()
+	srv.handleGetLogs(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var resp struct {
+		Logs  []string `json:"logs"`
+		MaxID int64    `json:"max_id"`
+	}
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Logs) != 0 {
+		t.Fatalf("expected empty logs, got %v", resp.Logs)
+	}
+	if resp.MaxID != 0 {
+		t.Fatalf("expected max_id=0, got %d", resp.MaxID)
 	}
 }
 
