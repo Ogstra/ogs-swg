@@ -169,6 +169,7 @@ export default function LogViewer() {
     const [viewMode, setViewMode] = useState<'tail' | 'search'>('tail')
     const [tailLimit, setTailLimit] = useState<number>(50)
     const searchAbortRef = useRef<AbortController | null>(null)
+    const lastMaxIDRef = useRef<number>(0)
     // Pending lines buffer: chunks are accumulated here and flushed into state
     // via rAF so each rAF only triggers one React render regardless of how many
     // chunks the backend sends in quick succession.
@@ -178,18 +179,35 @@ export default function LogViewer() {
     const backendTailQuery = shouldUseServerTailQuery(query) ? query.trim() : ''
 
     const fetchLogs = (silent = false, currentQuery = query) => {
-        if (!silent) setLoading(true)
         const serverQuery = shouldUseServerTailQuery(currentQuery) ? currentQuery.trim() : ''
-        api.getLogs({ q: serverQuery || undefined, limit: tailLimit }).then(data => {
-            const nextLines = data.logs || []
-            setTailRawLines(nextLines)
-            setLines(serverQuery ? nextLines : filterTailLinesLocally(nextLines, currentQuery))
-            if (!silent) setLoading(false)
+        const afterId = lastMaxIDRef.current
+        const isIncremental = afterId > 0 && !serverQuery
+
+        if (!silent && !isIncremental) setLoading(true)
+
+        api.getLogs({ q: serverQuery || undefined, limit: isIncremental ? 200 : tailLimit, after_id: isIncremental ? afterId : undefined }).then(data => {
+            const incoming = data.logs || []
+            if (data.max_id && data.max_id > lastMaxIDRef.current) {
+                lastMaxIDRef.current = data.max_id
+            }
+            if (isIncremental) {
+                if (incoming.length === 0) return
+                setTailRawLines(prev => {
+                    const combined = [...prev, ...incoming]
+                    return combined.length > 2000 ? combined.slice(combined.length - 2000) : combined
+                })
+            } else {
+                setTailRawLines(incoming)
+                setLines(serverQuery ? incoming : filterTailLinesLocally(incoming, currentQuery))
+                if (!silent) setLoading(false)
+            }
         }).catch(err => {
             console.error(err)
-            setTailRawLines([])
-            setLines(['Error loading logs: ' + err.message])
-            if (!silent) setLoading(false)
+            if (!isIncremental) {
+                setTailRawLines([])
+                setLines(['Error loading logs: ' + err.message])
+                if (!silent) setLoading(false)
+            }
         })
     }
 
@@ -222,10 +240,11 @@ export default function LogViewer() {
 
     useEffect(() => {
         if (viewMode !== 'tail') return
+        lastMaxIDRef.current = 0
         fetchLogs(true, query)
         const interval = setInterval(() => {
             fetchLogs(true, query)
-        }, refreshInterval)
+        }, 500)
         return () => clearInterval(interval)
     }, [refreshInterval, backendTailQuery, viewMode, tailLimit])
 
