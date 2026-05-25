@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -393,6 +394,9 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.requirePerm(canWriteSettings, s.handlePauseSampler)))
 	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.requirePerm(canWriteSettings, s.handleResumeSampler)))
 	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.handlePruneNow)))
+	protected.HandleFunc("GET /api/settings/logs/stats", s.secure(s.requirePerm(canReadSettings, s.handleGetLogStoreStats)))
+	protected.HandleFunc("GET /api/settings/backup/download", s.secure(s.requirePerm(canWriteSettings, s.handleDownloadDBBackup)))
+	protected.HandleFunc("POST /api/settings/backup/trigger", s.secure(s.requirePerm(canWriteSettings, s.handleTriggerDBBackup)))
 
 	// Panel user management
 	protected.HandleFunc("GET /api/panel-users", s.secure(s.requirePerm(canReadPanelUsers, s.handleGetPanelUsers)))
@@ -627,6 +631,25 @@ func StartServer(cfg *core.Config) *Server {
 					}
 				}
 
+				// Log hot tier retention -> cold export
+				if server.logStore != nil {
+					coldDir := cfg.LogColdDir
+					if coldDir == "" {
+						coldDir = "data/logs"
+					}
+					if err := os.MkdirAll(coldDir, 0755); err == nil {
+						mode := cfg.LogRetentionMode
+						if mode == "" {
+							mode = "size"
+						}
+						if seg, err := server.logStore.CheckRetention(context.Background(), mode, cfg.LogRetentionMB, cfg.LogRetentionDays, cfg.LogRetentionUnit, coldDir); err != nil {
+							log.Printf("Log retention export error: %v", err)
+						} else if seg != nil {
+							log.Printf("Log retention: exported %d rows to %s", seg.RowCount, seg.Filename)
+						}
+					}
+				}
+
 				if vacuumNeeded {
 					if err := store.Vacuum(); err != nil {
 						log.Printf("DB Maintenance: Vacuum failed: %v", err)
@@ -645,6 +668,57 @@ func StartServer(cfg *core.Config) *Server {
 				maintenance()
 			}
 		}()
+		// Scheduled DB backups on a separate configurable ticker.
+		if cfg.DBBackupIntervalHours > 0 {
+			go func() {
+				time.Sleep(5 * time.Minute) // initial delay so startup I/O settles
+				runBackup := func() {
+					backupDir := cfg.DBBackupPath
+					if backupDir == "" {
+						backupDir = "data/backups"
+					}
+					if err := os.MkdirAll(backupDir, 0755); err != nil {
+						log.Printf("DB backup: mkdir %s: %v", backupDir, err)
+						return
+					}
+					ctx := context.Background()
+					ts := time.Now().Format("2006-01-02_150405")
+
+					mainName := fmt.Sprintf("ogs_%s.tar.gz", ts)
+					if err := core.BackupDBToTarGz(ctx, store.DB(), "stats.db", filepath.Join(backupDir, mainName)); err != nil {
+						log.Printf("DB backup (main): %v", err)
+					}
+
+					auditName := fmt.Sprintf("audit_%s.tar.gz", ts)
+					if server.auditStore != nil {
+						if err := core.BackupDBToTarGz(ctx, server.auditStore.DB(), "audit.db", filepath.Join(backupDir, auditName)); err != nil {
+							log.Printf("DB backup (audit): %v", err)
+						}
+					}
+
+					if server.logStore != nil {
+						firstMs, lastMs, _ := server.logStore.HotDateRange(ctx)
+						var logName string
+						if firstMs == 0 && lastMs == 0 {
+							logName = fmt.Sprintf("singbox_logs_empty_%s.tar.gz", time.Now().Format("2006-01-02"))
+						} else {
+							logName = fmt.Sprintf("singbox_logs_%s_%s.tar.gz",
+								time.UnixMilli(firstMs).Format("2006-01-02"),
+								time.UnixMilli(lastMs).Format("2006-01-02"))
+						}
+						if err := core.BackupDBToTarGz(ctx, server.logStore.DB(), "singbox_logs.db", filepath.Join(backupDir, logName)); err != nil {
+							log.Printf("DB backup (logs): %v", err)
+						}
+					}
+				}
+				runBackup()
+				ticker := time.NewTicker(time.Duration(cfg.DBBackupIntervalHours) * time.Hour)
+				defer ticker.Stop()
+				for range ticker.C {
+					runBackup()
+				}
+			}()
+		}
 	} else {
 		log.Printf("Demo mode: skipping DB maintenance; demo seeder manages retention")
 	}

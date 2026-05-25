@@ -123,6 +123,21 @@ func (l *LogStore) Close() {
 // DB returns the underlying *sql.DB (used by the backup system in 49-06).
 func (l *LogStore) DB() *sql.DB { return l.db }
 
+// RowCount returns the total number of rows in singbox_logs.
+func (l *LogStore) RowCount(ctx context.Context) (int64, error) {
+	var n int64
+	err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM singbox_logs`).Scan(&n)
+	return n, err
+}
+
+// SegmentStats returns the count and total size_bytes of all rows in log_segments.
+func (l *LogStore) SegmentStats(ctx context.Context) (count int64, totalBytes int64, err error) {
+	err = l.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM log_segments`).
+		Scan(&count, &totalBytes)
+	return count, totalBytes, err
+}
+
 // SizeBytes returns the current on-disk size of the log DB file.
 func (l *LogStore) SizeBytes() int64 {
 	info, err := os.Stat(l.path)
