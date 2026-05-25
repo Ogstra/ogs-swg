@@ -39,15 +39,6 @@ func (s *stubExecutor) IsServiceActive(_ context.Context, _ string) (bool, error
 }
 func (s *stubExecutor) ApplySysctl(_ context.Context, _, _ string) error      { return nil }
 func (s *stubExecutor) GetSysctl(_ context.Context, _ string) (string, error) { return "", nil }
-func (s *stubExecutor) ReadJournal(_ context.Context, _ string, _ int) ([]string, error) {
-	return nil, nil
-}
-func (s *stubExecutor) ReadAllJournal(_ context.Context, _ string) ([]string, error) {
-	return nil, nil
-}
-func (s *stubExecutor) SearchJournal(_ context.Context, _, _ string, _ int) ([]string, error) {
-	return nil, nil
-}
 func (s *stubExecutor) SyncWireGuard(_ context.Context, _ string, _ []byte) error { return nil }
 func (s *stubExecutor) RestartWireGuard(_ context.Context, _ string) error        { return nil }
 func (s *stubExecutor) ListWireGuardInterfaces(_ context.Context) ([]string, error) {

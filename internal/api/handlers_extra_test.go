@@ -92,18 +92,6 @@ func (s *serviceActionExecutorStub) GetSysctl(context.Context, string) (string, 
 	return "", nil
 }
 
-func (s *serviceActionExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
-	return nil, nil
-}
-
-func (s *serviceActionExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-
-func (s *serviceActionExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
-	return nil, nil
-}
-
 func (s *serviceActionExecutorStub) SyncWireGuard(context.Context, string, []byte) error { return nil }
 
 func (s *serviceActionExecutorStub) RestartWireGuard(context.Context, string) error { return nil }

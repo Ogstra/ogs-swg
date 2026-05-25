@@ -73,15 +73,6 @@ func (s *multiIfaceExecutorStub) ReadConfig(_ context.Context, path string) ([]b
 }
 func (s *multiIfaceExecutorStub) ApplySysctl(context.Context, string, string) error { return nil }
 func (s *multiIfaceExecutorStub) GetSysctl(context.Context, string) (string, error) { return "", nil }
-func (s *multiIfaceExecutorStub) ReadJournal(context.Context, string, int) ([]string, error) {
-	return nil, nil
-}
-func (s *multiIfaceExecutorStub) ReadAllJournal(context.Context, string) ([]string, error) {
-	return nil, nil
-}
-func (s *multiIfaceExecutorStub) SearchJournal(context.Context, string, string, int) ([]string, error) {
-	return nil, nil
-}
 func (s *multiIfaceExecutorStub) SyncWireGuard(_ context.Context, interfaceName string, configContent []byte) error {
 	if len(configContent) == 0 {
 		return fmt.Errorf("empty sync content")

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -16,59 +15,8 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
-// logsExecutorStub overrides ReadJournal and SearchJournal to return controlled lines.
 type logsExecutorStub struct {
 	singboxConfigExecutorStub
-	journalLines    []string
-	walkJournalHits int
-}
-
-func (s *logsExecutorStub) ReadJournal(_ context.Context, _ string, limit int) ([]string, error) {
-	if limit <= 0 || limit >= len(s.journalLines) {
-		out := make([]string, len(s.journalLines))
-		copy(out, s.journalLines)
-		return out, nil
-	}
-	out := make([]string, limit)
-	copy(out, s.journalLines[len(s.journalLines)-limit:])
-	return out, nil
-}
-
-func (s *logsExecutorStub) ReadAllJournal(_ context.Context, _ string) ([]string, error) {
-	out := make([]string, len(s.journalLines))
-	copy(out, s.journalLines)
-	return out, nil
-}
-
-func (s *logsExecutorStub) SearchJournal(_ context.Context, _ string, query string, _ int) ([]string, error) {
-	// Return all lines that contain the query (case-insensitive not required by stub —
-	// just do a simple substring match so tests can reason about it).
-	var result []string
-	q := query
-	for _, ln := range s.journalLines {
-		if containsInsensitive(ln, q) {
-			result = append(result, ln)
-		}
-	}
-	return result, nil
-}
-
-func (s *logsExecutorStub) WalkJournal(_ context.Context, _ string, newestFirst bool, visit func(string) error) error {
-	s.walkJournalHits++
-	if newestFirst {
-		for i := len(s.journalLines) - 1; i >= 0; i-- {
-			if err := visit(s.journalLines[i]); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	for _, line := range s.journalLines {
-		if err := visit(line); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func containsInsensitive(s, substr string) bool {
@@ -136,11 +84,9 @@ func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub
 				}
 			]
 		}`)},
-		journalLines: lines,
 	}
 	cfg := &core.Config{
 		EnableSingbox:     true,
-		LogSource:         "journal",
 		SingboxConfigPath: "/test/config.json",
 		ManagedInbounds:   []string{"in-reality"},
 		StatsInbounds:     []string{"in-reality"},
@@ -148,18 +94,6 @@ func newLogsTestServer(t *testing.T, lines []string) (*Server, *logsExecutorStub
 	cfg.SetExecutor(stub)
 	srv := NewServer(store, cfg, stub)
 	srv.logStore = logStore
-	return srv, stub
-}
-
-func newLogsTestServerWithFileSource(t *testing.T, journalLines, fileLines []string) (*Server, *logsExecutorStub) {
-	t.Helper()
-	srv, stub := newLogsTestServer(t, journalLines)
-	accessLogPath := filepath.Join(t.TempDir(), "access.log")
-	if err := os.WriteFile(accessLogPath, []byte(joinLines(fileLines)), 0644); err != nil {
-		t.Fatalf("WriteFile(access.log): %v", err)
-	}
-	srv.config.LogSource = "file"
-	srv.config.AccessLogPath = accessLogPath
 	return srv, stub
 }
 
@@ -773,37 +707,6 @@ func TestHandleSearchLogs_BracketLiteralWithoutMatchesDoesNotCrash(t *testing.T)
 	}
 }
 
-func TestHandleSearchLogs_FileModeFallsBackToJournalForBracketQuery(t *testing.T) {
-	srv, _ := newLogsTestServerWithFileSource(t,
-		[]string{hysteriaUserTaggedLogLine, hysteriaOutboundLogLine},
-		[]string{textAndLogLine},
-	)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/logs/search?q=%5BALPHA-H2%5D", nil)
-	req = requestWithPerms(req, &core.PanelUserPermissions{CanReadLogs: true})
-	rr := httptest.NewRecorder()
-
-	srv.handleSearchLogs(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	var resp struct {
-		Logs []string `json:"logs"`
-	}
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	body := joinLines(resp.Logs)
-	if !containsInsensitive(body, hysteriaUserTaggedLogLine) {
-		t.Fatalf("expected journal fallback to include hysteria user line, got: %v", resp.Logs)
-	}
-	if !containsInsensitive(body, hysteriaOutboundLogLine) {
-		t.Fatalf("expected journal fallback to include correlated outbound line, got: %v", resp.Logs)
-	}
-}
 
 func TestHandleSearchLogs_TimeRangeFiltersEmbeddedTimestamp(t *testing.T) {
 	// Build a server with a LogStore populated with three lines at distinct timestamps.
