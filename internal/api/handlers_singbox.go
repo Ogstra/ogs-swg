@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -115,7 +116,9 @@ func (s *Server) handleGetSingboxOutbounds(w http.ResponseWriter, r *http.Reques
 
 	outbounds, err := s.config.GetSingboxOutboundViews()
 	if err != nil {
-		http.Error(w, "Failed to get outbounds: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("handleGetSingboxOutbounds: config unavailable: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
 		return
 	}
 
@@ -149,7 +152,9 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 
 	inboundViews, err := s.config.GetSingboxInboundViews()
 	if err != nil {
-		http.Error(w, "Failed to get inbounds: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("handleGetSingboxInbounds: config unavailable: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
 		return
 	}
 	inbounds := make([]map[string]interface{}, 0, len(inboundViews))
@@ -1496,7 +1501,9 @@ func (s *Server) handleGetSingboxRouteRules(w http.ResponseWriter, r *http.Reque
 
 	rules, err := s.config.GetSingboxRouteRules()
 	if err != nil {
-		http.Error(w, "Failed to get route rules: "+err.Error(), http.StatusInternalServerError)
+		log.Printf("handleGetSingboxRouteRules: config unavailable: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
 		return
 	}
 
