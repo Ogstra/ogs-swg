@@ -391,12 +391,7 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 		return fmt.Errorf("invalid json: %v", err)
 	}
 
-	// 2. Validate with Sing-box
-	if err := c.ValidateConfig([]byte(content)); err != nil {
-		return fmt.Errorf("sing-box validation failed: %v", err)
-	}
-
-	// 3. Write to file
+	// 2. Write to file
 	if c.executor != nil {
 		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, []byte(content), 0644); err != nil {
 			return err
@@ -579,12 +574,14 @@ func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 		return nil, err
 	}
 
-	var cfg SingboxConfig
-	if err := json.Unmarshal(content, &cfg); err != nil {
+	// Extract inbounds directly from the raw map to avoid failures from typed
+	// fields elsewhere in the config (e.g. Experimental with custom unmarshal).
+	var rawTop map[string]json.RawMessage
+	if err := json.Unmarshal(content, &rawTop); err != nil {
 		return nil, err
 	}
 
-	rawInbounds, err := decodeInboundRawList(cfg.Inbounds)
+	rawInbounds, err := decodeInboundRawList(rawTop["inbounds"])
 	if err != nil {
 		return nil, err
 	}
