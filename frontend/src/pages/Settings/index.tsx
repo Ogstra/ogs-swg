@@ -17,6 +17,7 @@ import { Tabs } from '../../components/ui/Tabs'
 import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './components/PanelUsers'
 import SecurityTab from './components/SecurityTab'
+import LogsBackupsTab from './LogsBackupsTab'
 import { WireGuardRawConfigModal } from './components/WireGuardRawConfigModal'
 import {
     WG_INTERFACE_DEFAULTS,
@@ -678,6 +679,19 @@ export default function Settings() {
                     loadMoreAuditLog={loadMoreAuditLog}
                 />
             )
+        },
+        {
+            id: 'logs-backups',
+            label: <span className="flex items-center gap-2"><Database size={16} /> Logs &amp; Backups</span>,
+            content: (
+                <LogsBackupsTab
+                    features={features}
+                    setFeatures={setFeatures}
+                    canWriteSettings={canWriteSettings}
+                    success={success}
+                    toastError={toastError}
+                />
+            ),
         },
         {
             id: 'security',
