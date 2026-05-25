@@ -27,9 +27,6 @@ services:
       - /etc/sing-box:/etc/sing-box
       - /etc/wireguard:/etc/wireguard
 
-      # Sing-box access log — read-only; path must match access_log_path in config.json
-      - /var/log/singbox.log:/var/log/singbox.log:ro
-
       # docker_local mode requires host runtime sockets for systemd/dbus/journal
       # - /run/dbus:/run/dbus
       # - /run/systemd:/run/systemd
