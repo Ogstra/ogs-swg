@@ -21,6 +21,7 @@ services:
 
     volumes:
       - ./data:/app/data
+      - ${OGS_ACCESS_LOG_HOST_DIR:-./data}:/app/access-logs:ro
       - ./config.json:/app/config.json
 
       # Bind-mount host config dirs at the same path (local + docker_local modes)
@@ -36,6 +37,7 @@ services:
     environment:
       - OGS_LISTEN_ADDR=:8080
       - OGS_DB_PATH=/app/data/stats.db
+      - OGS_ACCESS_LOG_PATH=${OGS_ACCESS_LOG_PATH:-/app/access-logs/access.log}
       - OGS_API_KEY=${OGS_API_KEY}
 
       # First-run admin bootstrap — remove after initial login
