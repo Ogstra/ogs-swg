@@ -33,7 +33,7 @@ export const Layout: React.FC = () => {
         { path: '/users', label: 'sing-box Users', icon: Users, permission: 'can_read_users' as const },
         { path: '/subscriptions', label: 'Subscriptions', icon: LinkIcon, permission: 'can_read_users' as const },
         { path: '/wireguard', label: 'WireGuard', icon: Shield, permission: 'can_read_wireguard' as const },
-        { path: '/logs', label: 'System Logs', icon: Activity, permission: 'can_read_logs' as const },
+        { path: '/logs', label: 'Access Logs', icon: Activity, permission: 'can_read_logs' as const },
         { path: '/raw-config', label: 'Raw Config', icon: FileJson, permission: 'can_read_config' as const },
         { path: '/settings', label: 'Settings', icon: Settings, permission: 'can_read_settings' as const },
     ];
