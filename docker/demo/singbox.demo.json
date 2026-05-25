@@ -127,6 +127,51 @@
           "password": "ZmVkY2JhOTg3NjU0MzIxMA=="
         }
       ]
+    },
+    {
+      "type": "anytls",
+      "tag": "demo-anytls",
+      "listen": "::",
+      "listen_port": 11443,
+      "users": [
+        {
+          "name": "user-09",
+          "password": "demo-anytls-user-09-pass"
+        }
+      ],
+      "padding_scheme": [
+        "stop=8",
+        "padding=32"
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "demo-anytls.example.com",
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ]
+      }
+    },
+    {
+      "type": "naive",
+      "tag": "demo-naive",
+      "listen": "::",
+      "listen_port": 12443,
+      "network": "tcp",
+      "users": [
+        {
+          "username": "user-10",
+          "password": "demo-naive-user-10-pass"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "demo-naive.example.com",
+        "alpn": [
+          "h2",
+          "http/1.1"
+        ]
+      }
     }
   ],
   "outbounds": [
@@ -166,6 +211,18 @@
           "demo-shadowsocks-2022"
         ],
         "outbound": "direct"
+      },
+      {
+        "inbound": [
+          "demo-anytls"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "inbound": [
+          "demo-naive"
+        ],
+        "outbound": "direct"
       }
     ],
     "final": "direct"
@@ -180,7 +237,9 @@
           "demo-vmess-ws",
           "demo-trojan-tls",
           "demo-hysteria2",
-          "demo-shadowsocks-2022"
+          "demo-shadowsocks-2022",
+          "demo-anytls",
+          "demo-naive"
         ],
         "outbounds": [
           "direct"
@@ -193,7 +252,9 @@
           "user-05",
           "user-06",
           "user-07",
-          "user-08"
+          "user-08",
+          "user-09",
+          "user-10"
         ]
       }
     }
