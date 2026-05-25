@@ -23,12 +23,11 @@ services:
       - /run/systemd:/run/systemd
       - /var/log/journal:/var/log/journal:ro
       - /run/log/journal:/run/log/journal:ro
-      - /var/log/singbox.log:/var/log/singbox.log:ro
 
     environment:
       - OGS_LISTEN_ADDR=:${OGS_SLOT_GREEN_PORT:-18081}
       - OGS_DB_PATH=/app/data/stats.db
-      - OGS_ACCESS_LOG_PATH=/var/log/singbox.log
+      - OGS_ACCESS_LOG_PATH=/app/data/access.log
 
       # Activates DockerLocalExecutor (host D-Bus mode)
       - OGS_EXECUTION_MODE=docker_local
