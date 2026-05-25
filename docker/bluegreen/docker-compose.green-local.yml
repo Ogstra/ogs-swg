@@ -15,6 +15,7 @@ services:
 
     volumes:
       - ../../data:/app/data
+      - ${OGS_ACCESS_LOG_HOST_DIR:-../../data}:/app/access-logs:ro
 
       # Bind-mount at the same path as on the host
       - /etc/sing-box:/etc/sing-box
@@ -27,7 +28,7 @@ services:
     environment:
       - OGS_LISTEN_ADDR=:${OGS_SLOT_GREEN_PORT:-18081}
       - OGS_DB_PATH=/app/data/stats.db
-      - OGS_ACCESS_LOG_PATH=/app/data/access.log
+      - OGS_ACCESS_LOG_PATH=${OGS_ACCESS_LOG_PATH:-/app/access-logs/access.log}
 
       # Activates DockerLocalExecutor (host D-Bus mode)
       - OGS_EXECUTION_MODE=docker_local
