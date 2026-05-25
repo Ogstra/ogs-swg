@@ -1910,6 +1910,9 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// DB returns the underlying *sql.DB (used by the backup system).
+func (s *Store) DB() *sql.DB { return s.db }
+
 // WireGuard traffic samples
 
 func (s *Store) InsertWGSamples(samples []WGSample) error {

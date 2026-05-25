@@ -90,6 +90,9 @@ func (a *AuditStore) Close() {
 	}
 }
 
+// DB returns the underlying *sql.DB (used by the backup system).
+func (a *AuditStore) DB() *sql.DB { return a.db }
+
 // SizeBytes returns the current on-disk size of the audit DB file.
 func (a *AuditStore) SizeBytes() int64 {
 	info, err := os.Stat(a.path)
