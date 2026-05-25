@@ -63,14 +63,36 @@ function LogTerminal({
         overscan: 20,
     })
 
-    // Scroll to bottom when autoScroll is requested (tail mode initial load)
+    // Keep tail mode pinned to the newest line while auto-scroll is enabled.
+    // Virtual rows can be measured after React commits, so repeat the scroll
+    // across animation frames to land on the final measured height.
     useLayoutEffect(() => {
         if (!autoScroll || viewMode !== 'tail') return
-        if (!initialScrollPendingRef.current) return
         if (lines.length === 0) return
-        virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+
+        let cancelled = false
+        const scrollToBottom = () => {
+            if (cancelled) return
+            virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+            const el = containerRef.current
+            if (el) {
+                el.scrollTop = el.scrollHeight
+            }
+        }
+
+        scrollToBottom()
+        let secondFrame: number | null = null
+        const firstFrame = requestAnimationFrame(() => {
+            scrollToBottom()
+            secondFrame = requestAnimationFrame(scrollToBottom)
+        })
+
         initialScrollPendingRef.current = false
-        setAutoScroll(false)
+        return () => {
+            cancelled = true
+            cancelAnimationFrame(firstFrame)
+            if (secondFrame !== null) cancelAnimationFrame(secondFrame)
+        }
     }, [lines.length, autoScroll, viewMode])
 
     const virtualItems = virtualizer.getVirtualItems()

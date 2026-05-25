@@ -3,22 +3,24 @@ set -euo pipefail
 
 DB_PATH="${DEMO_DB_PATH:-/app/data/stats.db}"
 LOG_PATH="${DEMO_LOG_PATH:-/app/data/access.log}"
+LOG_DB_PATH="${DEMO_LOG_DB_PATH:-$(dirname "$DB_PATH")/singbox_logs.db}"
 MODE="${1:-sample}"
 LIVE_INTERVAL="${DEMO_LIVE_INTERVAL_SEC:-60}"
 LOG_INTERVAL="${DEMO_LOG_INTERVAL_SEC:-3}"
 SUB_REQUEST_INTERVAL="${DEMO_SUB_REQUEST_INTERVAL_SEC:-8}"
-RETENTION="${DEMO_RETENTION_SECONDS:-172800}"
+RETENTION="${DEMO_RETENTION_SECONDS:-3600}"
+MAX_DB_BYTES="${DEMO_MAX_DB_BYTES:-52428800}"
 
-USERS=(user-01 user-02 user-03 user-04 user-05 user-06 user-07 user-08)
-INBOUNDS=(demo-vless-reality demo-vmess-ws demo-trojan-tls demo-hysteria2 demo-shadowsocks-2022)
-INBOUND_PROTOCOLS=(vless vmess trojan hysteria2 shadowsocks)
+USERS=(user-01 user-02 user-03 user-04 user-05 user-06 user-07 user-08 user-09 user-10)
+INBOUNDS=(demo-vless-reality demo-vmess-ws demo-trojan-tls demo-hysteria2 demo-shadowsocks-2022 demo-anytls demo-naive)
+INBOUND_PROTOCOLS=(vless vmess trojan hysteria2 shadowsocks anytls naive)
 
-SUB_TOKENS=(demo-sub-mobile demo-sub-overquota demo-sub-cached demo-sub-unlimited)
-SUB_NAMES=("Reality Mobile" "Mixed Office Over Quota" "Cached VMess/Trojan" "Unlimited UDP Lab")
-SUB_QUOTAS=($((60 * 1024 * 1024 * 1024)) $((3 * 1024 * 1024 * 1024)) $((24 * 1024 * 1024 * 1024)) 0)
-SUB_INTERVALS=(24 6 12 0)
-SUB_UPDATE_ALWAYS=(0 1 0 1)
-SUB_USERS=("user-01,user-02" "user-03,user-05" "user-04,user-06" "user-07,user-08")
+SUB_TOKENS=(demo-sub-mobile demo-sub-overquota demo-sub-cached demo-sub-unlimited demo-sub-modern)
+SUB_NAMES=("Reality Mobile" "Mixed Office Over Quota" "Cached VMess/Trojan" "Unlimited UDP Lab" "AnyTLS and Naive Lab")
+SUB_QUOTAS=($((60 * 1024 * 1024 * 1024)) $((3 * 1024 * 1024 * 1024)) $((24 * 1024 * 1024 * 1024)) 0 $((18 * 1024 * 1024 * 1024)))
+SUB_INTERVALS=(24 6 12 0 8)
+SUB_UPDATE_ALWAYS=(0 1 0 1 0)
+SUB_USERS=("user-01,user-02" "user-03,user-05" "user-04,user-06" "user-07,user-08" "user-09,user-10")
 
 REQUEST_UAS=(
   "Shadowrocket/2.2.82 CFNetwork/1568.200.51 Darwin/24.1.0"
@@ -59,6 +61,81 @@ WG_ALIASES=(peer-01 peer-02 peer-03 peer-04 peer-05 peer-06 peer-07 peer-08 peer
 WG_RX=()
 WG_TX=()
 
+demo_db_dir() {
+  dirname "$DB_PATH"
+}
+
+db_size_bytes() {
+  local total=0 f
+  for f in "$(demo_db_dir)"/*.db "$(demo_db_dir)"/*.db-wal "$(demo_db_dir)"/*.db-shm; do
+    [[ -e "$f" ]] || continue
+    total=$(( total + $(stat -c%s "$f" 2>/dev/null || echo 0) ))
+  done
+  printf '%s' "$total"
+}
+
+checkpoint_demo_dbs() {
+  sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+  sqlite3 "$LOG_DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+  sqlite3 "$(demo_db_dir)/audit.db" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+}
+
+checkpoint_log_db() {
+  sqlite3 "$LOG_DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+}
+
+compact_demo_dbs() {
+  sqlite3 "$DB_PATH" "VACUUM;" >/dev/null 2>&1 || true
+  sqlite3 "$LOG_DB_PATH" "VACUUM;" >/dev/null 2>&1 || true
+  sqlite3 "$(demo_db_dir)/audit.db" "VACUUM;" >/dev/null 2>&1 || true
+  checkpoint_demo_dbs
+}
+
+prune_main_db() {
+  apply_sql "DELETE FROM samples WHERE ts < strftime('%s','now') - ${RETENTION};
+             DELETE FROM wg_samples WHERE ts < strftime('%s','now') - ${RETENTION};
+             DELETE FROM sampler_runs WHERE ts < strftime('%s','now') - ${RETENTION};
+             DELETE FROM subscription_requests WHERE requested_at < strftime('%s','now') - ${RETENTION};"
+}
+
+prune_log_db() {
+  local cutoff_ms=$(( ($(date +%s) - RETENTION) * 1000 ))
+  sqlite3 "$LOG_DB_PATH" <<SQL >/dev/null 2>&1 || true
+PRAGMA busy_timeout = 5000;
+BEGIN;
+DELETE FROM singbox_logs_fts WHERE rowid IN (SELECT id FROM singbox_logs WHERE ts < ${cutoff_ms});
+DELETE FROM singbox_logs WHERE ts < ${cutoff_ms};
+COMMIT;
+SQL
+}
+
+prune_audit_db() {
+  local audit_db
+  audit_db="$(demo_db_dir)/audit.db"
+  [[ -f "$audit_db" ]] || return 0
+  sqlite3 "$audit_db" <<SQL >/dev/null 2>&1 || true
+PRAGMA busy_timeout = 5000;
+DELETE FROM audit_log WHERE ts < strftime('%s','now') - ${RETENTION};
+SQL
+}
+
+enforce_demo_db_budget() {
+  prune_main_db
+  prune_log_db
+  prune_audit_db
+  checkpoint_demo_dbs
+
+  if (( $(db_size_bytes) > MAX_DB_BYTES )); then
+    compact_demo_dbs
+  fi
+
+  if (( $(db_size_bytes) > MAX_DB_BYTES )); then
+    # Keep the last hour intact. If this still exceeds the cap, emit a warning
+    # rather than deleting current demo data.
+    echo "[demo-seeder] warning: DB files exceed ${MAX_DB_BYTES} bytes after pruning last ${RETENTION}s" >&2
+  fi
+}
+
 apply_sql() {
   local sql="$1"
   sqlite3 "$DB_PATH" <<SQL >/dev/null 2>&1 || true
@@ -89,6 +166,8 @@ subscription_alias_for_user() {
     user-06) printf 'Hysteria2 Travel' ;;
     user-07) printf 'Shadowsocks TCP' ;;
     user-08) printf 'Shadowsocks UDP' ;;
+    user-09) printf 'AnyTLS Laptop' ;;
+    user-10) printf 'Naive Browser' ;;
     *) printf '%s' "$1" ;;
   esac
 }
@@ -97,6 +176,38 @@ wait_for_db() {
   until sqlite3 "$DB_PATH" "SELECT 1 FROM samples LIMIT 1;" >/dev/null 2>&1; do
     sleep 1
   done
+}
+
+wait_for_log_db() {
+  until sqlite3 "$LOG_DB_PATH" "SELECT 1 FROM singbox_logs LIMIT 1;" >/dev/null 2>&1; do
+    sleep 1
+  done
+}
+
+sql_quote() {
+  printf "%s" "$1" | sed "s/'/''/g"
+}
+
+insert_demo_log_lines() {
+  local ts_ms="$1"
+  local first_line="$2"
+  local second_line="$3"
+  local user="$4"
+  local first_quoted second_quoted user_quoted
+
+  first_quoted="$(sql_quote "$first_line")"
+  second_quoted="$(sql_quote "$second_line")"
+  user_quoted="$(sql_quote "[$user]")"
+
+  sqlite3 "$LOG_DB_PATH" <<SQL >/dev/null 2>&1 || true
+PRAGMA busy_timeout = 5000;
+BEGIN;
+INSERT INTO singbox_logs(ts,raw,level,user) VALUES(${ts_ms},'${first_quoted}','INFO','');
+INSERT INTO singbox_logs_fts(rowid, raw) VALUES(last_insert_rowid(),'${first_quoted}');
+INSERT INTO singbox_logs(ts,raw,level,user) VALUES(${ts_ms},'${second_quoted}','INFO','${user_quoted}');
+INSERT INTO singbox_logs_fts(rowid, raw) VALUES(last_insert_rowid(),'${second_quoted}');
+COMMIT;
+SQL
 }
 
 seed_core_entities() {
@@ -147,6 +258,14 @@ seed_core_entities() {
         credential="ZmVkY2JhOTg3NjU0MzIxMA=="
         inbound_tags='["demo-shadowsocks-2022"]'
         ;;
+      user-09)
+        credential="demo-anytls-user-09-pass"
+        inbound_tags='["demo-anytls"]'
+        ;;
+      user-10)
+        credential="demo-naive-user-10-pass"
+        inbound_tags='["demo-naive"]'
+        ;;
     esac
     sql+="INSERT INTO users(email,quota_limit,quota_period,reset_day,enabled,credential,flow,vmess_security,inbound_tags) VALUES('${user}',${quota},'monthly',1,1,'${credential}','${flow}','${vmess_security}','${inbound_tags}') ON CONFLICT(email) DO UPDATE SET quota_limit=excluded.quota_limit,enabled=1,credential=excluded.credential,flow=excluded.flow,vmess_security=excluded.vmess_security,inbound_tags=excluded.inbound_tags;"
   done
@@ -189,8 +308,8 @@ seed_traffic_history() {
     WG_TX[$i]=$(( 12 * 1024 * 1024 + RANDOM % (60 * 1024 * 1024) ))
   done
 
-  for ((b = 0; b < 48; b++)); do
-    ts=$(( now - (48 - b) * 1800 ))
+  for ((b = 0; b < 12; b++)); do
+    ts=$(( now - (12 - b) * 300 ))
     hour=$(( (ts / 3600) % 24 ))
 
     if   (( hour >= 0  && hour < 6  )); then base_mb=$(( 50  + RANDOM % 150 ))
@@ -233,10 +352,10 @@ seed_subscription_history() {
   local sql="" i sub_idx ua_idx ip_idx req_ts served_from_cache blocked reason req_ua request_count=0
 
   for ((i = 0; i < 18; i++)); do
-    sub_idx=$(( i % 4 ))
+    sub_idx=$(( i % ${#SUB_TOKENS[@]} ))
     ua_idx=$(( i % ${#REQUEST_UAS[@]} ))
     ip_idx=$(( i % ${#REQUEST_IPS[@]} ))
-    req_ts=$(( now - (18 - i) * 480 ))
+    req_ts=$(( now - (18 - i) * 180 ))
     served_from_cache=0
     blocked=0
     reason=""
@@ -309,6 +428,7 @@ do_bootstrap() {
   inserted_total=$(( inserted_traffic + inserted_requests ))
 
   apply_sql "INSERT INTO sampler_runs(ts,duration_ms,inserted,error,source) VALUES(${now},500,${inserted_total},'','demo-seed');"
+  enforce_demo_db_budget
   echo "[demo-seeder] bootstrap: ${inserted_total} rows seeded"
 }
 
@@ -346,13 +466,11 @@ do_sample_loop() {
 
     sql+="INSERT INTO sampler_runs(ts,duration_ms,inserted,error,source) VALUES(${ts},50,${inserted},'','demo-live');"
     apply_sql "$sql"
+    prune_main_db
 
     loops=$(( loops + 1 ))
     if (( loops % 30 == 0 )); then
-      apply_sql "DELETE FROM samples WHERE ts < strftime('%s','now') - ${RETENTION};
-                 DELETE FROM wg_samples WHERE ts < strftime('%s','now') - ${RETENTION};
-                 DELETE FROM sampler_runs WHERE ts < strftime('%s','now') - ${RETENTION};"
-      sqlite3 "$DB_PATH" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+      enforce_demo_db_budget
     fi
 
     sleep "$LIVE_INTERVAL"
@@ -363,8 +481,9 @@ do_log_loop() {
   local -a CLIENTS=(198.51.100.210 2001:db8:feed:beef::212 192.0.2.214 2001:db8:abcd:12::211 192.0.2.215)
   local -a TARGETS=(cdn-edge.demo.invalid:443 api-gw.demo.invalid:443 media.demo.invalid:443 updates.demo.invalid:443 198.51.100.44:443)
 
+  wait_for_log_db
   while true; do
-    local sys_ts panel_ts tz inbound_idx inbound protocol user conn latency port client target fsize
+    local sys_ts panel_ts ts_ms tz inbound_idx inbound protocol user conn latency port client target fsize line1 line2
     fsize=$(stat -c%s "$LOG_PATH" 2>/dev/null || echo 0)
     if (( fsize > 1048576 )); then
       : > "$LOG_PATH"
@@ -372,6 +491,7 @@ do_log_loop() {
 
     sys_ts=$(date +"%b %d %H:%M:%S")
     panel_ts=$(date +"%Y-%m-%d %H:%M:%S")
+    ts_ms=$(( $(date +%s) * 1000 ))
     tz=$(date +"%z")
     inbound_idx=$((RANDOM % ${#INBOUNDS[@]}))
     inbound="${INBOUNDS[$inbound_idx]}"
@@ -383,10 +503,15 @@ do_log_loop() {
     client="${CLIENTS[$((RANDOM % ${#CLIENTS[@]}))]}"
     target="${TARGETS[$((RANDOM % ${#TARGETS[@]}))]}"
 
-    printf "%s localhost sing-box[2783211]: %s %s INFO [%s 0ms] inbound/%s[%s]: inbound connection from %s:%s\n" \
-      "$sys_ts" "$tz" "$panel_ts" "$conn" "$protocol" "$inbound" "$client" "$port" >> "$LOG_PATH"
-    printf "%s localhost sing-box[2783211]: %s %s INFO [%s %sms] inbound/%s[%s]: [%s] inbound connection to %s\n" \
-      "$sys_ts" "$tz" "$panel_ts" "$conn" "$latency" "$protocol" "$inbound" "$user" "$target" >> "$LOG_PATH"
+    line1=$(printf "%s localhost sing-box[2783211]: %s %s INFO [%s 0ms] inbound/%s[%s]: inbound connection from %s:%s" \
+      "$sys_ts" "$tz" "$panel_ts" "$conn" "$protocol" "$inbound" "$client" "$port")
+    line2=$(printf "%s localhost sing-box[2783211]: %s %s INFO [%s %sms] inbound/%s[%s]: [%s] inbound connection to %s" \
+      "$sys_ts" "$tz" "$panel_ts" "$conn" "$latency" "$protocol" "$inbound" "$user" "$target")
+
+    printf "%s\n%s\n" "$line1" "$line2" >> "$LOG_PATH"
+    insert_demo_log_lines "$ts_ms" "$line1" "$line2" "$user"
+    prune_log_db
+    checkpoint_log_db
 
     sleep "$LOG_INTERVAL"
   done
@@ -397,7 +522,7 @@ do_subscription_loop() {
 
   while true; do
     ts=$(date +%s)
-    sub_idx=$(( RANDOM % 3 ))
+    sub_idx=$(( RANDOM % ${#SUB_TOKENS[@]} ))
     ua_idx=$(( RANDOM % ${#REQUEST_UAS[@]} ))
     ip_idx=$(( RANDOM % ${#REQUEST_IPS[@]} ))
     mode=$(( RANDOM % 10 ))
@@ -436,10 +561,11 @@ do_subscription_loop() {
     sql+="'L$((ts % 1000))',"
     sql+="${ts},${served_from_cache},${blocked},'${reason}');"
     apply_sql "$sql"
+    prune_main_db
 
     loops=$(( loops + 1 ))
     if (( loops % 30 == 0 )); then
-      apply_sql "DELETE FROM subscription_requests WHERE requested_at < strftime('%s','now') - ${RETENTION};"
+      enforce_demo_db_budget
     fi
 
     sleep "$SUB_REQUEST_INTERVAL"

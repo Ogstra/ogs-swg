@@ -6,14 +6,18 @@
     "demo-vmess-ws",
     "demo-trojan-tls",
     "demo-hysteria2",
-    "demo-shadowsocks-2022"
+    "demo-shadowsocks-2022",
+    "demo-anytls",
+    "demo-naive"
   ],
   "stats_inbounds": [
     "demo-vless-reality",
     "demo-vmess-ws",
     "demo-trojan-tls",
     "demo-hysteria2",
-    "demo-shadowsocks-2022"
+    "demo-shadowsocks-2022",
+    "demo-anytls",
+    "demo-naive"
   ],
   "stats_outbounds": [
     "direct"
@@ -35,13 +39,25 @@
   "wg_retention_days": 15,
   "aggregation_enabled": true,
   "aggregation_days": 7,
+  "audit_log_max_mb": 10,
+  "log_retention_mode": "size",
+  "log_retention_mb": 50,
+  "log_retention_days": 7,
+  "log_retention_unit": "days",
+  "log_cold_dir": "/app/data/logs",
+  "db_backup_path": "/app/data/backups",
+  "db_backup_interval_hours": 12,
   "public_ip": "203.0.113.10",
   "subscription_domain": "swg-demo.local",
+  "cf_worker_url": "https://swg-demo.local/cf-worker",
   "subscription_protection": {
     "max_requests": 6,
     "window_seconds": 60,
     "ua_filter_enabled": true,
     "social_fetchers_block_enabled": true
   },
-  "api_key": ""
+  "api_key": "",
+  "api_key_read_only": true,
+  "demo_mode": true,
+  "disable_password_login": true
 }
