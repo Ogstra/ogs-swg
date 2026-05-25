@@ -28,14 +28,6 @@ type SystemExecutor interface {
 	// GetSysctl retrieves a kernel parameter. Implementation MUST enforce a whitelist.
 	GetSysctl(ctx context.Context, key string) (string, error)
 
-	// Log Management
-	// ReadJournal reads the last N lines from a systemd journal unit.
-	ReadJournal(ctx context.Context, unit string, limit int) ([]string, error)
-	// ReadAllJournal reads the full merged history for a systemd journal unit.
-	ReadAllJournal(ctx context.Context, unit string) ([]string, error)
-	// SearchJournal searches for a query string in the journal.
-	SearchJournal(ctx context.Context, unit, query string, limit int) ([]string, error)
-
 	// SyncWireGuard applies the WireGuard configuration to the interface.
 	SyncWireGuard(ctx context.Context, interfaceName string, configContent []byte) error
 	// RestartWireGuard restarts the target WireGuard interface service.

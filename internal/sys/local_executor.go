@@ -163,39 +163,6 @@ func (e *LocalExecutor) GetSysctl(_ context.Context, key string) (string, error)
 	return strings.TrimSpace(string(data)), nil
 }
 
-func (e *LocalExecutor) ReadJournal(ctx context.Context, unit string, limit int) ([]string, error) {
-	return journalRead(ctx, unit, limit, "")
-}
-
-func (e *LocalExecutor) ReadAllJournal(ctx context.Context, unit string) ([]string, error) {
-	unitFull := unit
-	if !strings.Contains(unitFull, ".") {
-		unitFull += ".service"
-	}
-
-	cmd := exec.CommandContext(ctx, "journalctl", "-u", unitFull, "--no-pager", "--merge", "-o", "cat")
-	out, err := cmd.CombinedOutput()
-	if ctx != nil && ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if msg == "" {
-			return nil, fmt.Errorf("journalctl failed: %v", err)
-		}
-		return nil, fmt.Errorf("journalctl failed: %v: %s", err, msg)
-	}
-	return parseJournalOutput(out), nil
-}
-
-func (e *LocalExecutor) SearchJournal(ctx context.Context, unit, query string, limit int) ([]string, error) {
-	return journalRead(ctx, unit, limit, query)
-}
-
-func (e *LocalExecutor) WalkJournal(ctx context.Context, unit string, newestFirst bool, visit func(string) error) error {
-	return journalWalk(ctx, unit, newestFirst, visit)
-}
-
 func (e *LocalExecutor) CheckConnectivity(_ context.Context) error {
 	return nil
 }
