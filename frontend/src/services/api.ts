@@ -28,6 +28,7 @@ export interface UserStatus {
     last_seen?: number;
     inbound_tags?: string[];
     route_tags?: UserRouteTag[];
+    external_profiles?: ExternalProfile[];
 }
 
 export interface UserRouteTag {
@@ -40,6 +41,27 @@ export interface UserRouteTag {
     broken: boolean;
     broken_reason?: string;
     auth_users: string[];
+}
+
+export interface ExternalProfile {
+    id: number;
+    name: string;
+    type: 'vless' | 'shadowsocks';
+    host_ipv4: string;
+    host_ipv6_file: string;
+    port: number;
+    uuid: string;
+    password: string;
+    ss_method: string;
+    ss_server_key: string;
+    public_key: string;
+    short_id: string;
+    server_name: string;
+    flow: string;
+    enabled: boolean;
+    position: number;
+    created_at: number;
+    updated_at: number;
 }
 
 export interface CompatibleUserRouteRule {
@@ -546,6 +568,42 @@ export const api = {
             headers: buildHeaders()
         });
         await handleResponse(res, 'Failed to fetch VLESS link');
+        return res.json();
+    },
+    getExternalProfiles: async (): Promise<ExternalProfile[]> => {
+        const res = await fetch('/api/external-profiles', { headers: buildHeaders() });
+        await handleResponse(res, 'Failed to fetch external profiles');
+        return res.json();
+    },
+    upsertExternalProfile: async (profile: Partial<ExternalProfile>): Promise<{ id: number }> => {
+        const res = await fetch('/api/external-profiles', {
+            method: 'POST',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify(profile)
+        });
+        await handleResponse(res, 'Failed to save external profile');
+        return res.json();
+    },
+    deleteExternalProfile: async (id: number): Promise<void> => {
+        const res = await fetch(`/api/external-profiles/${id}`, {
+            method: 'DELETE',
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to delete external profile');
+    },
+    updateUserExternalProfiles: async (name: string, profileIds: number[]): Promise<void> => {
+        const res = await fetch(`/api/users/${encodeURIComponent(name)}/external-profiles`, {
+            method: 'PUT',
+            headers: buildHeaders('application/json'),
+            body: JSON.stringify({ profile_ids: profileIds })
+        });
+        await handleResponse(res, 'Failed to update user external profiles');
+    },
+    getExternalProfileLink: async (id: number, displayName: string): Promise<{ link: string; type: string }> => {
+        const res = await fetch(`/api/external-profiles/${id}/link?name=${encodeURIComponent(displayName)}`, {
+            headers: buildHeaders()
+        });
+        await handleResponse(res, 'Failed to fetch external profile link');
         return res.json();
     },
     bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> => {
