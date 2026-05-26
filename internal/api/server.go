@@ -289,12 +289,17 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleRemoveUserFromInbound))))
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserInInbound))))
 	protected.HandleFunc("PUT /api/users/{name}/route-tags", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserRouteTags))))
+	protected.HandleFunc("PUT /api/users/{name}/external-profiles", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserExternalProfiles))))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "create", s.handleBulkCreateUsers))))
 	protected.HandleFunc("GET /api/user-route-tags", s.secure(s.requirePerm(canReadUsers, s.handleGetUserRouteTags)))
 	protected.HandleFunc("POST /api/user-route-tags", s.secure(s.requirePerm(canWriteUsers, s.handleCreateUserRouteTag)))
 	protected.HandleFunc("PUT /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserRouteTag)))
 	protected.HandleFunc("DELETE /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteUserRouteTag)))
 	protected.HandleFunc("GET /api/user-route-tags/compatible-rules", s.secure(s.requirePerm(canReadConfig, s.handleGetCompatibleUserRouteRules)))
+	protected.HandleFunc("GET /api/external-profiles", s.secure(s.requirePerm(canReadConfig, s.handleListExternalProfiles)))
+	protected.HandleFunc("POST /api/external-profiles", s.secure(s.requirePerm(canWriteConfig, s.AuditLogger("external_profile", "upsert", s.handleUpsertExternalProfile))))
+	protected.HandleFunc("DELETE /api/external-profiles/{id}", s.secure(s.requirePerm(canWriteConfig, s.AuditLogger("external_profile", "delete", s.handleDeleteExternalProfile))))
+	protected.HandleFunc("GET /api/external-profiles/{id}/link", s.secure(s.requirePerm(canWriteUsers, s.handleGetExternalProfileLink)))
 
 	// Reports/logs
 	protected.HandleFunc("GET /api/report", s.secure(s.requirePerm(canReadUsers, s.handleGetReport)))
@@ -847,9 +852,10 @@ type UserStatus struct {
 	ResetDay          int                  `json:"reset_day"`
 	Enabled           bool                 `json:"enabled"`
 	LastSeen          int64                `json:"last_seen"`
-	InboundTags       []string             `json:"inbound_tags"`
-	RouteTags         []UserRouteTagStatus `json:"route_tags"`
-	SubscriptionQuota *SubQuotaInfo        `json:"subscription_quota,omitempty"`
+	InboundTags       []string               `json:"inbound_tags"`
+	RouteTags         []UserRouteTagStatus   `json:"route_tags"`
+	ExternalProfiles  []core.ExternalProfile `json:"external_profiles,omitempty"`
+	SubscriptionQuota *SubQuotaInfo          `json:"subscription_quota,omitempty"`
 }
 
 func (s *Server) replaceUserInRouteRules(oldName, newName string) error {
@@ -1124,6 +1130,13 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		var externalProfiles []core.ExternalProfile
+		if s.store != nil {
+			if eps, err := s.store.GetUserExternalProfiles(name); err == nil {
+				externalProfiles = eps
+			}
+		}
+
 		// Subscription quota: check if this user belongs to a subscription with quota_limit > 0.
 		var subQuota *SubQuotaInfo
 		if subs, subErr := s.store.Queries.GetSubscriptionsForUser(r.Context(), name); subErr == nil {
@@ -1160,6 +1173,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			LastSeen:          lastSeen,
 			InboundTags:       inboundTags,
 			RouteTags:         routeTags,
+			ExternalProfiles:  externalProfiles,
 			SubscriptionQuota: subQuota,
 		})
 	}
