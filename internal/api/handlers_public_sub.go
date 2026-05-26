@@ -312,6 +312,30 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 				links = append(links, link)
 			}
 		}
+
+		// Append external homelab profile links for this subscription member.
+		if s.store != nil {
+			externalProfiles, epErr := s.store.GetUserExternalProfiles(username)
+			if epErr == nil {
+				for _, ep := range externalProfiles {
+					if !ep.Enabled {
+						continue
+					}
+					var epLink string
+					var epLinkErr error
+					epDisplayName := proxyDisplayName(username, member.Alias)
+					switch ep.Type {
+					case "vless":
+						epLink, epLinkErr = buildExternalVlessLink(epDisplayName, ep)
+					case "shadowsocks":
+						epLink, epLinkErr = buildExternalShadowsocksLink(epDisplayName, ep)
+					}
+					if epLinkErr == nil && epLink != "" {
+						links = append(links, epLink)
+					}
+				}
+			}
+		}
 	}
 
 	displayTitle := subscriptionDisplayName(sub.Name, sub.Alias)
