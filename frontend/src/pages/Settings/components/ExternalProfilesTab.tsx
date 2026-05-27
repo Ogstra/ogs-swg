@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, ExternalProfile } from '../../../services/api'
 import { useToast } from '../../../context/ToastContext'
+import { COUNTRIES, countryFlagEmoji } from '../../../utils/countries'
 import { Button } from '../../../components/ui/Button'
 import { Badge } from '../../../components/ui/Badge'
 import { Modal } from '../../../components/ui/Modal'
@@ -449,14 +450,21 @@ export default function ExternalProfilesTab() {
                             />
                         )}
                         {field('Flag',
-                            <input
-                                type="text"
+                            <select
                                 value={form.flag}
                                 onChange={e => setForm(f => ({ ...f, flag: e.target.value }))}
-                                className={inputClass}
-                                placeholder="AR"
-                                maxLength={16}
-                            />,
+                                className={selectClass}
+                            >
+                                <option value="">None</option>
+                                {COUNTRIES.map(c => {
+                                    const emoji = countryFlagEmoji(c.code)
+                                    return (
+                                        <option key={c.code} value={emoji}>
+                                            {emoji} {c.code} · {c.name}
+                                        </option>
+                                    )
+                                })}
+                            </select>,
                             'Optional prefix used in subscription link names for this external profile'
                         )}
                         {field('Type',

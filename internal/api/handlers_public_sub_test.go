@@ -2007,7 +2007,7 @@ func TestHandlePublicSubscription_IncludesExternalOnlyProfile(t *testing.T) {
 	if !strings.Contains(bodyText, "vless://22222222-2222-2222-2222-222222222222@external.example.test:443") {
 		t.Fatalf("subscription body missing external profile %d link: %q", externalID, bodyText)
 	}
-	if !strings.Contains(bodyText, "#AR+homelab-only") {
+	if !strings.Contains(bodyText, "#AR%20homelab-only") {
 		t.Fatalf("subscription body missing external profile flag in display name: %q", bodyText)
 	}
 	if strings.Contains(bodyText, "11111111-1111-1111-1111-111111111111") {
