@@ -19,6 +19,7 @@ type SSMethod = typeof SS_METHODS[number]
 
 type FormData = {
     name: string
+    flag: string
     type: 'vless' | 'shadowsocks'
     host_ipv4: string
     host_ipv6_file: string
@@ -38,6 +39,7 @@ type FormData = {
 
 const DEFAULT_FORM: FormData = {
     name: '',
+    flag: '',
     type: 'vless',
     host_ipv4: '',
     host_ipv6_file: '',
@@ -166,6 +168,7 @@ function parseProfileLink(rawLink: string): Partial<FormData> {
 function profileToForm(p: ExternalProfile): FormData {
     return {
         name: p.name,
+        flag: p.flag || '',
         type: p.type,
         host_ipv4: p.host_ipv4,
         host_ipv6_file: p.host_ipv6_file,
@@ -272,6 +275,7 @@ export default function ExternalProfilesTab() {
         try {
             const payload: Partial<ExternalProfile> = {
                 name: form.name.trim(),
+                flag: form.flag.trim(),
                 type: form.type,
                 host_ipv4: form.host_ipv4.trim(),
                 host_ipv6_file: form.host_ipv6_file.trim(),
@@ -352,7 +356,7 @@ export default function ExternalProfilesTab() {
                         <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1 space-y-1">
                                 <div className="flex flex-wrap items-center gap-2">
-                                    <span className="font-semibold text-white">{profile.name}</span>
+                                    <span className="font-semibold text-white">{profile.flag ? `${profile.flag} ${profile.name}` : profile.name}</span>
                                     <Badge variant={profile.type === 'vless' ? 'info' : 'warning'}>
                                         {profile.type === 'vless' ? 'VLESS' : 'SS'}
                                     </Badge>
@@ -443,6 +447,17 @@ export default function ExternalProfilesTab() {
                                 className={inputClass}
                                 placeholder="Homelab VLESS"
                             />
+                        )}
+                        {field('Flag',
+                            <input
+                                type="text"
+                                value={form.flag}
+                                onChange={e => setForm(f => ({ ...f, flag: e.target.value }))}
+                                className={inputClass}
+                                placeholder="AR"
+                                maxLength={16}
+                            />,
+                            'Optional prefix used in subscription link names for this external profile'
                         )}
                         {field('Type',
                             <select

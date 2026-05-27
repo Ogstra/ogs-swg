@@ -306,6 +306,7 @@ func (s *Store) initSchema() error {
 	CREATE TABLE IF NOT EXISTS external_profiles (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
+		flag TEXT NOT NULL DEFAULT '',
 		type TEXT NOT NULL DEFAULT 'vless',
 		host_ipv4 TEXT NOT NULL DEFAULT '',
 		host_ipv6_file TEXT NOT NULL DEFAULT '',
@@ -396,6 +397,7 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add happ_routing_profile to existing subscriptions tables.
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_routing_profile TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_color_profile TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE external_profiles ADD COLUMN flag TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE external_profiles ADD COLUMN alpn TEXT NOT NULL DEFAULT '';")
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_external_profiles_user ON user_external_profiles(user_name);`)
 	return nil

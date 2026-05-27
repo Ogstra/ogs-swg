@@ -46,6 +46,7 @@ export interface UserRouteTag {
 export interface ExternalProfile {
     id: number;
     name: string;
+    flag: string;
     type: 'vless' | 'shadowsocks';
     host_ipv4: string;
     host_ipv6_file: string;
