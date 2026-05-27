@@ -2,6 +2,7 @@ package core
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -11,17 +12,17 @@ import (
 type ExternalProfile struct {
 	ID           int64  `json:"id"`
 	Name         string `json:"name"`
-	Type         string `json:"type"`           // "vless" | "shadowsocks"
+	Type         string `json:"type"` // "vless" | "shadowsocks"
 	HostIPv4     string `json:"host_ipv4"`
 	HostIPv6File string `json:"host_ipv6_file"` // path on VPS, kept empty if not used
 	Port         int    `json:"port"`
-	UUID         string `json:"uuid"`           // VLESS only
-	Password     string `json:"password"`       // Shadowsocks only
-	SSMethod     string `json:"ss_method"`      // Shadowsocks only (e.g. "2022-blake3-aes-128-gcm")
-	SSServerKey  string `json:"ss_server_key"`  // Shadowsocks 2022 only
-	PublicKey    string `json:"public_key"`     // Reality public key (homelab server key)
+	UUID         string `json:"uuid"`          // VLESS only
+	Password     string `json:"password"`      // Shadowsocks only
+	SSMethod     string `json:"ss_method"`     // Shadowsocks only (e.g. "2022-blake3-aes-128-gcm")
+	SSServerKey  string `json:"ss_server_key"` // Shadowsocks 2022 only
+	PublicKey    string `json:"public_key"`    // Reality public key (homelab server key)
 	ShortID      string `json:"short_id"`
-	ServerName   string `json:"server_name"`    // SNI
+	ServerName   string `json:"server_name"` // SNI
 	Flow         string `json:"flow"`
 	Enabled      bool   `json:"enabled"`
 	Position     int    `json:"position"`
@@ -46,8 +47,15 @@ func ReadExternalIPv6(path string) string {
 // If p.ID == 0, a new row is inserted and the new ID is returned.
 // If p.ID != 0, the existing row is updated and p.ID is returned.
 func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var id int64
 	if p.ID == 0 {
-		result, err := s.db.Exec(`
+		result, err := tx.Exec(`
 			INSERT INTO external_profiles
 				(name, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method, ss_server_key,
 				 public_key, short_id, server_name, flow, enabled, position)
@@ -59,20 +67,65 @@ func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
 		if err != nil {
 			return 0, err
 		}
-		return result.LastInsertId()
+		id, err = result.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		result, err := tx.Exec(`
+			UPDATE external_profiles SET
+				name = ?, type = ?, host_ipv4 = ?, host_ipv6_file = ?, port = ?, uuid = ?,
+				password = ?, ss_method = ?, ss_server_key = ?, public_key = ?, short_id = ?,
+				server_name = ?, flow = ?, enabled = ?, position = ?,
+				updated_at = strftime('%s','now')
+			WHERE id = ?`,
+			p.Name, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
+			p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.Flow,
+			boolToInt(p.Enabled), p.Position, p.ID,
+		)
+		if err != nil {
+			return 0, err
+		}
+		if rows, err := result.RowsAffected(); err == nil && rows == 0 {
+			return 0, fmt.Errorf("external profile %d not found", p.ID)
+		}
+		id = p.ID
 	}
-	_, err := s.db.Exec(`
-		UPDATE external_profiles SET
-			name = ?, type = ?, host_ipv4 = ?, host_ipv6_file = ?, port = ?, uuid = ?,
-			password = ?, ss_method = ?, ss_server_key = ?, public_key = ?, short_id = ?,
-			server_name = ?, flow = ?, enabled = ?, position = ?,
-			updated_at = strftime('%s','now')
-		WHERE id = ?`,
-		p.Name, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
-		p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.Flow,
-		boolToInt(p.Enabled), p.Position, p.ID,
+
+	p.ID = id
+	if err := ensureExternalProfileUserTx(tx, p); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+func ensureExternalProfileUserTx(tx *sql.Tx, p ExternalProfile) error {
+	userName := strings.TrimSpace(p.Name)
+	if userName == "" {
+		return fmt.Errorf("external profile user name is required")
+	}
+	if p.ID <= 0 {
+		return fmt.Errorf("external profile id is required")
+	}
+
+	_, err := tx.Exec(`
+		INSERT INTO users
+			(email, quota_limit, quota_period, reset_day, enabled, credential, flow, vmess_security, vmess_alter_id, inbound_tags)
+		VALUES (?, 0, 'monthly', 1, ?, '', '', '', 0, '[]')
+		ON CONFLICT(email) DO NOTHING`,
+		userName, boolToInt(p.Enabled),
 	)
-	return p.ID, err
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE users SET inbound_tags = '[]' WHERE email = ? AND COALESCE(inbound_tags, '') = ''`, userName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM user_external_profiles WHERE external_profile_id = ?`, p.ID); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT OR IGNORE INTO user_external_profiles (user_name, external_profile_id) VALUES (?, ?)`, userName, p.ID)
+	return err
 }
 
 // GetExternalProfile retrieves a single external profile by ID.
