@@ -231,6 +231,9 @@ func (s *Server) handleGetExternalProfileLink(w http.ResponseWriter, r *http.Req
 		http.Error(w, "External profile not found", http.StatusNotFound)
 		return
 	}
+	if flag := strings.TrimSpace(p.Flag); flag != "" {
+		displayName = flag + displayName
+	}
 	var link string
 	var linkType string
 	switch p.Type {

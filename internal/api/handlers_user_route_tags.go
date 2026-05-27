@@ -361,6 +361,20 @@ func (s *Server) handleUpdateUserRouteTags(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+	userMeta, err := s.store.GetUserMetadata(name)
+	if err != nil {
+		http.Error(w, "Failed to get user metadata: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	externalProfiles, err := s.store.GetUserExternalProfiles(name)
+	if err != nil {
+		http.Error(w, "Failed to get external profiles: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if userMeta != nil && len(userMeta.InboundTags) == 0 && len(externalProfiles) > 0 {
+		http.Error(w, "External-only users cannot use route tags", http.StatusBadRequest)
+		return
+	}
 
 	tags, err := s.store.ListUserRouteTags()
 	if err != nil {

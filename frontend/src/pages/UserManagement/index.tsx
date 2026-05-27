@@ -61,6 +61,24 @@ function formatUserTypeLabel(type: UserType): string {
     return type.toUpperCase()
 }
 
+type ExternalProfileSummary = NonNullable<UserStatus['external_profiles']>[number]
+
+function externalProfileTag(profile: ExternalProfileSummary): string {
+    return `external-${String(profile.type || 'unknown').trim().toLowerCase()}`
+}
+
+function visibleUserTags(user: Pick<UserStatus, 'inbound_tags' | 'external_profiles'>): string[] {
+    const tags = [
+        ...(user.inbound_tags || []).map(tag => tag.trim()).filter(Boolean),
+        ...(user.external_profiles || []).map(externalProfileTag),
+    ]
+    return Array.from(new Set(tags))
+}
+
+function isExternalOnlyUser(user: Pick<UserStatus, 'inbound_tags' | 'external_profiles'>): boolean {
+    return (user.external_profiles || []).length > 0 && (user.inbound_tags || []).filter(tag => tag.trim()).length === 0
+}
+
 export default function UserManagement() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -145,9 +163,7 @@ export default function UserManagement() {
         setQrLoading(true)
         setQrLink('')
         setQrError('')
-        const inboundOptions = (user.inbound_tags || []).filter(
-            tag => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || '')
-        )
+        const inboundOptions = (user.inbound_tags || []).filter(canBuildQrForInboundTag)
         const firstSupportedTag = inboundOptions[0]
             || (user.external_profiles && user.external_profiles.length > 0 ? `ext:${user.external_profiles[0].id}` : '')
         setSelectedQrInbound(firstSupportedTag)
@@ -156,28 +172,41 @@ export default function UserManagement() {
         setModalState({ type: 'qr', data: user })
         // Pre-fetch all inbound links + external profile links into cache
         const allFetches: Array<Promise<void>> = []
+        const setFetchedLink = (key: string, link: string) => {
+            setQrLinkCache(prev => ({ ...prev, [key]: link }))
+            if (key === firstSupportedTag) {
+                setQrLink(link)
+            }
+        }
         inboundOptions.forEach(tag => {
             allFetches.push(
                 api.getUserLink(user.name, tag)
-                    .then(res => { setQrLinkCache(prev => ({ ...prev, [tag]: res.link || '' })) })
-                    .catch(() => {})
+                    .then(res => { setFetchedLink(tag, res.link || '') })
+                    .catch(err => {
+                        if (tag === firstSupportedTag) setQrError(String(err))
+                    })
             )
         });
         (user.external_profiles || []).forEach(ep => {
             const key = `ext:${ep.id}`
             allFetches.push(
                 api.getExternalProfileLink(ep.id, user.name)
-                    .then(res => { setQrLinkCache(prev => ({ ...prev, [key]: res.link || '' })) })
-                    .catch(() => {})
+                    .then(res => { setFetchedLink(key, res.link || '') })
+                    .catch(err => {
+                        if (key === firstSupportedTag) setQrError(String(err))
+                    })
             )
         })
+        if (!firstSupportedTag) {
+            setQrError('No supported link available for this user')
+        }
         Promise.allSettled(allFetches).finally(() => setQrLoading(false))
     }
 
     const inferInboundsFromUsers = (userList: UserStatus[]) => {
         const uniqueTags = Array.from(
             new Set(
-                userList.flatMap(u => (u.inbound_tags || []).map(tag => tag.trim()).filter(Boolean))
+                userList.flatMap(u => visibleUserTags(u))
             )
         )
         return uniqueTags.map(tag => ({ tag, type: '' }))
@@ -262,6 +291,10 @@ export default function UserManagement() {
     )
 
     const getInboundType = (tag: string) => inboundTypeByTag.get(tag) as UserType | undefined
+    const canBuildQrForInboundTag = (tag: string) => {
+        const type = inboundTypeByTag.get(tag) || ''
+        return type === '' || SUPPORTED_LINK_TYPES.has(type)
+    }
     const getInboundByTag = (tag: string) => inbounds.find(inb => inb.tag === tag)
     const canEditFlowForInbound = (type: string, inboundTag: string) => canSelectInboundUserFlow(type, getInboundByTag(inboundTag) || null)
     const canShowBulkFlow = (inboundTag: string) => getInboundType(inboundTag) === 'vless' && canEditFlowForInbound('vless', inboundTag)
@@ -304,7 +337,7 @@ export default function UserManagement() {
     }, [modalState.type])
 
     const sortedUsers = users
-        .filter(u => !filterInbound || (u.inbound_tags && u.inbound_tags.includes(filterInbound)) || (!u.inbound_tags && !filterInbound))
+        .filter(u => !filterInbound || visibleUserTags(u).includes(filterInbound))
         .filter(u => !routeTagFilter || (u.route_tags || []).some(tag => String(tag.id) === routeTagFilter))
         .sort((a, b) => {
             const dir = sortDir === 'asc' ? 1 : -1
@@ -380,6 +413,10 @@ export default function UserManagement() {
     }
 
     const openRouteTagsModal = (user: UserStatus) => {
+        if (isExternalOnlyUser(user)) {
+            toastError('External-only users cannot use route tags')
+            return
+        }
         setSelectedRouteTagIds(new Set((user.route_tags || []).map(tag => tag.id)))
         setModalState({ type: 'route_tags', data: user })
     }
@@ -401,6 +438,10 @@ export default function UserManagement() {
     const handleSaveUserRouteTags = async () => {
         if (!canWriteUsers || !modalState.data) return
         const user = modalState.data as UserStatus
+        if (isExternalOnlyUser(user)) {
+            toastError('External-only users cannot use route tags')
+            return
+        }
         setRouteTagSaving(true)
         try {
             const result = await api.updateUserRouteTags(user.name, Array.from(selectedRouteTagIds))
@@ -1058,8 +1099,8 @@ export default function UserManagement() {
                                             </td>
                                             <td className="p-2">
                                                 <div className="flex flex-wrap gap-2 max-w-full">
-                                                    {(user.inbound_tags && user.inbound_tags.length > 0) ? (
-                                                        user.inbound_tags.map(tag => (
+                                                    {visibleUserTags(user).length > 0 ? (
+                                                        visibleUserTags(user).map(tag => (
                                                             <Badge key={tag} variant="info" className="max-w-[160px] truncate">
                                                                 {tag}
                                                             </Badge>
@@ -1071,15 +1112,6 @@ export default function UserManagement() {
                                                 {user.route_tags && user.route_tags.length > 0 && (
                                                     <div className="mt-2">
                                                         {renderRouteTagBadges(user.route_tags)}
-                                                    </div>
-                                                )}
-                                                {user.external_profiles && user.external_profiles.length > 0 && (
-                                                    <div className="flex flex-wrap gap-1 mt-1">
-                                                        {user.external_profiles.map(ep => (
-                                                            <Badge key={ep.id} variant="neutral" className="text-xs">
-                                                                {ep.name}
-                                                            </Badge>
-                                                        ))}
                                                     </div>
                                                 )}
                                             </td>
@@ -1095,7 +1127,7 @@ export default function UserManagement() {
                                                     </ActionIconButton>
                                                     <ActionIconButton
                                                         onClick={() => openRouteTagsModal(user)}
-                                                        disabled={!canWriteUsers}
+                                                        disabled={!canWriteUsers || isExternalOnlyUser(user)}
                                                         title="Route Tags"
                                                     >
                                                         <Tags size={16} />
@@ -1178,7 +1210,7 @@ export default function UserManagement() {
                                             </ActionIconButton>
                                             <ActionIconButton
                                                 onClick={() => openRouteTagsModal(user)}
-                                                disabled={!canWriteUsers}
+                                                disabled={!canWriteUsers || isExternalOnlyUser(user)}
                                                 title="Route Tags"
                                             >
                                                 <Tags size={16} />
@@ -1206,17 +1238,14 @@ export default function UserManagement() {
                                             <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>{statusText}</span>
                                         </div>
                                         <div className="min-w-0 flex flex-1 flex-wrap justify-end gap-1.5">
-                                            {(user.inbound_tags && user.inbound_tags.length > 0) ? (
-                                                user.inbound_tags.map(tag => (
+                                            {visibleUserTags(user).length > 0 ? (
+                                                visibleUserTags(user).map(tag => (
                                                     <Badge key={tag} variant="info" className="max-w-[140px] truncate" title={tag}>{tag}</Badge>
                                                 ))
                                             ) : (
                                                 <Badge variant="neutral">All</Badge>
                                             )}
                                             {user.route_tags && user.route_tags.length > 0 && renderRouteTagBadges(user.route_tags, "contents")}
-                                            {user.external_profiles && user.external_profiles.length > 0 && user.external_profiles.map(ep => (
-                                                <Badge key={ep.id} variant="neutral" className="text-xs">{ep.name}</Badge>
-                                            ))}
                                         </div>
                                     </div>
 
@@ -1931,10 +1960,10 @@ export default function UserManagement() {
             {(() => {
                 const qrUser = modalState.data as UserStatus | undefined
                 const inboundOptions = (qrUser?.inbound_tags || [])
-                    .filter(tag => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || ''))
+                    .filter(canBuildQrForInboundTag)
                     .map(tag => ({ id: tag, label: tag }))
                 const extOptions = (qrUser?.external_profiles || [])
-                    .map(ep => ({ id: `ext:${ep.id}`, label: `[ext] ${ep.name}` }))
+                    .map(ep => ({ id: `ext:${ep.id}`, label: externalProfileTag(ep) }))
                 const allOptions = [...inboundOptions, ...extOptions]
                 if (allOptions.length > 1) {
                     return (
