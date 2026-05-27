@@ -5,7 +5,7 @@ import { useToast } from '../../../context/ToastContext'
 import { Button } from '../../../components/ui/Button'
 import { Badge } from '../../../components/ui/Badge'
 import { Modal } from '../../../components/ui/Modal'
-import { Plus, Edit, Trash2 } from 'lucide-react'
+import { Copy, Plus, Edit, Trash2, Import as ImportIcon } from 'lucide-react'
 
 const SS_METHODS = [
     '2022-blake3-aes-128-gcm',
@@ -27,6 +27,7 @@ type FormData = {
     public_key: string
     short_id: string
     server_name: string
+    alpn: string
     flow: string
     password: string
     ss_method: SSMethod
@@ -45,12 +46,121 @@ const DEFAULT_FORM: FormData = {
     public_key: '',
     short_id: '',
     server_name: '',
+    alpn: '',
     flow: 'xtls-rprx-vision',
     password: '',
     ss_method: '2022-blake3-aes-128-gcm',
     ss_server_key: '',
     enabled: true,
     position: '',
+}
+
+function safeDecode(value: string): string {
+    try {
+        return decodeURIComponent(value)
+    } catch {
+        return value
+    }
+}
+
+function decodeBase64Url(value: string): string {
+    const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    return atob(padded)
+}
+
+function splitHostPort(value: string): { host: string; port: string } {
+    const trimmed = value.trim()
+    if (!trimmed) throw new Error('Missing host')
+    if (trimmed.startsWith('[')) {
+        const end = trimmed.indexOf(']')
+        if (end < 0) throw new Error('Invalid IPv6 host')
+        const host = trimmed.slice(1, end)
+        const port = trimmed.slice(end + 1).replace(/^:/, '')
+        return { host, port }
+    }
+    const lastColon = trimmed.lastIndexOf(':')
+    if (lastColon <= 0) throw new Error('Missing port')
+    return {
+        host: trimmed.slice(0, lastColon),
+        port: trimmed.slice(lastColon + 1),
+    }
+}
+
+function parseShadowsocksLink(rawLink: string): Partial<FormData> {
+    const withoutScheme = rawLink.slice('ss://'.length)
+    const hashIndex = withoutScheme.indexOf('#')
+    const beforeHash = hashIndex >= 0 ? withoutScheme.slice(0, hashIndex) : withoutScheme
+    const name = hashIndex >= 0 ? safeDecode(withoutScheme.slice(hashIndex + 1)) : ''
+    const queryIndex = beforeHash.indexOf('?')
+    const body = queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash
+
+    let credential = ''
+    let hostPort = ''
+    const atIndex = body.lastIndexOf('@')
+    if (atIndex >= 0) {
+        credential = decodeBase64Url(safeDecode(body.slice(0, atIndex)))
+        hostPort = safeDecode(body.slice(atIndex + 1))
+    } else {
+        const decoded = decodeBase64Url(safeDecode(body))
+        const decodedAt = decoded.lastIndexOf('@')
+        if (decodedAt < 0) throw new Error('Invalid Shadowsocks link')
+        credential = decoded.slice(0, decodedAt)
+        hostPort = decoded.slice(decodedAt + 1)
+    }
+
+    const credentialParts = credential.split(':')
+    const method = credentialParts.shift() || ''
+    if (!method || credentialParts.length === 0) throw new Error('Invalid Shadowsocks credentials')
+    const password = credentialParts.pop() || ''
+    const serverKey = credentialParts.join(':')
+    const { host, port } = splitHostPort(hostPort)
+
+    return {
+        name,
+        type: 'shadowsocks',
+        host_ipv4: host,
+        port,
+        password,
+        ss_method: (SS_METHODS.includes(method as SSMethod) ? method : DEFAULT_FORM.ss_method) as SSMethod,
+        ss_server_key: serverKey,
+        uuid: '',
+        public_key: '',
+        short_id: '',
+        server_name: '',
+        alpn: '',
+        flow: '',
+    }
+}
+
+function parseVlessLink(rawLink: string): Partial<FormData> {
+    const parsed = new URL(rawLink)
+    if (parsed.protocol !== 'vless:') throw new Error('Invalid VLESS link')
+    const params = parsed.searchParams
+    const name = parsed.hash ? safeDecode(parsed.hash.slice(1)) : ''
+
+    return {
+        name,
+        type: 'vless',
+        host_ipv4: parsed.hostname.replace(/^\[(.*)\]$/, '$1'),
+        port: parsed.port,
+        uuid: safeDecode(parsed.username),
+        public_key: params.get('pbk') || '',
+        short_id: params.get('sid') || '',
+        server_name: params.get('sni') || '',
+        alpn: params.get('alpn') || '',
+        flow: params.get('flow') || '',
+        password: '',
+        ss_method: DEFAULT_FORM.ss_method,
+        ss_server_key: '',
+    }
+}
+
+function parseProfileLink(rawLink: string): Partial<FormData> {
+    const trimmed = rawLink.trim()
+    if (trimmed.startsWith('vless://')) return parseVlessLink(trimmed)
+    if (trimmed.startsWith('ss://')) return parseShadowsocksLink(trimmed)
+    throw new Error('Only vless:// and ss:// links are supported')
 }
 
 function profileToForm(p: ExternalProfile): FormData {
@@ -64,6 +174,7 @@ function profileToForm(p: ExternalProfile): FormData {
         public_key: p.public_key,
         short_id: p.short_id,
         server_name: p.server_name,
+        alpn: p.alpn || '',
         flow: p.flow,
         password: p.password,
         ss_method: (p.ss_method || '2022-blake3-aes-128-gcm') as SSMethod,
@@ -79,6 +190,7 @@ export default function ExternalProfilesTab() {
     const [modalOpen, setModalOpen] = useState(false)
     const [editingId, setEditingId] = useState<number | null>(null)
     const [form, setForm] = useState<FormData>(DEFAULT_FORM)
+    const [importLink, setImportLink] = useState('')
     const [saving, setSaving] = useState(false)
 
     const { data: profiles = [], isLoading } = useQuery({
@@ -94,12 +206,24 @@ export default function ExternalProfilesTab() {
     const openCreate = () => {
         setEditingId(null)
         setForm(DEFAULT_FORM)
+        setImportLink('')
         setModalOpen(true)
     }
 
     const openEdit = (profile: ExternalProfile) => {
         setEditingId(profile.id)
         setForm(profileToForm(profile))
+        setImportLink('')
+        setModalOpen(true)
+    }
+
+    const openDuplicate = (profile: ExternalProfile) => {
+        setEditingId(null)
+        setForm({
+            ...profileToForm(profile),
+            name: `${profile.name} copy`,
+        })
+        setImportLink('')
         setModalOpen(true)
     }
 
@@ -107,6 +231,23 @@ export default function ExternalProfilesTab() {
         setModalOpen(false)
         setEditingId(null)
         setForm(DEFAULT_FORM)
+        setImportLink('')
+    }
+
+    const handleImportLink = () => {
+        try {
+            const imported = parseProfileLink(importLink)
+            setForm(current => ({
+                ...current,
+                ...imported,
+                name: imported.name?.trim() || current.name || 'Imported profile',
+                enabled: current.enabled,
+                position: current.position,
+            }))
+            success('Profile link imported')
+        } catch (err) {
+            toastError(err instanceof Error ? err.message : 'Invalid profile link')
+        }
     }
 
     const handleSave = async () => {
@@ -141,6 +282,7 @@ export default function ExternalProfilesTab() {
                 public_key: form.public_key.trim(),
                 short_id: form.short_id.trim(),
                 server_name: form.server_name.trim(),
+                alpn: form.alpn.split(',').map(item => item.trim()).filter(Boolean).join(','),
                 flow: form.flow.trim(),
                 password: form.password.trim(),
                 ss_method: form.ss_method,
@@ -229,6 +371,14 @@ export default function ExternalProfilesTab() {
                                 <Button
                                     variant="ghost"
                                     size="sm"
+                                    icon={<Copy size={14} />}
+                                    onClick={() => openDuplicate(profile)}
+                                >
+                                    Duplicate
+                                </Button>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
                                     icon={<Edit size={14} />}
                                     onClick={() => openEdit(profile)}
                                 >
@@ -263,6 +413,27 @@ export default function ExternalProfilesTab() {
                 }
             >
                 <div className="space-y-4 modal-form-uniform">
+                    <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                        <label className="block text-sm font-medium text-slate-400">Import profile link</label>
+                        <textarea
+                            value={importLink}
+                            onChange={e => setImportLink(e.target.value)}
+                            className={`${inputClass} min-h-[84px] resize-y font-mono text-xs`}
+                            placeholder="vless://... or ss://..."
+                        />
+                        <div className="flex justify-end">
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                icon={<ImportIcon size={14} />}
+                                onClick={handleImportLink}
+                                disabled={!importLink.trim()}
+                            >
+                                Import
+                            </Button>
+                        </div>
+                    </div>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {field('Name',
                             <input
@@ -364,6 +535,16 @@ export default function ExternalProfilesTab() {
                                         className={inputClass}
                                         placeholder="example.com"
                                     />
+                                )}
+                                {field('ALPN',
+                                    <input
+                                        type="text"
+                                        value={form.alpn}
+                                        onChange={e => setForm(f => ({ ...f, alpn: e.target.value }))}
+                                        className={inputClass}
+                                        placeholder="h2, http/1.1"
+                                    />,
+                                    'Optional, comma-separated. Included in generated VLESS Reality links.'
                                 )}
                                 {field('Flow',
                                     <input

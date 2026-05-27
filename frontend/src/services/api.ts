@@ -57,6 +57,7 @@ export interface ExternalProfile {
     public_key: string;
     short_id: string;
     server_name: string;
+    alpn: string;
     flow: string;
     enabled: boolean;
     position: number;

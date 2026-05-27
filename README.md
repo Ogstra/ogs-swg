@@ -80,6 +80,7 @@ environment:
   - OGS_ACCESS_LOG_PATH=/app/access-logs/access.log
 volumes:
   - ${OGS_ACCESS_LOG_HOST_DIR:-./data}:/app/access-logs:ro
+  - ${OGS_EXTERNAL_PROFILE_IP_HOST_DIR:-./homelab/ip}:/app/external-profile-ip:ro
   - /etc/sing-box:/etc/sing-box
   - /etc/wireguard:/etc/wireguard
   - /run/dbus:/run/dbus
@@ -91,6 +92,8 @@ volumes:
 Ready-to-use compose at [`docker/docker-local/docker-compose.yml`](docker/docker-local/docker-compose.yml).
 
 If sing-box writes to another host log path, mount its containing directory with `OGS_ACCESS_LOG_HOST_DIR` and point `OGS_ACCESS_LOG_PATH` at the file inside `/app/access-logs`.
+
+For External Profiles with dynamic IP files, mount the host directory with `OGS_EXTERNAL_PROFILE_IP_HOST_DIR` and use the fixed container path in the UI. Example: if the host file is `/root/ogs-swg/homelab/ip/sing-box`, set `OGS_EXTERNAL_PROFILE_IP_HOST_DIR=/root/ogs-swg/homelab/ip` and use `/app/external-profile-ip/sing-box` in the IPv6 File Path field.
 
 For blue/green local slots, use:
 

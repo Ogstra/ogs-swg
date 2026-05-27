@@ -135,6 +135,7 @@ func buildExternalVlessLink(displayName string, p core.ExternalProfile) (string,
 	if strings.TrimSpace(p.ServerName) == "" {
 		return "", fmt.Errorf("external VLESS profile %q missing server_name (SNI)", p.Name)
 	}
+	alpn := normalizedALPN(strings.Split(p.ALPN, ","))
 
 	hostInURI := host
 	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
@@ -149,6 +150,9 @@ func buildExternalVlessLink(displayName string, p core.ExternalProfile) (string,
 	params.Set("type", "tcp")
 	params.Set("sni", strings.TrimSpace(p.ServerName))
 	params.Set("sid", strings.TrimSpace(p.ShortID))
+	if alpn != "" {
+		params.Set("alpn", alpn)
+	}
 	if strings.TrimSpace(p.Flow) != "" {
 		params.Set("flow", strings.TrimSpace(p.Flow))
 	}

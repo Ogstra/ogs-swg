@@ -80,6 +80,13 @@ func TestUpsertExternalProfileRenameMovesAssignmentWithoutLocalInbound(t *testin
 	if len(oldProfiles) != 0 {
 		t.Fatalf("old profile assignments=%#v; want none after rename", oldProfiles)
 	}
+	oldMeta, err := store.GetUserMetadata("old-homelab")
+	if err != nil {
+		t.Fatalf("GetUserMetadata old: %v", err)
+	}
+	if oldMeta != nil {
+		t.Fatalf("old user metadata=%#v; want auto-created old user removed after rename", oldMeta)
+	}
 	newProfiles, err := store.GetUserExternalProfiles("new-homelab")
 	if err != nil {
 		t.Fatalf("GetUserExternalProfiles new: %v", err)
@@ -94,5 +101,90 @@ func TestUpsertExternalProfileRenameMovesAssignmentWithoutLocalInbound(t *testin
 	}
 	if meta == nil || len(meta.InboundTags) != 0 {
 		t.Fatalf("new user metadata=%#v; want metadata-only user without local inbounds", meta)
+	}
+}
+
+func TestDeleteExternalProfileRemovesMetadataOnlyUserAndSubscriptionMembership(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	id, err := store.UpsertExternalProfile(ExternalProfile{
+		Name:    "external-only",
+		Type:    "vless",
+		Port:    443,
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertExternalProfile: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO subscriptions (token, name) VALUES ('external-token', 'External')`); err != nil {
+		t.Fatalf("insert subscription: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO subscription_users (sub_id, user_name, alias, position) VALUES (1, 'external-only', '', 0)`); err != nil {
+		t.Fatalf("insert subscription user: %v", err)
+	}
+
+	if err := store.DeleteExternalProfile(id); err != nil {
+		t.Fatalf("DeleteExternalProfile: %v", err)
+	}
+	meta, err := store.GetUserMetadata("external-only")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta != nil {
+		t.Fatalf("metadata=%#v; want auto-created external user removed", meta)
+	}
+	var subUsers int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM subscription_users WHERE user_name = 'external-only'`).Scan(&subUsers); err != nil {
+		t.Fatalf("count subscription_users: %v", err)
+	}
+	if subUsers != 0 {
+		t.Fatalf("subscription_users count=%d; want 0", subUsers)
+	}
+}
+
+func TestDeleteExternalProfilePreservesRealUser(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if err := store.SaveUserMetadata(UserMetadata{
+		Email:       "real-user",
+		Credential:  "11111111-1111-1111-1111-111111111111",
+		QuotaPeriod: "monthly",
+		Enabled:     true,
+		InboundTags: []string{"vless-in"},
+	}); err != nil {
+		t.Fatalf("SaveUserMetadata: %v", err)
+	}
+	id, err := store.UpsertExternalProfile(ExternalProfile{
+		Name:    "real-user",
+		Type:    "vless",
+		Port:    443,
+		Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertExternalProfile: %v", err)
+	}
+
+	if err := store.DeleteExternalProfile(id); err != nil {
+		t.Fatalf("DeleteExternalProfile: %v", err)
+	}
+	meta, err := store.GetUserMetadata("real-user")
+	if err != nil {
+		t.Fatalf("GetUserMetadata: %v", err)
+	}
+	if meta == nil {
+		t.Fatal("real user metadata was removed")
+	}
+	if meta.Credential == "" || len(meta.InboundTags) != 1 || meta.InboundTags[0] != "vless-in" {
+		t.Fatalf("real user metadata=%#v; want preserved sing-box identity", meta)
 	}
 }
