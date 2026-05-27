@@ -314,6 +314,40 @@ func TestHandleUpdateUserRouteTags(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateUserRouteTagsRejectsExternalOnlyUser(t *testing.T) {
+	server, stub, store := newSingboxHandlerTestServerWithStore(t, routeTagAPIFixture())
+	emptyRule := map[string]interface{}{
+		"action":    "route",
+		"rule_set":  []interface{}{"geosite-empty"},
+		"outbound":  "empty",
+		"auth_user": []interface{}{},
+	}
+	empty := createRouteTagForRule(t, store, emptyRule, "Empty")
+	if _, err := store.UpsertExternalProfile(core.ExternalProfile{
+		Name:     "external-only",
+		Type:     "vless",
+		HostIPv4: "external.example.test",
+		Port:     443,
+		Enabled:  true,
+	}); err != nil {
+		t.Fatalf("UpsertExternalProfile: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/users/external-only/route-tags", strings.NewReader(`{"tag_ids":[`+strconv.FormatInt(empty.ID, 10)+`]}`))
+	req.SetPathValue("name", "external-only")
+	rec := httptest.NewRecorder()
+	server.handleUpdateUserRouteTags(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%q; want 400", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "External-only users cannot use route tags") {
+		t.Fatalf("body=%q; want external-only route tag error", rec.Body.String())
+	}
+	if stub.writeCount != 0 {
+		t.Fatalf("writeCount=%d; want no config write", stub.writeCount)
+	}
+}
+
 func TestHandleUpdateUserRouteTagsReturnsConflictForBrokenChangedTag(t *testing.T) {
 	server, stub, store := newSingboxHandlerTestServerWithStore(t, routeTagAPIFixture())
 	brokenRule := map[string]interface{}{
