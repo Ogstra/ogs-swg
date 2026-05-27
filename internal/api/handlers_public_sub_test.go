@@ -1959,7 +1959,7 @@ func TestHandlePublicSubscription_IncludesExternalOnlyProfile(t *testing.T) {
 
 	externalID, err := dataStore.UpsertExternalProfile(core.ExternalProfile{
 		Name:       "homelab-only",
-		Flag:       "AR ",
+		Flag:       "🇦🇷",
 		Type:       "vless",
 		HostIPv4:   "external.example.test",
 		Port:       443,
@@ -2007,7 +2007,7 @@ func TestHandlePublicSubscription_IncludesExternalOnlyProfile(t *testing.T) {
 	if !strings.Contains(bodyText, "vless://22222222-2222-2222-2222-222222222222@external.example.test:443") {
 		t.Fatalf("subscription body missing external profile %d link: %q", externalID, bodyText)
 	}
-	if !strings.Contains(bodyText, "#AR%20homelab-only") {
+	if !strings.Contains(bodyText, "#%F0%9F%87%A6%F0%9F%87%B7homelab-only") {
 		t.Fatalf("subscription body missing external profile flag in display name: %q", bodyText)
 	}
 	if strings.Contains(bodyText, "11111111-1111-1111-1111-111111111111") {

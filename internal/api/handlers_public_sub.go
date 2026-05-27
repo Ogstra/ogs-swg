@@ -222,7 +222,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	externalProfileDisplayName := func(username, alias string, ep core.ExternalProfile) string {
 		name := subscriptionMemberDisplayName(username, alias)
 		if flag := strings.TrimSpace(ep.Flag); flag != "" {
-			return flag + " " + name
+			return flag + name
 		}
 		return proxyDisplayName(username, alias)
 	}
