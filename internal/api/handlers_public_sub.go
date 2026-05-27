@@ -219,17 +219,16 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 		return name
 	}
+	externalProfileDisplayName := func(username, alias string, ep core.ExternalProfile) string {
+		name := subscriptionMemberDisplayName(username, alias)
+		if flag := strings.TrimSpace(ep.Flag); flag != "" {
+			return flag + " " + name
+		}
+		return proxyDisplayName(username, alias)
+	}
 
 	for _, member := range memberRows {
 		username := member.UserName
-		userInbounds, err := s.config.GetUserInbounds(username)
-		if err != nil || len(userInbounds) == 0 {
-			continue
-		}
-		// Legacy data may still have the same user in multiple inbounds. Subscription
-		// generation now treats the first match as canonical to avoid broken bundles.
-		userInbounds = userInbounds[:1]
-
 		userMeta, _ := s.store.GetUserMetadata(username)
 		if userMeta != nil {
 			// Only accumulate individual quota when there is no subscription-level quota set.
@@ -248,68 +247,75 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		for _, userInfo := range userInbounds {
-			inboundView, err := s.config.GetSingboxInboundView(userInfo.Tag)
-			if err != nil {
-				continue
-			}
-			inbType := inboundView.Type
-			if inbType == "" {
-				inbType = "vless"
-			}
+		userInbounds, err := s.config.GetUserInbounds(username)
+		if err == nil && len(userInbounds) > 0 {
+			// Legacy data may still have the same user in multiple inbounds. Subscription
+			// generation now treats the first match as canonical to avoid broken bundles.
+			userInbounds = userInbounds[:1]
 
-			if inboundView.ListenPort <= 0 {
-				continue
-			}
-			port := strconv.Itoa(inboundView.ListenPort)
-			currentHost := host
-			var inbMeta *core.InboundMeta
-			if m, ok := metaMap[userInfo.Tag]; ok {
-				inbMeta = m
-				if m.ExternalPort > 0 {
-					port = strconv.Itoa(m.ExternalPort)
+			for _, userInfo := range userInbounds {
+				inboundView, err := s.config.GetSingboxInboundView(userInfo.Tag)
+				if err != nil {
+					continue
 				}
-				if m.OverrideAddress != "" {
-					currentHost = m.OverrideAddress
+				inbType := inboundView.Type
+				if inbType == "" {
+					inbType = "vless"
 				}
-			}
 
-			sniFallback := ""
-			if currentHost != host {
-				sniFallback = host
-			}
-
-			var link string
-			var buildErr error
-
-			switch inbType {
-			case "vless":
-				link, buildErr = buildVlessLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-			case "vmess":
-				infoCopy := userInfo
-				if userMeta != nil {
-					if userMeta.VmessSecurity != "" {
-						infoCopy.VmessSecurity = userMeta.VmessSecurity
+				if inboundView.ListenPort <= 0 {
+					continue
+				}
+				port := strconv.Itoa(inboundView.ListenPort)
+				currentHost := host
+				var inbMeta *core.InboundMeta
+				if m, ok := metaMap[userInfo.Tag]; ok {
+					inbMeta = m
+					if m.ExternalPort > 0 {
+						port = strconv.Itoa(m.ExternalPort)
 					}
-					if userMeta.VmessAlterID != 0 {
-						infoCopy.VmessAlterID = userMeta.VmessAlterID
+					if m.OverrideAddress != "" {
+						currentHost = m.OverrideAddress
 					}
 				}
-				link, buildErr = buildVmessLink(proxyDisplayName(username, member.Alias), &infoCopy, inboundView, currentHost, port, inbMeta, sniFallback)
-			case "trojan":
-				link, buildErr = buildTrojanLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-			case "hysteria2":
-				link, buildErr = buildHysteria2Link(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
-			case "shadowsocks":
-				link, buildErr = buildShadowsocksLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
-			case "anytls":
-				link, buildErr = buildAnyTLSLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-			case "naive":
-				link, buildErr = buildNaiveLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-			}
 
-			if buildErr == nil && link != "" {
-				links = append(links, link)
+				sniFallback := ""
+				if currentHost != host {
+					sniFallback = host
+				}
+
+				var link string
+				var buildErr error
+
+				switch inbType {
+				case "vless":
+					link, buildErr = buildVlessLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				case "vmess":
+					infoCopy := userInfo
+					if userMeta != nil {
+						if userMeta.VmessSecurity != "" {
+							infoCopy.VmessSecurity = userMeta.VmessSecurity
+						}
+						if userMeta.VmessAlterID != 0 {
+							infoCopy.VmessAlterID = userMeta.VmessAlterID
+						}
+					}
+					link, buildErr = buildVmessLink(proxyDisplayName(username, member.Alias), &infoCopy, inboundView, currentHost, port, inbMeta, sniFallback)
+				case "trojan":
+					link, buildErr = buildTrojanLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				case "hysteria2":
+					link, buildErr = buildHysteria2Link(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
+				case "shadowsocks":
+					link, buildErr = buildShadowsocksLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
+				case "anytls":
+					link, buildErr = buildAnyTLSLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				case "naive":
+					link, buildErr = buildNaiveLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
+				}
+
+				if buildErr == nil && link != "" {
+					links = append(links, link)
+				}
 			}
 		}
 
@@ -323,7 +329,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 					}
 					var epLink string
 					var epLinkErr error
-					epDisplayName := proxyDisplayName(username, member.Alias)
+					epDisplayName := externalProfileDisplayName(username, member.Alias, ep)
 					switch ep.Type {
 					case "vless":
 						epLink, epLinkErr = buildExternalVlessLink(epDisplayName, ep)

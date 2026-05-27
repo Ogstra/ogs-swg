@@ -12,6 +12,7 @@ import (
 type ExternalProfile struct {
 	ID           int64  `json:"id"`
 	Name         string `json:"name"`
+	Flag         string `json:"flag"`
 	Type         string `json:"type"` // "vless" | "shadowsocks"
 	HostIPv4     string `json:"host_ipv4"`
 	HostIPv6File string `json:"host_ipv6_file"` // path on VPS, kept empty if not used
@@ -59,10 +60,10 @@ func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
 	if p.ID == 0 {
 		result, err := tx.Exec(`
 			INSERT INTO external_profiles
-				(name, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method, ss_server_key,
+				(name, flag, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method, ss_server_key,
 				 public_key, short_id, server_name, alpn, flow, enabled, position)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			p.Name, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.Name, p.Flag, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
 			p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.ALPN, p.Flow,
 			boolToInt(p.Enabled), p.Position,
 		)
@@ -82,12 +83,12 @@ func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
 		}
 		result, err := tx.Exec(`
 			UPDATE external_profiles SET
-				name = ?, type = ?, host_ipv4 = ?, host_ipv6_file = ?, port = ?, uuid = ?,
+				name = ?, flag = ?, type = ?, host_ipv4 = ?, host_ipv6_file = ?, port = ?, uuid = ?,
 				password = ?, ss_method = ?, ss_server_key = ?, public_key = ?, short_id = ?,
 				server_name = ?, alpn = ?, flow = ?, enabled = ?, position = ?,
 				updated_at = strftime('%s','now')
 			WHERE id = ?`,
-			p.Name, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
+			p.Name, p.Flag, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
 			p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.ALPN, p.Flow,
 			boolToInt(p.Enabled), p.Position, p.ID,
 		)
@@ -145,7 +146,7 @@ func ensureExternalProfileUserTx(tx *sql.Tx, p ExternalProfile) error {
 // Returns nil, nil if not found.
 func (s *Store) GetExternalProfile(id int64) (*ExternalProfile, error) {
 	row := s.db.QueryRow(`
-		SELECT id, name, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method,
+		SELECT id, name, COALESCE(flag, ''), type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method,
 		       ss_server_key, public_key, short_id, server_name, COALESCE(alpn, ''), flow, enabled, position,
 		       COALESCE(created_at, 0), COALESCE(updated_at, 0)
 		FROM external_profiles WHERE id = ?`, id)
@@ -159,7 +160,7 @@ func (s *Store) GetExternalProfile(id int64) (*ExternalProfile, error) {
 // ListExternalProfiles returns all external profiles ordered by position then id.
 func (s *Store) ListExternalProfiles() ([]ExternalProfile, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method,
+		SELECT id, name, COALESCE(flag, ''), type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method,
 		       ss_server_key, public_key, short_id, server_name, COALESCE(alpn, ''), flow, enabled, position,
 		       COALESCE(created_at, 0), COALESCE(updated_at, 0)
 		FROM external_profiles ORDER BY position ASC, id ASC`)
@@ -285,7 +286,7 @@ func (s *Store) SetUserExternalProfiles(userName string, profileIDs []int64) err
 // GetUserExternalProfiles returns all external profiles assigned to a user, ordered by position then id.
 func (s *Store) GetUserExternalProfiles(userName string) ([]ExternalProfile, error) {
 	rows, err := s.db.Query(`
-		SELECT ep.id, ep.name, ep.type, ep.host_ipv4, ep.host_ipv6_file, ep.port, ep.uuid, ep.password,
+		SELECT ep.id, ep.name, COALESCE(ep.flag, ''), ep.type, ep.host_ipv4, ep.host_ipv6_file, ep.port, ep.uuid, ep.password,
 		       ep.ss_method, ep.ss_server_key, ep.public_key, ep.short_id, ep.server_name, COALESCE(ep.alpn, ''), ep.flow,
 		       ep.enabled, ep.position, COALESCE(ep.created_at, 0), COALESCE(ep.updated_at, 0)
 		FROM external_profiles ep
@@ -316,7 +317,7 @@ func scanExternalProfile(s scanner) (*ExternalProfile, error) {
 	var p ExternalProfile
 	var enabled int
 	err := s.Scan(
-		&p.ID, &p.Name, &p.Type, &p.HostIPv4, &p.HostIPv6File, &p.Port, &p.UUID, &p.Password,
+		&p.ID, &p.Name, &p.Flag, &p.Type, &p.HostIPv4, &p.HostIPv6File, &p.Port, &p.UUID, &p.Password,
 		&p.SSMethod, &p.SSServerKey, &p.PublicKey, &p.ShortID, &p.ServerName, &p.ALPN,
 		&p.Flow, &enabled, &p.Position, &p.CreatedAt, &p.UpdatedAt,
 	)
