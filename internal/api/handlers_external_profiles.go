@@ -158,7 +158,7 @@ func buildExternalVlessLink(displayName string, p core.ExternalProfile) (string,
 	}
 	params.Set("packetEncoding", "xudp")
 
-	nameTag := url.QueryEscape(displayName)
+	nameTag := url.PathEscape(displayName)
 	return fmt.Sprintf("vless://%s@%s:%d?%s#%s",
 		url.QueryEscape(p.UUID),
 		hostInURI,
@@ -202,7 +202,7 @@ func buildExternalShadowsocksLink(displayName string, p core.ExternalProfile) (s
 		credential += password
 	}
 
-	nameTag := url.QueryEscape(displayName)
+	nameTag := url.PathEscape(displayName)
 	return fmt.Sprintf("ss://%s@%s:%d#%s",
 		base64.StdEncoding.EncodeToString([]byte(credential)),
 		hostInURI,
