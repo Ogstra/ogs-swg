@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, UserStatus, CreateUserRequest, UserRouteTag, ExternalProfile } from '../../services/api'
-import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags, Server } from 'lucide-react'
+import { api, UserStatus, CreateUserRequest, UserRouteTag } from '../../services/api'
+import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
@@ -74,7 +74,7 @@ export default function UserManagement() {
     const [userType, setUserType] = useState<UserType>('vless')
     // Modals state
     const [modalState, setModalState] = useState<{
-        type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | 'route_tags' | 'manage_route_tags' | 'assign_external_profiles' | null,
+        type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | 'route_tags' | 'manage_route_tags' | null,
         data?: any
     }>({ type: null })
     const [selectedInboundsToRemove, setSelectedInboundsToRemove] = useState<Set<string>>(new Set())
@@ -89,9 +89,6 @@ export default function UserManagement() {
     const [routeTagDeleteTarget, setRouteTagDeleteTarget] = useState<UserRouteTag | null>(null)
     const [routeTagSaving, setRouteTagSaving] = useState(false)
     const [routeTagDefinitionSaving, setRouteTagDefinitionSaving] = useState(false)
-    const [selectedExtProfileIds, setSelectedExtProfileIds] = useState<Set<number>>(new Set())
-    const [extProfileSaving, setExtProfileSaving] = useState(false)
-
     const [isEditing, setIsEditing] = useState(false)
     const [sortKey, setSortKey] = useState<'user' | 'quota' | 'usage' | 'status' | 'last_seen'>('user')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
@@ -206,13 +203,6 @@ export default function UserManagement() {
         queryKey: ['user-route-tags'],
         queryFn: () => api.getUserRouteTags(),
         enabled: canReadUsers,
-        placeholderData: previousData => previousData,
-    })
-
-    const externalProfilesQuery = useQuery({
-        queryKey: ['external-profiles'],
-        queryFn: api.getExternalProfiles,
-        enabled: canWriteUsers,
         placeholderData: previousData => previousData,
     })
 
@@ -429,23 +419,6 @@ export default function UserManagement() {
             toastError(message.toLowerCase().includes('needs relink') ? `Route tag needs relink: ${message}` : `Failed to save route tags: ${message}`)
         } finally {
             setRouteTagSaving(false)
-        }
-    }
-
-    const handleSaveUserExternalProfiles = async () => {
-        if (!canWriteUsers || !modalState.data) return
-        const user = modalState.data as UserStatus
-        setExtProfileSaving(true)
-        try {
-            await api.updateUserExternalProfiles(user.name, Array.from(selectedExtProfileIds))
-            await queryClient.invalidateQueries({ queryKey: ['users'] })
-            setModalState({ type: null })
-            setSelectedExtProfileIds(new Set())
-            success('External profiles updated')
-        } catch (err) {
-            toastError('Failed to update external profiles: ' + err)
-        } finally {
-            setExtProfileSaving(false)
         }
     }
 
@@ -1128,16 +1101,6 @@ export default function UserManagement() {
                                                         <Tags size={16} />
                                                     </ActionIconButton>
                                                     <ActionIconButton
-                                                        onClick={() => {
-                                                            setSelectedExtProfileIds(new Set((user.external_profiles || []).map(ep => ep.id)))
-                                                            setModalState({ type: 'assign_external_profiles', data: user })
-                                                        }}
-                                                        disabled={!canWriteUsers}
-                                                        title="Assign External Profiles"
-                                                    >
-                                                        <Server size={16} />
-                                                    </ActionIconButton>
-                                                    <ActionIconButton
                                                         onClick={() => openQrModal(user)}
                                                         disabled={!canWriteUsers}
                                                         title="Show QR / Link"
@@ -1219,16 +1182,6 @@ export default function UserManagement() {
                                                 title="Route Tags"
                                             >
                                                 <Tags size={16} />
-                                            </ActionIconButton>
-                                            <ActionIconButton
-                                                onClick={() => {
-                                                    setSelectedExtProfileIds(new Set((user.external_profiles || []).map(ep => ep.id)))
-                                                    setModalState({ type: 'assign_external_profiles', data: user })
-                                                }}
-                                                disabled={!canWriteUsers}
-                                                title="Assign External Profiles"
-                                            >
-                                                <Server size={16} />
                                             </ActionIconButton>
                                             <ActionIconButton
                                                 onClick={() => openQrModal(user)}
@@ -1592,86 +1545,6 @@ export default function UserManagement() {
                                         </span>
                                         {tag.description && <span className="mt-1 block text-xs text-slate-500">{tag.description}</span>}
                                         {tag.broken_reason && <span className="mt-1 block text-xs text-red-300">{tag.broken_reason}</span>}
-                                    </span>
-                                </label>
-                            ))
-                        )}
-                    </div>
-                </div>
-            </Modal>
-
-            {/* Assign External Profiles Modal */}
-            <Modal
-                isOpen={modalState.type === 'assign_external_profiles'}
-                onClose={() => {
-                    setModalState({ type: null })
-                    setSelectedExtProfileIds(new Set())
-                }}
-                title={`External Profiles — ${modalState.data?.name || ''}`}
-                footer={
-                    <>
-                        <Button
-                            variant="ghost"
-                            onClick={() => {
-                                setModalState({ type: null })
-                                setSelectedExtProfileIds(new Set())
-                            }}
-                            disabled={extProfileSaving}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="primary"
-                            onClick={handleSaveUserExternalProfiles}
-                            disabled={!canWriteUsers}
-                            isLoading={extProfileSaving}
-                        >
-                            Save
-                        </Button>
-                    </>
-                }
-            >
-                <div className="space-y-4">
-                    <p className="text-sm text-slate-400">
-                        Assign external profiles to <span className="font-mono text-slate-100">{modalState.data?.name}</span>
-                    </p>
-                    <div className="space-y-2">
-                        {(externalProfilesQuery.data || []).length === 0 ? (
-                            <div className="rounded-lg border border-slate-800 bg-slate-950 p-4 text-sm text-slate-500">
-                                No external profiles configured. Create profiles in Settings → External Profiles.
-                            </div>
-                        ) : (
-                            (externalProfilesQuery.data || []).map((ep: ExternalProfile) => (
-                                <label
-                                    key={ep.id}
-                                    className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 cursor-pointer hover:border-slate-700 transition-colors"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedExtProfileIds.has(ep.id)}
-                                        disabled={!canWriteUsers}
-                                        onChange={e => {
-                                            const next = new Set(selectedExtProfileIds)
-                                            if (e.target.checked) {
-                                                next.add(ep.id)
-                                            } else {
-                                                next.delete(ep.id)
-                                            }
-                                            setSelectedExtProfileIds(next)
-                                        }}
-                                        className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 disabled:opacity-50"
-                                    />
-                                    <span className="min-w-0 flex-1">
-                                        <span className="flex flex-wrap items-center gap-2">
-                                            <span className="font-medium text-slate-100">{ep.name}</span>
-                                            <span className={`text-xs px-1.5 py-0.5 rounded font-mono ${ep.type === 'vless' ? 'bg-blue-900/40 text-blue-300' : 'bg-purple-900/40 text-purple-300'}`}>
-                                                {ep.type === 'vless' ? 'VLESS' : 'SS'}
-                                            </span>
-                                            {!ep.enabled && <span className="text-xs text-slate-500">(disabled)</span>}
-                                        </span>
-                                        <span className="mt-0.5 block text-xs text-slate-500 font-mono">
-                                            {ep.host_ipv4 || '[no ipv4]'}:{ep.port}
-                                        </span>
                                     </span>
                                 </label>
                             ))

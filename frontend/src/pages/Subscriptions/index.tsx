@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { COUNTRIES, countryFlagEmoji } from '../../utils/countries'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Subscription, SubscriptionDefaults, SubscriptionHappConfig } from '../../services/api'
@@ -241,12 +241,6 @@ export default function Subscriptions() {
     const canManagePanelScopedDefaults = canWriteUsers && !!token
 
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
-    const [happEncrypted, setHappEncrypted] = useState<{
-        token: string | null
-        link: string
-        loading: boolean
-        error: string | null
-    }>({ token: null, link: '', loading: false, error: null })
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
     const [confirmRegenerate, setConfirmRegenerate] = useState<Subscription | null>(null)
     const [defaultsModalOpen, setDefaultsModalOpen] = useState(false)
@@ -329,26 +323,6 @@ export default function Subscriptions() {
     const cfWorkerURL = cfWorkerURLQuery.data?.trim() || ''
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const happConfig = happConfigQuery.data || EMPTY_HAPP_CONFIG
-
-    useEffect(() => {
-        if (modalState.type !== 'qr') return
-        const token = modalState.data?.token
-        if (!token) return
-        if (happEncrypted.token === token && happEncrypted.link) return
-        let cancelled = false
-        setHappEncrypted({ token, link: '', loading: true, error: null })
-        const plaintext = buildHappLink(token)
-        api.encryptHappLink(plaintext)
-            .then(res => {
-                if (cancelled) return
-                setHappEncrypted({ token, link: res.encrypted_url || '', loading: false, error: null })
-            })
-            .catch(err => {
-                if (cancelled) return
-                setHappEncrypted({ token, link: '', loading: false, error: err?.message || 'Failed to encrypt Happ link' })
-            })
-        return () => { cancelled = true }
-    }, [modalState.type, modalState.data?.token])
 
     const sortedSubs = [...subs].sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1
@@ -757,16 +731,10 @@ export default function Subscriptions() {
         url.searchParams.set('client', 'shadowrocket')
         return `sub://${toBase64(url.toString())}#${encodeURIComponent(name)}`
     }
-    const buildHappLink = (token: string) => {
-        const url = new URL(subLink(token))
-        url.searchParams.set('client', 'happ')
-        return url.toString()
-    }
     const getSubscriptionLinkVariants = (sub: Subscription) => (
         sub.token
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-                { id: 'happ', label: 'Happ', link: happEncrypted.token === sub.token && happEncrypted.link ? happEncrypted.link : buildHappLink(sub.token), loading: happEncrypted.token === sub.token && happEncrypted.loading },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, displaySubName(sub)) },
             ]
             : []
