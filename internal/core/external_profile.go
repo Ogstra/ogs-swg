@@ -3,6 +3,7 @@ package core
 import (
 	"database/sql"
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 )
@@ -15,7 +16,7 @@ type ExternalProfile struct {
 	Flag         string `json:"flag"`
 	Type         string `json:"type"` // "vless" | "shadowsocks"
 	HostIPv4     string `json:"host_ipv4"`
-	HostIPv6File string `json:"host_ipv6_file"` // path on VPS, kept empty if not used
+	HostIPv6File string `json:"host_ipv6_file"` // IPv6 literal or path on VPS, kept empty if not used
 	Port         int    `json:"port"`
 	UUID         string `json:"uuid"`          // VLESS only
 	Password     string `json:"password"`      // Shadowsocks only
@@ -32,13 +33,17 @@ type ExternalProfile struct {
 	UpdatedAt    int64  `json:"updated_at"`
 }
 
-// ReadExternalIPv6 reads the current IPv6 address from the file at path.
-// Returns "" if path is empty or the file cannot be read.
-func ReadExternalIPv6(path string) string {
-	if strings.TrimSpace(path) == "" {
+// ReadExternalIPv6 resolves an IPv6 literal or reads the current IPv6 address
+// from the file at value. Returns "" if value is empty or the file cannot be read.
+func ReadExternalIPv6(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
 		return ""
 	}
-	data, err := os.ReadFile(path)
+	if addr, err := netip.ParseAddr(trimmed); err == nil && addr.Is6() {
+		return addr.String()
+	}
+	data, err := os.ReadFile(trimmed)
 	if err != nil {
 		return ""
 	}
