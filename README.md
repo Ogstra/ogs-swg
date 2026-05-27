@@ -93,7 +93,7 @@ Ready-to-use compose at [`docker/docker-local/docker-compose.yml`](docker/docker
 
 If sing-box writes to another host log path, mount its containing directory with `OGS_ACCESS_LOG_HOST_DIR` and point `OGS_ACCESS_LOG_PATH` at the file inside `/app/access-logs`.
 
-For External Profiles with dynamic IP files, mount the host directory with `OGS_EXTERNAL_PROFILE_IP_HOST_DIR` and use the fixed container path in the UI. Example: if the host file is `/root/ogs-swg/homelab/ip/sing-box`, set `OGS_EXTERNAL_PROFILE_IP_HOST_DIR=/root/ogs-swg/homelab/ip` and use `/app/external-profile-ip/sing-box` in the IPv6 File Path field.
+For External Profiles with dynamic IP files, set `OGS_EXTERNAL_PROFILE_IP_HOST_DIR` to the host directory that contains those files and use the fixed container path in the UI. For a host file named `sing-box` inside that directory, use `/app/external-profile-ip/sing-box` in the IPv6 File Path field.
 
 For blue/green local slots, use:
 

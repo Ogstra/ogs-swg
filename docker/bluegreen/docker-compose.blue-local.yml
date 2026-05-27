@@ -16,6 +16,7 @@ services:
     volumes:
       - ../../data:/app/data
       - ${OGS_ACCESS_LOG_HOST_DIR:-../../data}:/app/access-logs:ro
+      - ${OGS_EXTERNAL_PROFILE_IP_HOST_DIR:-../../homelab/ip}:/app/external-profile-ip:ro
 
       # Bind-mount at the same path as on the host
       - /etc/sing-box:/etc/sing-box
