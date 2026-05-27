@@ -1,9 +1,25 @@
 package core
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+func TestReadExternalIPv6AcceptsLiteralOrFile(t *testing.T) {
+	literal := "2800:40:80:685f:be24:11ff:fefa:cc41"
+	if got := ReadExternalIPv6(literal); got != literal {
+		t.Fatalf("literal IPv6=%q want %q", got, literal)
+	}
+
+	path := filepath.Join(t.TempDir(), "sing-box")
+	if err := os.WriteFile(path, []byte(literal+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if got := ReadExternalIPv6(path); got != literal {
+		t.Fatalf("file IPv6=%q want %q", got, literal)
+	}
+}
 
 func TestUpsertExternalProfileCreatesMetadataUserAndAssignment(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "store.db")

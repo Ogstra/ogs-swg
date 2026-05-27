@@ -90,6 +90,14 @@ function splitHostPort(value: string): { host: string; port: string } {
     }
 }
 
+function hostFields(host: string): Pick<FormData, 'host_ipv4' | 'host_ipv6_file'> {
+    const trimmed = host.trim().replace(/^\[(.*)\]$/, '$1')
+    if (trimmed.includes(':')) {
+        return { host_ipv4: '', host_ipv6_file: trimmed }
+    }
+    return { host_ipv4: trimmed, host_ipv6_file: '' }
+}
+
 function parseShadowsocksLink(rawLink: string): Partial<FormData> {
     const withoutScheme = rawLink.slice('ss://'.length)
     const hashIndex = withoutScheme.indexOf('#')
@@ -118,11 +126,12 @@ function parseShadowsocksLink(rawLink: string): Partial<FormData> {
     const password = credentialParts.pop() || ''
     const serverKey = credentialParts.join(':')
     const { host, port } = splitHostPort(hostPort)
+    const hostData = hostFields(host)
 
     return {
         name,
         type: 'shadowsocks',
-        host_ipv4: host,
+        ...hostData,
         port,
         password,
         ss_method: (SS_METHODS.includes(method as SSMethod) ? method : DEFAULT_FORM.ss_method) as SSMethod,
@@ -141,11 +150,12 @@ function parseVlessLink(rawLink: string): Partial<FormData> {
     if (parsed.protocol !== 'vless:') throw new Error('Invalid VLESS link')
     const params = parsed.searchParams
     const name = parsed.hash ? safeDecode(parsed.hash.slice(1)) : ''
+    const hostData = hostFields(parsed.hostname)
 
     return {
         name,
         type: 'vless',
-        host_ipv4: parsed.hostname.replace(/^\[(.*)\]$/, '$1'),
+        ...hostData,
         port: parsed.port,
         uuid: safeDecode(parsed.username),
         public_key: params.get('pbk') || '',
@@ -477,7 +487,7 @@ export default function ExternalProfilesTab() {
                                 <option value="shadowsocks">Shadowsocks</option>
                             </select>
                         )}
-                        {field('IPv4 Host',
+                        {field('IPv4 / Hostname',
                             <input
                                 type="text"
                                 value={form.host_ipv4}
@@ -486,15 +496,15 @@ export default function ExternalProfilesTab() {
                                 placeholder="1.2.3.4"
                             />
                         )}
-                        {field('IPv6 File Path (dynamic)',
+                        {field('IPv6 or File Path',
                             <input
                                 type="text"
                                 value={form.host_ipv6_file}
                                 onChange={e => setForm(f => ({ ...f, host_ipv6_file: e.target.value }))}
                                 className={inputClass}
-                                placeholder="/etc/homelab-ipv6"
+                                placeholder="2800:... or /app/external-profile-ip/sing-box"
                             />,
-                            'Path on VPS containing current IPv6 address'
+                            'Literal IPv6 or container path containing the current IPv6 address'
                         )}
                         {field('Port',
                             <input
