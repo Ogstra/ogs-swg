@@ -1103,7 +1103,7 @@ export default function UserManagement() {
                                                 {user.external_profiles && user.external_profiles.length > 0 && (
                                                     <div className="flex flex-wrap gap-1 mt-1">
                                                         {user.external_profiles.map(ep => (
-                                                            <Badge key={ep.id} variant="outline" className="text-xs">
+                                                            <Badge key={ep.id} variant="neutral" className="text-xs">
                                                                 {ep.name}
                                                             </Badge>
                                                         ))}
@@ -1262,7 +1262,7 @@ export default function UserManagement() {
                                             )}
                                             {user.route_tags && user.route_tags.length > 0 && renderRouteTagBadges(user.route_tags, "contents")}
                                             {user.external_profiles && user.external_profiles.length > 0 && user.external_profiles.map(ep => (
-                                                <Badge key={ep.id} variant="outline" className="text-xs">{ep.name}</Badge>
+                                                <Badge key={ep.id} variant="neutral" className="text-xs">{ep.name}</Badge>
                                             ))}
                                         </div>
                                     </div>
