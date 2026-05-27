@@ -18,6 +18,7 @@ import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './components/PanelUsers'
 import SecurityTab from './components/SecurityTab'
 import LogsBackupsTab from './LogsBackupsTab'
+import ExternalProfilesTab from './components/ExternalProfilesTab'
 import { WireGuardRawConfigModal } from './components/WireGuardRawConfigModal'
 import {
     WG_INTERFACE_DEFAULTS,
@@ -703,6 +704,11 @@ export default function Settings() {
                     toastError={toastError}
                 />
             ),
+        },
+        {
+            id: 'external-profiles',
+            label: <span className="flex items-center gap-2"><Server size={16} /> External Profiles</span>,
+            content: <ExternalProfilesTab />,
         },
         ...(permissions?.can_read_panel_users ? [{
             id: 'panel-users',
