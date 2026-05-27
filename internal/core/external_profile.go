@@ -23,6 +23,7 @@ type ExternalProfile struct {
 	PublicKey    string `json:"public_key"`    // Reality public key (homelab server key)
 	ShortID      string `json:"short_id"`
 	ServerName   string `json:"server_name"` // SNI
+	ALPN         string `json:"alpn"`        // comma-separated ALPN protocols for share links
 	Flow         string `json:"flow"`
 	Enabled      bool   `json:"enabled"`
 	Position     int    `json:"position"`
@@ -54,14 +55,15 @@ func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
 	defer tx.Rollback()
 
 	var id int64
+	previousUserName := ""
 	if p.ID == 0 {
 		result, err := tx.Exec(`
 			INSERT INTO external_profiles
 				(name, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method, ss_server_key,
-				 public_key, short_id, server_name, flow, enabled, position)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 public_key, short_id, server_name, alpn, flow, enabled, position)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			p.Name, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
-			p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.Flow,
+			p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.ALPN, p.Flow,
 			boolToInt(p.Enabled), p.Position,
 		)
 		if err != nil {
@@ -72,15 +74,21 @@ func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
 			return 0, err
 		}
 	} else {
+		if err := tx.QueryRow(`SELECT name FROM external_profiles WHERE id = ?`, p.ID).Scan(&previousUserName); err != nil {
+			if err == sql.ErrNoRows {
+				return 0, fmt.Errorf("external profile %d not found", p.ID)
+			}
+			return 0, err
+		}
 		result, err := tx.Exec(`
 			UPDATE external_profiles SET
 				name = ?, type = ?, host_ipv4 = ?, host_ipv6_file = ?, port = ?, uuid = ?,
 				password = ?, ss_method = ?, ss_server_key = ?, public_key = ?, short_id = ?,
-				server_name = ?, flow = ?, enabled = ?, position = ?,
+				server_name = ?, alpn = ?, flow = ?, enabled = ?, position = ?,
 				updated_at = strftime('%s','now')
 			WHERE id = ?`,
 			p.Name, p.Type, p.HostIPv4, p.HostIPv6File, p.Port, p.UUID, p.Password,
-			p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.Flow,
+			p.SSMethod, p.SSServerKey, p.PublicKey, p.ShortID, p.ServerName, p.ALPN, p.Flow,
 			boolToInt(p.Enabled), p.Position, p.ID,
 		)
 		if err != nil {
@@ -95,6 +103,11 @@ func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
 	p.ID = id
 	if err := ensureExternalProfileUserTx(tx, p); err != nil {
 		return 0, err
+	}
+	if previousUserName != "" && strings.TrimSpace(previousUserName) != strings.TrimSpace(p.Name) {
+		if err := deleteExternalOnlyUserTx(tx, previousUserName); err != nil {
+			return 0, err
+		}
 	}
 	return id, tx.Commit()
 }
@@ -133,7 +146,7 @@ func ensureExternalProfileUserTx(tx *sql.Tx, p ExternalProfile) error {
 func (s *Store) GetExternalProfile(id int64) (*ExternalProfile, error) {
 	row := s.db.QueryRow(`
 		SELECT id, name, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method,
-		       ss_server_key, public_key, short_id, server_name, flow, enabled, position,
+		       ss_server_key, public_key, short_id, server_name, COALESCE(alpn, ''), flow, enabled, position,
 		       COALESCE(created_at, 0), COALESCE(updated_at, 0)
 		FROM external_profiles WHERE id = ?`, id)
 	p, err := scanExternalProfile(row)
@@ -147,7 +160,7 @@ func (s *Store) GetExternalProfile(id int64) (*ExternalProfile, error) {
 func (s *Store) ListExternalProfiles() ([]ExternalProfile, error) {
 	rows, err := s.db.Query(`
 		SELECT id, name, type, host_ipv4, host_ipv6_file, port, uuid, password, ss_method,
-		       ss_server_key, public_key, short_id, server_name, flow, enabled, position,
+		       ss_server_key, public_key, short_id, server_name, COALESCE(alpn, ''), flow, enabled, position,
 		       COALESCE(created_at, 0), COALESCE(updated_at, 0)
 		FROM external_profiles ORDER BY position ASC, id ASC`)
 	if err != nil {
@@ -165,10 +178,89 @@ func (s *Store) ListExternalProfiles() ([]ExternalProfile, error) {
 	return profiles, rows.Err()
 }
 
-// DeleteExternalProfile removes a profile by ID. Cascade handles user_external_profiles.
+// DeleteExternalProfile removes a profile and the metadata-only user it created
+// when that user has no local sing-box inbound identity.
 func (s *Store) DeleteExternalProfile(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM external_profiles WHERE id = ?`, id)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	userName := ""
+	if err := tx.QueryRow(`SELECT name FROM external_profiles WHERE id = ?`, id).Scan(&userName); err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM user_external_profiles WHERE external_profile_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM external_profiles WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if err := deleteExternalOnlyUserTx(tx, userName); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func deleteExternalOnlyUserTx(tx *sql.Tx, userName string) error {
+	userName = strings.TrimSpace(userName)
+	if userName == "" {
+		return nil
+	}
+
+	var remainingAssignments int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM user_external_profiles WHERE user_name = ?`, userName).Scan(&remainingAssignments); err != nil {
+		return err
+	}
+	if remainingAssignments > 0 {
+		return nil
+	}
+
+	var quotaLimit sql.NullInt64
+	var quotaPeriod sql.NullString
+	var resetDay sql.NullInt64
+	var credential, flow, vmessSecurity, inboundTags sql.NullString
+	var vmessAlterID sql.NullInt64
+	err := tx.QueryRow(`
+		SELECT quota_limit, quota_period, reset_day, credential, flow, vmess_security, vmess_alter_id, COALESCE(inbound_tags, '')
+		FROM users WHERE email = ?`, userName).Scan(
+		&quotaLimit, &quotaPeriod, &resetDay, &credential, &flow, &vmessSecurity, &vmessAlterID, &inboundTags,
+	)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	if quotaLimit.Int64 != 0 ||
+		(quotaPeriod.Valid && quotaPeriod.String != "" && quotaPeriod.String != "monthly") ||
+		(resetDay.Valid && resetDay.Int64 != 0 && resetDay.Int64 != 1) ||
+		strings.TrimSpace(credential.String) != "" ||
+		strings.TrimSpace(flow.String) != "" ||
+		strings.TrimSpace(vmessSecurity.String) != "" ||
+		vmessAlterID.Int64 != 0 ||
+		!isEmptyInboundTags(inboundTags.String) {
+		return nil
+	}
+
+	if _, err := tx.Exec(`DELETE FROM subscription_users WHERE user_name = ?`, userName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM user_external_profiles WHERE user_name = ?`, userName); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`DELETE FROM users WHERE email = ?`, userName)
 	return err
+}
+
+func isEmptyInboundTags(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	return trimmed == "" || trimmed == "[]"
 }
 
 // SetUserExternalProfiles replaces all external profile assignments for a user atomically.
@@ -194,7 +286,7 @@ func (s *Store) SetUserExternalProfiles(userName string, profileIDs []int64) err
 func (s *Store) GetUserExternalProfiles(userName string) ([]ExternalProfile, error) {
 	rows, err := s.db.Query(`
 		SELECT ep.id, ep.name, ep.type, ep.host_ipv4, ep.host_ipv6_file, ep.port, ep.uuid, ep.password,
-		       ep.ss_method, ep.ss_server_key, ep.public_key, ep.short_id, ep.server_name, ep.flow,
+		       ep.ss_method, ep.ss_server_key, ep.public_key, ep.short_id, ep.server_name, COALESCE(ep.alpn, ''), ep.flow,
 		       ep.enabled, ep.position, COALESCE(ep.created_at, 0), COALESCE(ep.updated_at, 0)
 		FROM external_profiles ep
 		JOIN user_external_profiles uep ON ep.id = uep.external_profile_id
@@ -225,8 +317,8 @@ func scanExternalProfile(s scanner) (*ExternalProfile, error) {
 	var enabled int
 	err := s.Scan(
 		&p.ID, &p.Name, &p.Type, &p.HostIPv4, &p.HostIPv6File, &p.Port, &p.UUID, &p.Password,
-		&p.SSMethod, &p.SSServerKey, &p.PublicKey, &p.ShortID, &p.ServerName, &p.Flow,
-		&enabled, &p.Position, &p.CreatedAt, &p.UpdatedAt,
+		&p.SSMethod, &p.SSServerKey, &p.PublicKey, &p.ShortID, &p.ServerName, &p.ALPN,
+		&p.Flow, &enabled, &p.Position, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err

@@ -317,6 +317,7 @@ func (s *Store) initSchema() error {
 		public_key TEXT NOT NULL DEFAULT '',
 		short_id TEXT NOT NULL DEFAULT '',
 		server_name TEXT NOT NULL DEFAULT '',
+		alpn TEXT NOT NULL DEFAULT '',
 		flow TEXT NOT NULL DEFAULT '',
 		enabled INTEGER NOT NULL DEFAULT 1,
 		position INTEGER NOT NULL DEFAULT 0,
@@ -395,6 +396,7 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add happ_routing_profile to existing subscriptions tables.
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_routing_profile TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_color_profile TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE external_profiles ADD COLUMN alpn TEXT NOT NULL DEFAULT '';")
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_external_profiles_user ON user_external_profiles(user_name);`)
 	return nil
 }

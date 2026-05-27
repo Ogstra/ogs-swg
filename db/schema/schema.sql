@@ -180,3 +180,34 @@ CREATE TABLE IF NOT EXISTS user_route_tags (
 	created_at INTEGER DEFAULT (strftime('%s','now')),
 	updated_at INTEGER DEFAULT (strftime('%s','now'))
 );
+
+CREATE TABLE IF NOT EXISTS external_profiles (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	name TEXT NOT NULL,
+	type TEXT NOT NULL DEFAULT 'vless',
+	host_ipv4 TEXT NOT NULL DEFAULT '',
+	host_ipv6_file TEXT NOT NULL DEFAULT '',
+	port INTEGER NOT NULL DEFAULT 0,
+	uuid TEXT NOT NULL DEFAULT '',
+	password TEXT NOT NULL DEFAULT '',
+	ss_method TEXT NOT NULL DEFAULT '',
+	ss_server_key TEXT NOT NULL DEFAULT '',
+	public_key TEXT NOT NULL DEFAULT '',
+	short_id TEXT NOT NULL DEFAULT '',
+	server_name TEXT NOT NULL DEFAULT '',
+	alpn TEXT NOT NULL DEFAULT '',
+	flow TEXT NOT NULL DEFAULT '',
+	enabled INTEGER NOT NULL DEFAULT 1,
+	position INTEGER NOT NULL DEFAULT 0,
+	created_at INTEGER DEFAULT (strftime('%s','now')),
+	updated_at INTEGER DEFAULT (strftime('%s','now'))
+);
+
+CREATE TABLE IF NOT EXISTS user_external_profiles (
+	user_name TEXT NOT NULL,
+	external_profile_id INTEGER NOT NULL,
+	PRIMARY KEY (user_name, external_profile_id),
+	FOREIGN KEY (external_profile_id) REFERENCES external_profiles(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_external_profiles_user ON user_external_profiles(user_name);

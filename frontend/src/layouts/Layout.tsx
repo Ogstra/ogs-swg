@@ -49,6 +49,7 @@ export const Layout: React.FC = () => {
         { id: 'dashboard', label: 'Dashboard', icon: Settings, permission: 'can_read_settings' as const },
         { id: 'database', label: 'Database', icon: Database, permission: 'can_read_settings' as const },
         { id: 'security', label: 'Sub Security', icon: ShieldAlert, permission: 'can_read_settings' as const },
+        { id: 'external-profiles', label: 'External Profiles', icon: Server, permission: 'can_read_config' as const },
         { id: 'logs-backups', label: 'Logs & Backups', icon: HardDrive, permission: 'can_read_settings' as const },
         { id: 'panel-users', label: 'Admins', icon: UserCog, permission: 'can_read_panel_users' as const },
     ].filter(item => permissions?.[item.permission] === true);
