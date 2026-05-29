@@ -97,11 +97,12 @@ function LogTerminal({
         }
     }, [lines.length, autoScroll, viewMode])
 
-    // After search completes (searching → false), scroll to the newest results
-    // (bottom of the list, since search results are shown oldest-first like tail).
-    // Also scroll while chunks arrive as long as the user hasn't scrolled up.
+    // Scroll to bottom when search completes. Skipping intermediate chunks avoids
+    // rAFs being cancelled by the next chunk before the virtualizer finishes
+    // measuring — only fire once after all lines are in and layout is stable.
     useLayoutEffect(() => {
         if (viewMode !== 'search') return
+        if (searching) return
         if (lines.length === 0) return
         if (!autoScroll) return
 
