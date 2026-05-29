@@ -286,6 +286,7 @@ export default function LogViewer() {
     }, [tailRawLines, query, backendTailQuery, viewMode])
 
     const handleScroll = () => {
+        if (searching) return
         const el = containerRef.current
         if (!el) return
         const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 10
