@@ -97,34 +97,25 @@ function LogTerminal({
         }
     }, [lines.length, autoScroll, viewMode])
 
-    // Scroll to bottom when search completes. Skipping intermediate chunks avoids
-    // rAFs being cancelled by the next chunk before the virtualizer finishes
-    // measuring — only fire once after all lines are in and layout is stable.
+    // Scroll to bottom on each search chunk and on completion.
+    // Synchronous scroll runs immediately inside useLayoutEffect before the next
+    // render — unlike rAFs it cannot be cancelled by the next chunk arriving.
+    // The rAF is a fine-tune pass for after the virtualizer measures new items;
+    // cancelling it on cleanup is fine because the sync scroll already ran.
     useLayoutEffect(() => {
         if (viewMode !== 'search') return
-        if (searching) return
         if (lines.length === 0) return
         if (!autoScroll) return
 
-        let cancelled = false
-        const scrollToBottom = () => {
-            if (cancelled) return
-            virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
-            const el = containerRef.current
-            if (el) el.scrollTop = el.scrollHeight
-        }
+        const el = containerRef.current
+        virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+        if (el) el.scrollTop = el.scrollHeight
 
-        scrollToBottom()
-        let secondFrame: number | null = null
-        const firstFrame = requestAnimationFrame(() => {
-            scrollToBottom()
-            secondFrame = requestAnimationFrame(scrollToBottom)
+        const frame = requestAnimationFrame(() => {
+            virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+            if (el) el.scrollTop = el.scrollHeight
         })
-        return () => {
-            cancelled = true
-            cancelAnimationFrame(firstFrame)
-            if (secondFrame !== null) cancelAnimationFrame(secondFrame)
-        }
+        return () => cancelAnimationFrame(frame)
     }, [lines.length, viewMode, autoScroll, searching])
 
     const virtualItems = virtualizer.getVirtualItems()
