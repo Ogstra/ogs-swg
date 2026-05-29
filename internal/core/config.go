@@ -175,6 +175,11 @@ func LoadConfig(path ...string) *Config {
 			// Fallback: use a timestamp-based secret (less secure but better than default)
 			cfg.JWTSecret = fmt.Sprintf("auto-generated-%d", os.Getpid())
 		}
+		// Persist so the same secret survives restarts; without this every restart
+		// invalidates all active browser sessions.
+		if err := cfg.SaveAppConfig(); err != nil {
+			log.Printf("warning: could not persist auto-generated JWT secret to %s: %v", configPath, err)
+		}
 	}
 
 	derivePath := strings.TrimSpace(cfg.WireGuardConfigPath)
