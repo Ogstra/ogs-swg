@@ -308,3 +308,38 @@ func TestWalkColdSegmentReverse_CancelPropagates(t *testing.T) {
 		t.Error("expected context error, got nil")
 	}
 }
+
+// TestSearchLogsViaStore_SubstringMatchNotFTS5
+// Verifies that searching for a bare word matches it as a substring, not just as
+// an FTS5 full-word token. "git" must match a line containing "github" even though
+// FTS5 would tokenize "github" as a single token that does not equal "git".
+func TestSearchLogsViaStore_SubstringMatchNotFTS5(t *testing.T) {
+	srv, ls, _ := newSearchTestServer(t)
+
+	now := time.Now().UnixMilli()
+	lines := []string{
+		"2024/01/01 12:00:01 INFO connecting to github.com/user/repo",
+		"2024/01/01 12:00:02 INFO unrelated log line",
+	}
+	if err := ls.InsertLogs(context.Background(), now, lines); err != nil {
+		t.Fatalf("InsertLogs: %v", err)
+	}
+
+	opts := logSearchOptions{
+		query:     compileLogQuery("git"),
+		limit:     200,
+		chunkSize: 10,
+	}
+
+	var received []string
+	summary, err := srv.searchLogsViaStore(context.Background(), opts, collectChunks(&received), noopStatus)
+	if err != nil {
+		t.Fatalf("searchLogsViaStore: %v", err)
+	}
+	if summary.matched != 1 {
+		t.Errorf("matched=%d want 1 — 'git' should match 'github' as substring", summary.matched)
+	}
+	if len(received) != 1 || !contains(received[0], "github.com") {
+		t.Errorf("expected github.com line in results, got: %v", received)
+	}
+}

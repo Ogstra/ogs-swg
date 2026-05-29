@@ -225,11 +225,10 @@ func (s *Server) walkLogStore(ctx context.Context, opts logSearchOptions, emitCh
 	}
 
 	// Hot tier: WalkHot in newest-first order.
-	simpleText := ""
-	if !opts.query.requiresPostFilter() {
-		simpleText = opts.query.simpleText
-	}
-	return s.logStore.WalkHot(ctx, simpleText, fromMs, toMs, visitRow)
+	// FTS5 tokenizes by word boundaries, so a term like "git" would not match
+	// "github" even though it's a substring. Always scan all rows and rely on
+	// logLineMatchesQuery (strings.Contains) for correct substring matching.
+	return s.logStore.WalkHot(ctx, "", fromMs, toMs, visitRow)
 }
 
 // walkColdSegmentReverse opens a gzip segment, buffers all lines, then visits
