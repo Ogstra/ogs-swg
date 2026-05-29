@@ -114,10 +114,15 @@ function LogTerminal({
         }
 
         scrollToBottom()
-        const frame = requestAnimationFrame(scrollToBottom)
+        let secondFrame: number | null = null
+        const firstFrame = requestAnimationFrame(() => {
+            scrollToBottom()
+            secondFrame = requestAnimationFrame(scrollToBottom)
+        })
         return () => {
             cancelled = true
-            cancelAnimationFrame(frame)
+            cancelAnimationFrame(firstFrame)
+            if (secondFrame !== null) cancelAnimationFrame(secondFrame)
         }
     }, [lines.length, viewMode, autoScroll, searching])
 
