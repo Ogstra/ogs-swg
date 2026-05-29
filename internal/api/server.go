@@ -1816,10 +1816,12 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	compiledQuery := compileLogQuery(qRaw)
 
-	// For queries that require post-filter (user correlation, AND/OR), fetch a
-	// larger window so connection-ID correlation can see the full context.
+	// When any filter is active, fetch a larger window so substring matches and
+	// connection-ID correlation have enough context. Without this, a simple query
+	// like "git" would only see the last 200 lines while a complex query like
+	// "[user] AND git" would see 5000.
 	fetchLimit := limit
-	if qRaw != "" && compiledQuery.requiresPostFilter() {
+	if qRaw != "" {
 		fetchLimit = 5000
 	}
 

@@ -38,6 +38,7 @@ interface LogTerminalProps {
     autoScroll: boolean
     setAutoScroll: (v: boolean) => void
     viewMode: 'tail' | 'search'
+    searching: boolean
     searchStatus: string
     containerRef: React.RefObject<HTMLDivElement | null>
     onScroll: () => void
@@ -50,6 +51,7 @@ function LogTerminal({
     autoScroll,
     setAutoScroll,
     viewMode,
+    searching,
     searchStatus,
     containerRef,
     onScroll,
@@ -94,6 +96,30 @@ function LogTerminal({
             if (secondFrame !== null) cancelAnimationFrame(secondFrame)
         }
     }, [lines.length, autoScroll, viewMode])
+
+    // After search completes (searching → false), scroll to the newest results
+    // (bottom of the list, since search results are shown oldest-first like tail).
+    // Also scroll while chunks arrive as long as the user hasn't scrolled up.
+    useLayoutEffect(() => {
+        if (viewMode !== 'search') return
+        if (lines.length === 0) return
+        if (!autoScroll) return
+
+        let cancelled = false
+        const scrollToBottom = () => {
+            if (cancelled) return
+            virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+            const el = containerRef.current
+            if (el) el.scrollTop = el.scrollHeight
+        }
+
+        scrollToBottom()
+        const frame = requestAnimationFrame(scrollToBottom)
+        return () => {
+            cancelled = true
+            cancelAnimationFrame(frame)
+        }
+    }, [lines.length, viewMode, autoScroll, searching])
 
     const virtualItems = virtualizer.getVirtualItems()
 
@@ -290,6 +316,7 @@ export default function LogViewer() {
         setSearching(true)
         setLines([])
         setViewMode('search')
+        setAutoScroll(true)
         setSearchStatus('Searching logs...')
         let completed = false
         let matchedCount = 0
@@ -626,6 +653,7 @@ export default function LogViewer() {
                 autoScroll={autoScroll}
                 setAutoScroll={setAutoScroll}
                 viewMode={viewMode}
+                searching={searching}
                 searchStatus={searchStatus}
                 containerRef={containerRef}
                 onScroll={handleScroll}
