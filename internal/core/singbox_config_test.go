@@ -298,7 +298,7 @@ func TestUpdateUserRouteTagMembership_BatchesWritePreservesFieldsAndZeroAssignee
 		{ID: 2, Name: "Streaming", RuleMatchJSON: streamingMatch},
 	}
 
-	assigned, err := cfg.UpdateUserRouteTagMembership("alice", []int64{2}, tags)
+	assigned, err := cfg.UpdateUserRouteTagMembership("alice", []int64{2}, tags, nil)
 	if err != nil {
 		t.Fatalf("UpdateUserRouteTagMembership: %v", err)
 	}
@@ -363,12 +363,72 @@ func TestUpdateUserRouteTagMembership_ReturnsRelinkErrorBeforeWrite(t *testing.T
 
 	_, err := cfg.UpdateUserRouteTagMembership("alice", []int64{1, 2}, []UserRouteTag{
 		{ID: 1, Name: "Premium", RuleMatchJSON: matchJSON},
-	})
+	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "route tag needs relink") {
 		t.Fatalf("error = %v; want route tag needs relink", err)
 	}
 	if tracker.writeCount != 0 {
 		t.Fatalf("writeCount = %d; want no write before relink error", tracker.writeCount)
+	}
+}
+
+func TestUpdateUserRouteTagMembership_BlocksInboundMismatch(t *testing.T) {
+	rule := map[string]interface{}{
+		"action":    "route",
+		"inbound":   []interface{}{"in-reality"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{},
+	}
+	matchJSON, _ := CanonicalRouteTagRuleMatch(rule)
+	cfg, stub := newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","inbound":["in-reality"],"outbound":"premium","auth_user":[]}
+			]
+		}
+	}`)
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+	tags := []UserRouteTag{{ID: 1, Name: "Premium", RuleMatchJSON: matchJSON}}
+
+	// user on wrong inbound — must be blocked
+	_, err := cfg.UpdateUserRouteTagMembership("alice", []int64{1}, tags, []string{"in-vless"})
+	if err == nil || !strings.Contains(err.Error(), "route tag inbound mismatch") {
+		t.Fatalf("error = %v; want route tag inbound mismatch", err)
+	}
+	if tracker.writeCount != 0 {
+		t.Fatalf("writeCount = %d; want no write on inbound mismatch", tracker.writeCount)
+	}
+
+	// user on correct inbound — must succeed
+	_, err = cfg.UpdateUserRouteTagMembership("alice", []int64{1}, tags, []string{"in-reality"})
+	if err != nil {
+		t.Fatalf("UpdateUserRouteTagMembership with matching inbound: %v", err)
+	}
+	if tracker.writeCount != 1 {
+		t.Fatalf("writeCount = %d; want 1 write for matching inbound", tracker.writeCount)
+	}
+
+	// no inbound restriction on rule — always compatible
+	openRule := map[string]interface{}{
+		"action":    "route",
+		"outbound":  "direct",
+		"auth_user": []interface{}{},
+	}
+	openMatch, _ := CanonicalRouteTagRuleMatch(openRule)
+	cfg2, stub2 := newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","outbound":"direct","auth_user":[]}
+			]
+		}
+	}`)
+	cfg2.SetExecutor(&reloadTrackingExecutor{stubExecutor: stub2})
+	_, err = cfg2.UpdateUserRouteTagMembership("alice", []int64{2}, []UserRouteTag{
+		{ID: 2, Name: "Direct", RuleMatchJSON: openMatch},
+	}, []string{"in-vless"})
+	if err != nil {
+		t.Fatalf("open rule should allow any inbound: %v", err)
 	}
 }
 

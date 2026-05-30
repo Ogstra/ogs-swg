@@ -1553,6 +1553,32 @@ func routeTagByID(tags []UserRouteTag) map[int64]UserRouteTag {
 	return out
 }
 
+// checkRouteTagInboundCompatibility returns an error if the rule restricts
+// traffic to specific inbounds and none of the user's inbound tags match.
+// An empty rule inbound list means no inbound restriction — always compatible.
+func checkRouteTagInboundCompatibility(rule map[string]interface{}, userInboundTags []string) error {
+	raw, ok := rule["inbound"]
+	if !ok {
+		return nil
+	}
+	inbounds, ok := raw.([]interface{})
+	if !ok || len(inbounds) == 0 {
+		return nil
+	}
+	for _, ib := range inbounds {
+		ibStr, ok := ib.(string)
+		if !ok {
+			continue
+		}
+		for _, userIB := range userInboundTags {
+			if userIB == ibStr {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("user inbound not in rule inbound list")
+}
+
 func addAuthUser(users []string, userName string) []string {
 	if containsRouteTagString(users, userName) {
 		return users
@@ -1570,7 +1596,7 @@ func removeAuthUser(users []string, userName string) []string {
 	return out
 }
 
-func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []int64, tags []UserRouteTag) ([]UserRouteTag, error) {
+func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []int64, tags []UserRouteTag, userInboundTags []string) ([]UserRouteTag, error) {
 	userName = strings.TrimSpace(userName)
 	if userName == "" {
 		return nil, fmt.Errorf("user name is required")
@@ -1632,6 +1658,9 @@ func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []in
 		}
 		nextUsers := resolution.AuthUsers
 		if _, shouldHave := targetSet[id]; shouldHave {
+			if err := checkRouteTagInboundCompatibility(resolution.Rule, userInboundTags); err != nil {
+				return nil, fmt.Errorf("route tag inbound mismatch: tag %d %w", id, err)
+			}
 			nextUsers = addAuthUser(nextUsers, userName)
 		} else {
 			nextUsers = removeAuthUser(nextUsers, userName)
