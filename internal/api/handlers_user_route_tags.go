@@ -381,10 +381,18 @@ func (s *Server) handleUpdateUserRouteTags(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "Failed to list route tags: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	assigned, err := s.config.UpdateUserRouteTagMembership(name, req.TagIDs, tags)
+	var userInboundTags []string
+	if userMeta != nil {
+		userInboundTags = userMeta.InboundTags
+	}
+	assigned, err := s.config.UpdateUserRouteTagMembership(name, req.TagIDs, tags, userInboundTags)
 	if err != nil {
 		if strings.Contains(err.Error(), "route tag needs relink") {
 			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		if strings.Contains(err.Error(), "route tag inbound mismatch") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		http.Error(w, "Failed to update route tags: "+err.Error(), http.StatusInternalServerError)

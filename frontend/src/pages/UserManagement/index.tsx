@@ -1547,15 +1547,22 @@ export default function UserManagement() {
                                 No route tags configured.
                             </div>
                         ) : (
-                            (routeTagsQuery.data || []).map(tag => (
+                            (routeTagsQuery.data || []).map(tag => {
+                                const userInbounds: string[] = modalState.data?.inbound_tags || []
+                                const ruleInbounds: string[] = (() => {
+                                    try { return (JSON.parse(tag.rule_match_json) as any)?.inbound ?? [] } catch { return [] }
+                                })()
+                                const inboundMismatch = ruleInbounds.length > 0 && !ruleInbounds.some((ib: string) => userInbounds.includes(ib))
+                                const isDisabled = tag.broken || inboundMismatch || !canWriteUsers
+                                return (
                                 <label
                                     key={tag.id}
-                                    className={`flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 ${tag.broken ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-700'}`}
+                                    className={`flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 ${isDisabled ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-700'}`}
                                 >
                                     <input
                                         type="checkbox"
                                         checked={selectedRouteTagIds.has(tag.id)}
-                                        disabled={tag.broken || !canWriteUsers}
+                                        disabled={isDisabled}
                                         onChange={e => {
                                             const next = new Set(selectedRouteTagIds)
                                             if (e.target.checked) {
@@ -1571,12 +1578,15 @@ export default function UserManagement() {
                                         <span className="flex flex-wrap items-center gap-2">
                                             <span className="font-medium text-slate-100">{tag.name}</span>
                                             {tag.broken && <Badge variant="error">needs relink</Badge>}
+                                            {inboundMismatch && <Badge variant="error">inbound mismatch</Badge>}
                                         </span>
                                         {tag.description && <span className="mt-1 block text-xs text-slate-500">{tag.description}</span>}
                                         {tag.broken_reason && <span className="mt-1 block text-xs text-red-300">{tag.broken_reason}</span>}
+                                        {inboundMismatch && <span className="mt-1 block text-xs text-red-300">user inbound not in rule inbound list</span>}
                                     </span>
                                 </label>
-                            ))
+                                )
+                            })
                         )}
                     </div>
                 </div>
