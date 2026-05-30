@@ -1553,10 +1553,10 @@ func routeTagByID(tags []UserRouteTag) map[int64]UserRouteTag {
 	return out
 }
 
-// checkRouteTagInboundCompatibility returns an error if the rule restricts
+// CheckRouteTagInboundCompatibility returns an error if the rule restricts
 // traffic to specific inbounds and none of the user's inbound tags match.
 // An empty rule inbound list means no inbound restriction — always compatible.
-func checkRouteTagInboundCompatibility(rule map[string]interface{}, userInboundTags []string) error {
+func CheckRouteTagInboundCompatibility(rule map[string]interface{}, userInboundTags []string) error {
 	raw, ok := rule["inbound"]
 	if !ok {
 		return nil
@@ -1658,7 +1658,7 @@ func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []in
 		}
 		nextUsers := resolution.AuthUsers
 		if _, shouldHave := targetSet[id]; shouldHave {
-			if err := checkRouteTagInboundCompatibility(resolution.Rule, userInboundTags); err != nil {
+			if err := CheckRouteTagInboundCompatibility(resolution.Rule, userInboundTags); err != nil {
 				return nil, fmt.Errorf("route tag inbound mismatch: tag %d %w", id, err)
 			}
 			nextUsers = addAuthUser(nextUsers, userName)

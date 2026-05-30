@@ -397,7 +397,7 @@ export default function UserManagement() {
                     className="max-w-[180px] truncate"
                     title={tag.broken_reason || tag.name}
                 >
-                    {tag.name}{tag.broken ? ' (needs relink)' : ''}
+                    {tag.name}{tag.broken ? (tag.broken_reason === 'inbound_mismatch' ? ' (inbound mismatch)' : ' (needs relink)') : ''}
                 </Badge>
             ))}
         </div>
@@ -967,7 +967,7 @@ export default function UserManagement() {
                             <option value="">All Route Tags</option>
                             {(routeTagsQuery.data || []).map(tag => (
                                 <option key={tag.id} value={String(tag.id)}>
-                                    {tag.name}{tag.broken ? ' (needs relink)' : ''}
+                                    {tag.name}{tag.broken ? (tag.broken_reason === 'inbound_mismatch' ? ' (inbound mismatch)' : ' (needs relink)') : ''}
                                 </option>
                             ))}
                         </select>
