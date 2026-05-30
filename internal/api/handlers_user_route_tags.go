@@ -98,16 +98,25 @@ func (s *Server) enrichUserRouteTag(tag core.UserRouteTag) (UserRouteTagStatus, 
 	return routeTagStatusFromTag(tag, resolution), nil
 }
 
-func (s *Server) routeTagStatusesForUser(userName string, tags []core.UserRouteTag) ([]UserRouteTagStatus, error) {
+func (s *Server) routeTagStatusesForUser(userName string, tags []core.UserRouteTag, userInboundTags []string) ([]UserRouteTagStatus, error) {
 	assigned, err := s.config.ResolveUserRouteTags(userName, tags)
 	if err != nil {
 		return nil, err
 	}
 	statuses := make([]UserRouteTagStatus, 0, len(assigned))
 	for _, tag := range assigned {
-		status, err := s.enrichUserRouteTag(tag)
+		resolution, err := s.config.ResolveRouteTagRule(tag.RuleMatchJSON)
 		if err != nil {
 			return nil, err
+		}
+		status := routeTagStatusFromTag(tag, resolution)
+		// Mark tag as broken when the resolved rule's inbound filter excludes the user's inbound.
+		// This surfaces hardcoded mismatches (e.g. manual config edits) in the UI.
+		if !status.Broken {
+			if err := core.CheckRouteTagInboundCompatibility(resolution.Rule, userInboundTags); err != nil {
+				status.Broken = true
+				status.BrokenReason = "inbound_mismatch"
+			}
 		}
 		statuses = append(statuses, status)
 	}

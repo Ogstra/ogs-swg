@@ -1124,7 +1124,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 				lastSeen = demoModeLastSeenInRange("singbox-user-idle", name, now, 6*60, 9*60*60)
 			}
 		}
-		routeTags, err := s.routeTagStatusesForUser(name, routeTagDefinitions)
+		routeTags, err := s.routeTagStatusesForUser(name, routeTagDefinitions, inboundTags)
 		if err != nil {
 			http.Error(w, "Failed to resolve route tags: "+err.Error(), http.StatusInternalServerError)
 			return
