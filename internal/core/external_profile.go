@@ -19,9 +19,9 @@ type ExternalProfile struct {
 	HostIPv6File string `json:"host_ipv6_file"` // IPv6 literal or path on VPS, kept empty if not used
 	Port         int    `json:"port"`
 	UUID         string `json:"uuid"`          // VLESS only
-	Password     string `json:"password"`      // Shadowsocks only
+	Password     string `json:"password"`      // Shadowsocks user password
 	SSMethod     string `json:"ss_method"`     // Shadowsocks only (e.g. "2022-blake3-aes-128-gcm")
-	SSServerKey  string `json:"ss_server_key"` // Shadowsocks 2022 only
+	SSServerKey  string `json:"ss_server_key"` // Shadowsocks server password/key
 	PublicKey    string `json:"public_key"`    // Reality public key (homelab server key)
 	ShortID      string `json:"short_id"`
 	ServerName   string `json:"server_name"` // SNI
@@ -111,6 +111,9 @@ func (s *Store) UpsertExternalProfile(p ExternalProfile) (int64, error) {
 		return 0, err
 	}
 	if previousUserName != "" && strings.TrimSpace(previousUserName) != strings.TrimSpace(p.Name) {
+		if err := transferExternalProfileSubscriptionsTx(tx, previousUserName, p.Name); err != nil {
+			return 0, err
+		}
 		if err := deleteExternalOnlyUserTx(tx, previousUserName); err != nil {
 			return 0, err
 		}
@@ -144,6 +147,31 @@ func ensureExternalProfileUserTx(tx *sql.Tx, p ExternalProfile) error {
 		return err
 	}
 	_, err = tx.Exec(`INSERT OR IGNORE INTO user_external_profiles (user_name, external_profile_id) VALUES (?, ?)`, userName, p.ID)
+	return err
+}
+
+func transferExternalProfileSubscriptionsTx(tx *sql.Tx, oldName, newName string) error {
+	oldName = strings.TrimSpace(oldName)
+	newName = strings.TrimSpace(newName)
+	if oldName == "" || newName == "" || oldName == newName {
+		return nil
+	}
+
+	if _, err := tx.Exec(`
+		UPDATE subscription_users
+		SET user_name = ?
+		WHERE user_name = ?
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM subscription_users existing
+			WHERE existing.sub_id = subscription_users.sub_id
+			  AND existing.user_name = ?
+		  )`,
+		newName, oldName, newName,
+	); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM subscription_users WHERE user_name = ?`, oldName)
 	return err
 }
 
