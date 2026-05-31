@@ -180,15 +180,15 @@ func (s *Server) walkLogStore(ctx context.Context, opts logSearchOptions, emitCh
 		toMs = tr.to.UnixMilli()
 	}
 
-	// Determine if cold segments need scanning: query reaches before oldest hot row.
-	coldNeeded := false
-	if fromMs > 0 {
+	// Determine if cold segments need scanning. An open-ended search has no
+	// lower bound, so it must include the cold tier as well as hot rows.
+	coldNeeded := fromMs == 0
+	if !coldNeeded && fromMs > 0 {
 		oldest, err := s.logStore.OldestHotTs(ctx)
 		if err == nil && (oldest == 0 || oldest > fromMs) {
 			coldNeeded = true
 		}
 	}
-	// fromMs == 0 means no lower time bound — hot only (D-05).
 
 	visitRow := func(row core.LogRow) error {
 		return visit(row.Raw)
@@ -197,7 +197,7 @@ func (s *Server) walkLogStore(ctx context.Context, opts logSearchOptions, emitCh
 	// Cold first (oldest range), newest-first within: iterate segments newest→oldest,
 	// and within each segment scan lines in reverse (matches previous file behavior).
 	if coldNeeded {
-		coldDir := filepath.Join(filepath.Dir(s.config.DatabasePath), "logs")
+		coldDir := s.logColdDir()
 
 		segs, err := s.logStore.SegmentsInRange(ctx, fromMs, toMs)
 		if err != nil {
@@ -229,6 +229,16 @@ func (s *Server) walkLogStore(ctx context.Context, opts logSearchOptions, emitCh
 	// "github" even though it's a substring. Always scan all rows and rely on
 	// logLineMatchesQuery (strings.Contains) for correct substring matching.
 	return s.logStore.WalkHot(ctx, "", fromMs, toMs, visitRow)
+}
+
+func (s *Server) logColdDir() string {
+	if s != nil && s.config != nil && strings.TrimSpace(s.config.LogColdDir) != "" {
+		return strings.TrimSpace(s.config.LogColdDir)
+	}
+	if s != nil && s.config != nil && strings.TrimSpace(s.config.DatabasePath) != "" {
+		return filepath.Join(filepath.Dir(s.config.DatabasePath), "logs")
+	}
+	return "data/logs"
 }
 
 // walkColdSegmentReverse opens a gzip segment, buffers all lines, then visits

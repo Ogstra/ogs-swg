@@ -20,7 +20,7 @@ import (
 // LogRow is one row in the singbox_logs table.
 type LogRow struct {
 	ID    int64  `json:"id"`
-	Ts    int64  `json:"ts"`   // unix ms
+	Ts    int64  `json:"ts"` // unix ms
 	Raw   string `json:"raw"`
 	Level string `json:"level"`
 	User  string `json:"user"`
@@ -640,8 +640,8 @@ func (l *LogStore) ExportToCold(ctx context.Context, coldDir string, maxID int64
 		return nil, fmt.Errorf("export cold commit: %w", err)
 	}
 
-	if _, err := l.db.ExecContext(ctx, `PRAGMA incremental_vacuum`); err != nil {
-		log.Printf("log store: incremental_vacuum after export: %v", err)
+	if _, err := l.db.ExecContext(ctx, `VACUUM`); err != nil {
+		log.Printf("log store: vacuum after export: %v", err)
 	}
 
 	return &LogSegment{

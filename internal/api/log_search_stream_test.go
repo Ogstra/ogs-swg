@@ -238,6 +238,119 @@ func TestSearchLogsViaStore_WithColdSegment(t *testing.T) {
 	}
 }
 
+func TestSearchLogsViaStore_NoTimeRangeIncludesColdSegments(t *testing.T) {
+	srv, ls, _ := newSearchTestServer(t)
+
+	coldDir := filepath.Join(filepath.Dir(srv.config.DatabasePath), "logs")
+	if err := os.MkdirAll(coldDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll coldDir: %v", err)
+	}
+
+	segFilename := "singbox_20230101-20230101.log.gz"
+	segPath := filepath.Join(coldDir, segFilename)
+	{
+		f, err := os.Create(segPath)
+		if err != nil {
+			t.Fatalf("create cold seg: %v", err)
+		}
+		gz := gzip.NewWriter(f)
+		for _, line := range []string{
+			"-0000 2023-01-01 00:00:00 INFO coldopen match",
+			"-0000 2023-01-01 00:00:01 INFO unrelated cold",
+		} {
+			if _, err := gz.Write([]byte(line + "\n")); err != nil {
+				t.Fatalf("gz write: %v", err)
+			}
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatalf("gz close: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("f close: %v", err)
+		}
+	}
+
+	coldBaseMs := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC).UnixMilli()
+	if _, err := ls.DB().ExecContext(context.Background(),
+		`INSERT INTO log_segments(filename, start_ts, end_ts, row_count, size_bytes) VALUES(?,?,?,?,?)`,
+		segFilename, coldBaseMs, coldBaseMs+1000, 2, 0); err != nil {
+		t.Fatalf("insert segment: %v", err)
+	}
+	if err := ls.InsertLogs(context.Background(), time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC).UnixMilli(), []string{
+		"2024/06/01 12:00:00 INFO coldopen hot match",
+	}); err != nil {
+		t.Fatalf("InsertLogs hot: %v", err)
+	}
+
+	opts := logSearchOptions{
+		query:     compileLogQuery("coldopen"),
+		limit:     200,
+		chunkSize: 50,
+	}
+
+	var received []string
+	summary, err := srv.searchLogsViaStore(context.Background(), opts, collectChunks(&received), noopStatus)
+	if err != nil {
+		t.Fatalf("searchLogsViaStore no range: %v", err)
+	}
+	if summary.matched != 2 {
+		t.Fatalf("matched=%d want 2; no-range search must include cold and hot tiers", summary.matched)
+	}
+	if len(received) != 2 {
+		t.Fatalf("received=%d want 2", len(received))
+	}
+}
+
+func TestSearchLogsViaStore_UsesConfiguredColdDir(t *testing.T) {
+	srv, ls, tmp := newSearchTestServer(t)
+	customColdDir := filepath.Join(tmp, "custom-cold")
+	srv.config.LogColdDir = customColdDir
+	if err := os.MkdirAll(customColdDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll customColdDir: %v", err)
+	}
+
+	segFilename := "singbox_20230102-20230102.log.gz"
+	segPath := filepath.Join(customColdDir, segFilename)
+	{
+		f, err := os.Create(segPath)
+		if err != nil {
+			t.Fatalf("create cold seg: %v", err)
+		}
+		gz := gzip.NewWriter(f)
+		if _, err := gz.Write([]byte("-0000 2023-01-02 00:00:00 INFO customcold match\n")); err != nil {
+			t.Fatalf("gz write: %v", err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatalf("gz close: %v", err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatalf("f close: %v", err)
+		}
+	}
+
+	coldBaseMs := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC).UnixMilli()
+	if _, err := ls.DB().ExecContext(context.Background(),
+		`INSERT INTO log_segments(filename, start_ts, end_ts, row_count, size_bytes) VALUES(?,?,?,?,?)`,
+		segFilename, coldBaseMs, coldBaseMs, 1, 0); err != nil {
+		t.Fatalf("insert segment: %v", err)
+	}
+
+	opts := logSearchOptions{
+		query:     compileLogQuery("customcold"),
+		limit:     200,
+		chunkSize: 50,
+	}
+
+	var received []string
+	summary, err := srv.searchLogsViaStore(context.Background(), opts, collectChunks(&received), noopStatus)
+	if err != nil {
+		t.Fatalf("searchLogsViaStore configured cold dir: %v", err)
+	}
+	if summary.matched != 1 || len(received) != 1 {
+		t.Fatalf("matched=%d received=%d want 1 result from configured cold dir", summary.matched, len(received))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TestWalkColdSegmentReverse_Order
 // ---------------------------------------------------------------------------
