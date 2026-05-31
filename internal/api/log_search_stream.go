@@ -288,8 +288,11 @@ func walkColdSegmentReverse(ctx context.Context, path string, visit func(string)
 
 func collectSearchChunks(chunks [][]string) []string {
 	collected := make([]string, 0)
-	for _, chunk := range chunks {
-		collected = append(collected, chunk...)
+	for i := len(chunks) - 1; i >= 0; i-- {
+		chunk := chunks[i]
+		for j := len(chunk) - 1; j >= 0; j-- {
+			collected = append(collected, chunk[j])
+		}
 	}
 	return collected
 }
