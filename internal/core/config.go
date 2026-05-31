@@ -19,44 +19,46 @@ import (
 )
 
 type Config struct {
-	SingboxConfigPath     string   `json:"singbox_config_path" env:"OGS_SINGBOX_CONFIG_PATH" env-default:"/etc/sing-box/config.json"`
-	SingboxAPIAddr        string   `json:"singbox_api_addr" env:"OGS_SINGBOX_API_ADDR" env-default:"127.0.0.1:8080"`
-	ManagedInbounds       []string `json:"managed_inbounds" env:"OGS_MANAGED_INBOUNDS" env-default:"in-reality"`
-	StatsInbounds         []string `json:"stats_inbounds" env:"OGS_STATS_INBOUNDS" env-default:"in-reality"`
-	StatsOutbounds        []string `json:"stats_outbounds" env:"OGS_STATS_OUTBOUNDS" env-default:"direct"`
-	AccessLogPath         string   `json:"access_log_path" env:"OGS_ACCESS_LOG_PATH" env-default:"data/access.log"`
-	DatabasePath          string   `json:"database_path" env:"OGS_DB_PATH" env-default:"data/stats.db"`
-	ListenAddr            string   `json:"listen_addr" env:"OGS_LISTEN_ADDR" env-default:":8080"`
-	WireGuardConfigPath   string   `json:"wireguard_config_path" env:"OGS_WIREGUARD_CONFIG_PATH" env-default:"/etc/wireguard/wg0.conf"`
-	WireGuardConfigDir    string   `json:"wireguard_config_dir" env:"OGS_WIREGUARD_CONFIG_DIR"`
-	EnableWireGuard       bool     `json:"enable_wireguard" env:"OGS_ENABLE_WIREGUARD" env-default:"true"`
-	EnableSingbox         bool     `json:"enable_singbox" env:"OGS_ENABLE_SINGBOX" env-default:"true"`
-	UseStatsSampler       bool     `json:"use_stats_sampler" env:"OGS_USE_STATS_SAMPLER" env-default:"true"`
-	SamplerIntervalSec    int      `json:"sampler_interval_sec" env:"OGS_SAMPLER_INTERVAL_SEC" env-default:"120"`
-	ActiveThresholdBytes  int64    `json:"active_threshold_bytes" env:"OGS_ACTIVE_THRESHOLD_BYTES" env-default:"1024"`
-	RetentionEnabled      bool     `json:"retention_enabled" env:"OGS_RETENTION_ENABLED" env-default:"false"`
-	RetentionDays         int      `json:"retention_days" env:"OGS_RETENTION_DAYS" env-default:"90"`
-	WGSamplerIntervalSec  int      `json:"wg_sampler_interval_sec" env:"OGS_WG_SAMPLER_INTERVAL_SEC" env-default:"60"`
-	WGRetentionDays       int      `json:"wg_retention_days" env:"OGS_WG_RETENTION_DAYS" env-default:"30"`
-	AggregationEnabled    bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
-	AggregationDays       int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
-	AuditLogMaxMB         int      `json:"audit_log_max_mb" env:"OGS_AUDIT_LOG_MAX_MB" env-default:"50"`
-	LogRetentionMode      string   `json:"log_retention_mode" env:"OGS_LOG_RETENTION_MODE" env-default:"size"`      // "size" or "time"
-	LogRetentionMB        int      `json:"log_retention_mb" env:"OGS_LOG_RETENTION_MB" env-default:"200"`
-	LogRetentionDays      int      `json:"log_retention_days" env:"OGS_LOG_RETENTION_DAYS" env-default:"30"`
-	LogRetentionUnit      string   `json:"log_retention_unit" env:"OGS_LOG_RETENTION_UNIT" env-default:"days"`      // "days"|"weeks"|"months"
-	LogColdDir            string   `json:"log_cold_dir" env:"OGS_LOG_COLD_DIR" env-default:"data/logs"`
-	DBBackupPath          string   `json:"db_backup_path" env:"OGS_DB_BACKUP_PATH" env-default:"data/backups"`
-	DBBackupIntervalHours int      `json:"db_backup_interval_hours" env:"OGS_DB_BACKUP_INTERVAL_HOURS" env-default:"24"`
-	PublicIP              string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
-	SubscriptionDomain    string   `json:"subscription_domain" env:"OGS_SUBSCRIPTION_DOMAIN"`
-	CFWorkerURL           string   `json:"cf_worker_url" env:"OGS_CF_WORKER_URL"`
-	SingboxPendingChanges bool     `json:"-"` // Not persisted, runtime flag
-	ConfigPath            string   `json:"-"`
-	APIKey                string   `json:"api_key" env:"OGS_API_KEY"`
-	APIKeyReadOnly        bool     `json:"api_key_read_only" env:"OGS_API_KEY_READ_ONLY" env-default:"false"`
-	DemoMode              bool     `json:"demo_mode" env:"OGS_DEMO_MODE" env-default:"false"`
-	DisablePasswordLogin  bool     `json:"disable_password_login" env:"OGS_DISABLE_PASSWORD_LOGIN" env-default:"false"`
+	SingboxConfigPath        string   `json:"singbox_config_path" env:"OGS_SINGBOX_CONFIG_PATH" env-default:"/etc/sing-box/config.json"`
+	SingboxAPIAddr           string   `json:"singbox_api_addr" env:"OGS_SINGBOX_API_ADDR" env-default:"127.0.0.1:8080"`
+	ManagedInbounds          []string `json:"managed_inbounds" env:"OGS_MANAGED_INBOUNDS" env-default:"in-reality"`
+	StatsInbounds            []string `json:"stats_inbounds" env:"OGS_STATS_INBOUNDS" env-default:"in-reality"`
+	StatsOutbounds           []string `json:"stats_outbounds" env:"OGS_STATS_OUTBOUNDS" env-default:"direct"`
+	AccessLogPath            string   `json:"access_log_path" env:"OGS_ACCESS_LOG_PATH" env-default:"data/access.log"`
+	DatabasePath             string   `json:"database_path" env:"OGS_DB_PATH" env-default:"data/stats.db"`
+	ListenAddr               string   `json:"listen_addr" env:"OGS_LISTEN_ADDR" env-default:":8080"`
+	WireGuardConfigPath      string   `json:"wireguard_config_path" env:"OGS_WIREGUARD_CONFIG_PATH" env-default:"/etc/wireguard/wg0.conf"`
+	WireGuardConfigDir       string   `json:"wireguard_config_dir" env:"OGS_WIREGUARD_CONFIG_DIR"`
+	EnableWireGuard          bool     `json:"enable_wireguard" env:"OGS_ENABLE_WIREGUARD" env-default:"true"`
+	EnableSingbox            bool     `json:"enable_singbox" env:"OGS_ENABLE_SINGBOX" env-default:"true"`
+	UseStatsSampler          bool     `json:"use_stats_sampler" env:"OGS_USE_STATS_SAMPLER" env-default:"true"`
+	SamplerIntervalSec       int      `json:"sampler_interval_sec" env:"OGS_SAMPLER_INTERVAL_SEC" env-default:"120"`
+	ActiveThresholdBytes     int64    `json:"active_threshold_bytes" env:"OGS_ACTIVE_THRESHOLD_BYTES" env-default:"1024"`
+	RetentionEnabled         bool     `json:"retention_enabled" env:"OGS_RETENTION_ENABLED" env-default:"false"`
+	RetentionDays            int      `json:"retention_days" env:"OGS_RETENTION_DAYS" env-default:"90"`
+	WGSamplerIntervalSec     int      `json:"wg_sampler_interval_sec" env:"OGS_WG_SAMPLER_INTERVAL_SEC" env-default:"60"`
+	WGRetentionDays          int      `json:"wg_retention_days" env:"OGS_WG_RETENTION_DAYS" env-default:"30"`
+	AggregationEnabled       bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
+	AggregationDays          int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
+	AuditLogMaxMB            int      `json:"audit_log_max_mb" env:"OGS_AUDIT_LOG_MAX_MB" env-default:"50"`
+	LogRetentionMode         string   `json:"log_retention_mode" env:"OGS_LOG_RETENTION_MODE" env-default:"size"` // "size" or "time"
+	LogRetentionMB           int      `json:"log_retention_mb" env:"OGS_LOG_RETENTION_MB" env-default:"200"`
+	LogRetentionTargetPct    int      `json:"log_retention_target_percent" env:"OGS_LOG_RETENTION_TARGET_PERCENT" env-default:"80"`
+	LogRetentionMaxExportPct int      `json:"log_retention_max_export_percent" env:"OGS_LOG_RETENTION_MAX_EXPORT_PERCENT" env-default:"25"`
+	LogRetentionDays         int      `json:"log_retention_days" env:"OGS_LOG_RETENTION_DAYS" env-default:"30"`
+	LogRetentionUnit         string   `json:"log_retention_unit" env:"OGS_LOG_RETENTION_UNIT" env-default:"days"` // "days"|"weeks"|"months"
+	LogColdDir               string   `json:"log_cold_dir" env:"OGS_LOG_COLD_DIR" env-default:"data/logs"`
+	DBBackupPath             string   `json:"db_backup_path" env:"OGS_DB_BACKUP_PATH" env-default:"data/backups"`
+	DBBackupIntervalHours    int      `json:"db_backup_interval_hours" env:"OGS_DB_BACKUP_INTERVAL_HOURS" env-default:"24"`
+	PublicIP                 string   `json:"public_ip" env:"OGS_PUBLIC_IP"`
+	SubscriptionDomain       string   `json:"subscription_domain" env:"OGS_SUBSCRIPTION_DOMAIN"`
+	CFWorkerURL              string   `json:"cf_worker_url" env:"OGS_CF_WORKER_URL"`
+	SingboxPendingChanges    bool     `json:"-"` // Not persisted, runtime flag
+	ConfigPath               string   `json:"-"`
+	APIKey                   string   `json:"api_key" env:"OGS_API_KEY"`
+	APIKeyReadOnly           bool     `json:"api_key_read_only" env:"OGS_API_KEY_READ_ONLY" env-default:"false"`
+	DemoMode                 bool     `json:"demo_mode" env:"OGS_DEMO_MODE" env-default:"false"`
+	DisablePasswordLogin     bool     `json:"disable_password_login" env:"OGS_DISABLE_PASSWORD_LOGIN" env-default:"false"`
 
 	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host).
 	ExecutionMode string `json:"execution_mode" env:"OGS_EXECUTION_MODE"`

@@ -845,28 +845,30 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
-		"enable_singbox":          s.config.EnableSingbox,
-		"enable_wireguard":        s.config.EnableWireGuard,
-		"retention_enabled":       s.config.RetentionEnabled,
-		"retention_days":          s.config.RetentionDays,
-		"wg_retention_days":       s.config.WGRetentionDays,
-		"sampler_interval_sec":    s.config.SamplerIntervalSec,
-		"wg_sampler_interval_sec": s.config.WGSamplerIntervalSec,
-		"sampler_paused":          s.sampler != nil && s.sampler.IsPaused(),
-		"active_threshold_bytes":  s.config.ActiveThresholdBytes,
-		"aggregation_enabled":     s.config.AggregationEnabled,
-		"aggregation_days":        s.config.AggregationDays,
-		"audit_log_max_mb":           s.config.AuditLogMaxMB,
-		"access_log_path":            s.config.AccessLogPath,
-		"log_retention_mode":         s.config.LogRetentionMode,
-		"log_retention_mb":           s.config.LogRetentionMB,
-		"log_retention_days":         s.config.LogRetentionDays,
-		"log_retention_unit":         s.config.LogRetentionUnit,
-		"log_cold_dir":               s.config.LogColdDir,
-		"db_backup_path":             s.config.DBBackupPath,
-		"db_backup_interval_hours":   s.config.DBBackupIntervalHours,
-		"systemctl_available":        s.executor != nil,
-		"journalctl_available":       s.executor != nil,
+		"enable_singbox":                   s.config.EnableSingbox,
+		"enable_wireguard":                 s.config.EnableWireGuard,
+		"retention_enabled":                s.config.RetentionEnabled,
+		"retention_days":                   s.config.RetentionDays,
+		"wg_retention_days":                s.config.WGRetentionDays,
+		"sampler_interval_sec":             s.config.SamplerIntervalSec,
+		"wg_sampler_interval_sec":          s.config.WGSamplerIntervalSec,
+		"sampler_paused":                   s.sampler != nil && s.sampler.IsPaused(),
+		"active_threshold_bytes":           s.config.ActiveThresholdBytes,
+		"aggregation_enabled":              s.config.AggregationEnabled,
+		"aggregation_days":                 s.config.AggregationDays,
+		"audit_log_max_mb":                 s.config.AuditLogMaxMB,
+		"access_log_path":                  s.config.AccessLogPath,
+		"log_retention_mode":               s.config.LogRetentionMode,
+		"log_retention_mb":                 s.config.LogRetentionMB,
+		"log_retention_target_percent":     s.config.LogRetentionTargetPct,
+		"log_retention_max_export_percent": s.config.LogRetentionMaxExportPct,
+		"log_retention_days":               s.config.LogRetentionDays,
+		"log_retention_unit":               s.config.LogRetentionUnit,
+		"log_cold_dir":                     s.config.LogColdDir,
+		"db_backup_path":                   s.config.DBBackupPath,
+		"db_backup_interval_hours":         s.config.DBBackupIntervalHours,
+		"systemctl_available":              s.executor != nil,
+		"journalctl_available":             s.executor != nil,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -990,6 +992,38 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.config.LogRetentionMB > 100_000 {
 			http.Error(w, "log_retention_mb must be <= 100000", http.StatusBadRequest)
+			return
+		}
+	}
+	if v, ok := payload["log_retention_target_percent"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.LogRetentionTargetPct = int(t)
+		case int:
+			s.config.LogRetentionTargetPct = t
+		}
+		if s.config.LogRetentionTargetPct < 50 {
+			http.Error(w, "log_retention_target_percent must be >= 50", http.StatusBadRequest)
+			return
+		}
+		if s.config.LogRetentionTargetPct > 95 {
+			http.Error(w, "log_retention_target_percent must be <= 95", http.StatusBadRequest)
+			return
+		}
+	}
+	if v, ok := payload["log_retention_max_export_percent"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.LogRetentionMaxExportPct = int(t)
+		case int:
+			s.config.LogRetentionMaxExportPct = t
+		}
+		if s.config.LogRetentionMaxExportPct < 5 {
+			http.Error(w, "log_retention_max_export_percent must be >= 5", http.StatusBadRequest)
+			return
+		}
+		if s.config.LogRetentionMaxExportPct > 50 {
+			http.Error(w, "log_retention_max_export_percent must be <= 50", http.StatusBadRequest)
 			return
 		}
 	}

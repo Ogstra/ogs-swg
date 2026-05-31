@@ -118,6 +118,8 @@ export interface FeatureFlags {
     journalctl_available?: boolean;
     log_retention_mode?: 'size' | 'time';
     log_retention_mb?: number;
+    log_retention_target_percent?: number;
+    log_retention_max_export_percent?: number;
     log_retention_days?: number;
     log_retention_unit?: 'days' | 'weeks' | 'months';
     log_cold_dir?: string;

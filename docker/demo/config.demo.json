@@ -42,6 +42,8 @@
   "audit_log_max_mb": 10,
   "log_retention_mode": "size",
   "log_retention_mb": 50,
+  "log_retention_target_percent": 80,
+  "log_retention_max_export_percent": 25,
   "log_retention_days": 7,
   "log_retention_unit": "days",
   "log_cold_dir": "/app/data/logs",

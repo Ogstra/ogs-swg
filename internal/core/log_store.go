@@ -657,25 +657,74 @@ func (l *LogStore) ExportToCold(ctx context.Context, coldDir string, maxID int64
 // CheckRetention inspects the current hot tier and exports old rows if the
 // configured threshold is exceeded.
 //
-// mode "size": export oldest ~50% of rows when SizeBytes() > maxMB*1024*1024.
+// mode "size": export enough oldest rows to estimate shrinking SizeBytes()
+// down to targetPercent of maxMB, capped by maxExportPercent per run.
 // mode "time": export rows with ts < now - duration(days, unit) where unit is
 //
 //	"days", "weeks", or "months".
 //
 // Returns the created segment if anything was exported (nil, nil otherwise).
-func (l *LogStore) CheckRetention(ctx context.Context, mode string, maxMB, days int, unit, coldDir string) (*LogSegment, error) {
+func (l *LogStore) CheckRetention(ctx context.Context, mode string, maxMB, targetPercent, maxExportPercent, days int, unit, coldDir string) (*LogSegment, error) {
 	switch mode {
 	case "size":
 		limit := int64(maxMB) * 1024 * 1024
-		if l.SizeBytes() <= limit {
+		currentSize := l.SizeBytes()
+		if currentSize <= limit {
 			return nil, nil
 		}
-		// Find the id at the 50th-percentile (export oldest half).
+		if targetPercent <= 0 {
+			targetPercent = 80
+		}
+		if targetPercent < 50 {
+			targetPercent = 50
+		}
+		if targetPercent > 95 {
+			targetPercent = 95
+		}
+		if maxExportPercent <= 0 {
+			maxExportPercent = 25
+		}
+		if maxExportPercent < 5 {
+			maxExportPercent = 5
+		}
+		if maxExportPercent > 50 {
+			maxExportPercent = 50
+		}
+		targetBytes := limit * int64(targetPercent) / 100
+		if targetBytes <= 0 || targetBytes >= currentSize {
+			targetBytes = limit
+		}
+
+		var rowCount int64
+		if err := l.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM singbox_logs`).Scan(&rowCount); err != nil {
+			return nil, err
+		}
+		if rowCount <= 1 {
+			return nil, nil
+		}
+
+		bytesToExport := currentSize - targetBytes
+		rowsToExport := (rowCount*bytesToExport + currentSize - 1) / currentSize
+		if rowsToExport < 1 {
+			rowsToExport = 1
+		}
+		maxRowsToExport := rowCount * int64(maxExportPercent) / 100
+		if maxRowsToExport < 1 {
+			maxRowsToExport = 1
+		}
+		if rowsToExport > maxRowsToExport {
+			rowsToExport = maxRowsToExport
+		}
+		if rowsToExport >= rowCount {
+			rowsToExport = rowCount - 1
+		}
+
+		// Find the id at the estimated export boundary.
 		var maxID sql.NullInt64
 		err := l.db.QueryRowContext(ctx,
-			`SELECT id FROM singbox_logs ORDER BY id ASC LIMIT 1 OFFSET (
-				SELECT COUNT(*)/2 FROM singbox_logs
-			)`).Scan(&maxID)
+			`SELECT id FROM singbox_logs ORDER BY id ASC LIMIT 1 OFFSET ?`,
+			rowsToExport-1,
+		).Scan(&maxID)
 		if err != nil || !maxID.Valid {
 			return nil, nil
 		}
