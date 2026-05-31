@@ -354,6 +354,22 @@ func TestSearchLogsViaStore_UsesConfiguredColdDir(t *testing.T) {
 	}
 }
 
+func TestCollectSearchChunksReturnsChronologicalOrder(t *testing.T) {
+	got := collectSearchChunks([][]string{
+		{"newest", "middle"},
+		{"oldest"},
+	})
+	want := []string{"oldest", "middle", "newest"}
+	if len(got) != len(want) {
+		t.Fatalf("len=%d want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got=%v want=%v", got, want)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // TestWalkColdSegmentReverse_Order
 // ---------------------------------------------------------------------------
