@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/base64"
 	"net/url"
 	"strings"
 	"testing"
@@ -34,5 +35,50 @@ func TestBuildExternalVlessLinkIncludesALPN(t *testing.T) {
 	}
 	if !strings.Contains(link, "packetEncoding=xudp") {
 		t.Fatalf("link missing packetEncoding=xudp: %s", link)
+	}
+}
+
+func TestBuildExternalShadowsocksLinkRequiresServerAndUserPasswords(t *testing.T) {
+	_, err := buildExternalShadowsocksLink("homelab", core.ExternalProfile{
+		Name:        "homelab",
+		Type:        "shadowsocks",
+		HostIPv4:    "example.test",
+		Port:        8388,
+		Password:    "user-password",
+		SSMethod:    "2022-blake3-aes-128-gcm",
+		SSServerKey: "",
+	})
+	if err == nil || !strings.Contains(err.Error(), "missing server password") {
+		t.Fatalf("error=%v; want missing server password", err)
+	}
+}
+
+func TestBuildExternalShadowsocksLinkUsesServerAndUserPasswordCredential(t *testing.T) {
+	link, err := buildExternalShadowsocksLink("homelab", core.ExternalProfile{
+		Name:        "homelab",
+		Type:        "shadowsocks",
+		HostIPv4:    "example.test",
+		Port:        8388,
+		Password:    "user-password",
+		SSMethod:    "2022-blake3-aes-128-gcm",
+		SSServerKey: "server-password",
+	})
+	if err != nil {
+		t.Fatalf("buildExternalShadowsocksLink: %v", err)
+	}
+
+	withoutFragment, _, _ := strings.Cut(link, "#")
+	rest := strings.TrimPrefix(withoutFragment, "ss://")
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx < 0 {
+		t.Fatalf("link missing @: %q", link)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(rest[:atIdx])
+	if err != nil {
+		t.Fatalf("decode credential: %v", err)
+	}
+	want := "2022-blake3-aes-128-gcm:server-password:user-password"
+	if string(decoded) != want {
+		t.Fatalf("credential=%q; want %q", string(decoded), want)
 	}
 }

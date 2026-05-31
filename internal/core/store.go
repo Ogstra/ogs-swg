@@ -400,6 +400,12 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE external_profiles ADD COLUMN flag TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE external_profiles ADD COLUMN alpn TEXT NOT NULL DEFAULT '';")
 	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_external_profiles_user ON user_external_profiles(user_name);`)
+	s.db.Exec(`
+		DELETE FROM subscription_users
+		WHERE NOT EXISTS (
+			SELECT 1 FROM users WHERE users.email = subscription_users.user_name
+		);
+	`)
 	return nil
 }
 

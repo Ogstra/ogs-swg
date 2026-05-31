@@ -51,12 +51,24 @@ func (s *Server) handleUpsertExternalProfile(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "port must be greater than 0", http.StatusBadRequest)
 		return
 	}
+	if p.Type == "shadowsocks" {
+		if strings.TrimSpace(p.Password) == "" {
+			http.Error(w, "user password is required for Shadowsocks profiles", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(p.SSServerKey) == "" {
+			http.Error(w, "server password is required for Shadowsocks profiles", http.StatusBadRequest)
+			return
+		}
+	}
 	id, err := s.store.UpsertExternalProfile(p)
 	if err != nil {
 		http.Error(w, "Failed to upsert external profile: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyAllUsers)
+	s.cache.Del(cacheKeyAllSubscriptions)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]int64{"id": id})
 }
@@ -76,7 +88,9 @@ func (s *Server) handleDeleteExternalProfile(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Failed to delete external profile: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyAllUsers)
+	s.cache.Del(cacheKeyAllSubscriptions)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -195,12 +209,11 @@ func buildExternalShadowsocksLink(displayName string, p core.ExternalProfile) (s
 		hostInURI = "[" + host + "]"
 	}
 
-	credential := method + ":"
-	if serverKey := strings.TrimSpace(p.SSServerKey); serverKey != "" {
-		credential += serverKey + ":" + password
-	} else {
-		credential += password
+	serverPassword := strings.TrimSpace(p.SSServerKey)
+	if serverPassword == "" {
+		return "", fmt.Errorf("external Shadowsocks profile %q missing server password", p.Name)
 	}
+	credential := method + ":" + serverPassword + ":" + password
 
 	nameTag := url.PathEscape(displayName)
 	return fmt.Sprintf("ss://%s@%s:%d#%s",

@@ -78,6 +78,12 @@ func TestUpsertExternalProfileRenameMovesAssignmentWithoutLocalInbound(t *testin
 	if err != nil {
 		t.Fatalf("create profile: %v", err)
 	}
+	if _, err := store.db.Exec(`INSERT INTO subscriptions (token, name) VALUES ('rename-token', 'Rename')`); err != nil {
+		t.Fatalf("insert subscription: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO subscription_users (sub_id, user_name, alias, position) VALUES (1, 'old-homelab', 'Old Alias', 7)`); err != nil {
+		t.Fatalf("insert subscription user: %v", err)
+	}
 	_, err = store.UpsertExternalProfile(ExternalProfile{
 		ID:      id,
 		Name:    "new-homelab",
@@ -117,6 +123,49 @@ func TestUpsertExternalProfileRenameMovesAssignmentWithoutLocalInbound(t *testin
 	}
 	if meta == nil || len(meta.InboundTags) != 0 {
 		t.Fatalf("new user metadata=%#v; want metadata-only user without local inbounds", meta)
+	}
+	var oldSubUsers int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM subscription_users WHERE user_name = 'old-homelab'`).Scan(&oldSubUsers); err != nil {
+		t.Fatalf("count old subscription users: %v", err)
+	}
+	if oldSubUsers != 0 {
+		t.Fatalf("old subscription_users count=%d; want 0 after rename", oldSubUsers)
+	}
+	var alias string
+	var position int
+	if err := store.db.QueryRow(`SELECT alias, position FROM subscription_users WHERE sub_id = 1 AND user_name = 'new-homelab'`).Scan(&alias, &position); err != nil {
+		t.Fatalf("new subscription membership missing after rename: %v", err)
+	}
+	if alias != "Old Alias" || position != 7 {
+		t.Fatalf("renamed subscription membership alias=%q position=%d; want alias and position preserved", alias, position)
+	}
+}
+
+func TestMigrateExistingSchemaRemovesOrphanSubscriptionUsers(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	if _, err := store.db.Exec(`INSERT INTO subscriptions (token, name) VALUES ('orphan-token', 'Orphan')`); err != nil {
+		t.Fatalf("insert subscription: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO subscription_users (sub_id, user_name, alias, position) VALUES (1, 'missing-external', '', 0)`); err != nil {
+		t.Fatalf("insert orphan subscription user: %v", err)
+	}
+
+	if err := store.initSchema(); err != nil {
+		t.Fatalf("initSchema: %v", err)
+	}
+
+	var count int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM subscription_users WHERE user_name = 'missing-external'`).Scan(&count); err != nil {
+		t.Fatalf("count orphan subscription users: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("orphan subscription_users count=%d; want 0", count)
 	}
 }
 

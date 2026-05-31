@@ -278,9 +278,15 @@ export default function ExternalProfilesTab() {
             toastError('UUID is required for VLESS profiles')
             return
         }
-        if (form.type === 'shadowsocks' && !form.password.trim()) {
-            toastError('Password is required for Shadowsocks profiles')
-            return
+        if (form.type === 'shadowsocks') {
+            if (!form.ss_server_key.trim()) {
+                toastError('Server password is required for Shadowsocks profiles')
+                return
+            }
+            if (!form.password.trim()) {
+                toastError('User password is required for Shadowsocks profiles')
+                return
+            }
         }
         setSaving(true)
         try {
@@ -597,13 +603,13 @@ export default function ExternalProfilesTab() {
                         <div className="space-y-4">
                             <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold border-b border-slate-800 pb-1">Shadowsocks</div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {field('Password',
+                                {field('User Password',
                                     <input
                                         type="text"
                                         value={form.password}
                                         onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
                                         className={inputClass}
-                                        placeholder="Password or base64 key"
+                                        placeholder="User password or base64 user key"
                                     />
                                 )}
                                 {field('Method',
@@ -615,15 +621,15 @@ export default function ExternalProfilesTab() {
                                         {SS_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                                     </select>
                                 )}
-                                {field('Server Key (SS 2022)',
+                                {field('Server Password',
                                     <input
                                         type="text"
                                         value={form.ss_server_key}
                                         onChange={e => setForm(f => ({ ...f, ss_server_key: e.target.value }))}
                                         className={inputClass}
-                                        placeholder="Optional: base64 server key"
+                                        placeholder="Server password or base64 server key"
                                     />,
-                                    'Required for 2022 methods'
+                                    'Generated links use server:user password credentials'
                                 )}
                             </div>
                         </div>
