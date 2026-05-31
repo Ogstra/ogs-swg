@@ -644,7 +644,7 @@ func StartServer(cfg *core.Config) *Server {
 						if mode == "" {
 							mode = "size"
 						}
-						if seg, err := server.logStore.CheckRetention(context.Background(), mode, cfg.LogRetentionMB, cfg.LogRetentionDays, cfg.LogRetentionUnit, coldDir); err != nil {
+						if seg, err := server.logStore.CheckRetention(context.Background(), mode, cfg.LogRetentionMB, cfg.LogRetentionTargetPct, cfg.LogRetentionMaxExportPct, cfg.LogRetentionDays, cfg.LogRetentionUnit, coldDir); err != nil {
 							log.Printf("Log retention export error: %v", err)
 						} else if seg != nil {
 							log.Printf("Log retention: exported %d rows to %s", seg.RowCount, seg.Filename)

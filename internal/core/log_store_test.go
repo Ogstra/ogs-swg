@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -368,12 +369,56 @@ func TestLogStore_CheckRetention_Size(t *testing.T) {
 	}
 
 	// Set maxMB to 0 so any size exceeds the threshold.
-	seg, err := ls.CheckRetention(ctx, "size", 0, 0, "days", coldDir)
+	seg, err := ls.CheckRetention(ctx, "size", 0, 80, 25, 0, "days", coldDir)
 	if err != nil {
 		t.Fatalf("CheckRetention size: %v", err)
 	}
 	if seg == nil {
 		t.Fatal("expected export to happen, got nil segment")
+	}
+}
+
+func TestLogStore_CheckRetention_SizeUsesTargetPercent(t *testing.T) {
+	ls, dir := newTestLogStore(t)
+	ctx := context.Background()
+	coldDir := filepath.Join(dir, "cold")
+
+	line := "2024/01/01 INFO " + strings.Repeat("target-percent ", 32)
+	for batch := 0; batch < 200 && ls.SizeBytes() <= int64(1100*1024); batch++ {
+		lines := make([]string, 50)
+		for i := range lines {
+			lines[i] = line
+		}
+		if err := ls.InsertLogs(ctx, time.Now().UnixMilli()+int64(batch), lines); err != nil {
+			t.Fatalf("InsertLogs batch %d: %v", batch, err)
+		}
+	}
+
+	beforeRows, err := ls.RowCount(ctx)
+	if err != nil {
+		t.Fatalf("RowCount before: %v", err)
+	}
+	if beforeRows < 100 {
+		t.Fatalf("beforeRows=%d; test setup did not create enough rows", beforeRows)
+	}
+	if ls.SizeBytes() <= int64(1024*1024) {
+		t.Fatalf("SizeBytes=%d; test setup did not exceed 1 MB", ls.SizeBytes())
+	}
+
+	seg, err := ls.CheckRetention(ctx, "size", 1, 80, 25, 0, "days", coldDir)
+	if err != nil {
+		t.Fatalf("CheckRetention size target percent: %v", err)
+	}
+	if seg == nil {
+		t.Fatal("expected export to happen, got nil segment")
+	}
+
+	afterRows, err := ls.RowCount(ctx)
+	if err != nil {
+		t.Fatalf("RowCount after: %v", err)
+	}
+	if afterRows*100/beforeRows < 70 {
+		t.Fatalf("remaining rows=%d/%d; target retention exported too aggressively", afterRows, beforeRows)
 	}
 }
 
@@ -387,7 +432,7 @@ func TestLogStore_CheckRetention_Time_Zero(t *testing.T) {
 	_ = ls.InsertLogs(ctx, ts, []string{"line"})
 
 	// days=0 should not export anything.
-	seg, err := ls.CheckRetention(ctx, "time", 200, 0, "days", coldDir)
+	seg, err := ls.CheckRetention(ctx, "time", 200, 80, 25, 0, "days", coldDir)
 	if err != nil {
 		t.Fatalf("CheckRetention time days=0: %v", err)
 	}
