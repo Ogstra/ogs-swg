@@ -638,10 +638,7 @@ func StartServer(cfg *core.Config) *Server {
 
 				// Log hot tier retention -> cold export
 				if server.logStore != nil {
-					coldDir := cfg.LogColdDir
-					if coldDir == "" {
-						coldDir = "data/logs"
-					}
+					coldDir := server.logColdDir()
 					if err := os.MkdirAll(coldDir, 0755); err == nil {
 						mode := cfg.LogRetentionMode
 						if mode == "" {
@@ -2007,4 +2004,3 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 		"truncated": summary.truncated,
 	})
 }
-

@@ -115,10 +115,7 @@ func (s *Server) resolveColdFiles(ctx context.Context, param string) []string {
 	if err != nil || len(segs) == 0 {
 		return nil
 	}
-	coldDir := s.config.LogColdDir
-	if coldDir == "" {
-		coldDir = filepath.Join(filepath.Dir(s.config.DatabasePath), "logs")
-	}
+	coldDir := s.logColdDir()
 	paths := make([]string, 0, len(segs))
 	for _, seg := range segs {
 		paths = append(paths, filepath.Join(coldDir, seg.Filename))
