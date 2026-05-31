@@ -299,6 +299,9 @@ func TestSearchLogsViaStore_NoTimeRangeIncludesColdSegments(t *testing.T) {
 	if len(received) != 2 {
 		t.Fatalf("received=%d want 2", len(received))
 	}
+	if !contains(received[0], "hot match") || !contains(received[1], "coldopen match") {
+		t.Fatalf("received order=%v; want hot result before cold result", received)
+	}
 }
 
 func TestSearchLogsViaStore_UsesConfiguredColdDir(t *testing.T) {

@@ -194,8 +194,15 @@ func (s *Server) walkLogStore(ctx context.Context, opts logSearchOptions, emitCh
 		return visit(row.Raw)
 	}
 
-	// Cold first (oldest range), newest-first within: iterate segments newest→oldest,
-	// and within each segment scan lines in reverse (matches previous file behavior).
+	// Hot tier first, then cold segments, all newest-first. This keeps mixed
+	// hot+cold searches ordered by time and lets limit stop after newest matches.
+	// FTS5 tokenizes by word boundaries, so a term like "git" would not match
+	// "github" even though it's a substring. Always scan all rows and rely on
+	// logLineMatchesQuery (strings.Contains) for correct substring matching.
+	if err := s.logStore.WalkHot(ctx, "", fromMs, toMs, visitRow); err != nil {
+		return err
+	}
+
 	if coldNeeded {
 		coldDir := s.logColdDir()
 
@@ -224,11 +231,7 @@ func (s *Server) walkLogStore(ctx context.Context, opts logSearchOptions, emitCh
 		}
 	}
 
-	// Hot tier: WalkHot in newest-first order.
-	// FTS5 tokenizes by word boundaries, so a term like "git" would not match
-	// "github" even though it's a substring. Always scan all rows and rely on
-	// logLineMatchesQuery (strings.Contains) for correct substring matching.
-	return s.logStore.WalkHot(ctx, "", fromMs, toMs, visitRow)
+	return nil
 }
 
 func (s *Server) logColdDir() string {
@@ -286,9 +289,7 @@ func walkColdSegmentReverse(ctx context.Context, path string, visit func(string)
 func collectSearchChunks(chunks [][]string) []string {
 	collected := make([]string, 0)
 	for _, chunk := range chunks {
-		for i := len(chunk) - 1; i >= 0; i-- {
-			collected = append(collected, chunk[i])
-		}
+		collected = append(collected, chunk...)
 	}
 	return collected
 }

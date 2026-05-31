@@ -329,7 +329,7 @@ export default function LogViewer() {
                 const batch = pendingLinesRef.current
                 if (batch.length === 0) return
                 pendingLinesRef.current = []
-                setLines(prev => [...batch, ...prev])
+                setLines(prev => [...prev, ...batch])
             })
         }
 
@@ -352,11 +352,10 @@ export default function LogViewer() {
                 }
                 if (event.type === 'chunk') {
                     matchedCount = event.matched ?? matchedCount
-                    // Prepend newest lines: backend sends oldest-first within each chunk,
-                    // reverse so newest is at top when prepended.
-                    const nextLines = [...(event.logs || [])].reverse()
+                    // Backend streams newest-first globally across hot and cold tiers.
+                    const nextLines = event.logs || []
                     // Accumulate into buffer; flush will batch these into one React render.
-                    pendingLinesRef.current = [...nextLines, ...pendingLinesRef.current]
+                    pendingLinesRef.current = [...pendingLinesRef.current, ...nextLines]
                     scheduleFlush()
                     if (!completed) {
                         setSearchStatus(`Found ${event.matched ?? 0} lines...`)
@@ -375,7 +374,7 @@ export default function LogViewer() {
                     const remaining = pendingLinesRef.current
                     pendingLinesRef.current = []
                     if (remaining.length > 0) {
-                        setLines(prev => [...remaining, ...prev])
+                        setLines(prev => [...prev, ...remaining])
                     }
                     const suffix = truncated ? ' (limit reached)' : ''
                     setSearchStatus(`Showing ${event.matched ?? 0} lines${suffix}`)
