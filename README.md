@@ -36,7 +36,7 @@ A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstr
 *   **User Management**: create, edit, and delete Sing-box users per inbound; supports multiple inbound assignments, traffic limits, expiry dates, and password/key-based users for Hysteria2, Shadowsocks, AnyTLS, and Naive.
 *   **Traffic Monitoring**: per-user download/upload stats for Sing-box inbounds; per-peer rx/tx stats across all WireGuard interfaces.
 *   **WireGuard Interfaces**: create, configure, enable/disable, and delete WireGuard interfaces; raw `.conf` editing per interface.
-*   **Subscriptions**: create tokenized subscription bundles with per-member aliases, quota limits, refresh policies, request history, and supported QR variants for Direct and Shadowrocket.
+*   **Subscriptions**: create tokenized subscription bundles with per-member aliases, quota limits, refresh policies, request history, and supported QR variants for Direct, Happ, and Shadowrocket.
 *   **Service Control**: restart/stop Sing-box and WireGuard services and reload configurations without leaving the UI.
 *   **Logs**: tail and filter Sing-box access logs in real time.
 *   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.

@@ -31,6 +31,11 @@ const parseGBInput = (value: string): number => {
 }
 
 const toBase64 = (value: string): string => btoa(value)
+const withClientParam = (link: string, client: string): string => {
+    const url = new URL(link)
+    url.searchParams.set('client', client)
+    return url.toString()
+}
 const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
 const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
     profile_update_interval_hours: null,
@@ -727,14 +732,13 @@ export default function Subscriptions() {
         return `${window.location.protocol}//${subDomain}/s/${token}`
     }
     const buildShadowrocketLink = (token: string, name: string) => {
-        const url = new URL(subLink(token))
-        url.searchParams.set('client', 'shadowrocket')
-        return `sub://${toBase64(url.toString())}#${encodeURIComponent(name)}`
+        return `sub://${toBase64(withClientParam(subLink(token), 'shadowrocket'))}#${encodeURIComponent(name)}`
     }
     const getSubscriptionLinkVariants = (sub: Subscription) => (
         sub.token
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
+                { id: 'happ', label: 'Happ', link: withClientParam(subLink(sub.token), 'happ') },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, displaySubName(sub)) },
             ]
             : []

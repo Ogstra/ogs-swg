@@ -19,6 +19,17 @@ const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
 const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks', 'anytls', 'naive'])
 type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks' | 'anytls' | 'naive'
 
+function withClientParam(link: string, client: string): string {
+    try {
+        const url = new URL(link)
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return link
+        url.searchParams.set('client', client)
+        return url.toString()
+    } catch {
+        return link
+    }
+}
+
 function bytesToGbString(bytes?: number) {
     return bytes && bytes > 0 ? (bytes / BYTES_PER_GB).toFixed(2) : ''
 }
@@ -1975,6 +1986,23 @@ export default function UserManagement() {
                 const extOptions = (qrUser?.external_profiles || [])
                     .map(ep => ({ id: `ext:${ep.id}`, label: externalProfileTag(ep) }))
                 const allOptions = [...inboundOptions, ...extOptions]
+                const linkVariants = allOptions.flatMap(opt => {
+                    const link = qrLinkCache[opt.id] || ''
+                    return [
+                        {
+                            id: opt.id,
+                            label: opt.label,
+                            link,
+                            loading: opt.id === selectedQrInbound && qrLoading,
+                        },
+                        {
+                            id: `${opt.id}:happ`,
+                            label: `${opt.label} Happ`,
+                            link: withClientParam(link, 'happ'),
+                            loading: opt.id === selectedQrInbound && qrLoading,
+                        },
+                    ]
+                })
                 if (allOptions.length > 1) {
                     return (
                         <QrLinkModal
@@ -1984,12 +2012,7 @@ export default function UserManagement() {
                             link={qrLoading ? '' : qrLink}
                             loading={qrLoading}
                             error={qrError && !qrLoading ? qrError : undefined}
-                            linkVariants={allOptions.map(opt => ({
-                                id: opt.id,
-                                label: opt.label,
-                                link: qrLinkCache[opt.id] || '',
-                                loading: opt.id === selectedQrInbound && qrLoading,
-                            }))}
+                            linkVariants={linkVariants}
                         />
                     )
                 }
@@ -1999,6 +2022,10 @@ export default function UserManagement() {
                         onClose={() => setModalState({ type: null })}
                         title={qrUser ? qrUser.name : 'User Configuration'}
                         link={qrLoading ? '' : qrLink}
+                        linkVariants={qrLink ? [
+                            { id: 'direct', label: 'Direct', link: qrLink, loading: qrLoading },
+                            { id: 'happ', label: 'Happ', link: withClientParam(qrLink, 'happ'), loading: qrLoading },
+                        ] : undefined}
                         loading={qrLoading}
                         error={qrError && !qrLoading ? qrError : undefined}
                     />
