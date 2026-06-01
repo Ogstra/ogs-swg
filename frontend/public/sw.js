@@ -1,6 +1,6 @@
-const APP_CACHE = 'ogs-swg-app-shell-v1'
-const ASSET_CACHE = 'ogs-swg-assets-v1'
-const APP_SHELL_URLS = ['/', '/manifest.webmanifest', '/sing-box-white.svg']
+const APP_CACHE = 'ogs-swg-app-shell-v2'
+const ASSET_CACHE = 'ogs-swg-assets-v2'
+const APP_SHELL_URLS = ['/manifest.webmanifest', '/sing-box-white.svg']
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -53,7 +53,7 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return
 
   if (request.mode === 'navigate') {
-    event.respondWith(staleWhileRevalidate(new Request('/', { credentials: 'same-origin' }), APP_CACHE))
+    event.respondWith(fetch(new Request(request, { cache: 'no-store' })))
     return
   }
 
