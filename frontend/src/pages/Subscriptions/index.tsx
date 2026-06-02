@@ -71,6 +71,11 @@ type HappConfigDraft = {
     advancedParameters: string
 }
 
+type HappQrLinkState = {
+    link: string
+    loading: boolean
+}
+
 const compactJSON = (value: Record<string, unknown>) => JSON.stringify(value)
 
 const makeHappTheme = (
@@ -279,6 +284,7 @@ export default function Subscriptions() {
     const [subHappRoutingPresetId, setSubHappRoutingPresetId] = useState('')
     const [subHappThemeId, setSubHappThemeId] = useState('')
     const [subRoutingProfileOpen, setSubRoutingProfileOpen] = useState(false)
+    const [happQrLinks, setHappQrLinks] = useState<Record<string, HappQrLinkState>>({})
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers(), enabled: canReadUsers })
@@ -596,6 +602,7 @@ export default function Subscriptions() {
     const openQr = (sub: Subscription) => {
         if (!canWriteUsers || !sub.token) return
         setModalState({ type: 'qr', data: sub })
+        void loadHappQrLink(sub.token)
     }
     const toggleUser = (userName: string) => {
         setSelectedProfiles(prev => {
@@ -731,6 +738,30 @@ export default function Subscriptions() {
         }
         return `${window.location.protocol}//${subDomain}/s/${token}`
     }
+    const happSubscriptionLink = (token: string) => withClientParam(subLink(token), 'happ')
+    const loadHappQrLink = async (token: string) => {
+        const directHappLink = happSubscriptionLink(token)
+        const current = happQrLinks[token]
+        if (current?.loading || current?.link.startsWith('happ://crypt5/')) return
+
+        setHappQrLinks(prev => ({
+            ...prev,
+            [token]: { link: directHappLink, loading: true },
+        }))
+        try {
+            const result = await api.encryptHappLink(directHappLink)
+            setHappQrLinks(prev => ({
+                ...prev,
+                [token]: { link: result.encrypted_url || directHappLink, loading: false },
+            }))
+        } catch (err) {
+            setHappQrLinks(prev => ({
+                ...prev,
+                [token]: { link: directHappLink, loading: false },
+            }))
+            toastError('Failed to prepare Happ QR link: ' + err)
+        }
+    }
     const buildShadowrocketLink = (token: string, name: string) => {
         return `sub://${toBase64(withClientParam(subLink(token), 'shadowrocket'))}#${encodeURIComponent(name)}`
     }
@@ -738,7 +769,12 @@ export default function Subscriptions() {
         sub.token
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-                { id: 'happ', label: 'Happ', link: withClientParam(subLink(sub.token), 'happ') },
+                {
+                    id: 'happ',
+                    label: 'Happ',
+                    link: happQrLinks[sub.token]?.link || happSubscriptionLink(sub.token),
+                    loading: !!happQrLinks[sub.token]?.loading,
+                },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, displaySubName(sub)) },
             ]
             : []
