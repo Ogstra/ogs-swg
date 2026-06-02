@@ -759,7 +759,6 @@ export default function Subscriptions() {
                 ...prev,
                 [token]: { link: directHappLink, loading: false },
             }))
-            toastError('Failed to prepare Happ QR link: ' + err)
         }
     }
     const buildShadowrocketLink = (token: string, name: string) => {
