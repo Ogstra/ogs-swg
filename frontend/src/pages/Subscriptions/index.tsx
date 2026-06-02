@@ -36,6 +36,16 @@ const withClientParam = (link: string, client: string): string => {
     url.searchParams.set('client', client)
     return url.toString()
 }
+const withProviderIdFragment = (link: string, providerId: string): string => {
+    const trimmedProviderId = providerId.trim()
+    if (!trimmedProviderId) return link
+
+    const url = new URL(link)
+    const params = new URLSearchParams(url.hash.startsWith('#?') ? url.hash.slice(2) : '')
+    params.set('providerid', trimmedProviderId)
+    url.hash = `?${params.toString()}`
+    return url.toString()
+}
 const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
 const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
     profile_update_interval_hours: null,
@@ -739,7 +749,9 @@ export default function Subscriptions() {
         }
         return `${window.location.protocol}//${subDomain}/s/${token}`
     }
-    const happSubscriptionLink = (token: string) => withClientParam(subLink(token), 'happ')
+    const happSubscriptionLink = (token: string) => (
+        withProviderIdFragment(withClientParam(subLink(token), 'happ'), happConfig.provider_id || '')
+    )
     const loadHappQrLink = async (token: string) => {
         const directHappLink = happSubscriptionLink(token)
         const current = happQrLinks[token]

@@ -297,7 +297,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	}
 	decoded := string(happBody)
 	for _, want := range []string{
-		"#providerid: provider-test-id",
+		"#providerid provider-test-id",
 		"#hide-settings: 1",
 		"#subscription-always-hwid-enable: 1",
 		"#subscription-auto-update-open-enable: 0",
@@ -345,7 +345,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode happ HWID body: %v", err)
 	}
-	if got := string(happHWIDBody); !strings.Contains(got, "#providerid: provider-test-id") {
+	if got := string(happHWIDBody); !strings.Contains(got, "#providerid provider-test-id") {
 		t.Fatalf("happ HWID body missing providerid: %q", got)
 	}
 }
