@@ -74,6 +74,7 @@ type HappConfigDraft = {
 type HappQrLinkState = {
     link: string
     loading: boolean
+    failed?: boolean
 }
 
 const compactJSON = (value: Record<string, unknown>) => JSON.stringify(value)
@@ -746,18 +747,18 @@ export default function Subscriptions() {
 
         setHappQrLinks(prev => ({
             ...prev,
-            [token]: { link: directHappLink, loading: true },
+            [token]: { link: '', loading: true },
         }))
         try {
             const result = await api.encryptHappLink(directHappLink)
             setHappQrLinks(prev => ({
                 ...prev,
-                [token]: { link: result.encrypted_url || directHappLink, loading: false },
+                [token]: { link: result.encrypted_url || '', loading: !result.encrypted_url, failed: !result.encrypted_url },
             }))
         } catch (err) {
             setHappQrLinks(prev => ({
                 ...prev,
-                [token]: { link: directHappLink, loading: false },
+                [token]: { link: '', loading: true, failed: true },
             }))
         }
     }
@@ -771,8 +772,8 @@ export default function Subscriptions() {
                 {
                     id: 'happ',
                     label: 'Happ',
-                    link: happQrLinks[sub.token]?.link || happSubscriptionLink(sub.token),
-                    loading: !!happQrLinks[sub.token]?.loading,
+                    link: happQrLinks[sub.token]?.link || '',
+                    loading: happQrLinks[sub.token]?.loading ?? true,
                 },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, displaySubName(sub)) },
             ]
