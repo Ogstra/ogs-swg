@@ -899,24 +899,7 @@ func (s *Server) handleEncryptHappLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Attempt JSON decode first
-	var parsed struct {
-		URL          string `json:"url"`
-		EncryptedURL string `json:"encrypted_url"`
-		Result       string `json:"result"`
-		Data         string `json:"data"`
-	}
-	candidate := ""
-	if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
-		for _, v := range []string{parsed.URL, parsed.EncryptedURL, parsed.Result, parsed.Data} {
-			if v != "" {
-				candidate = v
-				break
-			}
-		}
-	}
-	if candidate == "" {
-		candidate = strings.TrimSpace(string(bodyBytes))
-	}
+	candidate := extractEncryptedHappLink(bodyBytes)
 
 	if !strings.HasPrefix(candidate, "happ://crypt5/") {
 		w.Header().Set("Content-Type", "application/json")
@@ -927,4 +910,22 @@ func (s *Server) handleEncryptHappLink(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"encrypted_url": candidate})
+}
+
+func extractEncryptedHappLink(bodyBytes []byte) string {
+	var parsed struct {
+		URL           string `json:"url"`
+		EncryptedURL  string `json:"encrypted_url"`
+		EncryptedLink string `json:"encrypted_link"`
+		Result        string `json:"result"`
+		Data          string `json:"data"`
+	}
+	if jsonErr := json.Unmarshal(bodyBytes, &parsed); jsonErr == nil {
+		for _, v := range []string{parsed.EncryptedLink, parsed.EncryptedURL, parsed.URL, parsed.Result, parsed.Data} {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+	return strings.TrimSpace(string(bodyBytes))
 }
