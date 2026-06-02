@@ -98,15 +98,17 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
                     </div>
                 ) : (
                     <div className="relative p-4 bg-white rounded-xl shadow-lg w-full">
-                        <div className={isActiveLoading ? 'blur-sm opacity-70' : ''}>
-                            <QRCode
-                                size={256}
-                                style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
-                                value={activeLink || 'placeholder'}
-                                viewBox="0 0 256 256"
-                            />
-                        </div>
-                        {isActiveLoading && (
+                        {activeLink && (
+                            <div className={isActiveLoading ? 'blur-sm opacity-70' : ''}>
+                                <QRCode
+                                    size={256}
+                                    style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
+                                    value={activeLink}
+                                    viewBox="0 0 256 256"
+                                />
+                            </div>
+                        )}
+                        {(!activeLink || isActiveLoading) && (
                             <div className="absolute inset-0 flex items-center justify-center">
                                 <div className="w-8 h-8 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
                             </div>
