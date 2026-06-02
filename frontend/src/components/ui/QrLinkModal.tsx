@@ -35,11 +35,12 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
     const selectedVariant = variants.find(variant => variant.id === selectedVariantId) || variants[0]
     const activeLink = selectedVariant?.link || link || ''
     const isActiveLoading = loading || !!selectedVariant?.loading
+    const variantIds = variants.map(variant => variant.id).join('|')
 
     useEffect(() => {
         setSelectedVariantId(variants[0]?.id || 'default')
         setCopied(false)
-    }, [isOpen, link, linkVariants])
+    }, [isOpen, link, variantIds])
 
     const handleCopy = async () => {
         if (!activeLink) return
