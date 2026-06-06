@@ -237,6 +237,7 @@ export interface SubscriptionRequestHistoryEntry {
     served_from_cache: number;
     blocked: number;
     block_reason: string;
+    via_worker: number;
 }
 
 export interface SubscriptionRequestHistoryPage {
