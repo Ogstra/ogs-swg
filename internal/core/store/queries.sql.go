@@ -254,8 +254,9 @@ INSERT INTO subscriptions (
 	profile_update_interval_hours,
 	update_always,
 	happ_routing_profile,
-	happ_color_profile
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+	happ_color_profile,
+	happ_direct_sites
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
 `
 
 type CreateSubscriptionParams struct {
@@ -269,6 +270,7 @@ type CreateSubscriptionParams struct {
 	UpdateAlways               int64          `json:"update_always"`
 	HappRoutingProfile         string         `json:"happ_routing_profile"`
 	HappColorProfile           string         `json:"happ_color_profile"`
+	HappDirectSites            string         `json:"happ_direct_sites"`
 }
 
 // Subscriptions Queries --
@@ -284,6 +286,7 @@ func (q *Queries) CreateSubscription(ctx context.Context, arg CreateSubscription
 		arg.UpdateAlways,
 		arg.HappRoutingProfile,
 		arg.HappColorProfile,
+		arg.HappDirectSites,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -614,6 +617,7 @@ SELECT
 	s.update_always,
 	s.happ_routing_profile,
 	s.happ_color_profile,
+	s.happ_direct_sites,
 	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
 	s.created_at,
 	s.updated_at
@@ -633,6 +637,7 @@ type GetAllSubscriptionsRow struct {
 	UpdateAlways               int64          `json:"update_always"`
 	HappRoutingProfile         string         `json:"happ_routing_profile"`
 	HappColorProfile           string         `json:"happ_color_profile"`
+	HappDirectSites            string         `json:"happ_direct_sites"`
 	LastRequestAt              interface{}    `json:"last_request_at"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
@@ -659,6 +664,7 @@ func (q *Queries) GetAllSubscriptions(ctx context.Context) ([]GetAllSubscription
 			&i.UpdateAlways,
 			&i.HappRoutingProfile,
 			&i.HappColorProfile,
+			&i.HappDirectSites,
 			&i.LastRequestAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1212,6 +1218,7 @@ SELECT
 	s.update_always,
 	s.happ_routing_profile,
 	s.happ_color_profile,
+	s.happ_direct_sites,
 	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
 	s.created_at,
 	s.updated_at
@@ -1231,6 +1238,7 @@ type GetSubscriptionByIDRow struct {
 	UpdateAlways               int64          `json:"update_always"`
 	HappRoutingProfile         string         `json:"happ_routing_profile"`
 	HappColorProfile           string         `json:"happ_color_profile"`
+	HappDirectSites            string         `json:"happ_direct_sites"`
 	LastRequestAt              interface{}    `json:"last_request_at"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
@@ -1251,6 +1259,7 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id int64) (GetSubscri
 		&i.UpdateAlways,
 		&i.HappRoutingProfile,
 		&i.HappColorProfile,
+		&i.HappDirectSites,
 		&i.LastRequestAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1271,6 +1280,7 @@ SELECT
 	s.update_always,
 	s.happ_routing_profile,
 	s.happ_color_profile,
+	s.happ_direct_sites,
 	(SELECT MAX(sr.requested_at) FROM subscription_requests sr WHERE sr.sub_id = s.id) AS last_request_at,
 	s.created_at,
 	s.updated_at
@@ -1290,6 +1300,7 @@ type GetSubscriptionByTokenRow struct {
 	UpdateAlways               int64          `json:"update_always"`
 	HappRoutingProfile         string         `json:"happ_routing_profile"`
 	HappColorProfile           string         `json:"happ_color_profile"`
+	HappDirectSites            string         `json:"happ_direct_sites"`
 	LastRequestAt              interface{}    `json:"last_request_at"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
@@ -1310,6 +1321,7 @@ func (q *Queries) GetSubscriptionByToken(ctx context.Context, token string) (Get
 		&i.UpdateAlways,
 		&i.HappRoutingProfile,
 		&i.HappColorProfile,
+		&i.HappDirectSites,
 		&i.LastRequestAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2234,6 +2246,7 @@ SET
 	update_always = ?,
 	happ_routing_profile = ?,
 	happ_color_profile = ?,
+	happ_direct_sites = ?,
 	updated_at = strftime('%s','now')
 WHERE id = ?
 `
@@ -2248,6 +2261,7 @@ type UpdateSubscriptionParams struct {
 	UpdateAlways               int64          `json:"update_always"`
 	HappRoutingProfile         string         `json:"happ_routing_profile"`
 	HappColorProfile           string         `json:"happ_color_profile"`
+	HappDirectSites            string         `json:"happ_direct_sites"`
 	ID                         int64          `json:"id"`
 }
 
@@ -2262,6 +2276,7 @@ func (q *Queries) UpdateSubscription(ctx context.Context, arg UpdateSubscription
 		arg.UpdateAlways,
 		arg.HappRoutingProfile,
 		arg.HappColorProfile,
+		arg.HappDirectSites,
 		arg.ID,
 	)
 	return err

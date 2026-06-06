@@ -97,6 +97,7 @@ type Subscription struct {
 	UpdateAlways               int64          `json:"update_always"`
 	HappRoutingProfile         string         `json:"happ_routing_profile"`
 	HappColorProfile           string         `json:"happ_color_profile"`
+	HappDirectSites            string         `json:"happ_direct_sites"`
 	CreatedAt                  sql.NullInt64  `json:"created_at"`
 	UpdatedAt                  sql.NullInt64  `json:"updated_at"`
 }

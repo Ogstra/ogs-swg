@@ -406,6 +406,8 @@ func (s *Store) initSchema() error {
 			SELECT 1 FROM users WHERE users.email = subscription_users.user_name
 		);
 	`)
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_direct_sites TEXT NOT NULL DEFAULT '';")
+
 	return nil
 }
 
@@ -453,6 +455,7 @@ type SubscriptionHappConfig struct {
 	ProfileFlag        string                      `json:"profile_flag"`
 	RoutingProfile     string                      `json:"routing_profile"`
 	AdvancedParameters []SubscriptionHappParameter `json:"advanced_parameters"`
+	DirectSites        []string                    `json:"direct_sites"`
 }
 
 type DashboardPreferences struct {
