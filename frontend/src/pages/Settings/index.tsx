@@ -2357,8 +2357,13 @@ function DatabaseTab({
                                                 </div>
                                                 <div className="shrink-0 text-right text-slate-500 text-[10px]">{formatHistoryDateTime(run.requested_at)}</div>
                                             </div>
-                                            <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
-                                                {formatClientLabel(run)}
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="min-w-0 truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
+                                                    {formatClientLabel(run)}
+                                                </div>
+                                                {Boolean(run.via_worker) && (
+                                                    <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">Worker</span>
+                                                )}
                                             </div>
                                             {extraDetails && (
                                                 <div className="truncate text-slate-500 text-[10px]" title={extraDetails}>

@@ -605,6 +605,7 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 		ServedFromCache: servedFromCacheToInt64(servedFromCache),
 		Blocked:         0,
 		BlockReason:     "",
+		ViaWorker:       viaWorkerToInt64(r),
 	}); err == nil {
 		s.invalidateSubscriptionHistoryCache()
 	}
@@ -1035,6 +1036,13 @@ func firstPublicForwardedIP(value string) string {
 		}
 	}
 	return ""
+}
+
+func viaWorkerToInt64(r *http.Request) int64 {
+	if r.Header.Get("X-CF-Client-IP") != "" {
+		return 1
+	}
+	return 0
 }
 
 func servedFromCacheToInt64(v bool) int64 {
