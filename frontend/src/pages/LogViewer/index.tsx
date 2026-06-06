@@ -155,6 +155,7 @@ function LogTerminal({
                 className="logs-scrollbar flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm bg-black/20"
                 ref={containerRef}
                 onScroll={onScroll}
+                onTouchStart={() => setAutoScroll(false)}
             >
                 {lines.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50">
