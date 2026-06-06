@@ -41,6 +41,7 @@ type SubscriptionResponse struct {
 	UpdateAlways               bool                         `json:"update_always"`
 	HappRoutingProfile         string                       `json:"happ_routing_profile"`
 	HappColorProfile           string                       `json:"happ_color_profile"`
+	HappDirectSites            string                       `json:"happ_direct_sites"`
 	LastRequestAt              *int64                       `json:"last_request_at"`
 	CreatedAt                  int64                        `json:"created_at"`
 	UpdatedAt                  int64                        `json:"updated_at"`
@@ -77,6 +78,7 @@ type SubscriptionHappConfigRequest struct {
 	ProfileFlag        string                             `json:"profile_flag"`
 	RoutingProfile     string                             `json:"routing_profile"`
 	AdvancedParameters []SubscriptionHappParameterRequest `json:"advanced_parameters"`
+	DirectSites        []string                           `json:"direct_sites"`
 }
 
 type SubscriptionHappParameterRequest struct {
@@ -366,6 +368,14 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 		advanced = append(advanced, core.SubscriptionHappParameter{Key: key, Value: value})
 	}
 
+	directSites := make([]string, 0, len(req.DirectSites))
+	for _, s := range req.DirectSites {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			directSites = append(directSites, s)
+		}
+	}
+
 	return core.SubscriptionHappConfig{
 		ProviderID:         normalizeHappSubscriptionParamValue(req.ProviderID),
 		HideSettings:       hideSettings,
@@ -376,6 +386,7 @@ func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.Su
 		ProfileFlag:        strings.TrimSpace(req.ProfileFlag),
 		RoutingProfile:     strings.TrimSpace(req.RoutingProfile),
 		AdvancedParameters: advanced,
+		DirectSites:        directSites,
 	}, nil
 }
 
@@ -424,6 +435,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			UpdateAlways:               int64ToBool(sub.UpdateAlways),
 			HappRoutingProfile:         sub.HappRoutingProfile,
 			HappColorProfile:           sub.HappColorProfile,
+			HappDirectSites:            sub.HappDirectSites,
 			LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
 			UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -451,6 +463,7 @@ type CreateSubscriptionRequest struct {
 	UpdateAlways               *bool                       `json:"update_always"`
 	HappRoutingProfile         string                      `json:"happ_routing_profile"`
 	HappColorProfile           string                      `json:"happ_color_profile"`
+	HappDirectSites            string                      `json:"happ_direct_sites"`
 }
 
 type SubscriptionMemberRequest struct {
@@ -541,6 +554,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, false),
 		HappRoutingProfile:         strings.TrimSpace(req.HappRoutingProfile),
 		HappColorProfile:           strings.TrimSpace(req.HappColorProfile),
+		HappDirectSites:            strings.TrimSpace(req.HappDirectSites),
 	})
 	if err != nil {
 		http.Error(w, "Failed to create subscription: "+err.Error(), http.StatusInternalServerError)
@@ -605,6 +619,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		UpdateAlways:               int64ToBool(sub.UpdateAlways),
 		HappRoutingProfile:         sub.HappRoutingProfile,
 		HappColorProfile:           sub.HappColorProfile,
+		HappDirectSites:            sub.HappDirectSites,
 		LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,
 		UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -652,8 +667,9 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		ProfileUpdateIntervalHours: mergeNullableInt64(current.ProfileUpdateIntervalHours, req.ProfileUpdateIntervalHours),
 		UpdateAlways:               boolPtrToInt64(req.UpdateAlways, int64ToBool(current.UpdateAlways)),
 		HappRoutingProfile:         strings.TrimSpace(req.HappRoutingProfile),
-		ID:                         id,
 		HappColorProfile:           strings.TrimSpace(req.HappColorProfile),
+		HappDirectSites:            strings.TrimSpace(req.HappDirectSites),
+		ID:                         id,
 	})
 	if err != nil {
 		http.Error(w, "Failed to update subscription", http.StatusInternalServerError)

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -149,25 +150,53 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		s.subscriptionLimiter.record(token)
 	}
 
+	// Load global Happ config once; reuse for routing profile, direct sites, and shadowrocket flag.
+	var globalHappCfg core.SubscriptionHappConfig
+	var globalHappCfgLoaded bool
+	loadGlobalHappCfg := func() core.SubscriptionHappConfig {
+		if !globalHappCfgLoaded {
+			if cfg, cfgErr := s.store.GetSubscriptionHappConfig(r.Context()); cfgErr == nil {
+				globalHappCfg = cfg
+			}
+			globalHappCfgLoaded = true
+		}
+		return globalHappCfg
+	}
+
 	happParams, happFlag := s.happSubscriptionParamsForRequest(r, token, sub.HappColorProfile)
 	profileFlag := happFlag
 	if profileFlag == "" && isShadowrocketRequest(r) {
-		if cfg, cfgErr := s.store.GetSubscriptionHappConfig(r.Context()); cfgErr == nil {
-			profileFlag = cfg.ProfileFlag
-		}
+		profileFlag = loadGlobalHappCfg().ProfileFlag
 	}
 
-	// Determine routing profile for Happ clients.
-	// Per-sub override takes priority; falls back to global config.
 	routingProfileJSON := ""
 	if happParams != nil {
 		if sub.HappRoutingProfile != "" {
 			routingProfileJSON = sub.HappRoutingProfile
 		} else {
-			if globalCfg, cfgErr := s.store.GetSubscriptionHappConfig(r.Context()); cfgErr == nil {
-				routingProfileJSON = globalCfg.RoutingProfile
+			routingProfileJSON = loadGlobalHappCfg().RoutingProfile
+		}
+	}
+
+	// Collect DirectSites from global config and per-sub field.
+	var mergedDirectSites []string
+	if happParams != nil && strings.TrimSpace(routingProfileJSON) != happRoutingOffLink {
+		seen := make(map[string]struct{})
+		addSites := func(raw string) {
+			for _, s := range strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' || r == ',' }) {
+				s = strings.TrimSpace(s)
+				if s == "" {
+					continue
+				}
+				if _, ok := seen[s]; !ok {
+					seen[s] = struct{}{}
+					mergedDirectSites = append(mergedDirectSites, s)
+				}
 			}
 		}
+		globalCfg := loadGlobalHappCfg()
+		addSites(strings.Join(globalCfg.DirectSites, "\n"))
+		addSites(sub.HappDirectSites)
 	}
 
 	cacheKey := "sub:" + token
@@ -182,6 +211,9 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if profileFlag != "" {
 		cacheKey += ":flag:" + profileFlag
+	}
+	if len(mergedDirectSites) > 0 {
+		cacheKey += ":ds:" + strings.Join(mergedDirectSites, ",")
 	}
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
@@ -374,7 +406,37 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			if strings.TrimSpace(routingProfileJSON) == happRoutingOffLink {
 				responseLines = append(responseLines, happRoutingOffLink)
 			} else {
-				encoded := base64.StdEncoding.EncodeToString([]byte(routingProfileJSON))
+				injected := routingProfileJSON
+				if len(mergedDirectSites) > 0 {
+					var profileMap map[string]json.RawMessage
+					if err := json.Unmarshal([]byte(routingProfileJSON), &profileMap); err == nil {
+						var existing []string
+						if raw, ok := profileMap["DirectSites"]; ok {
+							_ = json.Unmarshal(raw, &existing)
+						}
+						combined := make([]string, 0, len(existing)+len(mergedDirectSites))
+						seenDS := make(map[string]struct{})
+						for _, s := range append(existing, mergedDirectSites...) {
+							if _, ok := seenDS[s]; !ok {
+								seenDS[s] = struct{}{}
+								combined = append(combined, s)
+							}
+						}
+						if dsRaw, err := json.Marshal(combined); err == nil {
+							profileMap["DirectSites"] = dsRaw
+						}
+						if injectedBytes, err := json.Marshal(profileMap); err == nil {
+							injected = string(injectedBytes)
+						}
+					}
+				}
+				encoded := base64.StdEncoding.EncodeToString([]byte(injected))
+				responseLines = append(responseLines, "happ://routing/onadd/"+encoded)
+			}
+		} else if len(mergedDirectSites) > 0 {
+			minProfile := map[string]interface{}{"Name": "panel-direct", "DirectSites": mergedDirectSites}
+			if minJSON, err := json.Marshal(minProfile); err == nil {
+				encoded := base64.StdEncoding.EncodeToString(minJSON)
 				responseLines = append(responseLines, "happ://routing/onadd/"+encoded)
 			}
 		}
