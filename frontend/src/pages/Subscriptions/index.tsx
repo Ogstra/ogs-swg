@@ -294,6 +294,8 @@ export default function Subscriptions() {
     const [subHappRoutingProfile, setSubHappRoutingProfile] = useState('')
     const [subHappRoutingPresetId, setSubHappRoutingPresetId] = useState('')
     const [subHappThemeId, setSubHappThemeId] = useState('')
+    const [subHappDirectSites, setSubHappDirectSites] = useState('')
+    const [happDirectSites, setHappDirectSites] = useState('')
     const [subRoutingProfileOpen, setSubRoutingProfileOpen] = useState(false)
     const [happQrLinks, setHappQrLinks] = useState<Record<string, HappQrLinkState>>({})
 
@@ -390,6 +392,7 @@ export default function Subscriptions() {
         setSubHappRoutingProfile('')
         setSubHappRoutingPresetId('')
         setSubHappThemeId(happThemeId)
+        setSubHappDirectSites('')
         setModalState({ type: 'create' })
     }
 
@@ -421,6 +424,7 @@ export default function Subscriptions() {
         setSubHappRoutingPresetId(resolveRoutingPresetId(subRouting))
         const subColorProfile = sub.happ_color_profile || ''
         setSubHappThemeId(subColorProfile ? resolveHappThemeId(subColorProfile) : happThemeId)
+        setSubHappDirectSites(sub.happ_direct_sites ?? '')
         setModalState({ type: 'edit', data: sub })
     }
 
@@ -451,6 +455,7 @@ export default function Subscriptions() {
         setHappProfileFlag(draft.profileFlag)
         setHappRoutingProfile(draft.routingProfile)
         setHappAdvancedParameters(draft.advancedParameters)
+        setHappDirectSites((happConfig.direct_sites ?? []).join('\n'))
         setHappConfigOpen(true)
     }
 
@@ -478,6 +483,7 @@ export default function Subscriptions() {
             update_always: updateAlways,
             happ_routing_profile: subHappRoutingPresetId === 'custom' ? subHappRoutingProfile.trim() : routingProfileForSubscriptionName(subHappRoutingPresetId, aliasInput.trim() || nameInput.trim()),
             happ_color_profile: subHappThemeId !== happThemeId ? (HAPP_THEME_PRESETS.find(t => t.id === subHappThemeId)?.value || '') : '',
+            happ_direct_sites: subHappDirectSites.trim(),
         }
 
         try {
@@ -543,6 +549,7 @@ export default function Subscriptions() {
                 profile_flag: happProfileFlag.trim(),
                 routing_profile: happRoutingProfile.trim(),
                 advanced_parameters: advancedParameters,
+                direct_sites: happDirectSites.split('\n').map(s => s.trim()).filter(Boolean),
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
             setHappConfigOpen(false)
@@ -1192,6 +1199,17 @@ export default function Subscriptions() {
                         <p className="mt-1 text-xs text-slate-500">Overrides the global routing profile for this subscription. Use Off to send <code>happ://routing/off</code> and actively disable routing on the client.</p>
                     </div>
                     <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Direct Sites Override</label>
+                        <textarea
+                            value={subHappDirectSites}
+                            onChange={e => setSubHappDirectSites(e.target.value)}
+                            rows={3}
+                            className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                            placeholder={"panel.example.com\napi.internal.com"}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Additional direct sites for this subscription only. Merged with global direct sites.</p>
+                    </div>
+                    <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Theme Override</label>
                         <select
                             value={subHappThemeId}
@@ -1343,6 +1361,18 @@ export default function Subscriptions() {
                             placeholder='{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}'
                         />
                         <p className="mt-1 text-xs text-slate-500">Emits <code>happ://routing/onadd/&lt;base64&gt;</code> directly in the subscription body. Use <code>happ://routing/off</code> to actively disable routing on the client.</p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Direct Sites (global)</label>
+                        <textarea
+                            value={happDirectSites}
+                            onChange={e => setHappDirectSites(e.target.value)}
+                            rows={3}
+                            className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                            placeholder={"panel.example.com\napi.internal.com"}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Domains injected into the DirectSites array of every Happ routing profile. One per line or comma-separated. Merged with per-subscription overrides.</p>
                     </div>
                 </div>
             </Modal>

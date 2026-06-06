@@ -349,6 +349,7 @@ export interface Subscription {
     alias: string;
     happ_routing_profile?: string;
     happ_color_profile?: string;
+    happ_direct_sites?: string;
     quota_limit: number;
     quota_period: string;
     used_bytes: number;
@@ -377,6 +378,7 @@ export interface SubscriptionMutationRequest {
     update_always: boolean;
     happ_routing_profile?: string;
     happ_color_profile?: string;
+    happ_direct_sites?: string;
 }
 
 export interface SubscriptionDefaults {
@@ -399,6 +401,7 @@ export interface SubscriptionHappConfig {
     color_profile: string;
     profile_flag: string;
     routing_profile?: string;
+    direct_sites?: string[];
     advanced_parameters: SubscriptionHappParameter[];
 }
 
