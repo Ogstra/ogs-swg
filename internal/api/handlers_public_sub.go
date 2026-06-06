@@ -399,7 +399,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			intervalVal = sub.ProfileUpdateIntervalHours.Int64
 		}
 		responseLines = append(responseLines, fmt.Sprintf("#profile-update-interval: %d", intervalVal))
-		if int64ToBool(sub.UpdateAlways) {
+		if int64ToBool(sub.UpdateAlways) && happParams == nil {
 			responseLines = append(responseLines, "#update-always: true")
 		}
 		if routingProfileJSON != "" {
