@@ -201,6 +201,29 @@ func (s *Server) insertAuditEntry(r *http.Request, domain, action, entityID, det
 	s.invalidateAuditLogCache()
 }
 
+// insertSystemAuditEntry records a background/automatic operation that has no
+// HTTP request context. Actor is fixed to "system". Failures are logged and
+// swallowed — audit must never break the underlying operation.
+func (s *Server) insertSystemAuditEntry(domain, action, entityID, detail string) {
+	if s.auditStore == nil {
+		return
+	}
+	entry := core.AuditEntry{
+		Ts:       time.Now().Unix(),
+		Actor:    "system",
+		IP:       "local",
+		Action:   action,
+		Domain:   domain,
+		EntityID: entityID,
+		Detail:   detail,
+	}
+	if err := s.auditStore.InsertAuditLog(context.Background(), entry); err != nil {
+		log.Printf("audit: system insert failed: %v", err)
+		return
+	}
+	s.invalidateAuditLogCache()
+}
+
 // AuditLogger wraps handler h. On 2xx response, writes one audit_log entry
 // with entity_id and detail extracted from path values, query params, and body.
 func (s *Server) AuditLogger(domain, action string, h http.HandlerFunc) http.HandlerFunc {
