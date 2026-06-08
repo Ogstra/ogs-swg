@@ -633,6 +633,8 @@ func StartServer(cfg *core.Config) *Server {
 					if server.auditStore != nil && server.auditStore.SizeBytes() > maxBytes {
 						server.auditStore.PruneToSize(maxBytes)
 						log.Printf("Audit log pruned to %d MB limit", cfg.AuditLogMaxMB)
+						server.insertSystemAuditEntry("retention", "auto_prune", "audit.db",
+							fmt.Sprintf("max_mb:%d", cfg.AuditLogMaxMB))
 					}
 				}
 
@@ -648,6 +650,8 @@ func StartServer(cfg *core.Config) *Server {
 							log.Printf("Log retention export error: %v", err)
 						} else if seg != nil {
 							log.Printf("Log retention: exported %d rows to %s", seg.RowCount, seg.Filename)
+							server.insertSystemAuditEntry("backup", "cold_export", seg.Filename,
+								fmt.Sprintf("rows:%d KB:%d", seg.RowCount, seg.SizeBytes/1024))
 						}
 					}
 				}
@@ -685,16 +689,21 @@ func StartServer(cfg *core.Config) *Server {
 					}
 					ctx := context.Background()
 					ts := time.Now().Format("2006-01-02_150405")
+					var created []string
 
 					mainName := fmt.Sprintf("ogs_%s.tar.gz", ts)
 					if err := core.BackupDBToTarGz(ctx, store.DB(), "stats.db", filepath.Join(backupDir, mainName)); err != nil {
 						log.Printf("DB backup (main): %v", err)
+					} else {
+						created = append(created, mainName)
 					}
 
 					auditName := fmt.Sprintf("audit_%s.tar.gz", ts)
 					if server.auditStore != nil {
 						if err := core.BackupDBToTarGz(ctx, server.auditStore.DB(), "audit.db", filepath.Join(backupDir, auditName)); err != nil {
 							log.Printf("DB backup (audit): %v", err)
+						} else {
+							created = append(created, auditName)
 						}
 					}
 
@@ -710,7 +719,14 @@ func StartServer(cfg *core.Config) *Server {
 						}
 						if err := core.BackupDBToTarGz(ctx, server.logStore.DB(), "singbox_logs.db", filepath.Join(backupDir, logName)); err != nil {
 							log.Printf("DB backup (logs): %v", err)
+						} else {
+							created = append(created, logName)
 						}
+					}
+
+					if len(created) > 0 {
+						server.insertSystemAuditEntry("backup", "auto", created[0],
+							fmt.Sprintf("archives:%d", len(created)))
 					}
 				}
 				runBackup()
