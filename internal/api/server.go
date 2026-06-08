@@ -398,10 +398,10 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("DELETE /api/subscription-requests", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("subscription_request", "delete", s.handleDeleteSubscriptionRequests))))
 	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.requirePerm(canWriteSettings, s.handlePauseSampler)))
 	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.requirePerm(canWriteSettings, s.handleResumeSampler)))
-	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.handlePruneNow)))
+	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("retention", "prune", s.handlePruneNow))))
 	protected.HandleFunc("GET /api/settings/logs/stats", s.secure(s.requirePerm(canReadSettings, s.handleGetLogStoreStats)))
 	protected.HandleFunc("GET /api/settings/backup/download", s.secure(s.requirePerm(canWriteSettings, s.handleDownloadDBBackup)))
-	protected.HandleFunc("POST /api/settings/backup/trigger", s.secure(s.requirePerm(canWriteSettings, s.handleTriggerDBBackup)))
+	protected.HandleFunc("POST /api/settings/backup/trigger", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("backup", "manual", s.handleTriggerDBBackup))))
 
 	// Panel user management
 	protected.HandleFunc("GET /api/panel-users", s.secure(s.requirePerm(canReadPanelUsers, s.handleGetPanelUsers)))
