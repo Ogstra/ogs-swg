@@ -1879,6 +1879,15 @@ function DatabaseTab({
                 if (entry.action === 'update') return d?.includes('to:') ? `Renamed route tag ${q(e)} to ${q(d.split('to:')[1])}` : e ? `Updated route tag ${q(e)}` : 'Updated route tag'
                 if (entry.action === 'delete') return e ? `Deleted route tag ${q(e)}` : 'Deleted route tag'
                 break
+            case 'backup':
+                if (entry.action === 'cold_export') return e ? `Cold log export → ${e}${d ? ` (${d})` : ''}` : 'Cold log segment exported'
+                if (entry.action === 'auto') return `Scheduled DB backup${d?.startsWith('archives:') ? ` (${d.slice(9)} archives)` : ''}`
+                if (entry.action === 'manual') return 'Manual DB backup triggered'
+                break
+            case 'retention':
+                if (entry.action === 'prune') return 'Manual retention prune'
+                if (entry.action === 'auto_prune') return `Automatic audit-log prune${d?.startsWith('max_mb:') ? ` (limit ${d.slice(7)} MB)` : ''}`
+                break
         }
         return `${entry.domain} · ${entry.action}${e ? ` · ${e}` : ''}`
     }
