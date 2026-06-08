@@ -2295,7 +2295,24 @@ function DatabaseTab({
                             onScroll={handleSubscriptionHistoryScroll}
                         >
                             {subscriptionRequestHistory.filter(r => !pendingDeletes.has(r.id)).length === 0 && pendingDeletes.size === 0 ? (
-                                <p className="text-slate-500 text-xs italic">No history available</p>
+                                subscriptionHistoryRefreshing ? (
+                                    <div className="space-y-0">
+                                        {Array.from({ length: 5 }).map((_, i) => (
+                                            <div key={i} className="py-2 border-b border-slate-800/50 last:border-0 animate-pulse">
+                                                <div className="flex items-start justify-between gap-3 mb-1">
+                                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                        <div className="h-3 w-28 bg-slate-700/50 rounded" />
+                                                        <div className="h-4 w-20 bg-slate-700/50 rounded shrink-0" />
+                                                    </div>
+                                                    <div className="h-3 w-20 bg-slate-700/50 rounded shrink-0" />
+                                                </div>
+                                                <div className="h-2.5 w-40 bg-slate-700/50 rounded mt-1" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 text-xs italic">No history available</p>
+                                )
                             ) : (
                                 subscriptionRequestHistory
                                     .filter(run => !pendingDeletes.has(run.id))
@@ -2405,7 +2422,26 @@ function DatabaseTab({
                             }}
                         >
                             {samplerHistory.length === 0 ? (
-                                <p className="text-slate-500 text-xs italic">No history available</p>
+                                samplerHistoryRefreshing ? (
+                                    <div className="space-y-0">
+                                        {Array.from({ length: 5 }).map((_, i) => (
+                                            <div key={i} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0 animate-pulse">
+                                                <div className="min-w-0 space-y-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="h-3 w-14 bg-slate-700/50 rounded" />
+                                                        <div className="h-4 w-10 bg-slate-700/50 rounded" />
+                                                    </div>
+                                                </div>
+                                                <div className="shrink-0 text-right space-y-1">
+                                                    <div className="h-3 w-16 bg-slate-700/50 rounded ml-auto" />
+                                                    <div className="h-2.5 w-10 bg-slate-700/50 rounded ml-auto" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 text-xs italic">No history available</p>
+                                )
                             ) : (
                                 samplerHistory.map((run, idx) => (
                                     <div key={idx} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
@@ -2498,7 +2534,24 @@ function DatabaseTab({
                             }}
                         >
                             {auditLogItems.length === 0 ? (
-                                <p className="text-slate-500 text-xs italic">No audit entries</p>
+                                auditLogRefreshing ? (
+                                    <div className="space-y-0">
+                                        {Array.from({ length: 3 }).map((_, i) => (
+                                            <div key={i} className="py-2 border-b border-slate-800/50 last:border-0 animate-pulse">
+                                                <div className="flex items-start justify-between gap-2 mb-1">
+                                                    <div className="h-3 w-48 bg-slate-700/50 rounded flex-1 min-w-0" />
+                                                    <div className="h-2.5 w-24 bg-slate-700/50 rounded shrink-0" />
+                                                </div>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <div className="h-4 w-16 bg-slate-700/50 rounded" />
+                                                    <div className="h-4 w-14 bg-slate-700/50 rounded" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 text-xs italic">No audit entries</p>
+                                )
                             ) : (
                                 auditLogItems.map((entry) => (
                                     <div key={entry.id} className="py-2 border-b border-slate-800/50 last:border-0">
