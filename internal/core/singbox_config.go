@@ -1083,6 +1083,57 @@ func (c *Config) ValidateConfig(content []byte) error {
 	return nil
 }
 
+// inboundListenNetworks returns the transport network(s) ("tcp", "udp") that an
+// inbound of the given type actually binds a socket on. Two inbounds sharing a
+// listen_port only collide if they share a network: sing-box lets a UDP-only
+// protocol (e.g. hysteria2/QUIC) and a TCP protocol (e.g. vless) coexist on the
+// same port number since they bind different sockets at the OS level.
+func inboundListenNetworks(inbType string, inbMap map[string]interface{}) []string {
+	switch inbType {
+	case "hysteria2", "hysteria", "tuic":
+		// QUIC-based protocols bind UDP only.
+		return []string{"udp"}
+	case "shadowsocks", "naive":
+		// These protocols can be restricted to a subset of networks via the
+		// "network" field; default to both when unset/unrecognized.
+		if networks := parseInboundNetworkField(inbMap["network"]); len(networks) > 0 {
+			return networks
+		}
+		return []string{"tcp", "udp"}
+	case "vless", "vmess", "trojan", "anytls":
+		// TCP-only proxy protocols.
+		return []string{"tcp"}
+	default:
+		// Unknown/unmanaged inbound type (mixed, socks, http, direct, tun, etc.) -
+		// conservatively assume both networks so a real collision isn't missed.
+		return []string{"tcp", "udp"}
+	}
+}
+
+func parseInboundNetworkField(raw interface{}) []string {
+	switch v := raw.(type) {
+	case string:
+		s := strings.ToLower(strings.TrimSpace(v))
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				s = strings.ToLower(strings.TrimSpace(s))
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // DetectPortCollision parses the config and checks for overlapping ports in inbounds
 func (c *Config) DetectPortCollision(content []byte) error {
 	var raw map[string]interface{}
@@ -1095,8 +1146,8 @@ func (c *Config) DetectPortCollision(content []byte) error {
 		return nil
 	}
 
-	// Map of Port -> Tag
-	usedPorts := make(map[int]string)
+	// Map of network -> Port -> Tag
+	usedPorts := make(map[string]map[int]string)
 
 	for _, inb := range inbounds {
 		inbMap, ok := inb.(map[string]interface{})
@@ -1105,15 +1156,24 @@ func (c *Config) DetectPortCollision(content []byte) error {
 		}
 
 		tag, _ := inbMap["tag"].(string)
+		inbType, _ := inbMap["type"].(string)
+		inbType = strings.ToLower(strings.TrimSpace(inbType))
 
 		// check "listen_port" (int)
 		if portVal, ok := inbMap["listen_port"]; ok {
 			if port, ok := portVal.(float64); ok { // json unmarshals numbers as float64
 				p := int(port)
-				if existingTag, exists := usedPorts[p]; exists {
-					return fmt.Errorf("port %d is already in use by inbound '%s'", p, existingTag)
+				for _, network := range inboundListenNetworks(inbType, inbMap) {
+					portsForNetwork := usedPorts[network]
+					if portsForNetwork == nil {
+						portsForNetwork = make(map[int]string)
+						usedPorts[network] = portsForNetwork
+					}
+					if existingTag, exists := portsForNetwork[p]; exists {
+						return fmt.Errorf("port %d (%s) is already in use by inbound '%s'", p, network, existingTag)
+					}
+					portsForNetwork[p] = tag
 				}
-				usedPorts[p] = tag
 			}
 		}
 
