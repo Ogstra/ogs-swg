@@ -205,6 +205,10 @@ jobs:
 
             docker network create ogs-bg-net >/dev/null 2>&1 || true
 
+            # Leftover bake state points at the slot we are about to start, with an
+            # expired window — the watchdog would gc the new slot mid-deploy.
+            rm -f .bluegreen.previous .bluegreen.bake_until
+
             BAKE_SECONDS='${{ github.event.inputs.bake_seconds || '600' }}'
             case "$BAKE_SECONDS" in
               ''|*[!0-9]*)
