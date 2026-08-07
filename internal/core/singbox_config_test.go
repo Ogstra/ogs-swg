@@ -1636,3 +1636,100 @@ func TestGetUserInbounds_Hysteria2(t *testing.T) {
 		t.Errorf("UUID = %q; want empty string", info.UUID)
 	}
 }
+
+// TestDetectPortCollision_TCPAndUDPSamePort_NotAFalsePositive covers a common,
+// valid sing-box deployment: a TCP proxy (vless-reality) and a UDP/QUIC proxy
+// (hysteria2) sharing the same port number. They bind different sockets at the
+// OS level, so this must not be reported as a collision.
+func TestDetectPortCollision_TCPAndUDPSamePort_NotAFalsePositive(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "in-reality",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}],
+				"tls": {
+					"enabled": true,
+					"server_name": "example.com",
+					"reality": {
+						"enabled": true,
+						"handshake": {"server": "example.com", "server_port": 443},
+						"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+						"public_key":  "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+						"short_id": ["deadbeef"]
+					}
+				}
+			},
+			{
+				"type": "hysteria2",
+				"tag": "hy2-in",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [{"name":"carol","password":"pw"}]
+			}
+		]
+	}`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	cfg.ManagedInbounds = []string{"in-reality", "hy2-in"}
+
+	// Renaming a user does not touch ports at all; it must not trip port
+	// validation just because an unrelated pre-existing inbound shares the
+	// port number over a different transport.
+	if err := cfg.RenameUser("alice", "bob", "11111111-1111-1111-1111-111111111111", "xtls-rprx-vision", "", 0); err != nil {
+		t.Fatalf("RenameUser: unexpected false-positive port collision: %v", err)
+	}
+
+	// Editing the vless-reality inbound in place (same tag, same port) must
+	// also not report a self-collision against itself.
+	updated := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "in-reality",
+		"listen":      "0.0.0.0",
+		"listen_port": float64(443),
+		"users": []interface{}{
+			map[string]interface{}{"name": "bob", "uuid": "11111111-1111-1111-1111-111111111111", "flow": "xtls-rprx-vision"},
+		},
+	}
+	if err := cfg.UpdateSingboxInbound("in-reality", updated); err != nil {
+		t.Fatalf("UpdateSingboxInbound: unexpected false-positive port collision: %v", err)
+	}
+}
+
+// TestDetectPortCollision_SameNetworkStillDetected ensures the network-aware
+// fix does not regress detection of genuine same-network port collisions.
+func TestDetectPortCollision_SameNetworkStillDetected(t *testing.T) {
+	t.Run("tcp/tcp", func(t *testing.T) {
+		fixtureJSON := `{
+			"inbounds": [
+				{"type":"vless","tag":"in-a","listen":"0.0.0.0","listen_port":443,"users":[{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}]},
+				{"type":"vmess","tag":"in-b","listen":"0.0.0.0","listen_port":443,"users":[]}
+			]
+		}`
+		cfg, _ := newTestConfig(t, fixtureJSON)
+		cfg.EnableSingbox = true
+		cfg.ManagedInbounds = []string{"in-a", "in-b"}
+
+		if err := cfg.RenameUser("alice", "bob", "11111111-1111-1111-1111-111111111111", "", "", 0); err == nil {
+			t.Fatal("expected genuine TCP/TCP port collision to still be detected")
+		}
+	})
+
+	t.Run("udp/udp", func(t *testing.T) {
+		fixtureJSON := `{
+			"inbounds": [
+				{"type":"hysteria2","tag":"hy2-a","listen":"0.0.0.0","listen_port":8443,"users":[{"name":"alice","password":"pw"}]},
+				{"type":"hysteria2","tag":"hy2-b","listen":"0.0.0.0","listen_port":8443,"users":[]}
+			]
+		}`
+		cfg, _ := newTestConfig(t, fixtureJSON)
+		cfg.EnableSingbox = true
+		cfg.ManagedInbounds = []string{"hy2-a", "hy2-b"}
+
+		if err := cfg.RenameUser("alice", "bob", "", "", "", 0); err == nil {
+			t.Fatal("expected genuine UDP/UDP port collision to still be detected")
+		}
+	})
+}
