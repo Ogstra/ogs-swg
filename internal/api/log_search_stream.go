@@ -61,14 +61,29 @@ func (s *Server) searchLogsViaStore(ctx context.Context, opts logSearchOptions, 
 				return logSearchSummary{}, err
 			}
 		}
+		// The correlation pre-pass must see log lines that establish a
+		// connection id ("[user] ... inbound connection") which can be far
+		// older than the traffic lines that reference that id, so it can't
+		// simply stop as soon as opts.limit matches are found the way the
+		// real search pass below does. But without a bound it degenerates
+		// into a full scan of the entire hot table (and any in-range cold
+		// segments) on every bracketed-user search, no matter how small the
+		// requested limit is. Cap it with a generous scan budget instead:
+		// bounded work, while remaining large enough in practice not to miss
+		// correlations for realistic limits and log volumes.
+		budget := correlationScanBudget(opts.limit)
+		scanned := 0
 		if err := s.walkLogStore(ctx, opts, emitChunk, emitStatus, func(line string) error {
+			scanned++
 			normalized, ok := s.normalizeSearchLine(line, opts.timeRange, opts.censored)
-			if !ok {
-				return nil
+			if ok {
+				accumulateUserConnectionIDs(normalized, userConnIDs)
 			}
-			accumulateUserConnectionIDs(normalized, userConnIDs)
+			if scanned >= budget {
+				return errStopLogWalk
+			}
 			return nil
-		}); err != nil {
+		}); err != nil && !errors.Is(err, errStopLogWalk) {
 			return logSearchSummary{}, err
 		}
 	}
@@ -124,7 +139,39 @@ func (s *Server) searchLogsViaStore(ctx context.Context, opts logSearchOptions, 
 	return logSearchSummary{matched: matched, truncated: truncated}, nil
 }
 
-var errStopLogWalk = errors.New("stop log walk")
+// errStopLogWalk is the api package's alias for core.ErrStopLogWalk. Using
+// the exact same sentinel (rather than a locally-defined error with the same
+// message) matters because core.LogStore.WalkHot recognizes a walk-stop
+// signal via errors.Is(err, core.ErrStopLogWalk) - a distinct error value
+// would not match, and while WalkHot happens to still terminate iteration in
+// that case (any non-nil visitor error stops the row loop), it would return
+// the "stop" as an unrecognized error instead of a clean nil, which is
+// fragile for any caller that treats WalkHot's return value as meaningful.
+var errStopLogWalk = core.ErrStopLogWalk
+
+// correlationScanBudget bounds how many rows the hasUser correlation
+// pre-pass in searchLogsViaStore will visit while building the
+// connection-id-to-username map. Without a bound, a bracketed [user] search
+// with no date range scans the entire hot log table (and any in-range cold
+// segments) regardless of how small the requested match limit is, since the
+// pre-pass's visitor never itself signals a stop. The budget scales with the
+// requested limit so small searches stay cheap while still comfortably
+// covering realistic log volumes.
+func correlationScanBudget(limit int) int {
+	const (
+		multiplier = 200
+		floor      = 20000
+		ceiling    = 500000
+	)
+	budget := limit * multiplier
+	if budget < floor {
+		budget = floor
+	}
+	if budget > ceiling {
+		budget = ceiling
+	}
+	return budget
+}
 
 func (s *Server) normalizeSearchLine(line string, tr logTimeRange, censored bool) (string, bool) {
 	line = sanitizeLogLine(line)
