@@ -567,59 +567,32 @@ export const api = {
         const params = new URLSearchParams();
         if (start) params.append('start', start);
         if (end) params.append('end', end);
-        const res = await fetch(`/api/report?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch report');
-        return res.json();
+        return request<UserStatus[]>(`/api/report?${params.toString()}`, { errorMsg: 'Failed to fetch report' });
     },
     getReportSummary: async (start?: string, end?: string, limitBytes?: number): Promise<any[]> => {
         const params = new URLSearchParams();
         if (start) params.append('start', start);
         if (end) params.append('end', end);
         if (limitBytes) params.append('limit_bytes', limitBytes.toString());
-        const res = await fetch(`/api/report/summary?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch report summary');
-        return res.json();
+        return request<any[]>(`/api/report/summary?${params.toString()}`, { errorMsg: 'Failed to fetch report summary' });
     },
-    getConfig: async (): Promise<any> => {
-        const res = await fetch('/api/config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch config');
-        return res.json();
-    },
-    getSingboxDNS: async (): Promise<SingboxDNSConfig> => {
-        const res = await fetch('/api/singbox/dns', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch sing-box DNS config');
-        return res.json();
-    },
-    updateSingboxDNS: async (dns: SingboxDNSConfig): Promise<void> => {
-        const res = await fetch('/api/singbox/dns', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(dns),
-        });
-        await handleResponse(res, 'Failed to update sing-box DNS config');
-    },
-    getSingboxOutbounds: async (): Promise<SingboxOutboundView[]> => {
-        const res = await fetch('/api/singbox/outbounds', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch sing-box outbounds');
-        return res.json();
-    },
-    updateSingboxOutboundDomainStrategies: async (updates: SingboxOutboundDomainStrategyUpdate[]): Promise<void> => {
-        const res = await fetch('/api/singbox/outbounds/domain-strategy', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(updates),
-        });
-        await handleResponse(res, 'Failed to update sing-box outbound domain_strategy values');
-    },
+    getConfig: async (): Promise<any> =>
+        request<any>('/api/config', { errorMsg: 'Failed to fetch config' }),
+    getSingboxDNS: async (): Promise<SingboxDNSConfig> =>
+        request<SingboxDNSConfig>('/api/singbox/dns', { errorMsg: 'Failed to fetch sing-box DNS config' }),
+    updateSingboxDNS: async (dns: SingboxDNSConfig): Promise<void> =>
+        request('/api/singbox/dns', { method: 'PUT', json: dns, parse: 'none', errorMsg: 'Failed to update sing-box DNS config' }),
+    getSingboxOutbounds: async (): Promise<SingboxOutboundView[]> =>
+        request<SingboxOutboundView[]>('/api/singbox/outbounds', { errorMsg: 'Failed to fetch sing-box outbounds' }),
+    updateSingboxOutboundDomainStrategies: async (updates: SingboxOutboundDomainStrategyUpdate[]): Promise<void> =>
+        request('/api/singbox/outbounds/domain-strategy', { method: 'PUT', json: updates, parse: 'none', errorMsg: 'Failed to update sing-box outbound domain_strategy values' }),
     getLogs: async (params?: { q?: string; limit?: number; after_id?: number; signal?: AbortSignal }): Promise<{ logs: string[]; max_id?: number }> => {
         const query = new URLSearchParams();
         if (params?.q) query.set('q', params.q);
         if (params?.limit) query.set('limit', String(params.limit));
         if (params?.after_id && params.after_id > 0) query.set('after_id', String(params.after_id));
         const url = query.toString() ? `/api/logs?${query.toString()}` : '/api/logs';
-        const res = await fetch(url, { headers: buildHeaders(), signal: params?.signal });
-        await handleResponse(res, 'Failed to fetch logs');
-        return res.json();
+        return request<{ logs: string[]; max_id?: number }>(url, { signal: params?.signal, errorMsg: 'Failed to fetch logs' });
     },
     searchLogs: async ({ query, limit, page, from, to, signal }: LogSearchParams): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
         const params = new URLSearchParams({ q: query });
@@ -627,9 +600,7 @@ export const api = {
         if (page) params.set('page', String(page));
         if (from) params.set('from', from);
         if (to) params.set('to', to);
-        const res = await fetch(`/api/logs/search?${params.toString()}`, { headers: buildHeaders(), signal });
-        await handleResponse(res, 'Failed to search logs');
-        const text = await res.text();
+        const text = await request<string>(`/api/logs/search?${params.toString()}`, { signal, parse: 'text', errorMsg: 'Failed to search logs' });
         try {
             return JSON.parse(text);
         } catch {
@@ -644,8 +615,7 @@ export const api = {
         if (limit) params.set('limit', String(limit));
         if (from) params.set('from', from);
         if (to) params.set('to', to);
-        const res = await fetch(`/api/logs/search/stream?${params.toString()}`, { headers: buildHeaders(), signal });
-        await handleResponse(res, 'Failed to search logs');
+        const res = await request<Response>(`/api/logs/search/stream?${params.toString()}`, { signal, parse: 'raw', errorMsg: 'Failed to search logs' });
         if (!res.body) {
             throw new Error('Streaming response body missing')
         }
