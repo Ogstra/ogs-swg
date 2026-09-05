@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -14,78 +13,76 @@ import (
 
 func (s *Server) handleListExternalProfiles(w http.ResponseWriter, _ *http.Request) {
 	if s.store == nil {
-		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "store unavailable")
 		return
 	}
 	profiles, err := s.store.ListExternalProfiles()
 	if err != nil {
-		http.Error(w, "Failed to list external profiles: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to list external profiles: "+err.Error())
 		return
 	}
 	if profiles == nil {
 		profiles = []core.ExternalProfile{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(profiles)
+	writeJSON(w, http.StatusOK, profiles)
 }
 
 func (s *Server) handleUpsertExternalProfile(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
-		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "store unavailable")
 		return
 	}
 	var p core.ExternalProfile
-	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &p); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if strings.TrimSpace(p.Name) == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if p.Type != "vless" && p.Type != "shadowsocks" {
-		http.Error(w, "type must be \"vless\" or \"shadowsocks\"", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "type must be \"vless\" or \"shadowsocks\"")
 		return
 	}
 	if p.Port <= 0 {
-		http.Error(w, "port must be greater than 0", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "port must be greater than 0")
 		return
 	}
 	if p.Type == "shadowsocks" {
 		if strings.TrimSpace(p.Password) == "" {
-			http.Error(w, "user password is required for Shadowsocks profiles", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "user password is required for Shadowsocks profiles")
 			return
 		}
 		if strings.TrimSpace(p.SSServerKey) == "" {
-			http.Error(w, "server password is required for Shadowsocks profiles", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "server password is required for Shadowsocks profiles")
 			return
 		}
 	}
 	id, err := s.store.UpsertExternalProfile(p)
 	if err != nil {
-		http.Error(w, "Failed to upsert external profile: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to upsert external profile: "+err.Error())
 		return
 	}
 	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyAllUsers)
 	s.cache.Del(cacheKeyAllSubscriptions)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]int64{"id": id})
+	writeJSON(w, http.StatusOK, map[string]int64{"id": id})
 }
 
 func (s *Server) handleDeleteExternalProfile(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
-		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "store unavailable")
 		return
 	}
 	idStr := strings.TrimSpace(r.PathValue("id"))
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
-		http.Error(w, "invalid external profile id", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid external profile id")
 		return
 	}
 	if err := s.store.DeleteExternalProfile(id); err != nil {
-		http.Error(w, "Failed to delete external profile: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete external profile: "+err.Error())
 		return
 	}
 	s.InvalidateSubCache()
@@ -96,31 +93,30 @@ func (s *Server) handleDeleteExternalProfile(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) handleUpdateUserExternalProfiles(w http.ResponseWriter, r *http.Request) {
 	if s.store == nil {
-		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "store unavailable")
 		return
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	var req struct {
 		ProfileIDs []int64 `json:"profile_ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if req.ProfileIDs == nil {
 		req.ProfileIDs = []int64{}
 	}
 	if err := s.store.SetUserExternalProfiles(name, req.ProfileIDs); err != nil {
-		http.Error(w, "Failed to update user external profiles: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update user external profiles: "+err.Error())
 		return
 	}
 	s.cache.Del(cacheKeyAllUsers)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // buildExternalVlessLink builds a vless:// Reality share link from an ExternalProfile.
@@ -228,7 +224,7 @@ func (s *Server) handleGetExternalProfileLink(w http.ResponseWriter, r *http.Req
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
-		http.Error(w, "Invalid profile id", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid profile id")
 		return
 	}
 	displayName := strings.TrimSpace(r.URL.Query().Get("name"))
@@ -236,12 +232,12 @@ func (s *Server) handleGetExternalProfileLink(w http.ResponseWriter, r *http.Req
 		displayName = "External"
 	}
 	if s.store == nil {
-		http.Error(w, "Store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Store unavailable")
 		return
 	}
 	p, err := s.store.GetExternalProfile(id)
 	if err != nil || p == nil {
-		http.Error(w, "External profile not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "External profile not found")
 		return
 	}
 	if flag := strings.TrimSpace(p.Flag); flag != "" {
@@ -257,13 +253,12 @@ func (s *Server) handleGetExternalProfileLink(w http.ResponseWriter, r *http.Req
 		link, err = buildExternalShadowsocksLink(displayName, *p)
 		linkType = "shadowsocks"
 	default:
-		http.Error(w, "Unsupported external profile type", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Unsupported external profile type")
 		return
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]string{"link": link, "type": linkType})
+	writeJSON(w, http.StatusOK, map[string]string{"link": link, "type": linkType})
 }
