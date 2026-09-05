@@ -185,7 +185,7 @@ func (s *Server) secure(handler http.HandlerFunc) http.HandlerFunc {
 
 		// Otherwise, enforce API Key
 		if r.Header.Get("X-API-Key") != s.config.APIKey {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
 		handler(w, r)
@@ -213,7 +213,7 @@ func (s *Server) requirePerm(check func(*core.PanelUserPermissions) bool, h http
 		p := getPermissions(r)
 		// nil permissions means API-key auth — grant full access for backward compatibility
 		if p != nil && !check(p) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			writeErr(w, http.StatusForbidden, "Forbidden")
 			return
 		}
 		h(w, r)
@@ -223,7 +223,7 @@ func (s *Server) requirePerm(check func(*core.PanelUserPermissions) bool, h http
 
 func (s *Server) requireSingbox(w http.ResponseWriter) bool {
 	if !s.config.EnableSingbox {
-		http.Error(w, "sing-box disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "sing-box disabled")
 		return false
 	}
 	return true
@@ -231,7 +231,7 @@ func (s *Server) requireSingbox(w http.ResponseWriter) bool {
 
 func (s *Server) requireWireGuard(w http.ResponseWriter) bool {
 	if !s.config.EnableWireGuard {
-		http.Error(w, "WireGuard disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "WireGuard disabled")
 		return false
 	}
 	return true
@@ -789,7 +789,7 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 	fs := http.FileServer(http.Dir(distDir))
 	assetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if distDir == "" {
-			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "frontend assets not found")
 			return
 		}
 		w.Header().Set("Cache-Control", frontendAssetCacheControl)
@@ -811,7 +811,7 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 			return
 		}
 		if distDir == "" {
-			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "frontend assets not found")
 			return
 		}
 
@@ -949,14 +949,14 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	// 1. Load active users from Singbox Config
 	activeUsers, err := s.config.GetActiveUsers()
 	if err != nil {
-		http.Error(w, "Failed to load users: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load users: "+err.Error())
 		return
 	}
 
 	// 2. Load all metadata (includes disabled users)
 	allMeta, err := s.store.GetAllUserMetadata()
 	if err != nil {
-		http.Error(w, "Failed to load metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load metadata: "+err.Error())
 		return
 	}
 
@@ -996,7 +996,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	routeTagDefinitions, err := s.store.ListUserRouteTags()
 	if err != nil {
-		http.Error(w, "Failed to load route tags: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load route tags: "+err.Error())
 		return
 	}
 
@@ -1139,7 +1139,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		}
 		routeTags, err := s.routeTagStatusesForUser(name, routeTagDefinitions, inboundTags)
 		if err != nil {
-			http.Error(w, "Failed to resolve route tags: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to resolve route tags: "+err.Error())
 			return
 		}
 
@@ -1238,17 +1238,17 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 	if req.InboundTag == "" {
-		http.Error(w, "Inbound Tag is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Inbound Tag is required")
 		return
 	}
 	if req.UUID == "" {
@@ -1263,10 +1263,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if enabled {
 		if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 			if errors.Is(err, os.ErrInvalid) || errors.Is(err, core.ErrUserAssignedToAnotherInbound) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				writeErr(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			http.Error(w, "Failed to add user to config: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to add user to config: "+err.Error())
 			return
 		}
 	}
@@ -1284,7 +1284,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		InboundTags:   canonicalInboundTags(req.InboundTag),
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
-		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error())
 		return
 	}
 
@@ -1298,13 +1298,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 
@@ -1346,15 +1346,15 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		nameChanged := originalName != req.Name
 		if nameChanged {
 			if err := s.config.RenameUser(originalName, req.Name, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); err != nil {
-				http.Error(w, "Failed to rename user in config: "+err.Error(), http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to rename user in config: "+err.Error())
 				return
 			}
 			if err := s.store.RenameUserTrafficIdentity(originalName, req.Name); err != nil {
 				if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
-					http.Error(w, "Failed to rename user traffic identity: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+					writeErr(w, http.StatusInternalServerError, "Failed to rename user traffic identity: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")")
 					return
 				}
-				http.Error(w, "Failed to rename user traffic identity: "+err.Error(), http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to rename user traffic identity: "+err.Error())
 				return
 			}
 		} else {
@@ -1373,7 +1373,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 						if addErr := s.config.AddUser(req.Name, req.UUID, req.Flow, tag, req.VmessSecurity, req.VmessAlterID); addErr != nil {
 							// Ignore "already exists" — propagate other errors.
 							if !strings.Contains(addErr.Error(), "already exists") {
-								http.Error(w, "Failed to restore user in inbound "+tag+": "+addErr.Error(), http.StatusInternalServerError)
+								writeErr(w, http.StatusInternalServerError, "Failed to restore user in inbound "+tag+": "+addErr.Error())
 								return
 							}
 						}
@@ -1383,7 +1383,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				// No known inbounds: fall back to UpdateUser across all managed inbounds.
 				if err := s.config.UpdateUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 					if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
-						http.Error(w, "Failed to update user in config: "+err.Error(), http.StatusInternalServerError)
+						writeErr(w, http.StatusInternalServerError, "Failed to update user in config: "+err.Error())
 						return
 					}
 				}
@@ -1431,15 +1431,15 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SaveUserMetadata(meta); err != nil {
 		if originalName != req.Name {
 			if rollbackErr := s.store.RenameUserTrafficIdentity(req.Name, originalName); rollbackErr != nil {
-				http.Error(w, "Failed to save metadata: "+err.Error()+" (store rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error()+" (store rollback failed: "+rollbackErr.Error()+")")
 				return
 			}
 			if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
-				http.Error(w, "Failed to save metadata: "+err.Error()+" (config rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error()+" (config rollback failed: "+rollbackErr.Error()+")")
 				return
 			}
 		}
-		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error())
 		return
 	}
 	if originalName != req.Name {
@@ -1454,7 +1454,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		!existingMeta.Enabled
 	if shouldReconcileQuota {
 		if err := s.store.ReconcileUserQuotaNow(req.Name, s.config); err != nil {
-			http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to reconcile user quota: "+err.Error())
 			return
 		}
 	}
@@ -1471,12 +1471,12 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.URL.Query().Get("name")
 	if name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 
 	if err := s.config.RemoveUser(name); err != nil {
-		http.Error(w, "Failed to remove user from config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from config: "+err.Error())
 		return
 	}
 
@@ -1485,12 +1485,12 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.RemoveUserFromSubscriptions(name); err != nil {
-		http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from subscriptions: "+err.Error())
 		return
 	}
 
 	if err := s.store.DeleteUserMetadata(name); err != nil {
-		http.Error(w, "Failed to delete metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete metadata: "+err.Error())
 		return
 	}
 
@@ -1509,17 +1509,17 @@ func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Requ
 	tag := r.PathValue("tag")
 
 	if name == "" || tag == "" {
-		http.Error(w, "Name and tag are required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name and tag are required")
 		return
 	}
 
 	if err := s.config.RemoveUserFromInbound(name, tag); err != nil {
-		http.Error(w, "Failed to remove user from inbound: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from inbound: "+err.Error())
 		return
 	}
 
 	if err := s.removeUserFromSubscriptionsIfUnassigned(name); err != nil {
-		http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from subscriptions: "+err.Error())
 		return
 	}
 
@@ -1554,7 +1554,7 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 	name := r.PathValue("name")
 	tag := r.PathValue("tag")
 	if name == "" || tag == "" {
-		http.Error(w, "Name and tag are required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name and tag are required")
 		return
 	}
 
@@ -1564,17 +1564,17 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		VmessSecurity string `json:"vmess_security,omitempty"`
 		VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.UUID == "" {
-		http.Error(w, "UUID is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "UUID is required")
 		return
 	}
 
 	if err := s.config.UpdateUserInInbound(name, req.UUID, req.Flow, tag, req.VmessSecurity, req.VmessAlterID); err != nil {
-		http.Error(w, "Failed to update user in inbound: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update user in inbound: "+err.Error())
 		return
 	}
 
@@ -1592,7 +1592,7 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := s.store.ReconcileUserQuotaNow(name, s.config); err != nil {
-		http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to reconcile user quota: "+err.Error())
 		return
 	}
 
@@ -1606,8 +1606,8 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var reqs []CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&reqs); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &reqs); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1678,7 +1678,7 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 
 	users, err := s.config.GetActiveUsers()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -1708,8 +1708,7 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleGetReportSummary(w http.ResponseWriter, r *http.Request) {
@@ -1748,7 +1747,7 @@ func (s *Server) handleGetReportSummary(w http.ResponseWriter, r *http.Request) 
 
 	users, err := s.config.GetActiveUsers()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -1781,8 +1780,7 @@ func (s *Server) handleGetReportSummary(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -1791,7 +1789,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	content, err := s.config.GetSingboxConfig()
 	if err != nil {
-		http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read config: "+err.Error())
 		return
 	}
 	if shouldRedactConfigReadOnly(r) {
@@ -1806,8 +1804,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.logStore == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"logs": []string{}, "max_id": 0})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"logs": []string{}, "max_id": 0})
 		return
 	}
 
@@ -1850,7 +1847,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "log read failed: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "log read failed: "+err.Error())
 		return
 	}
 
@@ -1874,8 +1871,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		lines, _ = truncateRecentLogMatches(lines, limit)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"logs":   lines,
 		"max_id": maxID,
 	})
@@ -1887,12 +1883,12 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		http.Error(w, "q is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "q is required")
 		return
 	}
 	timeRange, err := parseLogTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
 	if err != nil {
-		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid time range: "+err.Error())
 		return
 	}
 	page, pageSize, effectiveLimit := parseSearchPageParams(r)
@@ -1920,8 +1916,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("handleSearchLogs: cannot search logs: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"logs": []string{"Failed to search logs: " + err.Error()},
 		})
 		return
@@ -1938,8 +1933,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	paged := lines[start:end]
 	hasMore := summary.truncated && end == len(lines)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"logs":      paged,
 		"page":      page,
 		"page_size": pageSize,
@@ -1953,12 +1947,12 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		http.Error(w, "q is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "q is required")
 		return
 	}
 	timeRange, err := parseLogTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
 	if err != nil {
-		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid time range: "+err.Error())
 		return
 	}
 	_, _, effectiveLimit := parseSearchPageParams(r)
@@ -1969,7 +1963,7 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
