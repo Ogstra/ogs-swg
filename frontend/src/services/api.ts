@@ -447,20 +447,68 @@ const validateRawSingboxConfig = (config: string) => {
     }
 };
 
+type ParseMode = 'json' | 'text' | 'none' | 'raw';
+type ErrorMode = 'handled' | 'plain' | 'status';
+
+interface RequestOptions {
+    method?: string;
+    json?: unknown;
+    body?: BodyInit;
+    contentType?: string;
+    signal?: AbortSignal;
+    errorMsg?: string;
+    parse?: ParseMode;
+    errorMode?: ErrorMode;
+    allowStatus?: number[];
+}
+
+async function request<T = void>(path: string, options: RequestOptions = {}): Promise<T> {
+    const {
+        method = 'GET',
+        json,
+        body,
+        contentType,
+        signal,
+        errorMsg = 'Request failed',
+        parse = 'json',
+        errorMode = 'handled',
+        allowStatus,
+    } = options;
+
+    const headerContentType = contentType ?? (json !== undefined ? 'application/json' : undefined);
+    const init: RequestInit = { method, headers: buildHeaders(headerContentType) };
+    if (json !== undefined) {
+        init.body = JSON.stringify(json);
+    } else if (body !== undefined) {
+        init.body = body;
+    }
+    if (signal) init.signal = signal;
+
+    const res = await fetch(path, init);
+
+    if (!allowStatus || !allowStatus.includes(res.status)) {
+        if (errorMode === 'handled') {
+            await handleResponse(res, errorMsg);
+        } else if (errorMode === 'plain') {
+            if (!res.ok) throw new Error(errorMsg);
+        } else if (!res.ok) {
+            throw new Error(`${errorMsg}: ${res.status}`);
+        }
+    }
+
+    if (parse === 'raw') return res as unknown as T;
+    if (parse === 'none') return undefined as T;
+    if (parse === 'text') return (await res.text()) as unknown as T;
+    return (await res.json()) as T;
+}
+
 export const api = {
-    getUsers: async (): Promise<UserStatus[]> => {
-        const res = await fetch('/api/users', { headers: buildHeaders() });
-        if (!res.ok) throw new Error('Failed to fetch users');
-        return res.json();
-    },
-    pauseSampler: async (): Promise<void> => {
-        const res = await fetch('/api/sampler/pause', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to pause sampler');
-    },
-    resumeSampler: async (): Promise<void> => {
-        const res = await fetch('/api/sampler/resume', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to resume sampler');
-    },
+    getUsers: async (): Promise<UserStatus[]> =>
+        request<UserStatus[]>('/api/users', { errorMode: 'plain', errorMsg: 'Failed to fetch users' }),
+    pauseSampler: async (): Promise<void> =>
+        request('/api/sampler/pause', { method: 'POST', parse: 'none', errorMsg: 'Failed to pause sampler' }),
+    resumeSampler: async (): Promise<void> =>
+        request('/api/sampler/resume', { method: 'POST', parse: 'none', errorMsg: 'Failed to resume sampler' }),
     updatePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
         const res = await fetch('/api/auth/password', {
             method: 'PUT',
