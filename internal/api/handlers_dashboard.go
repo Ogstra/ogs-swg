@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -294,8 +293,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	if cachedPayload, found := s.cache.Get(cacheKey); found {
 		if payload, ok := cachedPayload.(DashboardData); ok {
 			payload.SingboxPendingChanges = s.config.GetSingboxPendingChanges()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(payload)
+			writeJSON(w, http.StatusOK, payload)
 			return
 		}
 	}
@@ -504,8 +502,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	// Setting cost to 1 as default and TTL to 15 seconds
 	s.cache.SetWithTTL(cacheKey, resp, 1, 15*time.Second)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.Request) {
@@ -525,11 +522,11 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 
 	key = resolveConsumerKey(key, mode, name, iface, s, r)
 	if key == "" || key == maskedValue {
-		http.Error(w, "Missing consumer key", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Missing consumer key")
 		return
 	}
 	if mode != "singbox" && mode != "wireguard" {
-		http.Error(w, "Invalid consumer mode", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid consumer mode")
 		return
 	}
 
@@ -540,7 +537,7 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 		end = time.Now().Unix()
 	}
 	if end <= start {
-		http.Error(w, "Invalid dashboard window", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid dashboard window")
 		return
 	}
 
@@ -560,12 +557,11 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 		buckets = apiTrafficBucketsFromCore(coreBuckets)
 	}
 	if err != nil {
-		http.Error(w, "Failed to fetch consumer chart: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to fetch consumer chart: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(DashboardConsumerChartData{
+	writeJSON(w, http.StatusOK, DashboardConsumerChartData{
 		ChartData: buildConsumerChartData(start, end, interval, buckets, mode),
 	})
 }
