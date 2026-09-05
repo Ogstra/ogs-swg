@@ -743,122 +743,57 @@ export const api = {
         request(`${wireGuardInterfaceBase(iface)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete WireGuard interface' }),
 
     // Service Control
-    restartService: async (service: string): Promise<void> => {
-        const res = await fetch('/api/service/restart', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ service })
-        });
-        await handleResponse(res, 'Failed to restart service');
-    },
-    startService: async (service: string): Promise<void> => {
-        const res = await fetch('/api/service/start', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ service })
-        });
-        await handleResponse(res, 'Failed to start service');
-    },
-    stopService: async (service: string): Promise<void> => {
-        const res = await fetch('/api/service/stop', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ service })
-        });
-        await handleResponse(res, 'Failed to stop service');
-    },
+    restartService: async (service: string): Promise<void> =>
+        request('/api/service/restart', { method: 'POST', json: { service }, parse: 'none', errorMsg: 'Failed to restart service' }),
+    startService: async (service: string): Promise<void> =>
+        request('/api/service/start', { method: 'POST', json: { service }, parse: 'none', errorMsg: 'Failed to start service' }),
+    stopService: async (service: string): Promise<void> =>
+        request('/api/service/stop', { method: 'POST', json: { service }, parse: 'none', errorMsg: 'Failed to stop service' }),
 
     // Feature toggles
-    getFeatures: async (): Promise<FeatureFlags> => {
-        const res = await fetch('/api/settings/features', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch features');
-        return res.json();
-    },
-    updateFeatures: async (flags: FeatureFlags): Promise<void> => {
-        const res = await fetch('/api/settings/features', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(flags)
-        });
-        await handleResponse(res, 'Failed to update features');
-    },
-    getDashboardPreferences: async (): Promise<DashboardPreferences> => {
-        const res = await fetch('/api/settings/dashboard-preferences', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch dashboard preferences');
-        return res.json();
-    },
-    updateDashboardPreferences: async (prefs: DashboardPreferences): Promise<void> => {
-        const res = await fetch('/api/settings/dashboard-preferences', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(prefs),
-        });
-        await handleResponse(res, 'Failed to update dashboard preferences');
-    },
+    getFeatures: async (): Promise<FeatureFlags> =>
+        request<FeatureFlags>('/api/settings/features', { errorMsg: 'Failed to fetch features' }),
+    updateFeatures: async (flags: FeatureFlags): Promise<void> =>
+        request('/api/settings/features', { method: 'PUT', json: flags, parse: 'none', errorMsg: 'Failed to update features' }),
+    getDashboardPreferences: async (): Promise<DashboardPreferences> =>
+        request<DashboardPreferences>('/api/settings/dashboard-preferences', { errorMsg: 'Failed to fetch dashboard preferences' }),
+    updateDashboardPreferences: async (prefs: DashboardPreferences): Promise<void> =>
+        request('/api/settings/dashboard-preferences', { method: 'PUT', json: prefs, parse: 'none', errorMsg: 'Failed to update dashboard preferences' }),
     getPublicIP: async (): Promise<string> => {
-        const res = await fetch('/api/settings/public-ip', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch public IP');
-        const data = await res.json();
+        const data = await request<{ public_ip?: string }>('/api/settings/public-ip', { errorMsg: 'Failed to fetch public IP' });
         return data.public_ip || '';
     },
-    updatePublicIP: async (publicIP: string): Promise<void> => {
-        const res = await fetch('/api/settings/public-ip', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ public_ip: publicIP })
-        });
-        await handleResponse(res, 'Failed to update public IP');
-    },
+    updatePublicIP: async (publicIP: string): Promise<void> =>
+        request('/api/settings/public-ip', { method: 'PUT', json: { public_ip: publicIP }, parse: 'none', errorMsg: 'Failed to update public IP' }),
 
     // Sing-box Configuration
-    getSingboxRouteRules: async (): Promise<any[]> => {
-        const res = await fetch('/api/singbox/route/rules', { headers: buildHeaders() });
-        const handled = await handleResponse(res, 'Failed to fetch route rules');
-        return handled.json();
-    },
-    upsertSingboxRouteRules: async (rules: any[]): Promise<void> => {
-        const res = await fetch('/api/singbox/route/rules/upsert', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(rules),
-        });
-        await handleResponse(res, 'Failed to upsert route rules');
-    },
-    getSingboxConfig: async (): Promise<string> => {
-        const res = await fetch('/api/singbox/config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch Sing-box config');
-        return res.text();
-    },
+    getSingboxRouteRules: async (): Promise<any[]> =>
+        request<any[]>('/api/singbox/route/rules', { errorMsg: 'Failed to fetch route rules' }),
+    upsertSingboxRouteRules: async (rules: any[]): Promise<void> =>
+        request('/api/singbox/route/rules/upsert', { method: 'POST', json: rules, parse: 'none', errorMsg: 'Failed to upsert route rules' }),
+    getSingboxConfig: async (): Promise<string> =>
+        request<string>('/api/singbox/config', { parse: 'text', errorMsg: 'Failed to fetch Sing-box config' }),
     updateSingboxConfig: async (config: string): Promise<void> => {
         validateRawSingboxConfig(config);
-        const res = await fetch('/api/singbox/config', {
+        return request('/api/singbox/config', {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: config
+            body: config,
+            contentType: 'application/json',
+            parse: 'none',
+            errorMsg: 'Failed to update Sing-box config',
         });
-        await handleResponse(res, 'Failed to update Sing-box config');
     },
-    getSingboxInbounds: async (): Promise<any[]> => {
-        const res = await fetch('/api/singbox/inbounds', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch Sing-box inbounds');
-        return res.json();
-    },
-    addSingboxInbound: async (inbound: any): Promise<void> => {
-        const res = await fetch('/api/singbox/inbound', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(inbound)
-        });
-        await handleResponse(res, 'Failed to add Sing-box inbound');
-    },
+    getSingboxInbounds: async (): Promise<any[]> =>
+        request<any[]>('/api/singbox/inbounds', { errorMsg: 'Failed to fetch Sing-box inbounds' }),
+    addSingboxInbound: async (inbound: any): Promise<void> =>
+        request('/api/singbox/inbound', { method: 'POST', json: inbound, parse: 'none', errorMsg: 'Failed to add Sing-box inbound' }),
     updateSingboxInbound: async (tag: string, inbound: any): Promise<SingboxInboundUpdateResponse> => {
-        const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
+        const text = await request<string>(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(inbound)
+            json: inbound,
+            parse: 'text',
+            errorMsg: 'Failed to update Sing-box inbound',
         });
-        await handleResponse(res, 'Failed to update Sing-box inbound');
-        const text = await res.text();
         if (!text.trim()) {
             return { warnings: [] };
         }
@@ -867,64 +802,28 @@ export const api = {
             warnings: Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [],
         };
     },
-    deleteSingboxInbound: async (tag: string): Promise<void> => {
-        const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete Sing-box inbound');
-    },
+    deleteSingboxInbound: async (tag: string): Promise<void> =>
+        request(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete Sing-box inbound' }),
 
     // Raw Config
-    updateConfig: async (configText: string): Promise<void> => {
-        const res = await fetch('/api/config', {
-            method: 'PUT',
-            headers: buildHeaders('text/plain'),
-            body: configText
-        });
-        await handleResponse(res, 'Failed to update config');
-    },
-    getWireGuardConfig: async (): Promise<string> => {
-        const res = await fetch('/api/wireguard/config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard config');
-        return res.text();
-    },
-    backupWireGuardConfig: async (): Promise<void> => {
-        const res = await fetch('/api/wireguard/config/backup', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to backup WireGuard config');
-    },
-    backupWireGuardConfigForInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup`, { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to backup WireGuard config');
-    },
-    restoreWireGuardConfig: async (): Promise<string> => {
-        const res = await fetch('/api/wireguard/config/restore', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to restore WireGuard config');
-        return res.text();
-    },
-    getBackupMeta: async (): Promise<{ singbox_last_backup?: string; wireguard_last_backup?: string }> => {
-        const res = await fetch('/api/config/backup/meta', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to load backup metadata');
-        return res.json();
-    },
-    getConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
-        const res = await fetch('/api/config/backups', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch config backups');
-        return res.json();
-    },
-    getConfigBackupContent: async (name: string): Promise<string> => {
-        const res = await fetch(`/api/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch config backup');
-        return res.text();
-    },
-    updateWireGuardConfig: async (config: string): Promise<void> => {
-        const res = await fetch('/api/wireguard/config', {
-            method: 'PUT',
-            headers: buildHeaders('text/plain'),
-            body: config
-        });
-        await handleResponse(res, 'Failed to update WireGuard config');
-    },
+    updateConfig: async (configText: string): Promise<void> =>
+        request('/api/config', { method: 'PUT', body: configText, contentType: 'text/plain', parse: 'none', errorMsg: 'Failed to update config' }),
+    getWireGuardConfig: async (): Promise<string> =>
+        request<string>('/api/wireguard/config', { parse: 'text', errorMsg: 'Failed to fetch WireGuard config' }),
+    backupWireGuardConfig: async (): Promise<void> =>
+        request('/api/wireguard/config/backup', { method: 'POST', parse: 'none', errorMsg: 'Failed to backup WireGuard config' }),
+    backupWireGuardConfigForInterface: async (iface: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/config/backup`, { method: 'POST', parse: 'none', errorMsg: 'Failed to backup WireGuard config' }),
+    restoreWireGuardConfig: async (): Promise<string> =>
+        request<string>('/api/wireguard/config/restore', { method: 'POST', parse: 'text', errorMsg: 'Failed to restore WireGuard config' }),
+    getBackupMeta: async (): Promise<{ singbox_last_backup?: string; wireguard_last_backup?: string }> =>
+        request('/api/config/backup/meta', { errorMsg: 'Failed to load backup metadata' }),
+    getConfigBackups: async (): Promise<ConfigBackupEntry[]> =>
+        request<ConfigBackupEntry[]>('/api/config/backups', { errorMsg: 'Failed to fetch config backups' }),
+    getConfigBackupContent: async (name: string): Promise<string> =>
+        request<string>(`/api/config/backup?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch config backup' }),
+    updateWireGuardConfig: async (config: string): Promise<void> =>
+        request('/api/wireguard/config', { method: 'PUT', body: config, contentType: 'text/plain', parse: 'none', errorMsg: 'Failed to update WireGuard config' }),
 
     // Stats & Status
     getStats: async (range: string = '24h', start?: string, end?: string): Promise<any[]> => {
