@@ -30,12 +30,12 @@ func (s *Server) handleGetAuditLog(w http.ResponseWriter, r *http.Request) {
 
 	page, err := s.auditStore.QueryAuditLog(r.Context(), limit, offset, domain, action)
 	if err != nil {
-		http.Error(w, "Failed to query audit log: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to query audit log: "+err.Error())
 		return
 	}
 	b, err := json.Marshal(page)
 	if err != nil {
-		http.Error(w, "Failed to encode audit log: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode audit log: "+err.Error())
 		return
 	}
 	s.cache.SetWithTTL(cacheKey, b, int64(len(b)), 15*time.Second)
