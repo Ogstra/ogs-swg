@@ -118,6 +118,11 @@ func (s *Store) initSchema() error {
 		s.db.Exec("DROP TABLE daily_usage")
 	}
 
+	// idx_samples_user_ts duplicated uq_samples_user_ts exactly (same columns, no
+	// extra benefit); drop it on upgrade so existing installs stop paying its
+	// write-amplification cost on every sample insert.
+	s.db.Exec("DROP INDEX IF EXISTS idx_samples_user_ts")
+
 	query := `
 	CREATE TABLE IF NOT EXISTS samples (
 		user TEXT NOT NULL,
@@ -126,7 +131,7 @@ func (s *Store) initSchema() error {
 		downlink INTEGER NOT NULL
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS uq_samples_user_ts ON samples(user, ts);
-	CREATE INDEX IF NOT EXISTS idx_samples_user_ts ON samples(user, ts);
+	CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
 
 	CREATE TABLE IF NOT EXISTS users (
 		email TEXT PRIMARY KEY,
@@ -159,6 +164,7 @@ func (s *Store) initSchema() error {
 		endpoint TEXT DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_wg_samples_pub_ts ON wg_samples(public_key, ts);
+	CREATE INDEX IF NOT EXISTS idx_wg_samples_ts ON wg_samples(ts);
 	CREATE TABLE IF NOT EXISTS wg_peers (
 		public_key TEXT PRIMARY KEY,
 		alias TEXT NOT NULL,
@@ -2373,6 +2379,84 @@ LIMIT ?`, start, end, limit)
 		})
 	}
 	return results, nil
+}
+
+// GetWGKeyTotals aggregates total usage (rx/tx deltas) per peer in the given
+// range, restricted to the given public keys. Used to derive per-interface
+// totals from a single query instead of one query per interface.
+func (s *Store) GetWGKeyTotals(publicKeys []string, start, end int64) (map[string]TrafficStats, error) {
+	out := make(map[string]TrafficStats)
+	if len(publicKeys) == 0 {
+		return out, nil
+	}
+
+	placeholders := strings.Repeat("?,", len(publicKeys))
+	placeholders = strings.TrimSuffix(placeholders, ",")
+
+	args := make([]interface{}, 0, len(publicKeys)+2)
+	for _, k := range publicKeys {
+		args = append(args, k)
+	}
+	args = append(args, start, end)
+
+	query := fmt.Sprintf(`
+WITH ordered AS (
+  SELECT
+    public_key,
+    ts,
+    rx,
+    tx,
+    LAG(rx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_rx,
+    LAG(tx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_tx
+  FROM wg_samples
+  WHERE public_key IN (%s) AND ts >= ? AND ts <= ?
+),
+diffs AS (
+  SELECT
+    public_key,
+    CASE
+      WHEN prev_tx IS NULL THEN 0
+      WHEN tx - prev_tx < 0 THEN 0
+      ELSE tx - prev_tx
+    END AS dx,
+    CASE
+      WHEN prev_rx IS NULL THEN 0
+      WHEN rx - prev_rx < 0 THEN 0
+      ELSE rx - prev_rx
+    END AS dr
+  FROM ordered
+)
+SELECT
+  public_key,
+  SUM(dr) AS rx_delta,
+  SUM(dx) AS tx_delta
+FROM diffs
+GROUP BY public_key
+`, placeholders)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pub string
+		var rx, tx sql.NullInt64
+		if err := rows.Scan(&pub, &rx, &tx); err != nil {
+			return nil, err
+		}
+		r := rx.Int64
+		t := tx.Int64
+		if r < 0 {
+			r = 0
+		}
+		if t < 0 {
+			t = 0
+		}
+		out[pub] = TrafficStats{Uplink: t, Downlink: r}
+	}
+	return out, nil
 }
 
 // GetSBTrafficBuckets aggregates Sing-box traffic per time bucket.
