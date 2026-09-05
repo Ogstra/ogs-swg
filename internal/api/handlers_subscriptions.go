@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"regexp"
@@ -908,6 +909,7 @@ func (s *Server) handleEncryptHappLink(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		log.Printf("happ crypto API: unexpected status %d, body=%q", resp.StatusCode, bodyBytes)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		json.NewEncoder(w).Encode(map[string]string{"error": "Happ crypto API failed"})
@@ -918,6 +920,7 @@ func (s *Server) handleEncryptHappLink(w http.ResponseWriter, r *http.Request) {
 	candidate := extractEncryptedHappLink(bodyBytes)
 
 	if !strings.HasPrefix(candidate, "happ://crypt5/") {
+		log.Printf("happ crypto API: unexpected response format, body=%q", bodyBytes)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
 		json.NewEncoder(w).Encode(map[string]string{"error": "unexpected response from Happ crypto API"})
