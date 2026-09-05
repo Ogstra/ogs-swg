@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
@@ -81,9 +80,7 @@ func (s *Server) reloadProtectionRules(ctx context.Context) {
 }
 
 func (s *Server) handleGetSubscriptionProtection(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(s.config.SubscriptionProtection)
+	writeJSON(w, http.StatusOK, s.config.SubscriptionProtection)
 }
 
 func (s *Server) handleUpdateSubscriptionProtection(w http.ResponseWriter, r *http.Request) {
@@ -93,8 +90,8 @@ func (s *Server) handleUpdateSubscriptionProtection(w http.ResponseWriter, r *ht
 		UAFilterEnabled            bool `json:"ua_filter_enabled"`
 		SocialFetchersBlockEnabled bool `json:"social_fetchers_block_enabled"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 
@@ -106,23 +103,19 @@ func (s *Server) handleUpdateSubscriptionProtection(w http.ResponseWriter, r *ht
 	s.config.SubscriptionProtection.WindowSeconds = max(s.config.SubscriptionProtection.WindowSeconds, 1)
 
 	if err := s.config.SaveAppConfig(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(s.config.SubscriptionProtection)
+	writeJSON(w, http.StatusOK, s.config.SubscriptionProtection)
 }
 
 func (s *Server) handleGetProtectionRules(w http.ResponseWriter, r *http.Request) {
 	rules, err := s.store.Queries.GetAllProtectionRules(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(rules)
+	writeJSON(w, http.StatusOK, rules)
 }
 
 func (s *Server) handleCreateProtectionRule(w http.ResponseWriter, r *http.Request) {
@@ -131,8 +124,8 @@ func (s *Server) handleCreateProtectionRule(w http.ResponseWriter, r *http.Reque
 		Value    string `json:"value"`
 		Note     string `json:"note"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid json")
 		return
 	}
 
@@ -142,11 +135,11 @@ func (s *Server) handleCreateProtectionRule(w http.ResponseWriter, r *http.Reque
 	switch req.RuleType {
 	case "ip_block", "token_block", "ip_allow":
 	default:
-		http.Error(w, "invalid rule_type", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid rule_type")
 		return
 	}
 	if req.Value == "" {
-		http.Error(w, "value is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "value is required")
 		return
 	}
 
@@ -157,7 +150,7 @@ func (s *Server) handleCreateProtectionRule(w http.ResponseWriter, r *http.Reque
 		CreatedAt: sql.NullInt64{Int64: time.Now().Unix(), Valid: true},
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.reloadProtectionRules(r.Context())
@@ -168,11 +161,11 @@ func (s *Server) handleCreateProtectionRule(w http.ResponseWriter, r *http.Reque
 func (s *Server) handleDeleteProtectionRule(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	if err := s.store.Queries.DeleteProtectionRule(r.Context(), id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.reloadProtectionRules(r.Context())
@@ -198,10 +191,8 @@ func (s *Server) handleGetBlockedLog(w http.ResponseWriter, r *http.Request) {
 		Offset: offset,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(rows)
+	writeJSON(w, http.StatusOK, rows)
 }

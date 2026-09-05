@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,14 +18,14 @@ import (
 // GET /api/settings/logs/stats
 func (s *Server) handleGetLogStoreStats(w http.ResponseWriter, r *http.Request) {
 	if s.logStore == nil {
-		http.Error(w, "log store not available", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "log store not available")
 		return
 	}
 	ctx := r.Context()
 
 	rowCount, err := s.logStore.RowCount(ctx)
 	if err != nil {
-		http.Error(w, "failed to query row count: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to query row count: "+err.Error())
 		return
 	}
 
@@ -34,13 +33,13 @@ func (s *Server) handleGetLogStoreStats(w http.ResponseWriter, r *http.Request) 
 
 	firstMs, lastMs, err := s.logStore.HotDateRange(ctx)
 	if err != nil {
-		http.Error(w, "failed to query date range: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to query date range: "+err.Error())
 		return
 	}
 
 	segCount, segBytes, err := s.logStore.SegmentStats(ctx)
 	if err != nil {
-		http.Error(w, "failed to query segment stats: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to query segment stats: "+err.Error())
 		return
 	}
 
@@ -52,8 +51,7 @@ func (s *Server) handleGetLogStoreStats(w http.ResponseWriter, r *http.Request) 
 		"segment_count":       segCount,
 		"segment_total_bytes": segBytes,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleDownloadDBBackup streams a tar.gz backup of the requested database.
@@ -64,13 +62,13 @@ func (s *Server) handleDownloadDBBackup(w http.ResponseWriter, r *http.Request) 
 
 	db, archiveName, filename, err := s.resolveBackupTarget(r.Context(), target)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	tmp, err := os.CreateTemp("", "ogs-db-backup-*.tar.gz")
 	if err != nil {
-		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to create temp file: "+err.Error())
 		return
 	}
 	tmpPath := tmp.Name()
@@ -88,7 +86,7 @@ func (s *Server) handleDownloadDBBackup(w http.ResponseWriter, r *http.Request) 
 		err = core.BackupDBToTarGz(r.Context(), db, archiveName, tmpPath)
 	}
 	if err != nil {
-		http.Error(w, "backup failed: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "backup failed: "+err.Error())
 		return
 	}
 
@@ -127,13 +125,13 @@ func (s *Server) resolveColdFiles(ctx context.Context, param string) []string {
 // POST /api/settings/backup/trigger
 func (s *Server) handleTriggerDBBackup(w http.ResponseWriter, r *http.Request) {
 	if s.config.DemoMode {
-		http.Error(w, "not available in demo mode", http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "not available in demo mode")
 		return
 	}
 
 	backupDir := s.config.DBBackupPath
 	if err := os.MkdirAll(backupDir, 0755); err != nil {
-		http.Error(w, "failed to create backup dir: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to create backup dir: "+err.Error())
 		return
 	}
 
@@ -169,8 +167,7 @@ func (s *Server) handleTriggerDBBackup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"created": created})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"created": created})
 }
 
 // resolveBackupTarget returns the *sql.DB, inner archive name, and download filename
