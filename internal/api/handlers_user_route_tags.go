@@ -54,11 +54,11 @@ type UpdateUserRouteTagsResponse struct {
 
 func (s *Server) requireUserRouteTagDependencies(w http.ResponseWriter) bool {
 	if s.store == nil {
-		http.Error(w, "store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "store unavailable")
 		return false
 	}
 	if s.config == nil {
-		http.Error(w, "sing-box config unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "sing-box config unavailable")
 		return false
 	}
 	if !s.requireSingbox(w) {
@@ -137,7 +137,7 @@ func (s *Server) handleGetUserRouteTags(w http.ResponseWriter, _ *http.Request) 
 
 	tags, err := s.store.ListUserRouteTags()
 	if err != nil {
-		http.Error(w, "Failed to list route tags: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to list route tags: "+err.Error())
 		return
 	}
 
@@ -145,14 +145,14 @@ func (s *Server) handleGetUserRouteTags(w http.ResponseWriter, _ *http.Request) 
 	for _, tag := range tags {
 		status, err := s.enrichUserRouteTag(tag)
 		if err != nil {
-			http.Error(w, "Failed to resolve route tag: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to resolve route tag: "+err.Error())
 			return
 		}
 		statuses = append(statuses, status)
 	}
 	b, err := json.Marshal(statuses)
 	if err != nil {
-		http.Error(w, "Failed to encode route tags: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode route tags: "+err.Error())
 		return
 	}
 	s.cache.SetWithTTL(cacheKeyAllRouteTags, b, int64(len(b)), 30*time.Second)
@@ -168,7 +168,7 @@ func (s *Server) handleGetCompatibleUserRouteRules(w http.ResponseWriter, _ *htt
 
 	tags, err := s.store.ListUserRouteTags()
 	if err != nil {
-		http.Error(w, "Failed to list route tags: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to list route tags: "+err.Error())
 		return
 	}
 	linked := make(map[string]struct{}, len(tags))
@@ -180,7 +180,7 @@ func (s *Server) handleGetCompatibleUserRouteRules(w http.ResponseWriter, _ *htt
 
 	rules, err := s.config.GetSingboxRouteRules()
 	if err != nil {
-		http.Error(w, "Failed to get route rules: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get route rules: "+err.Error())
 		return
 	}
 
@@ -206,8 +206,7 @@ func (s *Server) handleGetCompatibleUserRouteRules(w http.ResponseWriter, _ *htt
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(compatible)
+	writeJSON(w, http.StatusOK, compatible)
 }
 
 func (s *Server) handleCreateUserRouteTag(w http.ResponseWriter, r *http.Request) {
@@ -216,41 +215,39 @@ func (s *Server) handleCreateUserRouteTag(w http.ResponseWriter, r *http.Request
 	}
 
 	var req userRouteTagWriteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 	if req.RuleIndex == nil {
-		http.Error(w, "rule_index is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "rule_index is required")
 		return
 	}
 
 	ruleMatchJSON, err := s.ruleMatchJSONForIndex(*req.RuleIndex)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	tag, err := s.store.CreateUserRouteTag(req.Name, req.Color, req.Description, ruleMatchJSON)
 	if err != nil {
-		http.Error(w, "Failed to create route tag: "+err.Error(), statusForRouteTagStoreError(err))
+		writeErr(w, statusForRouteTagStoreError(err), "Failed to create route tag: "+err.Error())
 		return
 	}
 	status, err := s.enrichUserRouteTag(tag)
 	if err != nil {
-		http.Error(w, "Failed to resolve route tag: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to resolve route tag: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
 	s.cache.Del(cacheKeyAllRouteTags)
 	s.cache.Del(cacheKeyAllUsers)
 	s.insertAuditEntry(r, "user_route_tag", "create", tag.Name, fmt.Sprintf("id:%d", tag.ID))
-	_ = json.NewEncoder(w).Encode(status)
+	writeJSON(w, http.StatusCreated, status)
 }
 
 func (s *Server) handleUpdateUserRouteTag(w http.ResponseWriter, r *http.Request) {
@@ -260,26 +257,26 @@ func (s *Server) handleUpdateUserRouteTag(w http.ResponseWriter, r *http.Request
 
 	id, err := parseRouteTagID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	existing, err := s.store.GetUserRouteTag(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Route tag not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Route tag not found")
 			return
 		}
-		http.Error(w, "Failed to get route tag: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get route tag: "+err.Error())
 		return
 	}
 
 	var req userRouteTagWriteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 
@@ -287,7 +284,7 @@ func (s *Server) handleUpdateUserRouteTag(w http.ResponseWriter, r *http.Request
 	if req.RuleIndex != nil {
 		ruleMatchJSON, err = s.ruleMatchJSONForIndex(*req.RuleIndex)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
@@ -300,21 +297,20 @@ func (s *Server) handleUpdateUserRouteTag(w http.ResponseWriter, r *http.Request
 		RuleMatchJSON: ruleMatchJSON,
 	}
 	if err := s.store.UpdateUserRouteTag(updated); err != nil {
-		http.Error(w, "Failed to update route tag: "+err.Error(), statusForRouteTagStoreError(err))
+		writeErr(w, statusForRouteTagStoreError(err), "Failed to update route tag: "+err.Error())
 		return
 	}
 	tag, err := s.store.GetUserRouteTag(id)
 	if err != nil {
-		http.Error(w, "Failed to get route tag: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get route tag: "+err.Error())
 		return
 	}
 	status, err := s.enrichUserRouteTag(*tag)
 	if err != nil {
-		http.Error(w, "Failed to resolve route tag: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to resolve route tag: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	detail := fmt.Sprintf("id:%d", id)
 	if tag.Name != existing.Name {
 		detail += ",to:" + tag.Name
@@ -322,7 +318,7 @@ func (s *Server) handleUpdateUserRouteTag(w http.ResponseWriter, r *http.Request
 	s.cache.Del(cacheKeyAllRouteTags)
 	s.cache.Del(cacheKeyAllUsers)
 	s.insertAuditEntry(r, "user_route_tag", "update", existing.Name, detail)
-	_ = json.NewEncoder(w).Encode(status)
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) handleDeleteUserRouteTag(w http.ResponseWriter, r *http.Request) {
@@ -332,20 +328,20 @@ func (s *Server) handleDeleteUserRouteTag(w http.ResponseWriter, r *http.Request
 
 	id, err := parseRouteTagID(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	existing, err := s.store.GetUserRouteTag(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Route tag not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Route tag not found")
 			return
 		}
-		http.Error(w, "Failed to get route tag: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get route tag: "+err.Error())
 		return
 	}
 	if err := s.store.DeleteUserRouteTag(id); err != nil {
-		http.Error(w, "Failed to delete route tag: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete route tag: "+err.Error())
 		return
 	}
 	s.cache.Del(cacheKeyAllRouteTags)
@@ -361,33 +357,33 @@ func (s *Server) handleUpdateUserRouteTags(w http.ResponseWriter, r *http.Reques
 
 	name := strings.TrimSpace(r.PathValue("name"))
 	if name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 
 	var req UpdateUserRouteTagsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	userMeta, err := s.store.GetUserMetadata(name)
 	if err != nil {
-		http.Error(w, "Failed to get user metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get user metadata: "+err.Error())
 		return
 	}
 	externalProfiles, err := s.store.GetUserExternalProfiles(name)
 	if err != nil {
-		http.Error(w, "Failed to get external profiles: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get external profiles: "+err.Error())
 		return
 	}
 	if userMeta != nil && len(userMeta.InboundTags) == 0 && len(externalProfiles) > 0 {
-		http.Error(w, "External-only users cannot use route tags", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "External-only users cannot use route tags")
 		return
 	}
 
 	tags, err := s.store.ListUserRouteTags()
 	if err != nil {
-		http.Error(w, "Failed to list route tags: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to list route tags: "+err.Error())
 		return
 	}
 	var userInboundTags []string
@@ -397,14 +393,14 @@ func (s *Server) handleUpdateUserRouteTags(w http.ResponseWriter, r *http.Reques
 	assigned, err := s.config.UpdateUserRouteTagMembership(name, req.TagIDs, tags, userInboundTags)
 	if err != nil {
 		if strings.Contains(err.Error(), "route tag needs relink") {
-			http.Error(w, err.Error(), http.StatusConflict)
+			writeErr(w, http.StatusConflict, err.Error())
 			return
 		}
 		if strings.Contains(err.Error(), "route tag inbound mismatch") {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		http.Error(w, "Failed to update route tags: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update route tags: "+err.Error())
 		return
 	}
 
@@ -412,15 +408,14 @@ func (s *Server) handleUpdateUserRouteTags(w http.ResponseWriter, r *http.Reques
 	for _, tag := range assigned {
 		status, err := s.enrichUserRouteTag(tag)
 		if err != nil {
-			http.Error(w, "Failed to resolve route tag: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to resolve route tag: "+err.Error())
 			return
 		}
 		statuses = append(statuses, status)
 	}
 
 	s.cache.Del(cacheKeyAllUsers)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(UpdateUserRouteTagsResponse{
+	writeJSON(w, http.StatusOK, UpdateUserRouteTagsResponse{
 		Success:               true,
 		SingboxPendingChanges: s.config.GetSingboxPendingChanges(),
 		RouteTags:             statuses,
