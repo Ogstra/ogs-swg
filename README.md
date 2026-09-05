@@ -1,6 +1,6 @@
 # OGS-SWG Panel
 
-Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.24** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
+Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.25** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
 <img max-width="3024" max-height="1714" alt="image" src="https://github.com/user-attachments/assets/2f80f4c3-20fe-49a3-901c-f84586301cde" />
 
@@ -11,7 +11,7 @@ Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.24** 
 A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstra.com/)** — no login required.
 
 ## Tech Stack
-*   **Runtime**: Go 1.24
+*   **Runtime**: Go 1.25
 *   **Frontend**: React 19 + TypeScript (Vite)
 *   **DB**: SQLite + [sqlc](https://sqlc.dev/) (Type-safe SQL)
 *   **Cache**: [Ristretto](https://github.com/dgraph-io/ristretto)
@@ -137,6 +137,8 @@ environment:
 
 Parameters are merged from `config.json`, `.env`, and environment variables.
 
+This is a representative subset covering the most commonly tuned fields — see [`internal/core/config.go`](internal/core/config.go) for the full list (demo mode, backup scheduling, log retention, subscription domain/protection, etc.) and their `OGS_*` env var mappings.
+
 ```json
 {
   "listen_addr": ":8080",
@@ -153,18 +155,16 @@ Parameters are merged from `config.json`, `.env`, and environment variables.
   "wireguard_config_path": "/etc/wireguard/wg0.conf",
   "execution_mode": "",
   "managed_inbounds": [
-    "in-reality",
-    "in-reality-2"
+    "in-reality"
   ],
   "stats_inbounds": [
-    "in-reality",
-    "in-reality-2"
+    "in-reality"
   ],
   "stats_outbounds": [
     "direct"
   ],
-  "sampler_interval_sec": 30,
-  "active_threshold_bytes": 2048,
+  "sampler_interval_sec": 120,
+  "active_threshold_bytes": 1024,
   "wg_sampler_interval_sec": 60,
   "retention_enabled": false,
   "retention_days": 90,
@@ -178,11 +178,28 @@ Parameters are merged from `config.json`, `.env`, and environment variables.
 }
 ```
 
+Add more tags to `managed_inbounds`/`stats_inbounds` if you manage multiple inbounds (e.g. `["in-reality", "in-reality-2"]`).
+
 ## CI/CD
 
 Production-ready **Blue/Green deployment** via GitHub Actions: dual-slot topology (blue/green) managed by a watchdog, atomic Nginx reload on promotion, configurable baking window, and automatic rollback on health degradation.
 
 **[Full setup guide → DEPLOY_GITHUB_ACTIONS.md](DEPLOY_GITHUB_ACTIONS.md)**
+
+A separate `deploy-demo.yml` workflow deploys the public [demo instance](https://swg-demo.ogstra.com/) independently of the blue/green production pipeline.
+
+## Testing
+
+```bash
+go test ./...
+cd frontend && npm run build
+```
+
+Both must pass before committing — see [AGENTS.md](AGENTS.md) for the full set of commit/validation rules for this repo.
+
+## Dev Scripts
+
+`scripts/` contains local build/run helpers: `build_all.sh`, `build_and_run.sh`, `build_linux.sh` (prefers local toolchains under `.tools/`), and `run_server_test_mode.sh`.
 
 ## Sing-box Build Requirements
 
