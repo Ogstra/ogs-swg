@@ -831,118 +831,65 @@ export const api = {
         if (start && end) {
             url += `&start=${start}&end=${end}`;
         }
-        const res = await fetch(url, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch stats');
-        return res.json();
+        return request<any[]>(url, { errorMsg: 'Failed to fetch stats' });
     },
-    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; wireguard_pending_restart?: boolean; wg_sample_interval_sec?: number; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; audit_log_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> => {
-        const res = await fetch('/api/status', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch system status');
-        return res.json();
-    },
+    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; wireguard_pending_restart?: boolean; wg_sample_interval_sec?: number; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; audit_log_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> =>
+        request('/api/status', { errorMsg: 'Failed to fetch system status' }),
 
     // Sampler
-    runSampler: async (): Promise<void> => {
-        const res = await fetch('/api/sampler/run', {
-            method: 'POST',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to run sampler');
-    },
+    runSampler: async (): Promise<void> =>
+        request('/api/sampler/run', { method: 'POST', parse: 'none', errorMsg: 'Failed to run sampler' }),
     getSamplerHistory: async (limit?: number, offset?: number): Promise<SamplerHistoryEntry[]> => {
         const params = new URLSearchParams()
         if (typeof limit === 'number') params.set('limit', String(limit))
         if (typeof offset === 'number' && offset > 0) params.set('offset', String(offset))
         const qs = params.toString()
         const url = qs ? `/api/sampler/history?${qs}` : '/api/sampler/history'
-        const res = await fetch(url, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch sampler history');
-        return res.json();
+        return request<SamplerHistoryEntry[]>(url, { errorMsg: 'Failed to fetch sampler history' });
     },
     getSubscriptionRequestHistory: async (limit?: number): Promise<SubscriptionRequestHistoryEntry[]> => {
         const url = limit ? `/api/subscription-requests/history?limit=${limit}` : '/api/subscription-requests/history';
-        const res = await fetch(url, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription request history');
-        return res.json();
+        return request<SubscriptionRequestHistoryEntry[]>(url, { errorMsg: 'Failed to fetch subscription request history' });
     },
     getSubscriptionRequestHistoryPage: async (limit: number = 20, offset: number = 0, subId?: number): Promise<SubscriptionRequestHistoryPage> => {
         const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (subId && subId > 0) params.set('sub_id', String(subId));
-        const res = await fetch(`/api/subscription-requests/history?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription request history');
-        return res.json();
+        return request<SubscriptionRequestHistoryPage>(`/api/subscription-requests/history?${params.toString()}`, { errorMsg: 'Failed to fetch subscription request history' });
     },
     getAuditLogPage: async (limit: number = 50, offset: number = 0, domain?: string, action?: string): Promise<AuditLogPage> => {
         const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
         if (domain) params.set('domain', domain)
         if (action) params.set('action', action)
-        const res = await fetch(`/api/audit-log?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch audit log')
-        return res.json()
+        return request<AuditLogPage>(`/api/audit-log?${params.toString()}`, { errorMsg: 'Failed to fetch audit log' })
     },
-    getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> => {
-        const res = await fetch('/api/settings/subscription-protection', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription protection settings');
-        return res.json();
-    },
-    updateSubscriptionProtection: async (payload: Partial<SubscriptionProtectionConfig>): Promise<void> => {
-        const res = await fetch('/api/settings/subscription-protection', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload),
-        });
-        await handleResponse(res, 'Failed to update subscription protection settings');
-    },
-    getProtectionRules: async (): Promise<ProtectionRule[]> => {
-        const res = await fetch('/api/settings/protection-rules', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch protection rules');
-        return res.json();
-    },
-    createProtectionRule: async (payload: CreateProtectionRuleRequest): Promise<void> => {
-        const res = await fetch('/api/settings/protection-rules', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload),
-        });
-        await handleResponse(res, 'Failed to create protection rule');
-    },
-    deleteProtectionRule: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/settings/protection-rules/${id}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to delete protection rule');
-    },
+    getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> =>
+        request<SubscriptionProtectionConfig>('/api/settings/subscription-protection', { errorMsg: 'Failed to fetch subscription protection settings' }),
+    updateSubscriptionProtection: async (payload: Partial<SubscriptionProtectionConfig>): Promise<void> =>
+        request('/api/settings/subscription-protection', { method: 'PUT', json: payload, parse: 'none', errorMsg: 'Failed to update subscription protection settings' }),
+    getProtectionRules: async (): Promise<ProtectionRule[]> =>
+        request<ProtectionRule[]>('/api/settings/protection-rules', { errorMsg: 'Failed to fetch protection rules' }),
+    createProtectionRule: async (payload: CreateProtectionRuleRequest): Promise<void> =>
+        request('/api/settings/protection-rules', { method: 'POST', json: payload, parse: 'none', errorMsg: 'Failed to create protection rule' }),
+    deleteProtectionRule: async (id: number): Promise<void> =>
+        request(`/api/settings/protection-rules/${id}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete protection rule' }),
     getBlockedSubscriptionRequestLog: async (limit: number, offset: number): Promise<BlockedSubscriptionRequestEntry[]> => {
         const params = new URLSearchParams({
             limit: String(limit),
             offset: String(offset),
         });
-        const res = await fetch(`/api/settings/protection-rules/blocked-log?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch blocked request log');
-        return res.json();
+        return request<BlockedSubscriptionRequestEntry[]>(`/api/settings/protection-rules/blocked-log?${params.toString()}`, { errorMsg: 'Failed to fetch blocked request log' });
     },
-    pruneNow: async (): Promise<{ deleted: number; cutoff: number }> => {
-        const res = await fetch('/api/retention/prune', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to prune');
-        return res.json();
-    },
-    backupConfig: async (): Promise<void> => {
-        const res = await fetch('/api/config/backup', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to backup config');
-    },
-    restoreConfig: async (): Promise<any> => {
-        const res = await fetch('/api/config/restore', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to restore config');
-        return res.json();
-    },
+    pruneNow: async (): Promise<{ deleted: number; cutoff: number }> =>
+        request<{ deleted: number; cutoff: number }>('/api/retention/prune', { method: 'POST', errorMsg: 'Failed to prune' }),
+    backupConfig: async (): Promise<void> =>
+        request('/api/config/backup', { method: 'POST', parse: 'none', errorMsg: 'Failed to backup config' }),
+    restoreConfig: async (): Promise<any> =>
+        request<any>('/api/config/restore', { method: 'POST', errorMsg: 'Failed to restore config' }),
     getDashboardData: async (range: string = '24h', start?: string, end?: string): Promise<DashboardData> => {
         const params = new URLSearchParams({ range });
         if (start) params.append('start', start);
         if (end) params.append('end', end);
-        const res = await fetch(`/api/dashboard?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch dashboard data');
-        return res.json();
+        return request<DashboardData>(`/api/dashboard?${params.toString()}`, { errorMsg: 'Failed to fetch dashboard data' });
     },
     getDashboardConsumerChart: async (
         mode: 'singbox' | 'wireguard',
@@ -960,44 +907,21 @@ export const api = {
         if (start) params.append('start', start);
         if (end) params.append('end', end);
         if (targetPoints && targetPoints > 0) params.append('target_points', String(targetPoints));
-        const res = await fetch(`/api/dashboard/consumer-chart?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch consumer chart');
-        return res.json();
+        return request<DashboardConsumerChartData>(`/api/dashboard/consumer-chart?${params.toString()}`, { errorMsg: 'Failed to fetch consumer chart' });
     },
-    generateRealityKeys: async (): Promise<{ private_key: string; public_key: string; short_id: string[] }> => {
-        const res = await fetch('/api/tools/reality-keys', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to generate Reality keys');
-        return res.json();
-    },
-    generateSelfSignedCert: async (payload: { tag?: string; common_name?: string }): Promise<{ cert_path: string; key_path: string }> => {
-        const res = await fetch('/api/tools/self-signed-cert', {
+    generateRealityKeys: async (): Promise<{ private_key: string; public_key: string; short_id: string[] }> =>
+        request('/api/tools/reality-keys', { errorMsg: 'Failed to generate Reality keys' }),
+    generateSelfSignedCert: async (payload: { tag?: string; common_name?: string }): Promise<{ cert_path: string; key_path: string }> =>
+        request('/api/tools/self-signed-cert', { method: 'POST', json: payload, errorMsg: 'Failed to generate self-signed certificate' }),
+    generateRandBase64: async (keyLength: number): Promise<{ value: string }> =>
+        request('/api/tools/rand-base64', { method: 'POST', json: { key_length: keyLength }, errorMsg: 'Failed to generate random base64' }),
+    applySingboxChanges: async (): Promise<ApplySingboxChangesResponse> =>
+        request<ApplySingboxChangesResponse>('/api/singbox/apply', {
             method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to generate self-signed certificate');
-        return res.json();
-    },
-    generateRandBase64: async (keyLength: number): Promise<{ value: string }> => {
-        const res = await fetch('/api/tools/rand-base64', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ key_length: keyLength })
-        });
-        await handleResponse(res, 'Failed to generate random base64');
-        return res.json();
-    },
-    applySingboxChanges: async (): Promise<ApplySingboxChangesResponse> => {
-        const res = await fetch('/api/singbox/apply', {
-            method: 'POST',
-            headers: buildHeaders('application/json')
-        });
-        if (res.status === 409) {
-            return res.json();
-        }
-        await handleResponse(res, 'Failed to apply Sing-box changes');
-        return res.json();
-    },
+            contentType: 'application/json',
+            allowStatus: [409],
+            errorMsg: 'Failed to apply Sing-box changes',
+        }),
 
     // Panel user management
     getPanelUsers: async (): Promise<PanelUserInfo[]> => {
