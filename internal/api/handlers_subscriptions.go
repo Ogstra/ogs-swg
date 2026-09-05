@@ -195,44 +195,43 @@ func parseSubscriptionDefaultDestinations(lines []string, limit int) []string {
 func (s *Server) handleGetSubscriptionDefaults(w http.ResponseWriter, r *http.Request) {
 	username, err := ensureAuthenticatedPanelUser(r)
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	defaults, err := s.store.GetPanelUserSubscriptionDefaults(r.Context(), username)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
-		http.Error(w, "Failed to get subscription defaults", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get subscription defaults")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(subscriptionDefaultsResponseFromStore(defaults))
+	writeJSON(w, http.StatusOK, subscriptionDefaultsResponseFromStore(defaults))
 }
 
 func (s *Server) handleUpdateSubscriptionDefaults(w http.ResponseWriter, r *http.Request) {
 	username, err := ensureAuthenticatedPanelUser(r)
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	var req UpdateSubscriptionDefaultsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	destinations, err := normalizeSubscriptionDefaultDestinations(req.Destinations)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -243,20 +242,19 @@ func (s *Server) handleUpdateSubscriptionDefaults(w http.ResponseWriter, r *http
 	}
 	if err := s.store.UpdatePanelUserSubscriptionDefaults(r.Context(), username, defaults); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
-		http.Error(w, "Failed to update subscription defaults", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update subscription defaults")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(subscriptionDefaultsResponseFromStore(defaults))
+	writeJSON(w, http.StatusOK, subscriptionDefaultsResponseFromStore(defaults))
 }
 
 func (s *Server) handleGetSubscriptionDefaultDestinations(w http.ResponseWriter, r *http.Request) {
 	if _, err := ensureAuthenticatedPanelUser(r); err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -271,8 +269,7 @@ func (s *Server) handleGetSubscriptionDefaultDestinations(w http.ResponseWriter,
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SubscriptionDefaultDestinationsResponse{
+	writeJSON(w, http.StatusOK, SubscriptionDefaultDestinationsResponse{
 		Destinations: parseSubscriptionDefaultDestinations(lines, 10),
 	})
 }
@@ -288,12 +285,12 @@ func (s *Server) handleGetSubscriptionHappConfig(w http.ResponseWriter, r *http.
 
 	config, err := s.store.GetSubscriptionHappConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to get Happ config", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get Happ config")
 		return
 	}
 	b, err := json.Marshal(config)
 	if err != nil {
-		http.Error(w, "Failed to encode Happ config", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode Happ config")
 		return
 	}
 	s.cache.SetWithTTL(cacheKeyHappConfig, b, int64(len(b)), 60*time.Second)
@@ -304,26 +301,25 @@ func (s *Server) handleGetSubscriptionHappConfig(w http.ResponseWriter, r *http.
 
 func (s *Server) handleUpdateSubscriptionHappConfig(w http.ResponseWriter, r *http.Request) {
 	var req SubscriptionHappConfigRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 
 	config, err := normalizeSubscriptionHappConfig(req)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := s.store.UpdateSubscriptionHappConfig(r.Context(), config); err != nil {
-		http.Error(w, "Failed to update Happ config", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update Happ config")
 		return
 	}
 
 	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyHappConfig)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(config)
+	writeJSON(w, http.StatusOK, config)
 }
 
 func normalizeSubscriptionHappConfig(req SubscriptionHappConfigRequest) (core.SubscriptionHappConfig, error) {
@@ -402,7 +398,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 
 	subs, err := s.store.Queries.GetAllSubscriptions(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to get subscriptions: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get subscriptions: "+err.Error())
 		return
 	}
 
@@ -444,7 +440,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 	}
 	b, err := json.Marshal(res)
 	if err != nil {
-		http.Error(w, "Failed to encode subscriptions", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode subscriptions")
 		return
 	}
 	s.cache.SetWithTTL(cacheKeyAllSubscriptions, b, int64(len(b)), 15*time.Second)
@@ -526,19 +522,19 @@ func subscriptionUsersFromMembers(members []SubscriptionMemberResponse) []string
 
 func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request) {
 	var req CreateSubscriptionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 	if req.Name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 	if req.QuotaPeriod == "" {
 		req.QuotaPeriod = "monthly"
 	}
 	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	members := normalizeSubscriptionMembers(req.Users, req.Members)
@@ -558,7 +554,7 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		HappDirectSites:            strings.TrimSpace(req.HappDirectSites),
 	})
 	if err != nil {
-		http.Error(w, "Failed to create subscription: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to create subscription: "+err.Error())
 		return
 	}
 
@@ -573,21 +569,20 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 
 	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyAllSubscriptions)
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{"id": id, "token": token})
+	writeJSON(w, http.StatusCreated, map[string]interface{}{"id": id, "token": token})
 }
 
 func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid ID")
 		return
 	}
 
 	sub, err := s.store.Queries.GetSubscriptionByID(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Subscription not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
@@ -605,8 +600,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		token = &sub.Token
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SubscriptionResponse{
+	writeJSON(w, http.StatusOK, SubscriptionResponse{
 		ID:                         sub.ID,
 		Token:                      token,
 		Name:                       sub.Name,
@@ -631,31 +625,31 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid ID")
 		return
 	}
 
 	var req CreateSubscriptionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request")
 		return
 	}
 	if req.Name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 	if req.QuotaPeriod == "" {
 		req.QuotaPeriod = "monthly"
 	}
 	if err := validateSubscriptionRefreshPolicy(req.ProfileUpdateIntervalHours.Value); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	members := normalizeSubscriptionMembers(req.Users, req.Members)
 
 	current, err := s.store.Queries.GetSubscriptionByID(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Subscription not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
@@ -673,7 +667,7 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 		ID:                         id,
 	})
 	if err != nil {
-		http.Error(w, "Failed to update subscription", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update subscription")
 		return
 	}
 
@@ -811,19 +805,19 @@ func (s *Server) handleDeleteSubscription(w http.ResponseWriter, r *http.Request
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid ID")
 		return
 	}
 
 	sub, err := s.store.Queries.GetSubscriptionByID(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Subscription not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
 	err = s.store.Queries.DeleteSubscription(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Failed to delete subscription", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete subscription")
 		return
 	}
 
@@ -837,13 +831,13 @@ func (s *Server) handleRegenerateSubscriptionToken(w http.ResponseWriter, r *htt
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		http.Error(w, "Invalid ID", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid ID")
 		return
 	}
 
 	sub, err := s.store.Queries.GetSubscriptionByID(r.Context(), id)
 	if err != nil {
-		http.Error(w, "Subscription not found", http.StatusNotFound)
+		writeErr(w, http.StatusNotFound, "Subscription not found")
 		return
 	}
 
@@ -853,44 +847,43 @@ func (s *Server) handleRegenerateSubscriptionToken(w http.ResponseWriter, r *htt
 		ID:    id,
 	})
 	if err != nil {
-		http.Error(w, "Failed to regenerate token", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to regenerate token")
 		return
 	}
 
 	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyAllSubscriptions)
 	s.insertAuditEntry(r, "subscription", "regenerate", sub.Name, fmt.Sprintf("id:%d", id))
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"token": token})
+	writeJSON(w, http.StatusOK, map[string]string{"token": token})
 }
 
 func (s *Server) handleEncryptHappLink(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	req.URL = strings.TrimSpace(req.URL)
 	if req.URL == "" {
-		http.Error(w, "url is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "url is required")
 		return
 	}
 	if !strings.HasPrefix(req.URL, "http://") && !strings.HasPrefix(req.URL, "https://") {
-		http.Error(w, "url must be http(s)", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "url must be http(s)")
 		return
 	}
 
 	outBody, err := json.Marshal(map[string]string{"url": req.URL})
 	if err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Internal error")
 		return
 	}
 
 	outReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, "https://crypto.happ.su/api-v2.php", bytes.NewReader(outBody))
 	if err != nil {
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Internal error")
 		return
 	}
 	outReq.Header.Set("Content-Type", "application/json")
@@ -927,8 +920,7 @@ func (s *Server) handleEncryptHappLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"encrypted_url": candidate})
+	writeJSON(w, http.StatusOK, map[string]string{"encrypted_url": candidate})
 }
 
 func extractEncryptedHappLink(bodyBytes []byte) string {
