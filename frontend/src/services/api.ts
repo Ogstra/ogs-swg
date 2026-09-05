@@ -924,199 +924,69 @@ export const api = {
         }),
 
     // Panel user management
-    getPanelUsers: async (): Promise<PanelUserInfo[]> => {
-        const res = await fetch('/api/panel-users', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch panel users');
-        return res.json();
-    },
-    createPanelUser: async (data: CreatePanelUserRequest): Promise<void> => {
-        const res = await fetch('/api/panel-users', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to create panel user');
-    },
-    updatePanelUserPermissions: async (username: string, permissions: PanelUserPermissions): Promise<void> => {
-        const res = await fetch('/api/panel-users/permissions', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ username, permissions }),
-        });
-        await handleResponse(res, 'Failed to update permissions');
-    },
-    updatePanelUserUsername: async (username: string, new_username: string): Promise<void> => {
-        const res = await fetch('/api/panel-users/username', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ username, new_username }),
-        });
-        await handleResponse(res, 'Failed to update username');
-    },
-    updatePanelUserPassword: async (username: string, new_password: string): Promise<void> => {
-        const res = await fetch('/api/panel-users/password', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ username, new_password }),
-        });
-        await handleResponse(res, 'Failed to update password');
-    },
-    deletePanelUser: async (username: string): Promise<void> => {
-        const res = await fetch(`/api/panel-users?username=${encodeURIComponent(username)}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to delete panel user');
-    },
+    getPanelUsers: async (): Promise<PanelUserInfo[]> =>
+        request<PanelUserInfo[]>('/api/panel-users', { errorMsg: 'Failed to fetch panel users' }),
+    createPanelUser: async (data: CreatePanelUserRequest): Promise<void> =>
+        request('/api/panel-users', { method: 'POST', json: data, parse: 'none', errorMsg: 'Failed to create panel user' }),
+    updatePanelUserPermissions: async (username: string, permissions: PanelUserPermissions): Promise<void> =>
+        request('/api/panel-users/permissions', { method: 'PUT', json: { username, permissions }, parse: 'none', errorMsg: 'Failed to update permissions' }),
+    updatePanelUserUsername: async (username: string, new_username: string): Promise<void> =>
+        request('/api/panel-users/username', { method: 'PUT', json: { username, new_username }, parse: 'none', errorMsg: 'Failed to update username' }),
+    updatePanelUserPassword: async (username: string, new_password: string): Promise<void> =>
+        request('/api/panel-users/password', { method: 'PUT', json: { username, new_password }, parse: 'none', errorMsg: 'Failed to update password' }),
+    deletePanelUser: async (username: string): Promise<void> =>
+        request(`/api/panel-users?username=${encodeURIComponent(username)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete panel user' }),
 
     // Subscriptions
-    getSubscriptions: async (): Promise<Subscription[]> => {
-        const res = await fetch('/api/subscriptions', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscriptions');
-        return res.json();
-    },
-    getSubscriptionDefaults: async (): Promise<SubscriptionDefaults> => {
-        const res = await fetch('/api/subscriptions/defaults', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription defaults');
-        return res.json();
-    },
-    updateSubscriptionDefaults: async (data: SubscriptionDefaults): Promise<SubscriptionDefaults> => {
-        const res = await fetch('/api/subscriptions/defaults', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to update subscription defaults');
-        return res.json();
-    },
-    getSubscriptionDefaultDestinations: async (): Promise<SubscriptionDefaultDestinationsResponse> => {
-        const res = await fetch('/api/subscriptions/default-destinations', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription destination suggestions');
-        return res.json();
-    },
-    getSubscriptionHappConfig: async (): Promise<SubscriptionHappConfig> => {
-        const res = await fetch('/api/subscriptions/happ-config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch Happ config');
-        return res.json();
-    },
-    updateSubscriptionHappConfig: async (data: SubscriptionHappConfig): Promise<SubscriptionHappConfig> => {
-        const res = await fetch('/api/subscriptions/happ-config', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to update Happ config');
-        return res.json();
-    },
-    encryptHappLink: async (url: string): Promise<{ encrypted_url: string }> => {
-        const res = await fetch('/api/happ/encrypt-link', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ url }),
-        });
-        await handleResponse(res, 'Failed to encrypt Happ link');
-        return res.json();
-    },
-    createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> => {
-        const res = await fetch('/api/subscriptions', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to create subscription');
-        return res.json();
-    },
-    updateSubscription: async (id: number, data: SubscriptionMutationRequest): Promise<void> => {
-        const res = await fetch(`/api/subscriptions/${id}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to update subscription');
-    },
-    deleteSubscription: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/subscriptions/${id}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to delete subscription');
-    },
-    deleteSubscriptionRequest: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/subscription-requests/${id}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        if (!res.ok) throw new Error(`Failed to delete: ${res.status}`);
-    },
+    getSubscriptions: async (): Promise<Subscription[]> =>
+        request<Subscription[]>('/api/subscriptions', { errorMsg: 'Failed to fetch subscriptions' }),
+    getSubscriptionDefaults: async (): Promise<SubscriptionDefaults> =>
+        request<SubscriptionDefaults>('/api/subscriptions/defaults', { errorMsg: 'Failed to fetch subscription defaults' }),
+    updateSubscriptionDefaults: async (data: SubscriptionDefaults): Promise<SubscriptionDefaults> =>
+        request<SubscriptionDefaults>('/api/subscriptions/defaults', { method: 'PUT', json: data, errorMsg: 'Failed to update subscription defaults' }),
+    getSubscriptionDefaultDestinations: async (): Promise<SubscriptionDefaultDestinationsResponse> =>
+        request<SubscriptionDefaultDestinationsResponse>('/api/subscriptions/default-destinations', { errorMsg: 'Failed to fetch subscription destination suggestions' }),
+    getSubscriptionHappConfig: async (): Promise<SubscriptionHappConfig> =>
+        request<SubscriptionHappConfig>('/api/subscriptions/happ-config', { errorMsg: 'Failed to fetch Happ config' }),
+    updateSubscriptionHappConfig: async (data: SubscriptionHappConfig): Promise<SubscriptionHappConfig> =>
+        request<SubscriptionHappConfig>('/api/subscriptions/happ-config', { method: 'PUT', json: data, errorMsg: 'Failed to update Happ config' }),
+    encryptHappLink: async (url: string): Promise<{ encrypted_url: string }> =>
+        request('/api/happ/encrypt-link', { method: 'POST', json: { url }, errorMsg: 'Failed to encrypt Happ link' }),
+    createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> =>
+        request('/api/subscriptions', { method: 'POST', json: data, errorMsg: 'Failed to create subscription' }),
+    updateSubscription: async (id: number, data: SubscriptionMutationRequest): Promise<void> =>
+        request(`/api/subscriptions/${id}`, { method: 'PUT', json: data, parse: 'none', errorMsg: 'Failed to update subscription' }),
+    deleteSubscription: async (id: number): Promise<void> =>
+        request(`/api/subscriptions/${id}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete subscription' }),
+    deleteSubscriptionRequest: async (id: number): Promise<void> =>
+        request(`/api/subscription-requests/${id}`, { method: 'DELETE', parse: 'none', errorMode: 'status', errorMsg: 'Failed to delete' }),
 
-    bulkDeleteSubscriptionRequests: async (ids: number[]): Promise<void> => {
-        const res = await fetch('/api/subscription-requests', {
-            method: 'DELETE',
-            headers: { ...buildHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ids }),
-        });
-        if (!res.ok) throw new Error(`Failed to bulk delete: ${res.status}`);
-    },
+    bulkDeleteSubscriptionRequests: async (ids: number[]): Promise<void> =>
+        request('/api/subscription-requests', { method: 'DELETE', json: { ids }, parse: 'none', errorMode: 'status', errorMsg: 'Failed to bulk delete' }),
 
-    clearSubscriptionRequestsBySubID: async (subId: number): Promise<void> => {
-        const res = await fetch(`/api/subscription-requests?sub_id=${subId}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        if (!res.ok) throw new Error(`Failed to clear: ${res.status}`);
-    },
+    clearSubscriptionRequestsBySubID: async (subId: number): Promise<void> =>
+        request(`/api/subscription-requests?sub_id=${subId}`, { method: 'DELETE', parse: 'none', errorMode: 'status', errorMsg: 'Failed to clear' }),
 
-    regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> => {
-        const res = await fetch(`/api/subscriptions/${id}/regenerate`, {
-            method: 'POST',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to regenerate token');
-        return res.json();
-    },
+    regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> =>
+        request(`/api/subscriptions/${id}/regenerate`, { method: 'POST', errorMsg: 'Failed to regenerate token' }),
     getSubscriptionDomain: async (): Promise<string> => {
-        const res = await fetch('/api/settings/subscription-domain', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription domain');
-        const data = await res.json();
+        const data = await request<{ subscription_domain?: string }>('/api/settings/subscription-domain', { errorMsg: 'Failed to fetch subscription domain' });
         return data.subscription_domain || '';
     },
-    updateSubscriptionDomain: async (domain: string): Promise<void> => {
-        const res = await fetch('/api/settings/subscription-domain', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ subscription_domain: domain }),
-        });
-        await handleResponse(res, 'Failed to update subscription domain');
-    },
+    updateSubscriptionDomain: async (domain: string): Promise<void> =>
+        request('/api/settings/subscription-domain', { method: 'PUT', json: { subscription_domain: domain }, parse: 'none', errorMsg: 'Failed to update subscription domain' }),
     getCFWorkerURL: async (): Promise<string> => {
-        const res = await fetch('/api/settings/cf-worker-url', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch CF Worker URL');
-        const data = await res.json();
+        const data = await request<{ cf_worker_url?: string }>('/api/settings/cf-worker-url', { errorMsg: 'Failed to fetch CF Worker URL' });
         return data.cf_worker_url || '';
     },
-    updateCFWorkerURL: async (url: string): Promise<void> => {
-        const res = await fetch('/api/settings/cf-worker-url', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ cf_worker_url: url }),
-        });
-        await handleResponse(res, 'Failed to update CF Worker URL');
-    },
+    updateCFWorkerURL: async (url: string): Promise<void> =>
+        request('/api/settings/cf-worker-url', { method: 'PUT', json: { cf_worker_url: url }, parse: 'none', errorMsg: 'Failed to update CF Worker URL' }),
 
-    getLogStoreStats: async (): Promise<LogStoreStats> => {
-        const res = await fetch('/api/settings/logs/stats', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch log store stats');
-        return res.json();
-    },
+    getLogStoreStats: async (): Promise<LogStoreStats> =>
+        request<LogStoreStats>('/api/settings/logs/stats', { errorMsg: 'Failed to fetch log store stats' }),
 
-    triggerDBBackup: async (): Promise<{ created: string[] }> => {
-        const res = await fetch('/api/settings/backup/trigger', {
-            method: 'POST',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to trigger backup');
-        return res.json();
-    },
+    triggerDBBackup: async (): Promise<{ created: string[] }> =>
+        request('/api/settings/backup/trigger', { method: 'POST', errorMsg: 'Failed to trigger backup' }),
 };
 
 export function downloadDBBackupURL(target: 'main' | 'audit' | 'logs'): string {
@@ -1126,10 +996,7 @@ export function downloadDBBackupURL(target: 'main' | 'audit' | 'logs'): string {
 export async function downloadDBBackup(target: 'main' | 'audit' | 'logs', includeCold?: string): Promise<void> {
     let url = `/api/settings/backup/download?target=${target}`;
     if (target === 'logs' && includeCold && includeCold !== 'none') url += `&include_cold=${includeCold}`;
-    const res = await fetch(url, {
-        headers: buildHeaders(),
-    });
-    if (!res.ok) throw new Error(`Backup download failed: ${res.status}`);
+    const res = await request<Response>(url, { parse: 'raw', errorMode: 'status', errorMsg: 'Backup download failed' });
     const disposition = res.headers.get('Content-Disposition') ?? '';
     const match = disposition.match(/filename="([^"]+)"/);
     const filename = match ? match[1] : `${target}-backup.tar.gz`;
