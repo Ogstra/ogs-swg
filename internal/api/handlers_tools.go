@@ -8,7 +8,6 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"math/big"
 	"net"
@@ -48,7 +47,7 @@ func (s *Server) handleGenerateRealityKeys(w http.ResponseWriter, r *http.Reques
 	curve := ecdh.X25519()
 	privateKey, err := curve.GenerateKey(rand.Reader)
 	if err != nil {
-		http.Error(w, "Failed to generate private key: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to generate private key: "+err.Error())
 		return
 	}
 
@@ -62,7 +61,7 @@ func (s *Server) handleGenerateRealityKeys(w http.ResponseWriter, r *http.Reques
 	// Sing-box short_id is list of hex strings.
 	shortIdBytes := make([]byte, 8)
 	if _, err := rand.Read(shortIdBytes); err != nil {
-		http.Error(w, "Failed to generate short_id: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to generate short_id: "+err.Error())
 		return
 	}
 	shortIdStr := hex.EncodeToString(shortIdBytes)
@@ -73,16 +72,13 @@ func (s *Server) handleGenerateRealityKeys(w http.ResponseWriter, r *http.Reques
 		ShortId:    []string{shortIdStr},
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleGenerateSelfSignedCert(w http.ResponseWriter, r *http.Request) {
 	var req SelfSignedCertRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid JSON: "+err.Error())
 		return
 	}
 
@@ -97,7 +93,7 @@ func (s *Server) handleGenerateSelfSignedCert(w http.ResponseWriter, r *http.Req
 	}
 	certDir := filepath.Join(baseDir, "certs")
 	if err := os.MkdirAll(certDir, 0700); err != nil {
-		http.Error(w, "Failed to create cert directory: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to create cert directory: "+err.Error())
 		return
 	}
 
@@ -111,13 +107,13 @@ func (s *Server) handleGenerateSelfSignedCert(w http.ResponseWriter, r *http.Req
 
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		http.Error(w, "Failed to generate private key: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to generate private key: "+err.Error())
 		return
 	}
 
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		http.Error(w, "Failed to generate serial: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to generate serial: "+err.Error())
 		return
 	}
 
@@ -141,66 +137,60 @@ func (s *Server) handleGenerateSelfSignedCert(w http.ResponseWriter, r *http.Req
 
 	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &privKey.PublicKey, privKey)
 	if err != nil {
-		http.Error(w, "Failed to create certificate: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to create certificate: "+err.Error())
 		return
 	}
 
 	certOut, err := os.Create(certPath)
 	if err != nil {
-		http.Error(w, "Failed to write certificate: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to write certificate: "+err.Error())
 		return
 	}
 	defer certOut.Close()
 	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
-		http.Error(w, "Failed to encode certificate: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode certificate: "+err.Error())
 		return
 	}
 
 	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
-		http.Error(w, "Failed to write key: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to write key: "+err.Error())
 		return
 	}
 	defer keyOut.Close()
 	if err := pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)}); err != nil {
-		http.Error(w, "Failed to encode key: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode key: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(SelfSignedCertResponse{CertPath: certPath, KeyPath: keyPath}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writeJSON(w, http.StatusOK, SelfSignedCertResponse{CertPath: certPath, KeyPath: keyPath})
 }
 
 func (s *Server) handleGenerateRandBase64(w http.ResponseWriter, r *http.Request) {
 	perms := getPermissions(r)
 	if perms == nil || (!perms.CanWriteConfig && !perms.CanWriteUsers) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	var req RandBase64Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid JSON: "+err.Error())
 		return
 	}
 	if req.KeyLength <= 0 {
-		http.Error(w, "key_length must be a positive integer", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "key_length must be a positive integer")
 		return
 	}
 
 	buf := make([]byte, req.KeyLength)
 	if _, err := rand.Read(buf); err != nil {
-		http.Error(w, "Failed to generate random base64: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to generate random base64: "+err.Error())
 		return
 	}
 	value := base64.StdEncoding.EncodeToString(buf)
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(RandBase64Response{Value: value}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	writeJSON(w, http.StatusOK, RandBase64Response{Value: value})
 }
 
 func sanitizeFileToken(input string) string {
