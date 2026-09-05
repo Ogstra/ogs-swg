@@ -42,34 +42,34 @@ func getPasetoKey(secret string) []byte {
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.config.DisablePasswordLogin {
-		http.Error(w, "Password login is disabled", http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "Password login is disabled")
 		return
 	}
 
 	var req LoginRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if blocked, retryAfter := s.loginLimiter.isBlocked(req.Username); blocked {
 		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
-		http.Error(w, "Too many failed login attempts, try again later", http.StatusTooManyRequests)
+		writeErr(w, http.StatusTooManyRequests, "Too many failed login attempts, try again later")
 		return
 	}
 
 	perms, err := s.store.VerifyPanelUser(req.Username, req.Password)
 	if err != nil {
-		http.Error(w, "Authentication error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Authentication error")
 		return
 	}
 	if perms == nil {
 		s.loginLimiter.recordFailure(req.Username)
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
 	perms.Normalize()
@@ -87,12 +87,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	tokenString, err := v2.Encrypt(getPasetoKey(s.config.JWTSecret), jsonToken, nil)
 	if err != nil {
-		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(LoginResponse{Token: tokenString, Permissions: *perms})
+	writeJSON(w, http.StatusOK, LoginResponse{Token: tokenString, Permissions: *perms})
 
 	if s.auditStore != nil {
 		if err := s.auditStore.InsertAuditLog(r.Context(), core.AuditEntry{
@@ -115,36 +114,36 @@ type UpdatePasswordRequest struct {
 
 func (s *Server) handleUpdatePassword(w http.ResponseWriter, r *http.Request) {
 	var req UpdatePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Get username from context (set by AuthMiddleware)
 	username, ok := currentPanelUsername(r)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	// Verify current password
 	perms, err := s.store.VerifyPanelUser(username, req.CurrentPassword)
 	if err != nil {
-		http.Error(w, "Verification error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Verification error")
 		return
 	}
 	if perms == nil {
-		http.Error(w, "Invalid current password", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Invalid current password")
 		return
 	}
 
 	// Update password
 	if err := s.store.UpdatePanelUserPassword(username, req.NewPassword); err != nil {
-		http.Error(w, "Failed to update password", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update password")
 		return
 	}
 
@@ -158,40 +157,40 @@ type UpdateUsernameRequest struct {
 
 func (s *Server) handleUpdateUsername(w http.ResponseWriter, r *http.Request) {
 	var req UpdateUsernameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	// Get username from context
 	currentUsername, ok := currentPanelUsername(r)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 
 	// Verify current password
 	perms, err := s.store.VerifyPanelUser(currentUsername, req.CurrentPassword)
 	if err != nil {
-		http.Error(w, "Verification error", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Verification error")
 		return
 	}
 	if perms == nil {
-		http.Error(w, "Invalid current password", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Invalid current password")
 		return
 	}
 
 	// Update username
 	if err := s.store.UpdatePanelUsername(currentUsername, req.NewUsername); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
-			http.Error(w, err.Error(), http.StatusConflict)
+			writeErr(w, http.StatusConflict, err.Error())
 			return
 		}
-		http.Error(w, "Failed to update username: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update username: "+err.Error())
 		return
 	}
 
@@ -229,7 +228,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Missing Authorization header")
 			return
 		}
 
@@ -240,7 +239,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			http.Error(w, "Invalid Authorization header format", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Invalid Authorization header format")
 			return
 		}
 
@@ -255,7 +254,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Invalid token")
 			return
 		}
 
@@ -265,7 +264,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			http.Error(w, "Token expired", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Token expired")
 			return
 		}
 
