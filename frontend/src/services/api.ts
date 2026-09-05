@@ -509,167 +509,60 @@ export const api = {
         request('/api/sampler/pause', { method: 'POST', parse: 'none', errorMsg: 'Failed to pause sampler' }),
     resumeSampler: async (): Promise<void> =>
         request('/api/sampler/resume', { method: 'POST', parse: 'none', errorMsg: 'Failed to resume sampler' }),
-    updatePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
-        const res = await fetch('/api/auth/password', {
+    updatePassword: async (currentPassword: string, newPassword: string): Promise<void> =>
+        request('/api/auth/password', {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
-        });
-        await handleResponse(res, 'Failed to update password');
-    },
-    updateUsername: async (currentPassword: string, newUsername: string): Promise<void> => {
-        const res = await fetch('/api/auth/username', {
+            json: { current_password: currentPassword, new_password: newPassword },
+            parse: 'none',
+            errorMsg: 'Failed to update password',
+        }),
+    updateUsername: async (currentPassword: string, newUsername: string): Promise<void> =>
+        request('/api/auth/username', {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ current_password: currentPassword, new_username: newUsername })
-        });
-        await handleResponse(res, 'Failed to update username');
-    },
-    createUser: async (user: CreateUserRequest): Promise<void> => {
-        const res = await fetch('/api/users', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(user)
-        });
-        await handleResponse(res, 'Failed to create user');
-    },
-    updateUser: async (user: CreateUserRequest): Promise<void> => {
-        const res = await fetch('/api/users', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(user)
-        });
-        await handleResponse(res, 'Failed to update user');
-    },
-    deleteUser: async (name: string): Promise<void> => {
-        const res = await fetch(`/api/users?name=${encodeURIComponent(name)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete user');
-    },
-    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; password?: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch user inbounds');
-        return res.json();
-    },
-    getUserRouteTags: async (): Promise<UserRouteTag[]> => {
-        const res = await fetch('/api/user-route-tags', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch user route tags');
-        return res.json();
-    },
-    getCompatibleUserRouteRules: async (): Promise<CompatibleUserRouteRule[]> => {
-        const res = await fetch('/api/user-route-tags/compatible-rules', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch compatible user route rules');
-        return res.json();
-    },
-    createUserRouteTag: async (payload: CreateUserRouteTagRequest): Promise<UserRouteTag> => {
-        const res = await fetch('/api/user-route-tags', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to create user route tag');
-        return res.json();
-    },
-    updateUserRouteTag: async (id: number, payload: { name: string; color?: string; description?: string; rule_index?: number }): Promise<UserRouteTag> => {
-        const res = await fetch(`/api/user-route-tags/${encodeURIComponent(String(id))}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to update user route tag');
-        return res.json();
-    },
-    deleteUserRouteTag: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/user-route-tags/${encodeURIComponent(String(id))}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete user route tag');
-    },
-    updateUserRouteTags: async (name: string, tagIds: number[]): Promise<UpdateUserRouteTagsResponse> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/route-tags`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ tag_ids: tagIds })
-        });
-        await handleResponse(res, 'Failed to update user route tags');
-        return res.json();
-    },
-    removeUserFromInbound: async (name: string, inboundTag: string): Promise<void> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to remove user from inbound');
-    },
-    updateUserInbound: async (name: string, inboundTag: string, payload: { uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }): Promise<void> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to update user inbound');
-    },
-    getUserLink: async (name: string, inboundTag: string): Promise<{ link: string; type?: string }> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/link?inbound=${encodeURIComponent(inboundTag)}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch link');
-        return res.json();
-    },
-    getUserVlessLink: async (name: string, inboundTag: string): Promise<{ link: string }> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/vless?inbound=${encodeURIComponent(inboundTag)}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch VLESS link');
-        return res.json();
-    },
-    getExternalProfiles: async (): Promise<ExternalProfile[]> => {
-        const res = await fetch('/api/external-profiles', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch external profiles');
-        return res.json();
-    },
-    upsertExternalProfile: async (profile: Partial<ExternalProfile>): Promise<{ id: number }> => {
-        const res = await fetch('/api/external-profiles', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(profile)
-        });
-        await handleResponse(res, 'Failed to save external profile');
-        return res.json();
-    },
-    deleteExternalProfile: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/external-profiles/${id}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete external profile');
-    },
-    updateUserExternalProfiles: async (name: string, profileIds: number[]): Promise<void> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/external-profiles`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ profile_ids: profileIds })
-        });
-        await handleResponse(res, 'Failed to update user external profiles');
-    },
-    getExternalProfileLink: async (id: number, displayName: string): Promise<{ link: string; type: string }> => {
-        const res = await fetch(`/api/external-profiles/${id}/link?name=${encodeURIComponent(displayName)}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch external profile link');
-        return res.json();
-    },
-    bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> => {
-        const res = await fetch('/api/users/bulk', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(users)
-        });
-        await handleResponse(res, 'Failed to bulk create users');
-    },
+            json: { current_password: currentPassword, new_username: newUsername },
+            parse: 'none',
+            errorMsg: 'Failed to update username',
+        }),
+    createUser: async (user: CreateUserRequest): Promise<void> =>
+        request('/api/users', { method: 'POST', json: user, parse: 'none', errorMsg: 'Failed to create user' }),
+    updateUser: async (user: CreateUserRequest): Promise<void> =>
+        request('/api/users', { method: 'PUT', json: user, parse: 'none', errorMsg: 'Failed to update user' }),
+    deleteUser: async (name: string): Promise<void> =>
+        request(`/api/users?name=${encodeURIComponent(name)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete user' }),
+    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; password?: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> =>
+        request(`/api/users/${encodeURIComponent(name)}/inbounds`, { errorMsg: 'Failed to fetch user inbounds' }),
+    getUserRouteTags: async (): Promise<UserRouteTag[]> =>
+        request<UserRouteTag[]>('/api/user-route-tags', { errorMsg: 'Failed to fetch user route tags' }),
+    getCompatibleUserRouteRules: async (): Promise<CompatibleUserRouteRule[]> =>
+        request<CompatibleUserRouteRule[]>('/api/user-route-tags/compatible-rules', { errorMsg: 'Failed to fetch compatible user route rules' }),
+    createUserRouteTag: async (payload: CreateUserRouteTagRequest): Promise<UserRouteTag> =>
+        request<UserRouteTag>('/api/user-route-tags', { method: 'POST', json: payload, errorMsg: 'Failed to create user route tag' }),
+    updateUserRouteTag: async (id: number, payload: { name: string; color?: string; description?: string; rule_index?: number }): Promise<UserRouteTag> =>
+        request<UserRouteTag>(`/api/user-route-tags/${encodeURIComponent(String(id))}`, { method: 'PUT', json: payload, errorMsg: 'Failed to update user route tag' }),
+    deleteUserRouteTag: async (id: number): Promise<void> =>
+        request(`/api/user-route-tags/${encodeURIComponent(String(id))}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete user route tag' }),
+    updateUserRouteTags: async (name: string, tagIds: number[]): Promise<UpdateUserRouteTagsResponse> =>
+        request<UpdateUserRouteTagsResponse>(`/api/users/${encodeURIComponent(name)}/route-tags`, { method: 'PUT', json: { tag_ids: tagIds }, errorMsg: 'Failed to update user route tags' }),
+    removeUserFromInbound: async (name: string, inboundTag: string): Promise<void> =>
+        request(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to remove user from inbound' }),
+    updateUserInbound: async (name: string, inboundTag: string, payload: { uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }): Promise<void> =>
+        request(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, { method: 'PUT', json: payload, parse: 'none', errorMsg: 'Failed to update user inbound' }),
+    getUserLink: async (name: string, inboundTag: string): Promise<{ link: string; type?: string }> =>
+        request(`/api/users/${encodeURIComponent(name)}/link?inbound=${encodeURIComponent(inboundTag)}`, { errorMsg: 'Failed to fetch link' }),
+    getUserVlessLink: async (name: string, inboundTag: string): Promise<{ link: string }> =>
+        request(`/api/users/${encodeURIComponent(name)}/vless?inbound=${encodeURIComponent(inboundTag)}`, { errorMsg: 'Failed to fetch VLESS link' }),
+    getExternalProfiles: async (): Promise<ExternalProfile[]> =>
+        request<ExternalProfile[]>('/api/external-profiles', { errorMsg: 'Failed to fetch external profiles' }),
+    upsertExternalProfile: async (profile: Partial<ExternalProfile>): Promise<{ id: number }> =>
+        request<{ id: number }>('/api/external-profiles', { method: 'POST', json: profile, errorMsg: 'Failed to save external profile' }),
+    deleteExternalProfile: async (id: number): Promise<void> =>
+        request(`/api/external-profiles/${id}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete external profile' }),
+    updateUserExternalProfiles: async (name: string, profileIds: number[]): Promise<void> =>
+        request(`/api/users/${encodeURIComponent(name)}/external-profiles`, { method: 'PUT', json: { profile_ids: profileIds }, parse: 'none', errorMsg: 'Failed to update user external profiles' }),
+    getExternalProfileLink: async (id: number, displayName: string): Promise<{ link: string; type: string }> =>
+        request<{ link: string; type: string }>(`/api/external-profiles/${id}/link?name=${encodeURIComponent(displayName)}`, { errorMsg: 'Failed to fetch external profile link' }),
+    bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> =>
+        request('/api/users/bulk', { method: 'POST', json: users, parse: 'none', errorMsg: 'Failed to bulk create users' }),
     getReport: async (start?: string, end?: string): Promise<UserStatus[]> => {
         const params = new URLSearchParams();
         if (start) params.append('start', start);
