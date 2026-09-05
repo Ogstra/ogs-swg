@@ -645,201 +645,77 @@ export const api = {
     },
 
     // WireGuard
-    getWireGuardInterfaces: async (): Promise<string[]> => {
-        const res = await fetch('/api/wireguard/interfaces', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard interfaces');
-        return res.json();
-    },
-    createWireGuardInterface: async (payload: CreateWireGuardInterfaceRequest): Promise<CreateWireGuardInterfaceResponse> => {
-        const res = await fetch('/api/wireguard/interfaces', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload),
-        });
-        await handleResponse(res, 'Failed to create WireGuard interface');
-        return res.json();
-    },
-    getWireGuardInterfacesStatus: async (): Promise<WireGuardInterfaceSummary[]> => {
-        const res = await fetch('/api/wireguard/interfaces/status', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard interface status');
-        return res.json();
-    },
-    getWireGuardPeers: async (): Promise<any[]> => {
-        const res = await fetch('/api/wireguard/peers', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch peers');
-        return res.json();
-    },
-    getWireGuardPeersForInterface: async (iface: string): Promise<any[]> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch peers');
-        return res.json();
-    },
-    createWireGuardPeer: async (payload: { alias: string; ip: string; endpoint?: string }): Promise<any> => {
-        const res = await fetch('/api/wireguard/peers', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to create peer');
-        return res.json();
-    },
-    createWireGuardPeerForInterface: async (iface: string, payload: { alias: string; ip: string; endpoint?: string }): Promise<any> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers`, {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to create peer');
-        return res.json();
-    },
-    deleteWireGuardPeer: async (publicKey: string): Promise<void> => {
-        const res = await fetch(`/api/wireguard/peers?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete peer');
-    },
-    deleteWireGuardPeerForInterface: async (iface: string, publicKey: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete peer');
-    },
-    restoreWireGuardPeer: async (peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }) => {
-        const res = await fetch('/api/wireguard/peers/restore', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(peer)
-        });
-        await handleResponse(res, 'Failed to restore peer');
-    },
-    restoreWireGuardPeerForInterface: async (iface: string, peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }) => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers/restore`, {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(peer)
-        });
-        await handleResponse(res, 'Failed to restore peer');
-    },
-    getWireGuardInterface: async (): Promise<any> => {
-        const res = await fetch('/api/wireguard/interface', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch interface config');
-        return res.json();
-    },
-    getWireGuardInterfaceForInterface: async (iface: string): Promise<any> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/interface`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch interface config');
-        return res.json();
-    },
-    updateWireGuardInterface: async (config: any): Promise<void> => {
-        const res = await fetch('/api/wireguard/interface', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update interface');
-    },
-    updateWireGuardInterfaceForInterface: async (iface: string, config: any): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/interface`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update interface');
-    },
-    getWireGuardConfigForInterface: async (iface: string): Promise<string> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch WireGuard raw config');
-        return res.text();
-    },
-    getWireGuardConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
-        const res = await fetch('/api/wireguard/config/backups', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard config backups');
-        return res.json();
-    },
-    getWireGuardConfigBackupsForInterface: async (iface: string): Promise<ConfigBackupEntry[]> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backups`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard config backups');
-        return res.json();
-    },
-    getWireGuardConfigBackupContent: async (name: string): Promise<string> => {
-        const res = await fetch(`/api/wireguard/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard backup');
-        return res.text();
-    },
-    getWireGuardConfigBackupContentForInterface: async (iface: string, name: string): Promise<string> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard backup');
-        return res.text();
-    },
-    updateWireGuardConfigForInterface: async (iface: string, config: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config`, {
-            method: 'PUT',
-            headers: buildHeaders('text/plain'),
-            body: config
-        });
-        await handleResponse(res, 'Failed to update WireGuard raw config');
-    },
-    updateWireGuardPeer: async (publicKey: string, config: any): Promise<void> => {
-        const res = await fetch(`/api/wireguard/peer?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update peer');
-    },
-    updateWireGuardPeerForInterface: async (iface: string, publicKey: string, config: any): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peer?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update peer');
-    },
+    getWireGuardInterfaces: async (): Promise<string[]> =>
+        request<string[]>('/api/wireguard/interfaces', { errorMsg: 'Failed to fetch WireGuard interfaces' }),
+    createWireGuardInterface: async (payload: CreateWireGuardInterfaceRequest): Promise<CreateWireGuardInterfaceResponse> =>
+        request<CreateWireGuardInterfaceResponse>('/api/wireguard/interfaces', { method: 'POST', json: payload, errorMsg: 'Failed to create WireGuard interface' }),
+    getWireGuardInterfacesStatus: async (): Promise<WireGuardInterfaceSummary[]> =>
+        request<WireGuardInterfaceSummary[]>('/api/wireguard/interfaces/status', { errorMsg: 'Failed to fetch WireGuard interface status' }),
+    getWireGuardPeers: async (): Promise<any[]> =>
+        request<any[]>('/api/wireguard/peers', { errorMsg: 'Failed to fetch peers' }),
+    getWireGuardPeersForInterface: async (iface: string): Promise<any[]> =>
+        request<any[]>(`${wireGuardInterfaceBase(iface)}/peers`, { errorMsg: 'Failed to fetch peers' }),
+    createWireGuardPeer: async (payload: { alias: string; ip: string; endpoint?: string }): Promise<any> =>
+        request<any>('/api/wireguard/peers', { method: 'POST', json: payload, errorMsg: 'Failed to create peer' }),
+    createWireGuardPeerForInterface: async (iface: string, payload: { alias: string; ip: string; endpoint?: string }): Promise<any> =>
+        request<any>(`${wireGuardInterfaceBase(iface)}/peers`, { method: 'POST', json: payload, errorMsg: 'Failed to create peer' }),
+    deleteWireGuardPeer: async (publicKey: string): Promise<void> =>
+        request(`/api/wireguard/peers?public_key=${encodeURIComponent(publicKey)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete peer' }),
+    deleteWireGuardPeerForInterface: async (iface: string, publicKey: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/peers?public_key=${encodeURIComponent(publicKey)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete peer' }),
+    restoreWireGuardPeer: async (peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }) =>
+        request('/api/wireguard/peers/restore', { method: 'POST', json: peer, parse: 'none', errorMsg: 'Failed to restore peer' }),
+    restoreWireGuardPeerForInterface: async (iface: string, peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }) =>
+        request(`${wireGuardInterfaceBase(iface)}/peers/restore`, { method: 'POST', json: peer, parse: 'none', errorMsg: 'Failed to restore peer' }),
+    getWireGuardInterface: async (): Promise<any> =>
+        request<any>('/api/wireguard/interface', { errorMsg: 'Failed to fetch interface config' }),
+    getWireGuardInterfaceForInterface: async (iface: string): Promise<any> =>
+        request<any>(`${wireGuardInterfaceBase(iface)}/interface`, { errorMsg: 'Failed to fetch interface config' }),
+    updateWireGuardInterface: async (config: any): Promise<void> =>
+        request('/api/wireguard/interface', { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update interface' }),
+    updateWireGuardInterfaceForInterface: async (iface: string, config: any): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/interface`, { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update interface' }),
+    getWireGuardConfigForInterface: async (iface: string): Promise<string> =>
+        request<string>(`${wireGuardInterfaceBase(iface)}/config`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard raw config' }),
+    getWireGuardConfigBackups: async (): Promise<ConfigBackupEntry[]> =>
+        request<ConfigBackupEntry[]>('/api/wireguard/config/backups', { errorMsg: 'Failed to fetch WireGuard config backups' }),
+    getWireGuardConfigBackupsForInterface: async (iface: string): Promise<ConfigBackupEntry[]> =>
+        request<ConfigBackupEntry[]>(`${wireGuardInterfaceBase(iface)}/config/backups`, { errorMsg: 'Failed to fetch WireGuard config backups' }),
+    getWireGuardConfigBackupContent: async (name: string): Promise<string> =>
+        request<string>(`/api/wireguard/config/backup?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard backup' }),
+    getWireGuardConfigBackupContentForInterface: async (iface: string, name: string): Promise<string> =>
+        request<string>(`${wireGuardInterfaceBase(iface)}/config/backup?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard backup' }),
+    updateWireGuardConfigForInterface: async (iface: string, config: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/config`, { method: 'PUT', body: config, contentType: 'text/plain', parse: 'none', errorMsg: 'Failed to update WireGuard raw config' }),
+    updateWireGuardPeer: async (publicKey: string, config: any): Promise<void> =>
+        request(`/api/wireguard/peer?public_key=${encodeURIComponent(publicKey)}`, { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update peer' }),
+    updateWireGuardPeerForInterface: async (iface: string, publicKey: string, config: any): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/peer?public_key=${encodeURIComponent(publicKey)}`, { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update peer' }),
     getWireGuardPeerConfig: async (publicKey: string, privateKey?: string): Promise<{ config: string }> => {
         const params = new URLSearchParams({ public_key: publicKey })
         if (privateKey) params.set('private_key', privateKey)
-        const res = await fetch(`/api/wireguard/peer/config?${params.toString()}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch peer config');
-        return res.json();
+        return request<{ config: string }>(`/api/wireguard/peer/config?${params.toString()}`, { errorMsg: 'Failed to fetch peer config' });
     },
     getWireGuardPeerConfigForInterface: async (iface: string, publicKey: string, privateKey?: string): Promise<{ config: string }> => {
         const params = new URLSearchParams({ public_key: publicKey })
         if (privateKey) params.set('private_key', privateKey)
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peer/config?${params.toString()}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch peer config');
-        return res.json();
+        return request<{ config: string }>(`${wireGuardInterfaceBase(iface)}/peer/config?${params.toString()}`, { errorMsg: 'Failed to fetch peer config' });
     },
     getWireGuardTraffic: async (range: string): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ range })
-        const res = await fetch(`/api/wireguard/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
+        return request<Record<string, { rx: number; tx: number }>>(`/api/wireguard/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
     getWireGuardTrafficForInterface: async (iface: string, range: string): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ range })
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
+        return request<Record<string, { rx: number; tx: number }>>(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
     getWireGuardTrafficRange: async (start: number, end: number): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ start: String(start), end: String(end) })
-        const res = await fetch(`/api/wireguard/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
+        return request<Record<string, { rx: number; tx: number }>>(`/api/wireguard/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
     getWireGuardTrafficRangeForInterface: async (iface: string, start: number, end: number): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ start: String(start), end: String(end) })
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
+        return request<Record<string, { rx: number; tx: number }>>(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
     getWireGuardTrafficSeries: async (range?: string, peer?: string, limit?: number, start?: number, end?: number): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
         const params = new URLSearchParams()
@@ -848,9 +724,7 @@ export const api = {
         if (limit) params.append('limit', String(limit))
         if (start) params.append('start', String(start))
         if (end) params.append('end', String(end))
-        const res = await fetch(`/api/wireguard/traffic/series?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic series');
-        return res.json()
+        return request<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>>(`/api/wireguard/traffic/series?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic series' })
     },
     getWireGuardTrafficSeriesForInterface: async (iface: string, range?: string, peer?: string, limit?: number, start?: number, end?: number): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
         const params = new URLSearchParams()
@@ -859,22 +733,14 @@ export const api = {
         if (limit) params.append('limit', String(limit))
         if (start) params.append('start', String(start))
         if (end) params.append('end', String(end))
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/traffic/series?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic series');
-        return res.json()
+        return request<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>>(`${wireGuardInterfaceBase(iface)}/traffic/series?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic series' })
     },
-    enableWireGuardInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/enable`, { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to enable WireGuard interface');
-    },
-    disableWireGuardInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/disable`, { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to disable WireGuard interface');
-    },
-    deleteWireGuardInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}`, { method: 'DELETE', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to delete WireGuard interface');
-    },
+    enableWireGuardInterface: async (iface: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/enable`, { method: 'POST', parse: 'none', errorMsg: 'Failed to enable WireGuard interface' }),
+    disableWireGuardInterface: async (iface: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/disable`, { method: 'POST', parse: 'none', errorMsg: 'Failed to disable WireGuard interface' }),
+    deleteWireGuardInterface: async (iface: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete WireGuard interface' }),
 
     // Service Control
     restartService: async (service: string): Promise<void> => {
