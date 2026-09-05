@@ -205,15 +205,6 @@ func apiTrafficBucketsFromCore(in map[int64]core.TrafficStats) map[int64]Traffic
 	return out
 }
 
-func sumCoreTrafficMap(stats map[int64]core.TrafficStats) TrafficStats {
-	var out TrafficStats
-	for _, st := range stats {
-		out.Uplink += st.Uplink
-		out.Downlink += st.Downlink
-	}
-	return out
-}
-
 func (s *Server) discoverWireGuardPeersByInterface(ctx context.Context) (map[string][]string, map[string]string, map[string]string) {
 	byInterface := make(map[string][]string)
 	aliasByKey := make(map[string]string)
@@ -356,21 +347,18 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 				wgBuckets[ts] = TrafficStats{Uplink: stats.Uplink, Downlink: stats.Downlink}
 			}
 		}
-		ifaces := make([]string, 0, len(wgKeysByInterface))
-		for iface := range wgKeysByInterface {
-			ifaces = append(ifaces, iface)
-		}
-		sort.Strings(ifaces)
-		for _, iface := range ifaces {
-			keys := wgKeysByInterface[iface]
-			if len(keys) == 0 {
-				continue
+		// Single per-key totals query, then fold into per-interface sums in
+		// memory instead of re-running the same window-function query once
+		// per interface.
+		if keyTotals, err := s.store.GetWGKeyTotals(wgPeerKeys, start, end); err == nil {
+			for iface, keys := range wgKeysByInterface {
+				var stat TrafficStats
+				for _, key := range keys {
+					stat.Uplink += keyTotals[key].Uplink
+					stat.Downlink += keyTotals[key].Downlink
+				}
+				wgInterfaceStats[iface] = stat
 			}
-			buckets, err := s.store.GetWGTrafficBuckets(keys, start, end, interval)
-			if err != nil {
-				continue
-			}
-			wgInterfaceStats[iface] = sumCoreTrafficMap(buckets)
 		}
 	}
 
