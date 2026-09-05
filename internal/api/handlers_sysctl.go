@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -11,7 +10,7 @@ import (
 func (s *Server) handleGetSysctl(w http.ResponseWriter, r *http.Request) {
 	key := r.URL.Query().Get("key")
 	if key == "" {
-		http.Error(w, "Key is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Key is required")
 		return
 	}
 
@@ -20,19 +19,19 @@ func (s *Server) handleGetSysctl(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			// Check if error is due to whitelist
 			if strings.Contains(strings.ToLower(err.Error()), "whitelist") {
-				http.Error(w, err.Error(), http.StatusForbidden)
+				writeErr(w, http.StatusForbidden, err.Error())
 				return
 			}
-			http.Error(w, "Failed to get sysctl: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to get sysctl: "+err.Error())
 			return
 		}
 
-		json.NewEncoder(w).Encode(map[string]string{
+		writeJSON(w, http.StatusOK, map[string]string{
 			"key":   key,
 			"value": val,
 		})
 	} else {
-		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "System executor not initialized")
 	}
 }
 
@@ -41,12 +40,12 @@ func (s *Server) handleApplySysctl(w http.ResponseWriter, r *http.Request) {
 		Key   string `json:"key" validate:"required"`
 		Value string `json:"value" validate:"required"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -54,14 +53,14 @@ func (s *Server) handleApplySysctl(w http.ResponseWriter, r *http.Request) {
 		if err := s.executor.ApplySysctl(r.Context(), req.Key, req.Value); err != nil {
 			// Check if error is due to whitelist
 			if strings.Contains(strings.ToLower(err.Error()), "whitelist") {
-				http.Error(w, err.Error(), http.StatusForbidden)
+				writeErr(w, http.StatusForbidden, err.Error())
 				return
 			}
-			http.Error(w, "Failed to apply sysctl: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to apply sysctl: "+err.Error())
 			return
 		}
 	} else {
-		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "System executor not initialized")
 		return
 	}
 

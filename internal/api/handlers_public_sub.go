@@ -114,12 +114,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	if !allowlisted {
 		if s.protectionRules.isIPBlocked(clientIP) {
 			s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ip_block")
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			writeErr(w, http.StatusTooManyRequests, "Too Many Requests")
 			return
 		}
 		if s.protectionRules.isTokenBlocked(token) {
 			s.recordBlockedSubscriptionRequest(r, sub.ID, users, "token_block")
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			writeErr(w, http.StatusTooManyRequests, "Too Many Requests")
 			return
 		}
 		window := time.Duration(s.config.SubscriptionProtection.WindowSeconds) * time.Second
@@ -130,7 +130,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 				retryAfterSeconds = 1
 			}
 			w.Header().Set("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+			writeErr(w, http.StatusTooManyRequests, "Too Many Requests")
 			return
 		}
 	}
@@ -138,12 +138,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	// crawlers and browser requests do not consume quota slots.
 	if s.config.SubscriptionProtection.SocialFetchersBlockEnabled && isSocialFetcherUA(r.UserAgent()) {
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_social_fetcher")
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if s.config.SubscriptionProtection.UAFilterEnabled && isBrowserUA(r.UserAgent()) {
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_browser")
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 	if !allowlisted {
