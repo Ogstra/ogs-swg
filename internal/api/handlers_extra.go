@@ -59,22 +59,22 @@ func (s *Server) dispatchDetachedServiceAction(action, service string, run func(
 
 func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := validateService(req.Service); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if s.executor == nil {
-		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "System executor not initialized")
 		return
 	}
 
@@ -92,7 +92,7 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.executor.RestartService(r.Context(), req.Service); err != nil {
-		http.Error(w, "Failed to restart service: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to restart service: "+err.Error())
 		return
 	}
 
@@ -108,27 +108,27 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := validateService(req.Service); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if s.executor != nil {
 		if err := s.executor.StartService(r.Context(), req.Service); err != nil {
-			http.Error(w, "Failed to start service: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to start service: "+err.Error())
 			return
 		}
 	} else {
-		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "System executor not initialized")
 		return
 	}
 
@@ -137,22 +137,22 @@ func (s *Server) handleStartService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 	var req ServiceActionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := validateService(req.Service); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if s.executor == nil {
-		http.Error(w, "System executor not initialized", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "System executor not initialized")
 		return
 	}
 
@@ -163,7 +163,7 @@ func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.executor.StopService(r.Context(), req.Service); err != nil {
-		http.Error(w, "Failed to stop service: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to stop service: "+err.Error())
 		return
 	}
 
@@ -176,16 +176,16 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	content, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read body: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to read body: "+err.Error())
 		return
 	}
 	if err := validateRawSingboxConfigPayload(content); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := s.config.UpdateSingboxConfig(string(content)); err != nil {
-		http.Error(w, "Failed to update config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update config: "+err.Error())
 		return
 	}
 
@@ -240,7 +240,7 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 
 	history, err := s.store.GetGlobalTraffic(start, end)
 	if err != nil {
-		http.Error(w, "Failed to get stats: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get stats: "+err.Error())
 		return
 	}
 
@@ -295,16 +295,14 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	cacheKey := "api:status"
 	if cachedPayload, found := s.cache.Get(cacheKey); found {
 		if payload, ok := cachedPayload.(map[string]interface{}); ok {
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(payload)
+			writeJSON(w, http.StatusOK, payload)
 			return
 		}
 	}
@@ -451,8 +449,7 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// Cost of 1, TTL of 15 seconds
 	s.cache.SetWithTTL(cacheKey, status, 1, 15*time.Second)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(status)
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) checkService(ctx context.Context, service string) bool {
@@ -479,7 +476,7 @@ func (s *Server) checkService(ctx context.Context, service string) bool {
 
 func (s *Server) requireAnyService(w http.ResponseWriter) bool {
 	if !s.config.EnableSingbox && !s.config.EnableWireGuard {
-		http.Error(w, "No services enabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "No services enabled")
 		return false
 	}
 	return true
@@ -554,12 +551,12 @@ func (s *Server) handleSamplerHistory(w http.ResponseWriter, r *http.Request) {
 
 	runs, err := s.store.GetSamplerRuns(limit, offset)
 	if err != nil {
-		http.Error(w, "Failed to read sampler history: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read sampler history: "+err.Error())
 		return
 	}
 	b, err := json.Marshal(runs)
 	if err != nil {
-		http.Error(w, "Failed to encode sampler history: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode sampler history: "+err.Error())
 		return
 	}
 	s.cache.SetWithTTL(cacheKey, b, int64(len(b)), 15*time.Second)
@@ -599,7 +596,7 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 
 	page, err := s.getSubscriptionRequestHistoryPage(r.Context(), limit, offset, subID, censor)
 	if err != nil {
-		http.Error(w, "Failed to read subscription request history: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read subscription request history: "+err.Error())
 		return
 	}
 
@@ -607,12 +604,11 @@ func (s *Server) handleSubscriptionRequestHistory(w http.ResponseWriter, r *http
 		s.prefetchSubscriptionRequestHistoryPage(limit, page.NextOffset, subID, censor)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	if pageRequested {
-		json.NewEncoder(w).Encode(page)
+		writeJSON(w, http.StatusOK, page)
 		return
 	}
-	json.NewEncoder(w).Encode(page.Items)
+	writeJSON(w, http.StatusOK, page.Items)
 }
 
 // DELETE /api/subscription-requests/{id}
@@ -620,11 +616,11 @@ func (s *Server) handleDeleteSubscriptionRequest(w http.ResponseWriter, r *http.
 	idStr := r.PathValue("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	if err := s.store.DeleteSubscriptionRequest(id); err != nil {
-		http.Error(w, "failed to delete: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to delete: "+err.Error())
 		return
 	}
 	s.invalidateSubscriptionHistoryCache()
@@ -637,11 +633,11 @@ func (s *Server) handleDeleteSubscriptionRequests(w http.ResponseWriter, r *http
 	if subIDStr != "" {
 		subID, err := strconv.ParseInt(subIDStr, 10, 64)
 		if err != nil || subID <= 0 {
-			http.Error(w, "invalid sub_id", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "invalid sub_id")
 			return
 		}
 		if err := s.store.DeleteSubscriptionRequestsBySubID(subID); err != nil {
-			http.Error(w, "failed to clear: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "failed to clear: "+err.Error())
 			return
 		}
 		s.invalidateSubscriptionHistoryCache()
@@ -652,12 +648,12 @@ func (s *Server) handleDeleteSubscriptionRequests(w http.ResponseWriter, r *http
 	var body struct {
 		IDs []int64 `json:"ids"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.IDs) == 0 {
-		http.Error(w, "ids required", http.StatusBadRequest)
+	if err := decodeJSON(r, &body); err != nil || len(body.IDs) == 0 {
+		writeErr(w, http.StatusBadRequest, "ids required")
 		return
 	}
 	if err := s.store.DeleteSubscriptionRequestsByIDs(body.IDs); err != nil {
-		http.Error(w, "failed to bulk delete: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to bulk delete: "+err.Error())
 		return
 	}
 	s.invalidateSubscriptionHistoryCache()
@@ -798,7 +794,7 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload map[string]int
-	if err := json.NewDecoder(r.Body).Decode(&payload); err == nil {
+	if err := decodeJSON(r, &payload); err == nil {
 		if v, ok := payload["days"]; ok && v > 0 {
 			days = v
 		}
@@ -835,8 +831,7 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 		log.Printf("PruneNow: Vacuum failed: %v", err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"deleted": totalDeleted,
 		"cutoff":  cutoff,
 		"days":    days,
@@ -870,14 +865,13 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"systemctl_available":              s.executor != nil,
 		"journalctl_available":             s.executor != nil,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 	var payload map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if err := decodeJSON(r, &payload); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 
@@ -974,7 +968,7 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 	}
 	if v, ok := payload["log_retention_mode"].(string); ok {
 		if v != "size" && v != "time" {
-			http.Error(w, "log_retention_mode must be \"size\" or \"time\"", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_mode must be \"size\" or \"time\"")
 			return
 		}
 		s.config.LogRetentionMode = v
@@ -987,11 +981,11 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.LogRetentionMB = t
 		}
 		if s.config.LogRetentionMB < 10 {
-			http.Error(w, "log_retention_mb must be >= 10", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_mb must be >= 10")
 			return
 		}
 		if s.config.LogRetentionMB > 100_000 {
-			http.Error(w, "log_retention_mb must be <= 100000", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_mb must be <= 100000")
 			return
 		}
 	}
@@ -1003,11 +997,11 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.LogRetentionTargetPct = t
 		}
 		if s.config.LogRetentionTargetPct < 50 {
-			http.Error(w, "log_retention_target_percent must be >= 50", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_target_percent must be >= 50")
 			return
 		}
 		if s.config.LogRetentionTargetPct > 95 {
-			http.Error(w, "log_retention_target_percent must be <= 95", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_target_percent must be <= 95")
 			return
 		}
 	}
@@ -1019,11 +1013,11 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.LogRetentionMaxExportPct = t
 		}
 		if s.config.LogRetentionMaxExportPct < 5 {
-			http.Error(w, "log_retention_max_export_percent must be >= 5", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_max_export_percent must be >= 5")
 			return
 		}
 		if s.config.LogRetentionMaxExportPct > 50 {
-			http.Error(w, "log_retention_max_export_percent must be <= 50", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_max_export_percent must be <= 50")
 			return
 		}
 	}
@@ -1035,17 +1029,17 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.LogRetentionDays = t
 		}
 		if s.config.LogRetentionDays < 1 {
-			http.Error(w, "log_retention_days must be >= 1", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_days must be >= 1")
 			return
 		}
 		if s.config.LogRetentionDays > 3650 {
-			http.Error(w, "log_retention_days must be <= 3650", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_days must be <= 3650")
 			return
 		}
 	}
 	if v, ok := payload["log_retention_unit"].(string); ok {
 		if v != "days" && v != "weeks" && v != "months" {
-			http.Error(w, "log_retention_unit must be \"days\", \"weeks\", or \"months\"", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "log_retention_unit must be \"days\", \"weeks\", or \"months\"")
 			return
 		}
 		s.config.LogRetentionUnit = v
@@ -1064,11 +1058,11 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 			s.config.DBBackupIntervalHours = t
 		}
 		if s.config.DBBackupIntervalHours < 1 {
-			http.Error(w, "db_backup_interval_hours must be >= 1", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "db_backup_interval_hours must be >= 1")
 			return
 		}
 		if s.config.DBBackupIntervalHours > 8760 {
-			http.Error(w, "db_backup_interval_hours must be <= 8760", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "db_backup_interval_hours must be <= 8760")
 			return
 		}
 	}
@@ -1084,8 +1078,7 @@ func (s *Server) handleGetPublicIP(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"public_ip": s.config.PublicIP})
+	writeJSON(w, http.StatusOK, map[string]string{"public_ip": s.config.PublicIP})
 }
 
 func (s *Server) dashboardPreferencesPrincipal(r *http.Request) (string, bool) {
@@ -1101,31 +1094,30 @@ func (s *Server) dashboardPreferencesPrincipal(r *http.Request) (string, bool) {
 func (s *Server) handleGetDashboardPreferences(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.dashboardPreferencesPrincipal(r)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	prefs, err := s.store.GetDashboardPreferences(r.Context(), principal)
 	if err != nil {
-		http.Error(w, "Failed to load dashboard preferences: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load dashboard preferences: "+err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(prefs)
+	writeJSON(w, http.StatusOK, prefs)
 }
 
 func (s *Server) handleUpdateDashboardPreferences(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.dashboardPreferencesPrincipal(r)
 	if !ok {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
 	var prefs core.DashboardPreferences
-	if err := json.NewDecoder(r.Body).Decode(&prefs); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if err := decodeJSON(r, &prefs); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 	if err := s.store.UpdateDashboardPreferences(r.Context(), principal, prefs); err != nil {
-		http.Error(w, "Failed to save dashboard preferences: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save dashboard preferences: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -1138,13 +1130,13 @@ func (s *Server) handleUpdatePublicIP(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		PublicIP string `json:"public_ip"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if err := decodeJSON(r, &payload); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 	s.config.PublicIP = strings.TrimSpace(payload.PublicIP)
 	if err := s.config.SaveAppConfig(); err != nil {
-		http.Error(w, "Failed to save public IP: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save public IP: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -1154,8 +1146,7 @@ func (s *Server) handleGetSubscriptionDomain(w http.ResponseWriter, r *http.Requ
 	if !s.requireSingbox(w) {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"subscription_domain": s.config.SubscriptionDomain})
+	writeJSON(w, http.StatusOK, map[string]string{"subscription_domain": s.config.SubscriptionDomain})
 }
 
 func (s *Server) handleUpdateSubscriptionDomain(w http.ResponseWriter, r *http.Request) {
@@ -1165,13 +1156,13 @@ func (s *Server) handleUpdateSubscriptionDomain(w http.ResponseWriter, r *http.R
 	var payload struct {
 		SubscriptionDomain string `json:"subscription_domain"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if err := decodeJSON(r, &payload); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 	s.config.SubscriptionDomain = strings.TrimSpace(payload.SubscriptionDomain)
 	if err := s.config.SaveAppConfig(); err != nil {
-		http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save config: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -1181,8 +1172,7 @@ func (s *Server) handleGetCFWorkerURL(w http.ResponseWriter, r *http.Request) {
 	if !s.requireSingbox(w) {
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"cf_worker_url": s.config.CFWorkerURL})
+	writeJSON(w, http.StatusOK, map[string]string{"cf_worker_url": s.config.CFWorkerURL})
 }
 
 func (s *Server) handleUpdateCFWorkerURL(w http.ResponseWriter, r *http.Request) {
@@ -1192,8 +1182,8 @@ func (s *Server) handleUpdateCFWorkerURL(w http.ResponseWriter, r *http.Request)
 	var payload struct {
 		CFWorkerURL string `json:"cf_worker_url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if err := decodeJSON(r, &payload); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 	raw := strings.TrimSpace(payload.CFWorkerURL)
@@ -1206,7 +1196,7 @@ func (s *Server) handleUpdateCFWorkerURL(w http.ResponseWriter, r *http.Request)
 	}
 	s.config.CFWorkerURL = raw
 	if err := s.config.SaveAppConfig(); err != nil {
-		http.Error(w, "Failed to save config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save config: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -1218,7 +1208,7 @@ func (s *Server) handleBackupConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	src := s.config.SingboxConfigPath
 	if err := s.createConfigBackup(r.Context(), src); err != nil {
-		http.Error(w, "Backup failed: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Backup failed: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -1232,10 +1222,10 @@ func (s *Server) handleRestoreConfig(w http.ResponseWriter, r *http.Request) {
 	dst := s.config.SingboxConfigPath
 	if err := s.copyConfig(r.Context(), src, dst); err != nil {
 		if isNotFoundErr(err) {
-			http.Error(w, "Backup not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Backup not found")
 			return
 		}
-		http.Error(w, "Restore failed: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Restore failed: "+err.Error())
 		return
 	}
 	var content []byte
@@ -1246,7 +1236,7 @@ func (s *Server) handleRestoreConfig(w http.ResponseWriter, r *http.Request) {
 		content, err = os.ReadFile(dst)
 	}
 	if err != nil {
-		http.Error(w, "Restore succeeded but failed to read restored file: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Restore succeeded but failed to read restored file: "+err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1279,8 +1269,7 @@ func (s *Server) handleGetBackupMeta(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(info)
+	writeJSON(w, http.StatusOK, info)
 }
 
 type configBackupEntry struct {
@@ -1291,26 +1280,25 @@ type configBackupEntry struct {
 func (s *Server) handleListConfigBackups(w http.ResponseWriter, r *http.Request) {
 	backups, err := s.listConfigBackups(s.config.SingboxConfigPath, 10)
 	if err != nil {
-		http.Error(w, "Failed to list backups: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to list backups: "+err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(backups)
+	writeJSON(w, http.StatusOK, backups)
 }
 
 func (s *Server) handleGetConfigBackup(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if name == "" {
-		http.Error(w, "backup name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "backup name is required")
 		return
 	}
 	content, err := s.readNamedBackup(r.Context(), s.config.SingboxConfigPath, name)
 	if err != nil {
 		if isNotFoundErr(err) {
-			http.Error(w, "Backup not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Backup not found")
 			return
 		}
-		http.Error(w, "Failed to read backup: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read backup: "+err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
