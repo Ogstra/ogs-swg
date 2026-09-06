@@ -758,14 +758,9 @@ func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.
 	if tls.ServerName != "" {
 		params.Set("sni", tls.ServerName)
 	}
-	// Extract obfs from Raw — SingboxInboundView has no typed Obfs field
-	if obfsMap, ok := view.Raw["obfs"].(map[string]interface{}); ok {
-		obfsType, _ := obfsMap["type"].(string)
-		obfsPwd, _ := obfsMap["password"].(string)
-		if obfsType != "" && obfsPwd != "" {
-			params.Set("obfs", obfsType)
-			params.Set("obfs-password", obfsPwd)
-		}
+	if view.Obfs != nil && view.Obfs.Type != "" && view.Obfs.Password != "" {
+		params.Set("obfs", view.Obfs.Type)
+		params.Set("obfs-password", view.Obfs.Password)
 	}
 	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("hysteria2://%s@%s:%s",
@@ -822,7 +817,7 @@ func buildNaiveLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	}
 
 	scheme := "naive+https"
-	if network, _ := view.Raw["network"].(string); strings.EqualFold(strings.TrimSpace(network), "udp") {
+	if strings.EqualFold(view.Network, "udp") {
 		scheme = "naive+quic"
 	}
 	tls := extractTLSInfo(view)
@@ -854,8 +849,7 @@ func buildShadowsocksLink(name string, userInfo *core.UserInboundInfo, view *cor
 		return "", fmt.Errorf("User password missing for shadowsocks inbound")
 	}
 
-	method, _ := view.Raw["method"].(string)
-	method = strings.TrimSpace(method)
+	method := view.Method
 	if method == "" {
 		return "", fmt.Errorf("Shadowsocks inbound method missing")
 	}
@@ -863,8 +857,8 @@ func buildShadowsocksLink(name string, userInfo *core.UserInboundInfo, view *cor
 	// Shadowsocks 2022 multi-user: inbound has a top-level server key that the
 	// client must prepend to the user key ("server_key:user_key").
 	credential := method + ":"
-	if serverKey, _ := view.Raw["password"].(string); strings.TrimSpace(serverKey) != "" {
-		credential += strings.TrimSpace(serverKey) + ":" + password
+	if view.ServerKey != "" {
+		credential += view.ServerKey + ":" + password
 	} else {
 		credential += password
 	}
