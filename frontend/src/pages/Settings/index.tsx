@@ -1247,7 +1247,7 @@ function WireGuardInterfacesTab() {
         setBusyKey(key)
         setEditErrors({})
         try {
-            const cfg = await api.getWireGuardInterfaceForInterface(iface.name)
+            const cfg = await api.getWireGuardInterface(iface.name)
             setEditTarget(iface.name)
             setEditAddress(String(cfg?.address || ''))
             setEditBindAddress(String(cfg?.bind_address || ''))
@@ -1292,7 +1292,7 @@ function WireGuardInterfacesTab() {
 
         setBusyKey('edit')
         try {
-            await api.updateWireGuardInterfaceForInterface(editTarget, payload)
+            await api.updateWireGuardInterface(payload, editTarget)
             success(`Interface ${editTarget} updated`)
             closeEditModal()
             await refreshInterfaces()
