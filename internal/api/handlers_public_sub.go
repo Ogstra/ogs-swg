@@ -2,9 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -223,245 +221,40 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	var links []string
-	var totalUp, totalDown int64
-
-	// Use subscription-level quota if set; otherwise fall back to summing individual user quotas.
-	var totalLimit int64
-	hasSubQuota := sub.QuotaLimit.Int64 > 0
-	if hasSubQuota {
-		totalLimit = sub.QuotaLimit.Int64
-	}
-
-	host := s.resolvePublicHost(r)
-
-	// Fetch global inbound meta map for speedy lookup
-	metaMap := make(map[string]*core.InboundMeta)
-	if meta, err := s.store.GetAllInboundMeta(); err == nil {
-		for k, v := range meta {
-			metaCopy := v
-			metaMap[k] = &metaCopy
-		}
-	}
-
-	proxyDisplayName := func(username, alias string) string {
-		name := subscriptionMemberDisplayName(username, alias)
-		if profileFlag != "" {
-			return profileFlag + name
-		}
-		return name
-	}
-	externalProfileDisplayName := func(username, alias string, ep core.ExternalProfile) string {
-		name := subscriptionMemberDisplayName(username, alias)
-		if flag := strings.TrimSpace(ep.Flag); flag != "" {
-			return flag + name
-		}
-		return proxyDisplayName(username, alias)
-	}
-
+	members := make([]subscriptionMember, 0, len(memberRows))
 	for _, member := range memberRows {
-		username := member.UserName
-		userMeta, _ := s.store.GetUserMetadata(username)
-		if userMeta != nil {
-			// Only accumulate individual quota when there is no subscription-level quota set.
-			if !hasSubQuota && userMeta.QuotaLimit > 0 {
-				totalLimit += userMeta.QuotaLimit
-			}
-			// Add user traffic
-			now := s.now()
-			start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-			samples, err := s.store.GetCombinedReport(username, start.Unix(), now.Unix())
-			if err == nil {
-				for _, smp := range samples {
-					totalUp += smp.Uplink
-					totalDown += smp.Downlink
-				}
-			}
-		}
-
-		userInbounds, err := s.config.GetUserInbounds(username)
-		if err == nil && len(userInbounds) > 0 {
-			// Legacy data may still have the same user in multiple inbounds. Subscription
-			// generation now treats the first match as canonical to avoid broken bundles.
-			userInbounds = userInbounds[:1]
-
-			for _, userInfo := range userInbounds {
-				inboundView, err := s.config.GetSingboxInboundView(userInfo.Tag)
-				if err != nil {
-					continue
-				}
-				inbType := inboundView.Type
-				if inbType == "" {
-					inbType = "vless"
-				}
-
-				if inboundView.ListenPort <= 0 {
-					continue
-				}
-				port := strconv.Itoa(inboundView.ListenPort)
-				currentHost := host
-				var inbMeta *core.InboundMeta
-				if m, ok := metaMap[userInfo.Tag]; ok {
-					inbMeta = m
-					if m.ExternalPort > 0 {
-						port = strconv.Itoa(m.ExternalPort)
-					}
-					if m.OverrideAddress != "" {
-						currentHost = m.OverrideAddress
-					}
-				}
-
-				sniFallback := ""
-				if currentHost != host {
-					sniFallback = host
-				}
-
-				var link string
-				var buildErr error
-
-				switch inbType {
-				case "vless":
-					link, buildErr = buildVlessLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-				case "vmess":
-					infoCopy := userInfo
-					if userMeta != nil {
-						if userMeta.VmessSecurity != "" {
-							infoCopy.VmessSecurity = userMeta.VmessSecurity
-						}
-						if userMeta.VmessAlterID != 0 {
-							infoCopy.VmessAlterID = userMeta.VmessAlterID
-						}
-					}
-					link, buildErr = buildVmessLink(proxyDisplayName(username, member.Alias), &infoCopy, inboundView, currentHost, port, inbMeta, sniFallback)
-				case "trojan":
-					link, buildErr = buildTrojanLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-				case "hysteria2":
-					link, buildErr = buildHysteria2Link(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
-				case "shadowsocks":
-					link, buildErr = buildShadowsocksLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port)
-				case "anytls":
-					link, buildErr = buildAnyTLSLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-				case "naive":
-					link, buildErr = buildNaiveLink(proxyDisplayName(username, member.Alias), &userInfo, inboundView, currentHost, port, inbMeta, sniFallback)
-				}
-
-				if buildErr == nil && link != "" {
-					links = append(links, link)
-				}
-			}
-		}
-
-		// Append external homelab profile links for this subscription member.
-		if s.store != nil {
-			externalProfiles, epErr := s.store.GetUserExternalProfiles(username)
-			if epErr == nil {
-				for _, ep := range externalProfiles {
-					if !ep.Enabled {
-						continue
-					}
-					var epLink string
-					var epLinkErr error
-					epDisplayName := externalProfileDisplayName(username, member.Alias, ep)
-					switch ep.Type {
-					case "vless":
-						epLink, epLinkErr = buildExternalVlessLink(epDisplayName, ep)
-					case "shadowsocks":
-						epLink, epLinkErr = buildExternalShadowsocksLink(epDisplayName, ep)
-					}
-					if epLinkErr == nil && epLink != "" {
-						links = append(links, epLink)
-					}
-				}
-			}
-		}
+		members = append(members, subscriptionMember{UserName: member.UserName, Alias: member.Alias})
 	}
 
-	displayTitle := subscriptionDisplayName(sub.Name, sub.Alias)
-
-	var responseLines []string
-	if title := strings.TrimSpace(displayTitle); title != "" {
-		responseLines = append(responseLines, "#profile-title: "+title)
+	// Nil-typed-interface hazard: assigning a nil *core.Store/*core.Config
+	// directly into an interface field produces a non-nil interface holding a
+	// nil pointer, so these must be resolved to explicit nil interface values
+	// first.
+	var subUsers subscriptionUserSource
+	if s.store != nil {
+		subUsers = s.store
 	}
-	for _, param := range happParams {
-		responseLines = append(responseLines, happSubscriptionBodyLine(param))
-	}
-	// Embed standard subscription metadata as body lines for Happ clients so they
-	// remain accessible even when HTTP response headers are stripped by proxies.
-	if happParams != nil {
-		userinfoParts := []string{
-			fmt.Sprintf("upload=%d", totalUp),
-			fmt.Sprintf("download=%d", totalDown),
-			fmt.Sprintf("total=%d", totalLimit),
-		}
-		responseLines = append(responseLines, "#subscription-userinfo: "+strings.Join(userinfoParts, "; "))
-		intervalVal := int64(0)
-		if sub.ProfileUpdateIntervalHours.Valid {
-			intervalVal = sub.ProfileUpdateIntervalHours.Int64
-		}
-		responseLines = append(responseLines, fmt.Sprintf("#profile-update-interval: %d", intervalVal))
-		if int64ToBool(sub.UpdateAlways) && happParams == nil {
-			responseLines = append(responseLines, "#update-always: true")
-		}
-		if routingProfileJSON != "" {
-			if strings.TrimSpace(routingProfileJSON) == happRoutingOffLink {
-				responseLines = append(responseLines, happRoutingOffLink)
-			} else {
-				injected := routingProfileJSON
-				if len(mergedDirectSites) > 0 {
-					var profileMap map[string]json.RawMessage
-					if err := json.Unmarshal([]byte(routingProfileJSON), &profileMap); err == nil {
-						var existing []string
-						if raw, ok := profileMap["DirectSites"]; ok {
-							_ = json.Unmarshal(raw, &existing)
-						}
-						combined := make([]string, 0, len(existing)+len(mergedDirectSites))
-						seenDS := make(map[string]struct{})
-						for _, s := range append(existing, mergedDirectSites...) {
-							if _, ok := seenDS[s]; !ok {
-								seenDS[s] = struct{}{}
-								combined = append(combined, s)
-							}
-						}
-						if dsRaw, err := json.Marshal(combined); err == nil {
-							profileMap["DirectSites"] = dsRaw
-						}
-						if injectedBytes, err := json.Marshal(profileMap); err == nil {
-							injected = string(injectedBytes)
-						}
-					}
-				}
-				encoded := base64.StdEncoding.EncodeToString([]byte(injected))
-				responseLines = append(responseLines, "happ://routing/onadd/"+encoded)
-			}
-		} else if len(mergedDirectSites) > 0 {
-			minProfile := map[string]interface{}{"Name": "panel-direct", "DirectSites": mergedDirectSites}
-			if minJSON, err := json.Marshal(minProfile); err == nil {
-				encoded := base64.StdEncoding.EncodeToString(minJSON)
-				responseLines = append(responseLines, "happ://routing/onadd/"+encoded)
-			}
-		}
-	}
-	responseLines = append(responseLines, links...)
-	joined := strings.Join(responseLines, "\n")
-	body := make([]byte, base64.StdEncoding.EncodedLen(len(joined)))
-	base64.StdEncoding.Encode(body, []byte(joined))
-
-	// total=0 means "no limit" for most clients; only send if we have either sub or individual quotas.
-	if !hasSubQuota && totalLimit == 0 {
-		// no limit at all — leave totalLimit as 0
+	var subInbounds subscriptionInboundSource
+	if s.config != nil {
+		subInbounds = s.config
 	}
 
-	// Save to cache (TTL: 2 minutes to protect against flood, but fast enough for normal use)
-	c := cachedSub{
-		Body:                  body,
-		HeaderName:            displayTitle,
-		HeaderUp:              totalUp,
-		HeaderDown:            totalDown,
-		HeaderTot:             totalLimit,
-		HeaderProfileInterval: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
-		HeaderUpdateAlways:    int64ToBool(sub.UpdateAlways),
-		HeaderHappParams:      happParams,
-	}
+	c := buildSubscription(buildSubscriptionInput{
+		Members:               members,
+		DisplayTitle:          subscriptionDisplayName(sub.Name, sub.Alias),
+		Host:                  s.resolvePublicHost(r),
+		ProfileFlag:           profileFlag,
+		HappParams:            happParams,
+		RoutingProfileJSON:    routingProfileJSON,
+		MergedDirectSites:     mergedDirectSites,
+		SubQuotaLimit:         sub.QuotaLimit.Int64,
+		ProfileUpdateInterval: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
+		UpdateAlways:          int64ToBool(sub.UpdateAlways),
+		Now:                   s.now(),
+		Users:                 subUsers,
+		Inbounds:              subInbounds,
+	})
+
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
 	s.recordSubscriptionRequest(r, sub.ID, users, false)
