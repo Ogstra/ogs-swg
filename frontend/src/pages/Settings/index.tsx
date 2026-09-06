@@ -18,6 +18,7 @@ import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './components/PanelUsers'
 import SecurityTab from './components/SecurityTab'
 import LogsBackupsTab from './LogsBackupsTab'
+import { usePaginatedHistory } from '../../hooks/usePaginatedHistory'
 import ExternalProfilesTab from './components/ExternalProfilesTab'
 import { WireGuardRawConfigModal } from './components/WireGuardRawConfigModal'
 import {
@@ -58,14 +59,6 @@ export default function Settings() {
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<DbInfo>({ rows: 0, sizeMB: 0, auditSizeMB: 0 })
-    const [samplerHistory, setSamplerHistory] = useState<SamplerHistoryEntry[]>([])
-    const [samplerHistoryNextOffset, setSamplerHistoryNextOffset] = useState(0)
-    const [samplerHistoryHasMore, setSamplerHistoryHasMore] = useState(false)
-    const [samplerHistoryRefreshing, setSamplerHistoryRefreshing] = useState(false)
-    const [samplerHistoryLoadingMore, setSamplerHistoryLoadingMore] = useState(false)
-    const samplerHistoryRef = useRef<SamplerHistoryEntry[]>([])
-    const samplerHistoryRefreshingRef = useRef(false)
-    const samplerHistoryLoadingMoreRef = useRef(false)
     const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
     const [subscriptionHistoryNextOffset, setSubscriptionHistoryNextOffset] = useState(0)
     const [subscriptionHistoryHasMore, setSubscriptionHistoryHasMore] = useState(false)
@@ -180,10 +173,6 @@ export default function Settings() {
             wireguard: status.wireguard ?? null
         })
     }, [statusQuery.data])
-
-    useEffect(() => {
-        samplerHistoryRef.current = samplerHistory
-    }, [samplerHistory])
 
     useEffect(() => {
         if (typeof publicIPQuery.data !== 'string') return
@@ -381,46 +370,21 @@ export default function Settings() {
         return () => window.clearInterval(interval)
     }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, isDatabaseTabActive, refreshSubscriptionRequestHistory])
 
-    const hardRefreshSamplerHistory = useCallback(async () => {
-        if (samplerHistoryRefreshingRef.current) return
-        samplerHistoryRefreshingRef.current = true
-        setSamplerHistoryRefreshing(true)
-        try {
-            const items = await api.getSamplerHistory(SAMPLER_HISTORY_PAGE_SIZE, 0)
-            samplerHistoryRef.current = items
-            setSamplerHistory(items)
-            setSamplerHistoryNextOffset(items.length)
-            setSamplerHistoryHasMore(items.length === SAMPLER_HISTORY_PAGE_SIZE)
-        } catch {
-            // silently ignore
-        } finally {
-            samplerHistoryRefreshingRef.current = false
-            setSamplerHistoryRefreshing(false)
-        }
-    }, [])
-
-    const loadMoreSamplerHistory = useCallback(async () => {
-        if (samplerHistoryLoadingMoreRef.current || !samplerHistoryHasMore) return
-        samplerHistoryLoadingMoreRef.current = true
-        setSamplerHistoryLoadingMore(true)
-        try {
-            const items = await api.getSamplerHistory(SAMPLER_HISTORY_PAGE_SIZE, samplerHistoryNextOffset)
-            const existingKeys = new Set(samplerHistoryRef.current.map(r => `${r.ts ?? r.timestamp}:${r.source}`))
-            const merged = [
-                ...samplerHistoryRef.current,
-                ...items.filter(r => !existingKeys.has(`${r.ts ?? r.timestamp}:${r.source}`)),
-            ]
-            samplerHistoryRef.current = merged
-            setSamplerHistory(merged)
-            setSamplerHistoryNextOffset(prev => prev + items.length)
-            setSamplerHistoryHasMore(items.length === SAMPLER_HISTORY_PAGE_SIZE)
-        } catch {
-            // silently ignore
-        } finally {
-            samplerHistoryLoadingMoreRef.current = false
-            setSamplerHistoryLoadingMore(false)
-        }
-    }, [samplerHistoryHasMore, samplerHistoryNextOffset])
+    const samplerHistoryPage = usePaginatedHistory<SamplerHistoryEntry>({
+        pageSize: SAMPLER_HISTORY_PAGE_SIZE,
+        fetchPage: async (limit, offset) => {
+            const items = await api.getSamplerHistory(limit, offset)
+            return { items, next_offset: offset + items.length, has_more: items.length === limit }
+        },
+        getKey: r => `${r.ts ?? r.timestamp}:${r.source}`,
+        swallowErrors: true,
+    })
+    const samplerHistory = samplerHistoryPage.items
+    const samplerHistoryHasMore = samplerHistoryPage.hasMore
+    const samplerHistoryRefreshing = samplerHistoryPage.refreshing
+    const samplerHistoryLoadingMore = samplerHistoryPage.loadingMore
+    const hardRefreshSamplerHistory = samplerHistoryPage.refresh
+    const loadMoreSamplerHistory = samplerHistoryPage.loadMore
 
     useEffect(() => {
         if (!isDatabaseTabActive) return
