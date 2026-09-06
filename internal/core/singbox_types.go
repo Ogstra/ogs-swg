@@ -444,12 +444,22 @@ type SingboxInboundUserView struct {
 	AlterID  int    `json:"alterId,omitempty"`
 }
 
+// SingboxObfsConfig is the typed form of a hysteria2 inbound's "obfs" block.
+type SingboxObfsConfig struct {
+	Type     string `json:"type,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
 type SingboxInboundView struct {
 	Tag        string                   `json:"tag"`
 	Type       string                   `json:"type"`
 	ListenPort int                      `json:"listen_port,omitempty"`
 	Users      []SingboxInboundUserView `json:"users,omitempty"`
 	TLS        *TLSConfig               `json:"-"`
+	Obfs       *SingboxObfsConfig       `json:"-"` // hysteria2 obfs block, nil when absent
+	Network    string                   `json:"-"` // top-level "network" (shadowsocks, naive), trimmed
+	Method     string                   `json:"-"` // shadowsocks method, trimmed
+	ServerKey  string                   `json:"-"` // shadowsocks inbound-level "password" (server key), trimmed
 	Raw        map[string]interface{}   `json:"-"`
 }
 

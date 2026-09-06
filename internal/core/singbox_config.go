@@ -531,12 +531,26 @@ func decodeSingboxInboundView(rawInbound json.RawMessage) (SingboxInboundView, e
 		}
 	}
 
+	var obfs *SingboxObfsConfig
+	if obfsMap, ok := inboundMap["obfs"].(map[string]interface{}); ok {
+		obfsType, _ := obfsMap["type"].(string)
+		obfsPassword, _ := obfsMap["password"].(string)
+		obfs = &SingboxObfsConfig{Type: obfsType, Password: obfsPassword}
+	}
+	network, _ := inboundMap["network"].(string)
+	method, _ := inboundMap["method"].(string)
+	serverKey, _ := inboundMap["password"].(string)
+
 	return SingboxInboundView{
 		Tag:        meta.Tag,
 		Type:       meta.Type,
 		ListenPort: meta.ListenPort,
 		Users:      decodeSingboxInboundUserViews(inboundMap["users"]),
 		TLS:        tlsCfg,
+		Obfs:       obfs,
+		Network:    strings.TrimSpace(network),
+		Method:     strings.TrimSpace(method),
+		ServerKey:  strings.TrimSpace(serverKey),
 		Raw:        inboundMap,
 	}, nil
 }
