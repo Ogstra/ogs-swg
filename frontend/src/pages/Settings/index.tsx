@@ -83,17 +83,10 @@ export default function Settings() {
         aggregation_days: 7,
         audit_log_max_mb: 50,
     })
-    const [auditLogItems, setAuditLogItems] = useState<AuditEntry[]>([])
-    const [auditLogNextOffset, setAuditLogNextOffset] = useState(0)
-    const [auditLogHasMore, setAuditLogHasMore] = useState(false)
-    const [auditLogRefreshing, setAuditLogRefreshing] = useState(false)
-    const [auditLogLoadingMore, setAuditLogLoadingMore] = useState(false)
     const [auditLogDomain, setAuditLogDomain] = useState('')
     const [auditLogAction, setAuditLogAction] = useState('')
     const auditLogDomainRef = useRef(auditLogDomain)
     const auditLogActionRef = useRef(auditLogAction)
-    const auditLogRefreshingRef = useRef(false)
-    const auditLogLoadingMoreRef = useRef(false)
 
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
     const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction | null>(null)
@@ -276,57 +269,33 @@ export default function Settings() {
         }
     }, [hardRefreshSubscriptionHistory, success, toastError])
 
-    const hardRefreshAuditLog = useCallback(async () => {
-        if (auditLogRefreshingRef.current) return
-        auditLogRefreshingRef.current = true
-        setAuditLogRefreshing(true)
-        try {
-            const page = await api.getAuditLogPage(50, 0, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined)
-            setAuditLogItems(page.items)
-            setAuditLogNextOffset(page.next_offset)
-            setAuditLogHasMore(page.has_more)
-        } catch {
-            // silently ignore
-        } finally {
-            auditLogRefreshingRef.current = false
-            setAuditLogRefreshing(false)
-        }
-    }, [])
-
-    const loadMoreAuditLog = useCallback(async () => {
-        if (auditLogLoadingMoreRef.current || !auditLogHasMore) return
-        auditLogLoadingMoreRef.current = true
-        setAuditLogLoadingMore(true)
-        try {
-            const page = await api.getAuditLogPage(50, auditLogNextOffset, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined)
-            setAuditLogItems(prev => [...prev, ...page.items])
-            setAuditLogNextOffset(prev => Math.max(page.next_offset, prev + page.items.length))
-            setAuditLogHasMore(page.has_more)
-        } catch {
-            // silently ignore
-        } finally {
-            auditLogLoadingMoreRef.current = false
-            setAuditLogLoadingMore(false)
-        }
-    }, [auditLogHasMore, auditLogNextOffset])
+    const auditLogPage = usePaginatedHistory<AuditEntry>({
+        pageSize: 50,
+        fetchPage: (limit, offset) => api.getAuditLogPage(limit, offset, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined),
+        swallowErrors: true,
+    })
+    const auditLogItems = auditLogPage.items
+    const auditLogHasMore = auditLogPage.hasMore
+    const auditLogRefreshing = auditLogPage.refreshing
+    const auditLogLoadingMore = auditLogPage.loadingMore
+    const hardRefreshAuditLog = auditLogPage.refresh
+    const loadMoreAuditLog = auditLogPage.loadMore
 
     const handleAuditDomainChange = useCallback((value: string) => {
         auditLogDomainRef.current = value
         setAuditLogDomain(value)
-        setAuditLogNextOffset(0)
-        setAuditLogHasMore(false)
+        auditLogPage.reset({ keepItems: true })
         if (!isDatabaseTabActive) return
         void hardRefreshAuditLog()
-    }, [hardRefreshAuditLog, isDatabaseTabActive])
+    }, [auditLogPage, hardRefreshAuditLog, isDatabaseTabActive])
 
     const handleAuditActionChange = useCallback((value: string) => {
         auditLogActionRef.current = value
         setAuditLogAction(value)
-        setAuditLogNextOffset(0)
-        setAuditLogHasMore(false)
+        auditLogPage.reset({ keepItems: true })
         if (!isDatabaseTabActive) return
         void hardRefreshAuditLog()
-    }, [hardRefreshAuditLog, isDatabaseTabActive])
+    }, [auditLogPage, hardRefreshAuditLog, isDatabaseTabActive])
 
     useEffect(() => {
         if (!isDatabaseTabActive) return
