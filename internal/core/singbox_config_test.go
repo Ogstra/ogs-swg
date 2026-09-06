@@ -1852,3 +1852,100 @@ func TestSingboxInboundView_MarshalStability(t *testing.T) {
 		}
 	}
 }
+
+// TestGetUserInbounds_CredentialMapping asserts the capability-driven
+// credential mapping in GetUserInbounds matches the pre-refactor behavior for
+// every known protocol plus one unmanaged/unknown type. See 54-01's golden
+// fixture (user_inbounds_golden.json) for the byte-identical end-to-end
+// contract this must not break.
+func TestGetUserInbounds_CredentialMapping(t *testing.T) {
+	fixtureJSON := `{
+      "inbounds": [
+        {"type":"vless","tag":"t-vless","listen_port":11001,"users":[{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}]},
+        {"type":"vmess","tag":"t-vmess-id-fallback","listen_port":11002,"users":[{"name":"alice","id":"22222222-2222-2222-2222-222222222222","security":"aes-128-gcm","alterId":2,"flow":"ignored-flow"}]},
+        {"type":"vmess","tag":"t-vmess-uuid","listen_port":11003,"users":[{"name":"alice","uuid":"33333333-3333-3333-3333-333333333333","id":"44444444-4444-4444-4444-444444444444"}]},
+        {"type":"trojan","tag":"t-trojan","listen_port":11004,"users":[{"name":"alice","password":"trojan-password","flow":"should-be-cleared","security":"aes-128-gcm","alterId":3}]},
+        {"type":"hysteria2","tag":"t-hysteria2","listen_port":11005,"users":[{"name":"alice","password":"hy2-password"}]},
+        {"type":"shadowsocks","tag":"t-shadowsocks","listen_port":11006,"method":"2022-blake3-aes-128-gcm","password":"server-key-placeholder","users":[{"name":"alice","password":"user-key-placeholder"}]},
+        {"type":"anytls","tag":"t-anytls","listen_port":11007,"users":[{"name":"alice","password":"anytls-password"}]},
+        {"type":"naive","tag":"t-naive","listen_port":11008,"network":"udp","users":[{"username":"alice","password":"naive-password"}]},
+        {"type":"socks","tag":"t-unknown","listen_port":11009,"users":[{"username":"alice","password":"socks-password","uuid":"55555555-5555-5555-5555-555555555555"}]}
+      ]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+
+	result, err := cfg.GetUserInbounds("alice")
+	if err != nil {
+		t.Fatalf("GetUserInbounds() error = %v", err)
+	}
+
+	byTag := map[string]UserInboundInfo{}
+	for _, info := range result {
+		byTag[info.Tag] = info
+	}
+
+	// Password-credential protocols: only Tag/Password set, everything else zero.
+	for _, tag := range []string{"t-hysteria2", "t-shadowsocks", "t-anytls", "t-naive"} {
+		info, ok := byTag[tag]
+		if !ok {
+			t.Fatalf("missing result for tag %q", tag)
+		}
+		if info.UUID != "" || info.Flow != "" || info.VmessSecurity != "" || info.VmessAlterID != 0 {
+			t.Errorf("tag %q: expected only Password set, got %+v", tag, info)
+		}
+		if info.Password == "" {
+			t.Errorf("tag %q: expected non-empty Password", tag)
+		}
+	}
+
+	// trojan: UUID = password, Flow cleared, vmess fields still copied through.
+	trojan := byTag["t-trojan"]
+	if trojan.UUID != "trojan-password" {
+		t.Errorf("trojan UUID = %q; want %q", trojan.UUID, "trojan-password")
+	}
+	if trojan.Flow != "" {
+		t.Errorf("trojan Flow = %q; want empty", trojan.Flow)
+	}
+	if trojan.VmessSecurity != "aes-128-gcm" || trojan.VmessAlterID != 3 {
+		t.Errorf("trojan vmess fields = (%q, %d); want (%q, %d)", trojan.VmessSecurity, trojan.VmessAlterID, "aes-128-gcm", 3)
+	}
+
+	// vmess with empty uuid falls back to id; flow always cleared.
+	vmessFallback := byTag["t-vmess-id-fallback"]
+	if vmessFallback.UUID != "22222222-2222-2222-2222-222222222222" {
+		t.Errorf("vmess id-fallback UUID = %q; want id value", vmessFallback.UUID)
+	}
+	if vmessFallback.Flow != "" {
+		t.Errorf("vmess id-fallback Flow = %q; want empty", vmessFallback.Flow)
+	}
+
+	// vmess with non-empty uuid keeps uuid over id.
+	vmessUUID := byTag["t-vmess-uuid"]
+	if vmessUUID.UUID != "33333333-3333-3333-3333-333333333333" {
+		t.Errorf("vmess uuid UUID = %q; want uuid value", vmessUUID.UUID)
+	}
+	if vmessUUID.Flow != "" {
+		t.Errorf("vmess uuid Flow = %q; want empty", vmessUUID.Flow)
+	}
+
+	// vless: uuid/flow preserved as-is.
+	vless := byTag["t-vless"]
+	if vless.UUID != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("vless UUID = %q; want uuid value", vless.UUID)
+	}
+	if vless.Flow != "xtls-rprx-vision" {
+		t.Errorf("vless Flow = %q; want %q", vless.Flow, "xtls-rprx-vision")
+	}
+
+	// Unknown type (socks): default branch behaves like vless — uuid/flow preserved.
+	unknown, ok := byTag["t-unknown"]
+	if !ok {
+		t.Fatalf("missing result for unknown type tag t-unknown")
+	}
+	if unknown.UUID != "55555555-5555-5555-5555-555555555555" {
+		t.Errorf("unknown type UUID = %q; want preserved uuid value", unknown.UUID)
+	}
+	if unknown.Password != "" {
+		t.Errorf("unknown type Password = %q; want empty (password-branch not taken)", unknown.Password)
+	}
+}
