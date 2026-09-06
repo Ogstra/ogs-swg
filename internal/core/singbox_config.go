@@ -34,11 +34,35 @@ func (c *Config) GetSingboxConfig() (string, error) {
 	return string(content), nil
 }
 
-func (c *Config) readSingboxConfigLocked() ([]byte, error) {
+func (c *Config) readSingboxConfigUncachedLocked() ([]byte, error) {
+	c.singboxDiskReads++
 	if c.executor != nil {
 		return c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
 	}
 	return os.ReadFile(c.SingboxConfigPath)
+}
+
+func (c *Config) readSingboxConfigLocked() ([]byte, error) {
+	modTime, size, ok := c.statSingboxConfigLocked()
+	if ok && c.singboxCacheValidLocked(modTime, size) {
+		return append([]byte(nil), c.singboxCache.raw...), nil
+	}
+	content, err := c.readSingboxConfigUncachedLocked()
+	if err != nil {
+		c.singboxCache = nil
+		return nil, err
+	}
+	if ok {
+		c.singboxCache = &singboxConfigCache{
+			path:    c.SingboxConfigPath,
+			modTime: modTime,
+			size:    size,
+			raw:     append([]byte(nil), content...),
+		}
+	} else {
+		c.singboxCache = nil
+	}
+	return content, nil
 }
 
 func (c *Config) readSingboxConfigMapLocked() (map[string]interface{}, error) {
@@ -46,15 +70,23 @@ func (c *Config) readSingboxConfigMapLocked() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.singboxCache != nil && c.singboxCache.parsed != nil {
+		return deepCopyJSONMap(c.singboxCache.parsed), nil
+	}
 
 	raw := make(map[string]interface{})
+	c.singboxJSONParses++
 	if err := json.Unmarshal(content, &raw); err != nil {
 		return nil, err
+	}
+	if c.singboxCache != nil {
+		c.singboxCache.parsed = deepCopyJSONMap(raw)
 	}
 	return raw, nil
 }
 
 func (c *Config) writeSingboxConfigLocked(data []byte) error {
+	c.invalidateSingboxConfigCacheLocked()
 	if c.executor != nil {
 		return c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644)
 	}
@@ -391,10 +423,12 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, []byte(content), 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	} else {
 		if err := os.WriteFile(c.SingboxConfigPath, []byte(content), 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	}
 
 	// 4. Mark pending restart (lock already held)
@@ -583,6 +617,10 @@ func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 		return nil, err
 	}
 
+	if c.singboxCache != nil && c.singboxCache.views != nil {
+		return cloneSingboxInboundViews(c.singboxCache.views), nil
+	}
+
 	// Extract inbounds directly from the raw map to avoid failures from typed
 	// fields elsewhere in the config (e.g. Experimental with custom unmarshal).
 	var rawTop map[string]json.RawMessage
@@ -594,6 +632,7 @@ func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.singboxJSONParses++
 	views := make([]SingboxInboundView, 0, len(rawInbounds))
 	for _, rawInbound := range rawInbounds {
 		view, err := decodeSingboxInboundView(rawInbound)
@@ -601,6 +640,9 @@ func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 			return nil, err
 		}
 		views = append(views, view)
+	}
+	if c.singboxCache != nil {
+		c.singboxCache.views = cloneSingboxInboundViews(views)
 	}
 	return views, nil
 }
@@ -1032,10 +1074,12 @@ func (c *Config) saveAndReload(rawConfig *SingboxConfig) error {
 		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	} else {
 		if err := os.WriteFile(c.SingboxConfigPath, data, 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	}
 
 	return c.afterSingboxConfigWriteLocked(rawConfig)

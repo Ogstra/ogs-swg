@@ -75,6 +75,10 @@ type Config struct {
 
 	executor SystemExecutor
 	mu       sync.Mutex
+
+	singboxCache      *singboxConfigCache
+	singboxDiskReads  int64 // test instrumentation; mutated under mu
+	singboxJSONParses int64 // test instrumentation; mutated under mu
 }
 
 type SubscriptionProtectionConfig struct {
