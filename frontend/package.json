@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "visibility:golden": "node scripts/inbound-visibility-golden.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.3",
