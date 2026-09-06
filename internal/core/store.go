@@ -338,6 +338,23 @@ func (s *Store) initSchema() error {
 		PRIMARY KEY (user_name, external_profile_id),
 		FOREIGN KEY (external_profile_id) REFERENCES external_profiles(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS ntfy_settings (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		server_url TEXT NOT NULL DEFAULT '',
+		topic TEXT NOT NULL DEFAULT '',
+		auth_mode TEXT NOT NULL DEFAULT 'none',
+		bearer_token TEXT NOT NULL DEFAULT '',
+		basic_user TEXT NOT NULL DEFAULT '',
+		basic_pass TEXT NOT NULL DEFAULT '',
+		enable_singbox_down INTEGER NOT NULL DEFAULT 0,
+		enable_wireguard_down INTEGER NOT NULL DEFAULT 0,
+		enable_high_traffic INTEGER NOT NULL DEFAULT 0,
+		enable_config_errors INTEGER NOT NULL DEFAULT 0,
+		traffic_threshold_bytes INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
@@ -938,6 +955,59 @@ func (s *Store) UpdateDashboardPreferences(ctx context.Context, principal string
 			detail_chart_target_points = excluded.detail_chart_target_points,
 			updated_at = strftime('%s','now')
 	`, principal, prefs.DefaultService, prefs.RefreshMs, prefs.DefaultRange, prefs.ActiveUserWindowMinutes, prefs.DetailChartTargetPoints)
+	return err
+}
+
+func (s *Store) GetNtfySettings(ctx context.Context) (NtfySettings, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
+		       enable_singbox_down, enable_wireguard_down, enable_high_traffic,
+		       enable_config_errors, traffic_threshold_bytes
+		FROM ntfy_settings WHERE id = 1
+	`)
+	var out NtfySettings
+	var enableSingboxDown, enableWireguardDown, enableHighTraffic, enableConfigErrors int64
+	if err := row.Scan(&out.ServerURL, &out.Topic, &out.AuthMode, &out.BearerToken,
+		&out.BasicUser, &out.BasicPass, &enableSingboxDown, &enableWireguardDown,
+		&enableHighTraffic, &enableConfigErrors, &out.TrafficThresholdBytes); err != nil {
+		if err == sql.ErrNoRows {
+			return NormalizeNtfySettings(NtfySettings{}), nil
+		}
+		return NormalizeNtfySettings(NtfySettings{}), err
+	}
+	out.EnableSingboxDown = enableSingboxDown != 0
+	out.EnableWireguardDown = enableWireguardDown != 0
+	out.EnableHighTraffic = enableHighTraffic != 0
+	out.EnableConfigErrors = enableConfigErrors != 0
+	return NormalizeNtfySettings(out), nil
+}
+
+func (s *Store) UpdateNtfySettings(ctx context.Context, settings NtfySettings) error {
+	settings = NormalizeNtfySettings(settings)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO ntfy_settings (
+			id, server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
+			enable_singbox_down, enable_wireguard_down, enable_high_traffic,
+			enable_config_errors, traffic_threshold_bytes, created_at, updated_at
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+		ON CONFLICT(id) DO UPDATE SET
+			server_url = excluded.server_url,
+			topic = excluded.topic,
+			auth_mode = excluded.auth_mode,
+			bearer_token = excluded.bearer_token,
+			basic_user = excluded.basic_user,
+			basic_pass = excluded.basic_pass,
+			enable_singbox_down = excluded.enable_singbox_down,
+			enable_wireguard_down = excluded.enable_wireguard_down,
+			enable_high_traffic = excluded.enable_high_traffic,
+			enable_config_errors = excluded.enable_config_errors,
+			traffic_threshold_bytes = excluded.traffic_threshold_bytes,
+			updated_at = strftime('%s','now')
+	`, settings.ServerURL, settings.Topic, settings.AuthMode, settings.BearerToken,
+		settings.BasicUser, settings.BasicPass,
+		boolToInt64(settings.EnableSingboxDown), boolToInt64(settings.EnableWireguardDown),
+		boolToInt64(settings.EnableHighTraffic), boolToInt64(settings.EnableConfigErrors),
+		settings.TrafficThresholdBytes)
 	return err
 }
 
