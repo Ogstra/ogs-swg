@@ -438,13 +438,14 @@ function normalizeRawJsonOrStringForEditor(value: unknown): string {
 }
 
 function normalizeTls(type: InboundType, tls: any, fallback: any) {
-    if (type === 'shadowsocks') return undefined
+    const cap = PROTOCOL_CAPABILITIES[type]
+    if (!cap.supportsTLS) return undefined
     const normalized: any = {
         ...cloneValue(fallback),
         ...(tls && typeof tls === 'object' ? cloneValue(tls) : {}),
-        enabled: type === 'hysteria2' || type === 'anytls' || type === 'naive' ? true : !!tls?.enabled,
+        enabled: cap.tlsAlwaysEnabled ? true : !!tls?.enabled,
     }
-    if (type === 'vless') {
+    if (cap.supportsReality) {
         normalized.reality = {
             ...cloneValue(DEFAULT_VLESS.tls.reality),
             ...(tls?.reality && typeof tls.reality === 'object' ? cloneValue(tls.reality) : {}),
@@ -459,7 +460,7 @@ function normalizeTls(type: InboundType, tls: any, fallback: any) {
     } else {
         delete normalized.reality
     }
-    if (type === 'hysteria2' || type === 'naive') {
+    if (!cap.supportsALPN) {
         delete normalized.alpn
     } else if (!Array.isArray(normalized.alpn)) {
         normalized.alpn = cloneValue(fallback.alpn || [])
@@ -468,7 +469,7 @@ function normalizeTls(type: InboundType, tls: any, fallback: any) {
 }
 
 function normalizeTransport(type: InboundType, transport: any, fallback: any) {
-    if (type === 'hysteria2' || type === 'shadowsocks' || type === 'anytls' || type === 'naive') return undefined
+    if (!PROTOCOL_CAPABILITIES[type].supportsTransport) return undefined
     const transportEnabled = isTransportConfigured(transport)
     const normalized: any = {
         ...cloneValue(fallback),
@@ -487,7 +488,7 @@ function normalizeTransport(type: InboundType, transport: any, fallback: any) {
 }
 
 function normalizeMultiplex(type: InboundType, multiplex: any, fallback: any) {
-    if (type === 'hysteria2' || type === 'anytls' || type === 'naive') return undefined
+    if (!PROTOCOL_CAPABILITIES[type].supportsMultiplex) return undefined
     return {
         ...cloneValue(fallback),
         ...(multiplex && typeof multiplex === 'object' ? cloneValue(multiplex) : {}),
