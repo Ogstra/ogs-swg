@@ -410,6 +410,34 @@ export interface SubscriptionDefaultDestinationsResponse {
     destinations: string[];
 }
 
+export interface NtfySettingsResponse {
+    server_url: string;
+    topic: string;
+    auth_mode: 'none' | 'bearer' | 'basic';
+    basic_user: string;
+    has_bearer_token: boolean;
+    has_basic_pass: boolean;
+    enable_singbox_down: boolean;
+    enable_wireguard_down: boolean;
+    enable_high_traffic: boolean;
+    enable_config_errors: boolean;
+    traffic_threshold_bytes: number;
+}
+
+export interface NtfySettingsRequest {
+    server_url: string;
+    topic: string;
+    auth_mode: 'none' | 'bearer' | 'basic';
+    bearer_token: string;
+    basic_user: string;
+    basic_pass: string;
+    enable_singbox_down: boolean;
+    enable_wireguard_down: boolean;
+    enable_high_traffic: boolean;
+    enable_config_errors: boolean;
+    traffic_threshold_bytes: number;
+}
+
 
 const buildHeaders = (contentType?: string) => {
     const headers: Record<string, string> = {};
@@ -945,6 +973,14 @@ export const api = {
 
     triggerDBBackup: async (): Promise<{ created: string[] }> =>
         request('/api/settings/backup/trigger', { method: 'POST', errorMsg: 'Failed to trigger backup' }),
+
+    // Notifications (ntfy)
+    getNtfySettings: async (): Promise<NtfySettingsResponse> =>
+        request<NtfySettingsResponse>('/api/settings/ntfy', { errorMsg: 'Failed to fetch notification settings' }),
+    updateNtfySettings: async (payload: NtfySettingsRequest): Promise<void> =>
+        request('/api/settings/ntfy', { method: 'PUT', json: payload, parse: 'none', errorMsg: 'Failed to save notification settings' }),
+    sendTestNtfyNotification: async (payload: NtfySettingsRequest): Promise<void> =>
+        request('/api/settings/ntfy/test', { method: 'POST', json: payload, parse: 'none', errorMsg: 'Test notification failed' }),
 };
 
 export function downloadDBBackupURL(target: 'main' | 'audit' | 'logs'): string {
