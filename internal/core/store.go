@@ -2642,6 +2642,39 @@ func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, err
 	return res, nil
 }
 
+// GetCombinedTrafficTotal returns total panel traffic (sing-box uplink+downlink
+// plus WireGuard rx+tx deltas) in the inclusive [start, end] unix-second range.
+// Used by the ntfy high-traffic threshold check (NTFY-02).
+func (s *Store) GetCombinedTrafficTotal(start, end int64) (int64, error) {
+	var sbTotal int64
+	if err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(uplink), 0) + COALESCE(SUM(downlink), 0)
+		FROM samples WHERE ts >= ? AND ts <= ?
+	`, start, end).Scan(&sbTotal); err != nil {
+		return 0, err
+	}
+
+	var wgTotal int64
+	if err := s.db.QueryRow(`
+		WITH ordered AS (
+		  SELECT public_key, rx, tx,
+		         LAG(rx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_rx,
+		         LAG(tx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_tx
+		  FROM wg_samples WHERE ts >= ? AND ts <= ?
+		),
+		diffs AS (
+		  SELECT CASE WHEN prev_rx IS NULL THEN 0 WHEN rx - prev_rx < 0 THEN 0 ELSE rx - prev_rx END AS dr,
+		         CASE WHEN prev_tx IS NULL THEN 0 WHEN tx - prev_tx < 0 THEN 0 ELSE tx - prev_tx END AS dx
+		  FROM ordered
+		)
+		SELECT COALESCE(SUM(dr), 0) + COALESCE(SUM(dx), 0) FROM diffs
+	`, start, end).Scan(&wgTotal); err != nil {
+		return 0, err
+	}
+
+	return sbTotal + wgTotal, nil
+}
+
 func (s *Store) PruneWGSamplesOlderThan(ts int64) error {
 	return s.Queries.PruneWGSamplesOlderThan(context.Background(), ts)
 }
