@@ -1,0 +1,2713 @@
+{
+  "after_external_edit": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": "clash-secret-placeholder"
+    },
+    "config_map": {
+      "dns": {
+        "servers": [
+          {
+            "address": "198.51.100.53",
+            "tag": "dns-remote"
+          }
+        ]
+      },
+      "experimental": {
+        "clash_api": {
+          "external_controller": "127.0.0.1:9090",
+          "secret": "clash-secret-placeholder"
+        },
+        "v2ray_api": {
+          "listen": "127.0.0.1:8964",
+          "stats": {
+            "enabled": true,
+            "inbounds": [
+              "gold-vless"
+            ],
+            "outbounds": [
+              "direct"
+            ],
+            "users": [
+              "alice"
+            ]
+          }
+        }
+      },
+      "inbounds": [
+        {
+          "listen": "::",
+          "listen_port": 8443,
+          "network": "tcp",
+          "tag": "gold-vless",
+          "tls": {
+            "enabled": true,
+            "reality": {
+              "enabled": true,
+              "handshake": {
+                "server": "edge.example.com",
+                "server_port": 443
+              },
+              "private_key": "reality-private-key-placeholder",
+              "public_key": "reality-public-key-placeholder",
+              "short_id": [
+                "deadbeef"
+              ]
+            },
+            "server_name": "edge.example.com"
+          },
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "alice",
+              "uuid": "11111111-1111-1111-1111-111111111111"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 444,
+          "tag": "gold-vless-bob",
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "bob",
+              "uuid": "77777777-7777-7777-7777-777777777777"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 445,
+          "tag": "gold-vmess",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "transport": {
+            "path": "/gold-vmess-ws",
+            "type": "ws"
+          },
+          "type": "vmess",
+          "users": [
+            {
+              "alterId": 0,
+              "id": "22222222-2222-2222-2222-222222222222",
+              "name": "alice",
+              "security": "aes-128-gcm"
+            },
+            {
+              "alterId": 0,
+              "id": "88888888-8888-8888-8888-888888888888",
+              "name": "carol",
+              "security": "aes-128-gcm"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 446,
+          "tag": "gold-trojan",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "trojan",
+          "users": [
+            {
+              "name": "alice",
+              "password": "trojan-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 447,
+          "obfs": {
+            "password": "obfs-password-placeholder",
+            "type": "salamander"
+          },
+          "tag": "gold-hy2",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "hysteria2",
+          "users": [
+            {
+              "name": "alice",
+              "password": "hy2-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 448,
+          "method": "2022-blake3-aes-128-gcm",
+          "password": "ss-server-key-placeholder",
+          "tag": "gold-ss",
+          "type": "shadowsocks",
+          "users": [
+            {
+              "name": "alice",
+              "password": "ss-user-key-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 449,
+          "tag": "gold-anytls",
+          "tls": {
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "anytls",
+          "users": [
+            {
+              "name": "alice",
+              "password": "anytls-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 450,
+          "network": "udp",
+          "tag": "gold-naive",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "naive",
+          "users": [
+            {
+              "password": "naive-password-placeholder",
+              "username": "alice"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 451,
+          "tag": "gold-unknown",
+          "type": "socks"
+        }
+      ],
+      "log": {
+        "level": "info",
+        "timestamp": true
+      },
+      "outbounds": [
+        {
+          "domain_strategy": "prefer_ipv4",
+          "tag": "direct",
+          "type": "direct"
+        },
+        {
+          "tag": "block",
+          "type": "block"
+        }
+      ],
+      "route": {
+        "rules": [
+          {
+            "auth_user": [
+              "alice"
+            ],
+            "inbound": [
+              "gold-vless"
+            ],
+            "outbound": "direct"
+          },
+          {
+            "action": "hijack-dns",
+            "protocol": "dns"
+          }
+        ]
+      }
+    },
+    "dns": {
+      "servers": [
+        {
+          "address": "198.51.100.53",
+          "tag": "dns-remote"
+        }
+      ]
+    },
+    "inbound_metas": [
+      {
+        "tag": "gold-vless",
+        "type": "vless",
+        "listen_port": 8443
+      },
+      {
+        "tag": "gold-vless-bob",
+        "type": "vless",
+        "listen_port": 444
+      },
+      {
+        "tag": "gold-vmess",
+        "type": "vmess",
+        "listen_port": 445
+      },
+      {
+        "tag": "gold-trojan",
+        "type": "trojan",
+        "listen_port": 446
+      },
+      {
+        "tag": "gold-hy2",
+        "type": "hysteria2",
+        "listen_port": 447
+      },
+      {
+        "tag": "gold-ss",
+        "type": "shadowsocks",
+        "listen_port": 448
+      },
+      {
+        "tag": "gold-anytls",
+        "type": "anytls",
+        "listen_port": 449
+      },
+      {
+        "tag": "gold-naive",
+        "type": "naive",
+        "listen_port": 450
+      },
+      {
+        "tag": "gold-unknown",
+        "type": "socks",
+        "listen_port": 451
+      }
+    ],
+    "inbound_view_gold_hy2": {
+      "listen_port": 447,
+      "method": "",
+      "network": "",
+      "obfs": {
+        "type": "salamander",
+        "password": "obfs-password-placeholder"
+      },
+      "raw": {
+        "listen": "::",
+        "listen_port": 447,
+        "obfs": {
+          "password": "obfs-password-placeholder",
+          "type": "salamander"
+        },
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      "server_key": "",
+      "tag": "gold-hy2",
+      "tls": {
+        "enabled": true,
+        "server_name": "edge.example.com"
+      },
+      "type": "hysteria2",
+      "users": [
+        {
+          "name": "alice",
+          "password": "hy2-password-placeholder"
+        }
+      ]
+    },
+    "inbound_view_missing_error": "inbound with tag 'does-not-exist' not found",
+    "inbound_views": [
+      {
+        "listen_port": 8443,
+        "method": "",
+        "network": "tcp",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 8443,
+          "network": "tcp",
+          "tag": "gold-vless",
+          "tls": {
+            "enabled": true,
+            "reality": {
+              "enabled": true,
+              "handshake": {
+                "server": "edge.example.com",
+                "server_port": 443
+              },
+              "private_key": "reality-private-key-placeholder",
+              "public_key": "reality-public-key-placeholder",
+              "short_id": [
+                "deadbeef"
+              ]
+            },
+            "server_name": "edge.example.com"
+          },
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "alice",
+              "uuid": "11111111-1111-1111-1111-111111111111"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vless",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com",
+          "reality": {
+            "enabled": true,
+            "handshake": {
+              "server": "edge.example.com",
+              "server_port": 443
+            },
+            "private_key": "reality-private-key-placeholder",
+            "public_key": "reality-public-key-placeholder",
+            "short_id": [
+              "deadbeef"
+            ]
+          }
+        },
+        "type": "vless",
+        "users": [
+          {
+            "name": "alice",
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      },
+      {
+        "listen_port": 444,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 444,
+          "tag": "gold-vless-bob",
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "bob",
+              "uuid": "77777777-7777-7777-7777-777777777777"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vless-bob",
+        "tls": null,
+        "type": "vless",
+        "users": [
+          {
+            "name": "bob",
+            "uuid": "77777777-7777-7777-7777-777777777777",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      },
+      {
+        "listen_port": 445,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 445,
+          "tag": "gold-vmess",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "transport": {
+            "path": "/gold-vmess-ws",
+            "type": "ws"
+          },
+          "type": "vmess",
+          "users": [
+            {
+              "alterId": 0,
+              "id": "22222222-2222-2222-2222-222222222222",
+              "name": "alice",
+              "security": "aes-128-gcm"
+            },
+            {
+              "alterId": 0,
+              "id": "88888888-8888-8888-8888-888888888888",
+              "name": "carol",
+              "security": "aes-128-gcm"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vmess",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "vmess",
+        "users": [
+          {
+            "name": "alice",
+            "id": "22222222-2222-2222-2222-222222222222",
+            "security": "aes-128-gcm"
+          },
+          {
+            "name": "carol",
+            "id": "88888888-8888-8888-8888-888888888888",
+            "security": "aes-128-gcm"
+          }
+        ]
+      },
+      {
+        "listen_port": 446,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 446,
+          "tag": "gold-trojan",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "trojan",
+          "users": [
+            {
+              "name": "alice",
+              "password": "trojan-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-trojan",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "trojan",
+        "users": [
+          {
+            "name": "alice",
+            "password": "trojan-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 447,
+        "method": "",
+        "network": "",
+        "obfs": {
+          "type": "salamander",
+          "password": "obfs-password-placeholder"
+        },
+        "raw": {
+          "listen": "::",
+          "listen_port": 447,
+          "obfs": {
+            "password": "obfs-password-placeholder",
+            "type": "salamander"
+          },
+          "tag": "gold-hy2",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "hysteria2",
+          "users": [
+            {
+              "name": "alice",
+              "password": "hy2-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 448,
+        "method": "2022-blake3-aes-128-gcm",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 448,
+          "method": "2022-blake3-aes-128-gcm",
+          "password": "ss-server-key-placeholder",
+          "tag": "gold-ss",
+          "type": "shadowsocks",
+          "users": [
+            {
+              "name": "alice",
+              "password": "ss-user-key-placeholder"
+            }
+          ]
+        },
+        "server_key": "ss-server-key-placeholder",
+        "tag": "gold-ss",
+        "tls": null,
+        "type": "shadowsocks",
+        "users": [
+          {
+            "name": "alice",
+            "password": "ss-user-key-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 449,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 449,
+          "tag": "gold-anytls",
+          "tls": {
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "anytls",
+          "users": [
+            {
+              "name": "alice",
+              "password": "anytls-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-anytls",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ]
+        },
+        "type": "anytls",
+        "users": [
+          {
+            "name": "alice",
+            "password": "anytls-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 450,
+        "method": "",
+        "network": "udp",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 450,
+          "network": "udp",
+          "tag": "gold-naive",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "naive",
+          "users": [
+            {
+              "password": "naive-password-placeholder",
+              "username": "alice"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-naive",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "naive",
+        "users": [
+          {
+            "name": "alice",
+            "password": "naive-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 451,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 451,
+          "tag": "gold-unknown",
+          "type": "socks"
+        },
+        "server_key": "",
+        "tag": "gold-unknown",
+        "tls": null,
+        "type": "socks",
+        "users": null
+      }
+    ],
+    "inbounds_raw": [
+      {
+        "listen": "::",
+        "listen_port": 8443,
+        "network": "tcp",
+        "tag": "gold-vless",
+        "tls": {
+          "enabled": true,
+          "reality": {
+            "enabled": true,
+            "handshake": {
+              "server": "edge.example.com",
+              "server_port": 443
+            },
+            "private_key": "reality-private-key-placeholder",
+            "public_key": "reality-public-key-placeholder",
+            "short_id": [
+              "deadbeef"
+            ]
+          },
+          "server_name": "edge.example.com"
+        },
+        "type": "vless",
+        "users": [
+          {
+            "flow": "xtls-rprx-vision",
+            "name": "alice",
+            "uuid": "11111111-1111-1111-1111-111111111111"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 444,
+        "tag": "gold-vless-bob",
+        "type": "vless",
+        "users": [
+          {
+            "flow": "xtls-rprx-vision",
+            "name": "bob",
+            "uuid": "77777777-7777-7777-7777-777777777777"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 445,
+        "tag": "gold-vmess",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "transport": {
+          "path": "/gold-vmess-ws",
+          "type": "ws"
+        },
+        "type": "vmess",
+        "users": [
+          {
+            "alterId": 0,
+            "id": "22222222-2222-2222-2222-222222222222",
+            "name": "alice",
+            "security": "aes-128-gcm"
+          },
+          {
+            "alterId": 0,
+            "id": "88888888-8888-8888-8888-888888888888",
+            "name": "carol",
+            "security": "aes-128-gcm"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 446,
+        "tag": "gold-trojan",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "trojan",
+        "users": [
+          {
+            "name": "alice",
+            "password": "trojan-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 447,
+        "obfs": {
+          "password": "obfs-password-placeholder",
+          "type": "salamander"
+        },
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 448,
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "ss-server-key-placeholder",
+        "tag": "gold-ss",
+        "type": "shadowsocks",
+        "users": [
+          {
+            "name": "alice",
+            "password": "ss-user-key-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 449,
+        "tag": "gold-anytls",
+        "tls": {
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "anytls",
+        "users": [
+          {
+            "name": "alice",
+            "password": "anytls-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 450,
+        "network": "udp",
+        "tag": "gold-naive",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "naive",
+        "users": [
+          {
+            "password": "naive-password-placeholder",
+            "username": "alice"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 451,
+        "tag": "gold-unknown",
+        "type": "socks"
+      }
+    ],
+    "outbound_views": [
+      {
+        "tag": "direct",
+        "type": "direct",
+        "domain_strategy": "prefer_ipv4"
+      },
+      {
+        "tag": "block",
+        "type": "block"
+      }
+    ],
+    "raw_bytes_sha256": "b59838833dd4c9b5a5a66737a1618e15daa2ca3e8861ddacff595406a0fc1baa",
+    "route_rules": [
+      {
+        "auth_user": [
+          "alice"
+        ],
+        "inbound": [
+          "gold-vless"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      }
+    ],
+    "user_inbounds_alice": [
+      {
+        "tag": "gold-vless",
+        "uuid": "11111111-1111-1111-1111-111111111111",
+        "flow": "xtls-rprx-vision"
+      },
+      {
+        "tag": "gold-vmess",
+        "uuid": "22222222-2222-2222-2222-222222222222",
+        "vmess_security": "aes-128-gcm"
+      },
+      {
+        "tag": "gold-trojan",
+        "uuid": "trojan-password-placeholder"
+      },
+      {
+        "tag": "gold-hy2",
+        "uuid": "",
+        "password": "hy2-password-placeholder"
+      },
+      {
+        "tag": "gold-ss",
+        "uuid": "",
+        "password": "ss-user-key-placeholder"
+      },
+      {
+        "tag": "gold-anytls",
+        "uuid": "",
+        "password": "anytls-password-placeholder"
+      },
+      {
+        "tag": "gold-naive",
+        "uuid": "",
+        "password": "naive-password-placeholder"
+      }
+    ],
+    "user_inbounds_bob": [
+      {
+        "tag": "gold-vless-bob",
+        "uuid": "77777777-7777-7777-7777-777777777777",
+        "flow": "xtls-rprx-vision"
+      }
+    ]
+  },
+  "initial": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": "clash-secret-placeholder"
+    },
+    "config_map": {
+      "dns": {
+        "servers": [
+          {
+            "address": "198.51.100.53",
+            "tag": "dns-remote"
+          }
+        ]
+      },
+      "experimental": {
+        "clash_api": {
+          "external_controller": "127.0.0.1:9090",
+          "secret": "clash-secret-placeholder"
+        },
+        "v2ray_api": {
+          "listen": "127.0.0.1:8964",
+          "stats": {
+            "enabled": true,
+            "inbounds": [
+              "gold-vless"
+            ],
+            "outbounds": [
+              "direct"
+            ],
+            "users": [
+              "alice"
+            ]
+          }
+        }
+      },
+      "inbounds": [
+        {
+          "listen": "::",
+          "listen_port": 443,
+          "network": "tcp",
+          "tag": "gold-vless",
+          "tls": {
+            "enabled": true,
+            "reality": {
+              "enabled": true,
+              "handshake": {
+                "server": "edge.example.com",
+                "server_port": 443
+              },
+              "private_key": "reality-private-key-placeholder",
+              "public_key": "reality-public-key-placeholder",
+              "short_id": [
+                "deadbeef"
+              ]
+            },
+            "server_name": "edge.example.com"
+          },
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "alice",
+              "uuid": "11111111-1111-1111-1111-111111111111"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 444,
+          "tag": "gold-vless-bob",
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "bob",
+              "uuid": "77777777-7777-7777-7777-777777777777"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 445,
+          "tag": "gold-vmess",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "transport": {
+            "path": "/gold-vmess-ws",
+            "type": "ws"
+          },
+          "type": "vmess",
+          "users": [
+            {
+              "alterId": 0,
+              "id": "22222222-2222-2222-2222-222222222222",
+              "name": "alice",
+              "security": "aes-128-gcm"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 446,
+          "tag": "gold-trojan",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "trojan",
+          "users": [
+            {
+              "name": "alice",
+              "password": "trojan-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 447,
+          "obfs": {
+            "password": "obfs-password-placeholder",
+            "type": "salamander"
+          },
+          "tag": "gold-hy2",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "hysteria2",
+          "users": [
+            {
+              "name": "alice",
+              "password": "hy2-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 448,
+          "method": "2022-blake3-aes-128-gcm",
+          "password": "ss-server-key-placeholder",
+          "tag": "gold-ss",
+          "type": "shadowsocks",
+          "users": [
+            {
+              "name": "alice",
+              "password": "ss-user-key-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 449,
+          "tag": "gold-anytls",
+          "tls": {
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "anytls",
+          "users": [
+            {
+              "name": "alice",
+              "password": "anytls-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 450,
+          "network": "udp",
+          "tag": "gold-naive",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "naive",
+          "users": [
+            {
+              "password": "naive-password-placeholder",
+              "username": "alice"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 451,
+          "tag": "gold-unknown",
+          "type": "socks"
+        }
+      ],
+      "log": {
+        "level": "info",
+        "timestamp": true
+      },
+      "outbounds": [
+        {
+          "domain_strategy": "prefer_ipv4",
+          "tag": "direct",
+          "type": "direct"
+        },
+        {
+          "tag": "block",
+          "type": "block"
+        }
+      ],
+      "route": {
+        "rules": [
+          {
+            "auth_user": [
+              "alice"
+            ],
+            "inbound": [
+              "gold-vless"
+            ],
+            "outbound": "direct"
+          },
+          {
+            "action": "hijack-dns",
+            "protocol": "dns"
+          }
+        ]
+      }
+    },
+    "dns": {
+      "servers": [
+        {
+          "address": "198.51.100.53",
+          "tag": "dns-remote"
+        }
+      ]
+    },
+    "inbound_metas": [
+      {
+        "tag": "gold-vless",
+        "type": "vless",
+        "listen_port": 443
+      },
+      {
+        "tag": "gold-vless-bob",
+        "type": "vless",
+        "listen_port": 444
+      },
+      {
+        "tag": "gold-vmess",
+        "type": "vmess",
+        "listen_port": 445
+      },
+      {
+        "tag": "gold-trojan",
+        "type": "trojan",
+        "listen_port": 446
+      },
+      {
+        "tag": "gold-hy2",
+        "type": "hysteria2",
+        "listen_port": 447
+      },
+      {
+        "tag": "gold-ss",
+        "type": "shadowsocks",
+        "listen_port": 448
+      },
+      {
+        "tag": "gold-anytls",
+        "type": "anytls",
+        "listen_port": 449
+      },
+      {
+        "tag": "gold-naive",
+        "type": "naive",
+        "listen_port": 450
+      },
+      {
+        "tag": "gold-unknown",
+        "type": "socks",
+        "listen_port": 451
+      }
+    ],
+    "inbound_view_gold_hy2": {
+      "listen_port": 447,
+      "method": "",
+      "network": "",
+      "obfs": {
+        "type": "salamander",
+        "password": "obfs-password-placeholder"
+      },
+      "raw": {
+        "listen": "::",
+        "listen_port": 447,
+        "obfs": {
+          "password": "obfs-password-placeholder",
+          "type": "salamander"
+        },
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      "server_key": "",
+      "tag": "gold-hy2",
+      "tls": {
+        "enabled": true,
+        "server_name": "edge.example.com"
+      },
+      "type": "hysteria2",
+      "users": [
+        {
+          "name": "alice",
+          "password": "hy2-password-placeholder"
+        }
+      ]
+    },
+    "inbound_view_missing_error": "inbound with tag 'does-not-exist' not found",
+    "inbound_views": [
+      {
+        "listen_port": 443,
+        "method": "",
+        "network": "tcp",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 443,
+          "network": "tcp",
+          "tag": "gold-vless",
+          "tls": {
+            "enabled": true,
+            "reality": {
+              "enabled": true,
+              "handshake": {
+                "server": "edge.example.com",
+                "server_port": 443
+              },
+              "private_key": "reality-private-key-placeholder",
+              "public_key": "reality-public-key-placeholder",
+              "short_id": [
+                "deadbeef"
+              ]
+            },
+            "server_name": "edge.example.com"
+          },
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "alice",
+              "uuid": "11111111-1111-1111-1111-111111111111"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vless",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com",
+          "reality": {
+            "enabled": true,
+            "handshake": {
+              "server": "edge.example.com",
+              "server_port": 443
+            },
+            "private_key": "reality-private-key-placeholder",
+            "public_key": "reality-public-key-placeholder",
+            "short_id": [
+              "deadbeef"
+            ]
+          }
+        },
+        "type": "vless",
+        "users": [
+          {
+            "name": "alice",
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      },
+      {
+        "listen_port": 444,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 444,
+          "tag": "gold-vless-bob",
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "bob",
+              "uuid": "77777777-7777-7777-7777-777777777777"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vless-bob",
+        "tls": null,
+        "type": "vless",
+        "users": [
+          {
+            "name": "bob",
+            "uuid": "77777777-7777-7777-7777-777777777777",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      },
+      {
+        "listen_port": 445,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 445,
+          "tag": "gold-vmess",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "transport": {
+            "path": "/gold-vmess-ws",
+            "type": "ws"
+          },
+          "type": "vmess",
+          "users": [
+            {
+              "alterId": 0,
+              "id": "22222222-2222-2222-2222-222222222222",
+              "name": "alice",
+              "security": "aes-128-gcm"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vmess",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "vmess",
+        "users": [
+          {
+            "name": "alice",
+            "id": "22222222-2222-2222-2222-222222222222",
+            "security": "aes-128-gcm"
+          }
+        ]
+      },
+      {
+        "listen_port": 446,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 446,
+          "tag": "gold-trojan",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "trojan",
+          "users": [
+            {
+              "name": "alice",
+              "password": "trojan-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-trojan",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "trojan",
+        "users": [
+          {
+            "name": "alice",
+            "password": "trojan-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 447,
+        "method": "",
+        "network": "",
+        "obfs": {
+          "type": "salamander",
+          "password": "obfs-password-placeholder"
+        },
+        "raw": {
+          "listen": "::",
+          "listen_port": 447,
+          "obfs": {
+            "password": "obfs-password-placeholder",
+            "type": "salamander"
+          },
+          "tag": "gold-hy2",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "hysteria2",
+          "users": [
+            {
+              "name": "alice",
+              "password": "hy2-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 448,
+        "method": "2022-blake3-aes-128-gcm",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 448,
+          "method": "2022-blake3-aes-128-gcm",
+          "password": "ss-server-key-placeholder",
+          "tag": "gold-ss",
+          "type": "shadowsocks",
+          "users": [
+            {
+              "name": "alice",
+              "password": "ss-user-key-placeholder"
+            }
+          ]
+        },
+        "server_key": "ss-server-key-placeholder",
+        "tag": "gold-ss",
+        "tls": null,
+        "type": "shadowsocks",
+        "users": [
+          {
+            "name": "alice",
+            "password": "ss-user-key-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 449,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 449,
+          "tag": "gold-anytls",
+          "tls": {
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "anytls",
+          "users": [
+            {
+              "name": "alice",
+              "password": "anytls-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-anytls",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ]
+        },
+        "type": "anytls",
+        "users": [
+          {
+            "name": "alice",
+            "password": "anytls-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 450,
+        "method": "",
+        "network": "udp",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 450,
+          "network": "udp",
+          "tag": "gold-naive",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "naive",
+          "users": [
+            {
+              "password": "naive-password-placeholder",
+              "username": "alice"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-naive",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "naive",
+        "users": [
+          {
+            "name": "alice",
+            "password": "naive-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 451,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 451,
+          "tag": "gold-unknown",
+          "type": "socks"
+        },
+        "server_key": "",
+        "tag": "gold-unknown",
+        "tls": null,
+        "type": "socks",
+        "users": null
+      }
+    ],
+    "inbounds_raw": [
+      {
+        "listen": "::",
+        "listen_port": 443,
+        "network": "tcp",
+        "tag": "gold-vless",
+        "tls": {
+          "enabled": true,
+          "reality": {
+            "enabled": true,
+            "handshake": {
+              "server": "edge.example.com",
+              "server_port": 443
+            },
+            "private_key": "reality-private-key-placeholder",
+            "public_key": "reality-public-key-placeholder",
+            "short_id": [
+              "deadbeef"
+            ]
+          },
+          "server_name": "edge.example.com"
+        },
+        "type": "vless",
+        "users": [
+          {
+            "flow": "xtls-rprx-vision",
+            "name": "alice",
+            "uuid": "11111111-1111-1111-1111-111111111111"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 444,
+        "tag": "gold-vless-bob",
+        "type": "vless",
+        "users": [
+          {
+            "flow": "xtls-rprx-vision",
+            "name": "bob",
+            "uuid": "77777777-7777-7777-7777-777777777777"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 445,
+        "tag": "gold-vmess",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "transport": {
+          "path": "/gold-vmess-ws",
+          "type": "ws"
+        },
+        "type": "vmess",
+        "users": [
+          {
+            "alterId": 0,
+            "id": "22222222-2222-2222-2222-222222222222",
+            "name": "alice",
+            "security": "aes-128-gcm"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 446,
+        "tag": "gold-trojan",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "trojan",
+        "users": [
+          {
+            "name": "alice",
+            "password": "trojan-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 447,
+        "obfs": {
+          "password": "obfs-password-placeholder",
+          "type": "salamander"
+        },
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 448,
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "ss-server-key-placeholder",
+        "tag": "gold-ss",
+        "type": "shadowsocks",
+        "users": [
+          {
+            "name": "alice",
+            "password": "ss-user-key-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 449,
+        "tag": "gold-anytls",
+        "tls": {
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "anytls",
+        "users": [
+          {
+            "name": "alice",
+            "password": "anytls-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 450,
+        "network": "udp",
+        "tag": "gold-naive",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "naive",
+        "users": [
+          {
+            "password": "naive-password-placeholder",
+            "username": "alice"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 451,
+        "tag": "gold-unknown",
+        "type": "socks"
+      }
+    ],
+    "outbound_views": [
+      {
+        "tag": "direct",
+        "type": "direct",
+        "domain_strategy": "prefer_ipv4"
+      },
+      {
+        "tag": "block",
+        "type": "block"
+      }
+    ],
+    "raw_bytes_sha256": "7781685b1e9560f8a6779654bdbd276c1d8f99fce179fef887e954871f9b7468",
+    "route_rules": [
+      {
+        "auth_user": [
+          "alice"
+        ],
+        "inbound": [
+          "gold-vless"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      }
+    ],
+    "user_inbounds_alice": [
+      {
+        "tag": "gold-vless",
+        "uuid": "11111111-1111-1111-1111-111111111111",
+        "flow": "xtls-rprx-vision"
+      },
+      {
+        "tag": "gold-vmess",
+        "uuid": "22222222-2222-2222-2222-222222222222",
+        "vmess_security": "aes-128-gcm"
+      },
+      {
+        "tag": "gold-trojan",
+        "uuid": "trojan-password-placeholder"
+      },
+      {
+        "tag": "gold-hy2",
+        "uuid": "",
+        "password": "hy2-password-placeholder"
+      },
+      {
+        "tag": "gold-ss",
+        "uuid": "",
+        "password": "ss-user-key-placeholder"
+      },
+      {
+        "tag": "gold-anytls",
+        "uuid": "",
+        "password": "anytls-password-placeholder"
+      },
+      {
+        "tag": "gold-naive",
+        "uuid": "",
+        "password": "naive-password-placeholder"
+      }
+    ],
+    "user_inbounds_bob": [
+      {
+        "tag": "gold-vless-bob",
+        "uuid": "77777777-7777-7777-7777-777777777777",
+        "flow": "xtls-rprx-vision"
+      }
+    ]
+  },
+  "repeat_same_file": {
+    "clash_api": {
+      "external_controller": "127.0.0.1:9090",
+      "secret": "clash-secret-placeholder"
+    },
+    "config_map": {
+      "dns": {
+        "servers": [
+          {
+            "address": "198.51.100.53",
+            "tag": "dns-remote"
+          }
+        ]
+      },
+      "experimental": {
+        "clash_api": {
+          "external_controller": "127.0.0.1:9090",
+          "secret": "clash-secret-placeholder"
+        },
+        "v2ray_api": {
+          "listen": "127.0.0.1:8964",
+          "stats": {
+            "enabled": true,
+            "inbounds": [
+              "gold-vless"
+            ],
+            "outbounds": [
+              "direct"
+            ],
+            "users": [
+              "alice"
+            ]
+          }
+        }
+      },
+      "inbounds": [
+        {
+          "listen": "::",
+          "listen_port": 443,
+          "network": "tcp",
+          "tag": "gold-vless",
+          "tls": {
+            "enabled": true,
+            "reality": {
+              "enabled": true,
+              "handshake": {
+                "server": "edge.example.com",
+                "server_port": 443
+              },
+              "private_key": "reality-private-key-placeholder",
+              "public_key": "reality-public-key-placeholder",
+              "short_id": [
+                "deadbeef"
+              ]
+            },
+            "server_name": "edge.example.com"
+          },
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "alice",
+              "uuid": "11111111-1111-1111-1111-111111111111"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 444,
+          "tag": "gold-vless-bob",
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "bob",
+              "uuid": "77777777-7777-7777-7777-777777777777"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 445,
+          "tag": "gold-vmess",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "transport": {
+            "path": "/gold-vmess-ws",
+            "type": "ws"
+          },
+          "type": "vmess",
+          "users": [
+            {
+              "alterId": 0,
+              "id": "22222222-2222-2222-2222-222222222222",
+              "name": "alice",
+              "security": "aes-128-gcm"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 446,
+          "tag": "gold-trojan",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "trojan",
+          "users": [
+            {
+              "name": "alice",
+              "password": "trojan-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 447,
+          "obfs": {
+            "password": "obfs-password-placeholder",
+            "type": "salamander"
+          },
+          "tag": "gold-hy2",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "hysteria2",
+          "users": [
+            {
+              "name": "alice",
+              "password": "hy2-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 448,
+          "method": "2022-blake3-aes-128-gcm",
+          "password": "ss-server-key-placeholder",
+          "tag": "gold-ss",
+          "type": "shadowsocks",
+          "users": [
+            {
+              "name": "alice",
+              "password": "ss-user-key-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 449,
+          "tag": "gold-anytls",
+          "tls": {
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "anytls",
+          "users": [
+            {
+              "name": "alice",
+              "password": "anytls-password-placeholder"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 450,
+          "network": "udp",
+          "tag": "gold-naive",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "naive",
+          "users": [
+            {
+              "password": "naive-password-placeholder",
+              "username": "alice"
+            }
+          ]
+        },
+        {
+          "listen": "::",
+          "listen_port": 451,
+          "tag": "gold-unknown",
+          "type": "socks"
+        }
+      ],
+      "log": {
+        "level": "info",
+        "timestamp": true
+      },
+      "outbounds": [
+        {
+          "domain_strategy": "prefer_ipv4",
+          "tag": "direct",
+          "type": "direct"
+        },
+        {
+          "tag": "block",
+          "type": "block"
+        }
+      ],
+      "route": {
+        "rules": [
+          {
+            "auth_user": [
+              "alice"
+            ],
+            "inbound": [
+              "gold-vless"
+            ],
+            "outbound": "direct"
+          },
+          {
+            "action": "hijack-dns",
+            "protocol": "dns"
+          }
+        ]
+      }
+    },
+    "dns": {
+      "servers": [
+        {
+          "address": "198.51.100.53",
+          "tag": "dns-remote"
+        }
+      ]
+    },
+    "inbound_metas": [
+      {
+        "tag": "gold-vless",
+        "type": "vless",
+        "listen_port": 443
+      },
+      {
+        "tag": "gold-vless-bob",
+        "type": "vless",
+        "listen_port": 444
+      },
+      {
+        "tag": "gold-vmess",
+        "type": "vmess",
+        "listen_port": 445
+      },
+      {
+        "tag": "gold-trojan",
+        "type": "trojan",
+        "listen_port": 446
+      },
+      {
+        "tag": "gold-hy2",
+        "type": "hysteria2",
+        "listen_port": 447
+      },
+      {
+        "tag": "gold-ss",
+        "type": "shadowsocks",
+        "listen_port": 448
+      },
+      {
+        "tag": "gold-anytls",
+        "type": "anytls",
+        "listen_port": 449
+      },
+      {
+        "tag": "gold-naive",
+        "type": "naive",
+        "listen_port": 450
+      },
+      {
+        "tag": "gold-unknown",
+        "type": "socks",
+        "listen_port": 451
+      }
+    ],
+    "inbound_view_gold_hy2": {
+      "listen_port": 447,
+      "method": "",
+      "network": "",
+      "obfs": {
+        "type": "salamander",
+        "password": "obfs-password-placeholder"
+      },
+      "raw": {
+        "listen": "::",
+        "listen_port": 447,
+        "obfs": {
+          "password": "obfs-password-placeholder",
+          "type": "salamander"
+        },
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      "server_key": "",
+      "tag": "gold-hy2",
+      "tls": {
+        "enabled": true,
+        "server_name": "edge.example.com"
+      },
+      "type": "hysteria2",
+      "users": [
+        {
+          "name": "alice",
+          "password": "hy2-password-placeholder"
+        }
+      ]
+    },
+    "inbound_view_missing_error": "inbound with tag 'does-not-exist' not found",
+    "inbound_views": [
+      {
+        "listen_port": 443,
+        "method": "",
+        "network": "tcp",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 443,
+          "network": "tcp",
+          "tag": "gold-vless",
+          "tls": {
+            "enabled": true,
+            "reality": {
+              "enabled": true,
+              "handshake": {
+                "server": "edge.example.com",
+                "server_port": 443
+              },
+              "private_key": "reality-private-key-placeholder",
+              "public_key": "reality-public-key-placeholder",
+              "short_id": [
+                "deadbeef"
+              ]
+            },
+            "server_name": "edge.example.com"
+          },
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "alice",
+              "uuid": "11111111-1111-1111-1111-111111111111"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vless",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com",
+          "reality": {
+            "enabled": true,
+            "handshake": {
+              "server": "edge.example.com",
+              "server_port": 443
+            },
+            "private_key": "reality-private-key-placeholder",
+            "public_key": "reality-public-key-placeholder",
+            "short_id": [
+              "deadbeef"
+            ]
+          }
+        },
+        "type": "vless",
+        "users": [
+          {
+            "name": "alice",
+            "uuid": "11111111-1111-1111-1111-111111111111",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      },
+      {
+        "listen_port": 444,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 444,
+          "tag": "gold-vless-bob",
+          "type": "vless",
+          "users": [
+            {
+              "flow": "xtls-rprx-vision",
+              "name": "bob",
+              "uuid": "77777777-7777-7777-7777-777777777777"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vless-bob",
+        "tls": null,
+        "type": "vless",
+        "users": [
+          {
+            "name": "bob",
+            "uuid": "77777777-7777-7777-7777-777777777777",
+            "flow": "xtls-rprx-vision"
+          }
+        ]
+      },
+      {
+        "listen_port": 445,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 445,
+          "tag": "gold-vmess",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "transport": {
+            "path": "/gold-vmess-ws",
+            "type": "ws"
+          },
+          "type": "vmess",
+          "users": [
+            {
+              "alterId": 0,
+              "id": "22222222-2222-2222-2222-222222222222",
+              "name": "alice",
+              "security": "aes-128-gcm"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-vmess",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "vmess",
+        "users": [
+          {
+            "name": "alice",
+            "id": "22222222-2222-2222-2222-222222222222",
+            "security": "aes-128-gcm"
+          }
+        ]
+      },
+      {
+        "listen_port": 446,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 446,
+          "tag": "gold-trojan",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "trojan",
+          "users": [
+            {
+              "name": "alice",
+              "password": "trojan-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-trojan",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "trojan",
+        "users": [
+          {
+            "name": "alice",
+            "password": "trojan-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 447,
+        "method": "",
+        "network": "",
+        "obfs": {
+          "type": "salamander",
+          "password": "obfs-password-placeholder"
+        },
+        "raw": {
+          "listen": "::",
+          "listen_port": 447,
+          "obfs": {
+            "password": "obfs-password-placeholder",
+            "type": "salamander"
+          },
+          "tag": "gold-hy2",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "hysteria2",
+          "users": [
+            {
+              "name": "alice",
+              "password": "hy2-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 448,
+        "method": "2022-blake3-aes-128-gcm",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 448,
+          "method": "2022-blake3-aes-128-gcm",
+          "password": "ss-server-key-placeholder",
+          "tag": "gold-ss",
+          "type": "shadowsocks",
+          "users": [
+            {
+              "name": "alice",
+              "password": "ss-user-key-placeholder"
+            }
+          ]
+        },
+        "server_key": "ss-server-key-placeholder",
+        "tag": "gold-ss",
+        "tls": null,
+        "type": "shadowsocks",
+        "users": [
+          {
+            "name": "alice",
+            "password": "ss-user-key-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 449,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 449,
+          "tag": "gold-anytls",
+          "tls": {
+            "alpn": [
+              "h2",
+              "http/1.1"
+            ],
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "anytls",
+          "users": [
+            {
+              "name": "alice",
+              "password": "anytls-password-placeholder"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-anytls",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com",
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ]
+        },
+        "type": "anytls",
+        "users": [
+          {
+            "name": "alice",
+            "password": "anytls-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 450,
+        "method": "",
+        "network": "udp",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 450,
+          "network": "udp",
+          "tag": "gold-naive",
+          "tls": {
+            "enabled": true,
+            "server_name": "edge.example.com"
+          },
+          "type": "naive",
+          "users": [
+            {
+              "password": "naive-password-placeholder",
+              "username": "alice"
+            }
+          ]
+        },
+        "server_key": "",
+        "tag": "gold-naive",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "naive",
+        "users": [
+          {
+            "name": "alice",
+            "password": "naive-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen_port": 451,
+        "method": "",
+        "network": "",
+        "obfs": null,
+        "raw": {
+          "listen": "::",
+          "listen_port": 451,
+          "tag": "gold-unknown",
+          "type": "socks"
+        },
+        "server_key": "",
+        "tag": "gold-unknown",
+        "tls": null,
+        "type": "socks",
+        "users": null
+      }
+    ],
+    "inbounds_raw": [
+      {
+        "listen": "::",
+        "listen_port": 443,
+        "network": "tcp",
+        "tag": "gold-vless",
+        "tls": {
+          "enabled": true,
+          "reality": {
+            "enabled": true,
+            "handshake": {
+              "server": "edge.example.com",
+              "server_port": 443
+            },
+            "private_key": "reality-private-key-placeholder",
+            "public_key": "reality-public-key-placeholder",
+            "short_id": [
+              "deadbeef"
+            ]
+          },
+          "server_name": "edge.example.com"
+        },
+        "type": "vless",
+        "users": [
+          {
+            "flow": "xtls-rprx-vision",
+            "name": "alice",
+            "uuid": "11111111-1111-1111-1111-111111111111"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 444,
+        "tag": "gold-vless-bob",
+        "type": "vless",
+        "users": [
+          {
+            "flow": "xtls-rprx-vision",
+            "name": "bob",
+            "uuid": "77777777-7777-7777-7777-777777777777"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 445,
+        "tag": "gold-vmess",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "transport": {
+          "path": "/gold-vmess-ws",
+          "type": "ws"
+        },
+        "type": "vmess",
+        "users": [
+          {
+            "alterId": 0,
+            "id": "22222222-2222-2222-2222-222222222222",
+            "name": "alice",
+            "security": "aes-128-gcm"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 446,
+        "tag": "gold-trojan",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "trojan",
+        "users": [
+          {
+            "name": "alice",
+            "password": "trojan-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 447,
+        "obfs": {
+          "password": "obfs-password-placeholder",
+          "type": "salamander"
+        },
+        "tag": "gold-hy2",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "hysteria2",
+        "users": [
+          {
+            "name": "alice",
+            "password": "hy2-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 448,
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "ss-server-key-placeholder",
+        "tag": "gold-ss",
+        "type": "shadowsocks",
+        "users": [
+          {
+            "name": "alice",
+            "password": "ss-user-key-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 449,
+        "tag": "gold-anytls",
+        "tls": {
+          "alpn": [
+            "h2",
+            "http/1.1"
+          ],
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "anytls",
+        "users": [
+          {
+            "name": "alice",
+            "password": "anytls-password-placeholder"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 450,
+        "network": "udp",
+        "tag": "gold-naive",
+        "tls": {
+          "enabled": true,
+          "server_name": "edge.example.com"
+        },
+        "type": "naive",
+        "users": [
+          {
+            "password": "naive-password-placeholder",
+            "username": "alice"
+          }
+        ]
+      },
+      {
+        "listen": "::",
+        "listen_port": 451,
+        "tag": "gold-unknown",
+        "type": "socks"
+      }
+    ],
+    "outbound_views": [
+      {
+        "tag": "direct",
+        "type": "direct",
+        "domain_strategy": "prefer_ipv4"
+      },
+      {
+        "tag": "block",
+        "type": "block"
+      }
+    ],
+    "raw_bytes_sha256": "7781685b1e9560f8a6779654bdbd276c1d8f99fce179fef887e954871f9b7468",
+    "route_rules": [
+      {
+        "auth_user": [
+          "alice"
+        ],
+        "inbound": [
+          "gold-vless"
+        ],
+        "outbound": "direct"
+      },
+      {
+        "action": "hijack-dns",
+        "protocol": "dns"
+      }
+    ],
+    "user_inbounds_alice": [
+      {
+        "tag": "gold-vless",
+        "uuid": "11111111-1111-1111-1111-111111111111",
+        "flow": "xtls-rprx-vision"
+      },
+      {
+        "tag": "gold-vmess",
+        "uuid": "22222222-2222-2222-2222-222222222222",
+        "vmess_security": "aes-128-gcm"
+      },
+      {
+        "tag": "gold-trojan",
+        "uuid": "trojan-password-placeholder"
+      },
+      {
+        "tag": "gold-hy2",
+        "uuid": "",
+        "password": "hy2-password-placeholder"
+      },
+      {
+        "tag": "gold-ss",
+        "uuid": "",
+        "password": "ss-user-key-placeholder"
+      },
+      {
+        "tag": "gold-anytls",
+        "uuid": "",
+        "password": "anytls-password-placeholder"
+      },
+      {
+        "tag": "gold-naive",
+        "uuid": "",
+        "password": "naive-password-placeholder"
+      }
+    ],
+    "user_inbounds_bob": [
+      {
+        "tag": "gold-vless-bob",
+        "uuid": "77777777-7777-7777-7777-777777777777",
+        "flow": "xtls-rprx-vision"
+      }
+    ]
+  }
+}
