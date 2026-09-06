@@ -299,8 +299,23 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// 1. Fetch System Status
-	status := s.collectSystemStatus(r.Context(), activeUsersWindow)
+	// 1. Fetch System Status and the public IP concurrently — both are
+	// independent of the traffic queries below.
+	var (
+		status   map[string]interface{}
+		publicIP string
+		statusWG sync.WaitGroup
+	)
+	statusWG.Add(2)
+	go func() {
+		defer statusWG.Done()
+		status = s.collectSystemStatus(r.Context(), activeUsersWindow)
+	}()
+	go func() {
+		defer statusWG.Done()
+		publicIP = getPublicIP(s.config)
+	}()
+	statusWG.Wait()
 
 	// 2. Fetch WireGuard peers for range calculations
 	var wgPeerKeys []string
@@ -496,7 +511,7 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 			"singbox":   topSB,
 		},
 		SingboxPendingChanges: s.config.GetSingboxPendingChanges(),
-		PublicIP:              getPublicIP(s.config),
+		PublicIP:              publicIP,
 	}
 
 	// cache response
