@@ -59,16 +59,7 @@ export default function Settings() {
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<DbInfo>({ rows: 0, sizeMB: 0, auditSizeMB: 0 })
-    const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
-    const [subscriptionHistoryNextOffset, setSubscriptionHistoryNextOffset] = useState(0)
-    const [subscriptionHistoryHasMore, setSubscriptionHistoryHasMore] = useState(false)
-    const [subscriptionHistoryRefreshing, setSubscriptionHistoryRefreshing] = useState(false)
-    const [subscriptionHistoryLoadingMore, setSubscriptionHistoryLoadingMore] = useState(false)
-    const subscriptionRequestHistoryRef = useRef<SubscriptionRequestHistoryEntry[]>([])
-    const subscriptionHistoryRefreshingRef = useRef(false)
-    const subscriptionHistoryLoadingMoreRef = useRef(false)
     const [subscriptionHistorySubId, setSubscriptionHistorySubId] = useState('all')
-    const subscriptionHistorySubIdRef = useRef(0)
     const [features, setFeatures] = useState<FeatureFlags>({
         enable_singbox: true,
         enable_wireguard: true,
@@ -177,85 +168,49 @@ export default function Settings() {
         setSubscriptionDomain(subDomainQuery.data || '')
     }, [subDomainQuery.data])
 
-    useEffect(() => {
-        subscriptionRequestHistoryRef.current = subscriptionRequestHistory
-    }, [subscriptionRequestHistory])
-
     const selectedSubscriptionHistorySubId = subscriptionHistorySubId === 'all'
         ? 0
         : Number.parseInt(subscriptionHistorySubId, 10) || 0
 
-    useEffect(() => {
-        subscriptionHistorySubIdRef.current = selectedSubscriptionHistorySubId
-    }, [selectedSubscriptionHistorySubId])
-
-    const handleSubscriptionHistorySubChange = useCallback((value: string) => {
-        subscriptionRequestHistoryRef.current = []
-        setSubscriptionRequestHistory([])
-        setSubscriptionHistoryNextOffset(0)
-        setSubscriptionHistoryHasMore(false)
-        setSubscriptionHistorySubId(value)
-    }, [])
-
-    const refreshSubscriptionRequestHistory = useCallback(async () => {
-        if (subscriptionHistoryRefreshingRef.current) return
-        const subID = selectedSubscriptionHistorySubId
-        subscriptionHistoryRefreshingRef.current = true
-        setSubscriptionHistoryRefreshing(true)
-        try {
-            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
-            if (subscriptionHistorySubIdRef.current !== subID) return
-            const incomingIds = new Set(page.items.map(item => item.id))
+    const subscriptionHistoryPage = usePaginatedHistory<SubscriptionRequestHistoryEntry>({
+        pageSize: SUBSCRIPTION_HISTORY_PAGE_SIZE,
+        fetchPage: (limit, offset) => api.getSubscriptionRequestHistoryPage(limit, offset, selectedSubscriptionHistorySubId),
+        getKey: item => item.id,
+        offsetMode: 'merged',
+        token: selectedSubscriptionHistorySubId,
+        mergeRefresh: (incoming, existing) => {
+            const incomingIds = new Set(incoming.map(item => item.id))
             const nameBySubId = new Map<number, string>()
-            for (const item of page.items) {
+            for (const item of incoming) {
                 if (item.sub_id && item.name) nameBySubId.set(item.sub_id, item.name)
             }
-            const merged = [
-                ...page.items,
-                ...subscriptionRequestHistoryRef.current
+            return [
+                ...incoming,
+                ...existing
                     .filter(item => !incomingIds.has(item.id))
                     .map(item => {
                         const freshName = nameBySubId.get(item.sub_id)
                         return freshName && freshName !== item.name ? { ...item, name: freshName } : item
                     }),
             ]
-            subscriptionRequestHistoryRef.current = merged
-            setSubscriptionRequestHistory(merged)
-            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
-            setSubscriptionHistoryHasMore(page.has_more)
-        } finally {
-            subscriptionHistoryRefreshingRef.current = false
-            setSubscriptionHistoryRefreshing(false)
-        }
-    }, [selectedSubscriptionHistorySubId])
+        },
+    })
+    const subscriptionRequestHistory = subscriptionHistoryPage.items
+    const subscriptionHistoryHasMore = subscriptionHistoryPage.hasMore
+    const subscriptionHistoryRefreshing = subscriptionHistoryPage.refreshing
+    const subscriptionHistoryLoadingMore = subscriptionHistoryPage.loadingMore
+    const refreshSubscriptionRequestHistory = subscriptionHistoryPage.refresh
+    const hardRefreshSubscriptionHistory = subscriptionHistoryPage.hardRefresh
+    const loadMoreSubscriptionRequestHistory = subscriptionHistoryPage.loadMore
 
-    const hardRefreshSubscriptionHistory = useCallback(async () => {
-        subscriptionRequestHistoryRef.current = []
-        setSubscriptionRequestHistory([])
-        setSubscriptionHistoryNextOffset(0)
-        setSubscriptionHistoryHasMore(false)
-        const subID = subscriptionHistorySubIdRef.current
-        subscriptionHistoryRefreshingRef.current = true
-        setSubscriptionHistoryRefreshing(true)
-        try {
-            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
-            if (subscriptionHistorySubIdRef.current !== subID) return
-            subscriptionRequestHistoryRef.current = page.items
-            setSubscriptionRequestHistory(page.items)
-            setSubscriptionHistoryNextOffset(page.next_offset)
-            setSubscriptionHistoryHasMore(page.has_more)
-        } finally {
-            subscriptionHistoryRefreshingRef.current = false
-            setSubscriptionHistoryRefreshing(false)
-        }
-    }, [])
+    const handleSubscriptionHistorySubChange = useCallback((value: string) => {
+        subscriptionHistoryPage.reset()
+        setSubscriptionHistorySubId(value)
+    }, [subscriptionHistoryPage])
 
     const removeSubscriptionRequestHistoryEntry = useCallback((id: number) => {
-        const next = subscriptionRequestHistoryRef.current.filter(item => item.id !== id)
-        subscriptionRequestHistoryRef.current = next
-        setSubscriptionRequestHistory(next)
-        setSubscriptionHistoryNextOffset(off => Math.max(0, off - 1))
-    }, [])
+        subscriptionHistoryPage.removeItems(item => item.id === id)
+    }, [subscriptionHistoryPage])
 
     const handleClearSubscriptionRequestsBySubID = useCallback(async (subId: number, label: string) => {
         if (subId === 0) return
@@ -303,31 +258,6 @@ export default function Settings() {
         const interval = setInterval(() => void hardRefreshAuditLog(), 30_000)
         return () => clearInterval(interval)
     }, [hardRefreshAuditLog, isDatabaseTabActive])
-
-    const loadMoreSubscriptionRequestHistory = useCallback(async () => {
-        if (subscriptionHistoryLoadingMoreRef.current || !subscriptionHistoryHasMore) return
-
-        const offset = subscriptionHistoryNextOffset
-        const subID = selectedSubscriptionHistorySubId
-        subscriptionHistoryLoadingMoreRef.current = true
-        setSubscriptionHistoryLoadingMore(true)
-        try {
-            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, offset, subID)
-            if (subscriptionHistorySubIdRef.current !== subID) return
-            const existingIds = new Set(subscriptionRequestHistoryRef.current.map(item => item.id))
-            const merged = [
-                ...subscriptionRequestHistoryRef.current,
-                ...page.items.filter(item => !existingIds.has(item.id)),
-            ]
-            subscriptionRequestHistoryRef.current = merged
-            setSubscriptionRequestHistory(merged)
-            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
-            setSubscriptionHistoryHasMore(page.has_more)
-        } finally {
-            subscriptionHistoryLoadingMoreRef.current = false
-            setSubscriptionHistoryLoadingMore(false)
-        }
-    }, [selectedSubscriptionHistorySubId, subscriptionHistoryHasMore, subscriptionHistoryNextOffset])
 
     useEffect(() => {
         if (!isDatabaseTabActive) return
