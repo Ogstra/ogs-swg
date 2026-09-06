@@ -831,39 +831,28 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 			}
 			uuid := user.UUID
 			flow := user.Flow
-			switch inbound.Type {
-			case "hysteria2":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "anytls":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "naive":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "shadowsocks":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "trojan":
-				uuid = user.Password
-				flow = ""
-			case "vmess":
-				if uuid == "" {
-					uuid = user.ID
+			capability, known := CapabilityFor(inbound.Type)
+			if known {
+				switch capability.Credential {
+				case CredentialPassword:
+					// hysteria2, anytls, naive, shadowsocks: the secret is the user
+					// password and no UUID/flow/vmess metadata is surfaced.
+					result = append(result, UserInboundInfo{
+						Tag:      inbound.Tag,
+						Password: user.Password,
+					})
+					continue
+				case CredentialPasswordAsUUID:
+					uuid = user.Password
+					flow = ""
+				case CredentialIDOrUUID:
+					if uuid == "" {
+						uuid = user.ID
+					}
+					flow = ""
+				case CredentialUUID:
+					// vless keeps users[].uuid and users[].flow as-is.
 				}
-				flow = ""
 			}
 			result = append(result, UserInboundInfo{
 				Tag:           inbound.Tag,
