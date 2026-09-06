@@ -1,0 +1,405 @@
+{
+  "fixed_window_default": {
+    "payload": {
+      "chart_data": [
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 0,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 60,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 120,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 180,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 240,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 300,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 360,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 420,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 480,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 540,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 600,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 660,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 720,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 780,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 840,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 900,
+          "up_sb": 0,
+          "up_wg": 800
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 400,
+          "ts": 960,
+          "up_sb": 0,
+          "up_wg": 800
+        }
+      ],
+      "public_ip": "201.216.219.144",
+      "singbox_pending_changes": false,
+      "stats_cards": {
+        "singbox": {
+          "downlink": 0,
+          "uplink": 0
+        },
+        "wireguard": {
+          "downlink": 400,
+          "uplink": 800
+        }
+      },
+      "status": {
+        "active_users_singbox": 0,
+        "active_users_singbox_list": null,
+        "active_users_wireguard": 2,
+        "active_users_wireguard_list": [
+          "alice",
+          "bob"
+        ],
+        "enable_singbox": false,
+        "enable_wireguard": true,
+        "singbox": false,
+        "wireguard": true
+      },
+      "top_consumers": {
+        "singbox": [],
+        "wireguard": [
+          {
+            "flow": "WireGuard:wg0",
+            "interface_name": "wg0",
+            "key": "peer-wg0-public-key",
+            "name": "alice",
+            "quota_limit": 0,
+            "total": 900
+          },
+          {
+            "flow": "WireGuard:wg1",
+            "interface_name": "wg1",
+            "key": "peer-wg1-public-key",
+            "name": "bob",
+            "quota_limit": 0,
+            "total": 300
+          }
+        ]
+      },
+      "wireguard_interfaces": {
+        "wg0": {
+          "downlink": 300,
+          "uplink": 600
+        },
+        "wg1": {
+          "downlink": 100,
+          "uplink": 200
+        }
+      }
+    },
+    "status_code": 200
+  },
+  "fixed_window_wide": {
+    "payload": {
+      "chart_data": [
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788642000,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788645600,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788649200,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788652800,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788656400,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788660000,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788663600,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788667200,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788670800,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788674400,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788678000,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788681600,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788685200,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788688800,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788692400,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788696000,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788699600,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788703200,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788706800,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788710400,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788714000,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788717600,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788721200,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788724800,
+          "up_sb": 0,
+          "up_wg": 0
+        },
+        {
+          "down_sb": 0,
+          "down_wg": 0,
+          "ts": 1788728400,
+          "up_sb": 0,
+          "up_wg": 0
+        }
+      ],
+      "public_ip": "201.216.219.144",
+      "singbox_pending_changes": false,
+      "stats_cards": {
+        "singbox": {
+          "downlink": 0,
+          "uplink": 0
+        },
+        "wireguard": {
+          "downlink": 0,
+          "uplink": 0
+        }
+      },
+      "status": {
+        "active_users_singbox": 0,
+        "active_users_singbox_list": null,
+        "active_users_wireguard": 2,
+        "active_users_wireguard_list": [
+          "alice",
+          "bob"
+        ],
+        "enable_singbox": false,
+        "enable_wireguard": true,
+        "singbox": false,
+        "wireguard": true
+      },
+      "top_consumers": {
+        "singbox": [],
+        "wireguard": []
+      },
+      "wireguard_interfaces": {
+        "wg0": {
+          "downlink": 0,
+          "uplink": 0
+        },
+        "wg1": {
+          "downlink": 0,
+          "uplink": 0
+        }
+      }
+    },
+    "status_code": 200
+  }
+}
