@@ -1733,3 +1733,122 @@ func TestDetectPortCollision_SameNetworkStillDetected(t *testing.T) {
 		}
 	})
 }
+
+func TestSingboxInboundView_ObfsDecoded(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "hysteria2",
+            "tag": "test-hy2",
+            "listen_port": 8443,
+            "users": [],
+            "obfs": {"type": "salamander", "password": "p"}
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-hy2")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Obfs == nil {
+		t.Fatal("Obfs is nil; expected *SingboxObfsConfig")
+	}
+	if view.Obfs.Type != "salamander" {
+		t.Errorf("Obfs.Type = %q; want %q", view.Obfs.Type, "salamander")
+	}
+	if view.Obfs.Password != "p" {
+		t.Errorf("Obfs.Password = %q; want %q", view.Obfs.Password, "p")
+	}
+}
+
+func TestSingboxInboundView_ObfsAbsentIsNil(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "hysteria2",
+            "tag": "test-hy2-noobfs",
+            "listen_port": 8443,
+            "users": []
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-hy2-noobfs")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Obfs != nil {
+		t.Errorf("Obfs should be nil when absent; got %+v", view.Obfs)
+	}
+}
+
+func TestSingboxInboundView_NetworkTrimmed(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "naive",
+            "tag": "test-naive",
+            "listen_port": 443,
+            "users": [],
+            "network": " UDP "
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-naive")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Network != "UDP" {
+		t.Errorf("Network = %q; want %q", view.Network, "UDP")
+	}
+}
+
+func TestSingboxInboundView_MethodAndServerKeyTrimmed(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "shadowsocks",
+            "tag": "test-ss",
+            "listen_port": 8388,
+            "users": [],
+            "method": " aes-256-gcm ",
+            "password": " server-key "
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-ss")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Method != "aes-256-gcm" {
+		t.Errorf("Method = %q; want %q", view.Method, "aes-256-gcm")
+	}
+	if view.ServerKey != "server-key" {
+		t.Errorf("ServerKey = %q; want %q", view.ServerKey, "server-key")
+	}
+}
+
+func TestSingboxInboundView_MarshalStability(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "shadowsocks",
+            "tag": "test-ss-marshal",
+            "listen_port": 8388,
+            "users": [],
+            "method": "aes-256-gcm",
+            "password": "server-key",
+            "network": "tcp",
+            "obfs": {"type": "salamander", "password": "p"}
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-ss-marshal")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	data, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("json.Marshal(view): %v", err)
+	}
+	s := string(data)
+	for _, forbidden := range []string{`"obfs"`, `"network"`, `"method"`, `"password"`} {
+		if strings.Contains(s, forbidden) {
+			t.Errorf("marshalled view contains %s, expected typed fields to stay json:\"-\": %s", forbidden, s)
+		}
+	}
+}
