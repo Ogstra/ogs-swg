@@ -1317,11 +1317,9 @@ func TestBuildHysteria2Link_Obfs(t *testing.T) {
 	view := &core.SingboxInboundView{
 		Type: "hysteria2",
 		TLS:  nil,
-		Raw: map[string]interface{}{
-			"obfs": map[string]interface{}{
-				"type":     "salamander",
-				"password": "obfs-secret",
-			},
+		Obfs: &core.SingboxObfsConfig{
+			Type:     "salamander",
+			Password: "obfs-secret",
 		},
 	}
 	user := &core.UserInboundInfo{Password: "s3cr3t"}
@@ -1375,10 +1373,8 @@ func TestBuildHysteria2Link_EmptyPassword(t *testing.T) {
 
 func TestBuildShadowsocksLink(t *testing.T) {
 	view := &core.SingboxInboundView{
-		Type: "shadowsocks",
-		Raw: map[string]interface{}{
-			"method": "2022-blake3-aes-128-gcm",
-		},
+		Type:   "shadowsocks",
+		Method: "2022-blake3-aes-128-gcm",
 	}
 	user := &core.UserInboundInfo{Password: "shadow-secret"}
 
@@ -1421,11 +1417,9 @@ func TestBuildShadowsocksLink_2022MultiUser_IncludesServerKey(t *testing.T) {
 	// Shadowsocks 2022 multi-user: inbound has top-level server password.
 	// Client needs "server_key:user_key" so sing-box can authenticate.
 	view := &core.SingboxInboundView{
-		Type: "shadowsocks",
-		Raw: map[string]interface{}{
-			"method":   "2022-blake3-aes-128-gcm",
-			"password": "server-key-base64",
-		},
+		Type:      "shadowsocks",
+		Method:    "2022-blake3-aes-128-gcm",
+		ServerKey: "server-key-base64",
 	}
 	user := &core.UserInboundInfo{Password: "user-key-base64"}
 
@@ -1463,10 +1457,8 @@ func TestBuildShadowsocksLink_RecommendedMethods(t *testing.T) {
 	for _, method := range methods {
 		t.Run(method, func(t *testing.T) {
 			view := &core.SingboxInboundView{
-				Type: "shadowsocks",
-				Raw: map[string]interface{}{
-					"method": method,
-				},
+				Type:   "shadowsocks",
+				Method: method,
 			}
 			user := &core.UserInboundInfo{Password: "shadow-secret"}
 
@@ -1491,6 +1483,156 @@ func TestBuildShadowsocksLink_RecommendedMethods(t *testing.T) {
 				t.Errorf("decoded userinfo = %q; want %q", string(decoded), want)
 			}
 		})
+	}
+}
+
+func TestBuildHysteria2Link_TypedObfsFieldsOnly(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "hysteria2",
+		Obfs: &core.SingboxObfsConfig{Type: "salamander", Password: "obfs-password"},
+	}
+	user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+	link, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildHysteria2Link() error = %v", err)
+	}
+	u, err := url.Parse(link)
+	if err != nil {
+		t.Fatalf("parse link: %v", err)
+	}
+	if got := u.Query().Get("obfs"); got != "salamander" {
+		t.Errorf("obfs = %q; want %q", got, "salamander")
+	}
+	if got := u.Query().Get("obfs-password"); got != "obfs-password" {
+		t.Errorf("obfs-password = %q; want %q", got, "obfs-password")
+	}
+}
+
+func TestBuildHysteria2Link_NilObfsFieldOmitsParams(t *testing.T) {
+	view := &core.SingboxInboundView{Type: "hysteria2"}
+	user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+	link, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildHysteria2Link() error = %v", err)
+	}
+	if strings.Contains(link, "obfs") {
+		t.Errorf("link should not contain obfs; got %q", link)
+	}
+}
+
+func TestBuildHysteria2Link_ObfsPartialFieldsOmitsParams(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type: "hysteria2",
+		Obfs: &core.SingboxObfsConfig{Type: "salamander", Password: ""},
+	}
+	user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+	link, err := buildHysteria2Link("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildHysteria2Link() error = %v", err)
+	}
+	if strings.Contains(link, "obfs") {
+		t.Errorf("link should not contain obfs; got %q", link)
+	}
+}
+
+func TestBuildNaiveLink_TypedNetworkFieldSelectsScheme(t *testing.T) {
+	cases := []struct {
+		network    string
+		wantScheme string
+	}{
+		{"UDP", "naive+quic"},
+		{"udp", "naive+quic"},
+		{"", "naive+https"},
+		{"tcp", "naive+https"},
+	}
+	for _, c := range cases {
+		t.Run(c.network+"->"+c.wantScheme, func(t *testing.T) {
+			view := &core.SingboxInboundView{
+				Type:    "naive",
+				Network: c.network,
+				TLS:     &core.TLSConfig{Enabled: true, ServerName: "example.com"},
+			}
+			user := &core.UserInboundInfo{Password: "s3cr3t"}
+
+			link, err := buildNaiveLink("alice", user, view, "1.2.3.4", "443", nil, "")
+			if err != nil {
+				t.Fatalf("buildNaiveLink() error = %v", err)
+			}
+			if !strings.HasPrefix(link, c.wantScheme+"://") {
+				t.Errorf("link = %q; want prefix %q", link, c.wantScheme+"://")
+			}
+		})
+	}
+}
+
+func TestBuildShadowsocksLink_TypedMethodMissingReturnsError(t *testing.T) {
+	view := &core.SingboxInboundView{Type: "shadowsocks"}
+	user := &core.UserInboundInfo{Password: "shadow-secret"}
+
+	_, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
+	if err == nil {
+		t.Fatal("buildShadowsocksLink() expected error for missing method; got nil")
+	}
+	if err.Error() != "Shadowsocks inbound method missing" {
+		t.Errorf("err = %q; want %q", err.Error(), "Shadowsocks inbound method missing")
+	}
+}
+
+func TestBuildShadowsocksLink_TypedServerKeyFieldsOnly(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type:      "shadowsocks",
+		Method:    "2022-blake3-aes-128-gcm",
+		ServerKey: "server-key",
+	}
+	user := &core.UserInboundInfo{Password: "user-key"}
+
+	link, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildShadowsocksLink() error = %v", err)
+	}
+	withoutFragment, _, _ := strings.Cut(link, "#")
+	rest := strings.TrimPrefix(withoutFragment, "ss://")
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx < 0 {
+		t.Fatalf("link missing @: %q", link)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(rest[:atIdx])
+	if err != nil {
+		t.Fatalf("base64 decode: %v", err)
+	}
+	want := "2022-blake3-aes-128-gcm:server-key:user-key"
+	if string(decoded) != want {
+		t.Errorf("decoded = %q; want %q", string(decoded), want)
+	}
+}
+
+func TestBuildShadowsocksLink_TypedNoServerKeyFieldsOnly(t *testing.T) {
+	view := &core.SingboxInboundView{
+		Type:   "shadowsocks",
+		Method: "aes-256-gcm",
+	}
+	user := &core.UserInboundInfo{Password: "user-key"}
+
+	link, err := buildShadowsocksLink("alice", user, view, "1.2.3.4", "443")
+	if err != nil {
+		t.Fatalf("buildShadowsocksLink() error = %v", err)
+	}
+	withoutFragment, _, _ := strings.Cut(link, "#")
+	rest := strings.TrimPrefix(withoutFragment, "ss://")
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx < 0 {
+		t.Fatalf("link missing @: %q", link)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(rest[:atIdx])
+	if err != nil {
+		t.Fatalf("base64 decode: %v", err)
+	}
+	want := "aes-256-gcm:user-key"
+	if string(decoded) != want {
+		t.Errorf("decoded = %q; want %q", string(decoded), want)
 	}
 }
 

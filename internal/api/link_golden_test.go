@@ -263,9 +263,7 @@ func linkGoldenCases() []linkGoldenCase {
 						Enabled:    true,
 						ServerName: "tls.example.com",
 					},
-					Raw: map[string]interface{}{
-						"obfs": map[string]interface{}{"type": "salamander", "password": "obfs-password"},
-					},
+					Obfs: &core.SingboxObfsConfig{Type: "salamander", Password: "obfs-password"},
 				}
 				user := &core.UserInboundInfo{Password: goldenPassword}
 				return buildHysteria2Link(goldenUserName, user, view, goldenHost, goldenPort)
@@ -295,9 +293,7 @@ func linkGoldenCases() []linkGoldenCase {
 						Enabled:    true,
 						ServerName: "tls.example.com",
 					},
-					Raw: map[string]interface{}{
-						"obfs": map[string]interface{}{"type": "salamander", "password": ""},
-					},
+					Obfs: &core.SingboxObfsConfig{Type: "salamander", Password: ""},
 				}
 				user := &core.UserInboundInfo{Password: goldenPassword}
 				return buildHysteria2Link(goldenUserName, user, view, goldenHost, goldenPort)
@@ -307,11 +303,9 @@ func linkGoldenCases() []linkGoldenCase {
 			Name: "shadowsocks_2022_with_server_key",
 			Build: func() (string, error) {
 				view := &core.SingboxInboundView{
-					Type: "shadowsocks",
-					Raw: map[string]interface{}{
-						"method":   "2022-blake3-aes-128-gcm",
-						"password": "server-key-placeholder",
-					},
+					Type:      "shadowsocks",
+					Method:    "2022-blake3-aes-128-gcm",
+					ServerKey: "server-key-placeholder",
 				}
 				user := &core.UserInboundInfo{Password: "user-key-placeholder"}
 				return buildShadowsocksLink(goldenUserName, user, view, goldenHost, goldenPort)
@@ -321,10 +315,8 @@ func linkGoldenCases() []linkGoldenCase {
 			Name: "shadowsocks_legacy_no_server_key",
 			Build: func() (string, error) {
 				view := &core.SingboxInboundView{
-					Type: "shadowsocks",
-					Raw: map[string]interface{}{
-						"method": "aes-256-gcm",
-					},
+					Type:   "shadowsocks",
+					Method: "aes-256-gcm",
 				}
 				user := &core.UserInboundInfo{Password: goldenPassword}
 				return buildShadowsocksLink(goldenUserName, user, view, goldenHost, goldenPort)
@@ -370,7 +362,7 @@ func linkGoldenCases() []linkGoldenCase {
 						Enabled:    true,
 						ServerName: goldenHost,
 					},
-					Raw: map[string]interface{}{"network": " UDP "},
+					Network: "UDP",
 				}
 				user := &core.UserInboundInfo{Password: goldenPassword}
 				return buildNaiveLink(goldenUserName, user, view, goldenHost, goldenPort, nil, "")
