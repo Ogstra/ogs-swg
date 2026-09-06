@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -581,83 +582,95 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 	var activeUsersSBList []string
 	var activeUsersWGList []string
 
+	var wg sync.WaitGroup
+
 	if s.config.EnableSingbox {
-		if s.config.DemoMode {
-			singboxStatus = true
-		} else {
-			singboxStatus = s.checkService(ctx, "sing-box")
-		}
-		// Fetch active users list (previously we only fetched count)
-		// We use the same threshold mechanism
-		if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, s.config.ActiveThresholdBytes); err == nil {
-			activeUsersSBList = users
-			activeUsersSB = int64(len(users))
-		}
-		// Fallback: if threshold-based result is empty, show sessions with any traffic.
-		if activeUsersSB == 0 {
-			if users, err := s.store.GetActiveUsers(activeUsersWindow); err == nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if s.config.DemoMode {
+				singboxStatus = true
+			} else {
+				singboxStatus = s.checkService(ctx, "sing-box")
+			}
+			// Fetch active users list (previously we only fetched count)
+			// We use the same threshold mechanism
+			if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, s.config.ActiveThresholdBytes); err == nil {
 				activeUsersSBList = users
 				activeUsersSB = int64(len(users))
 			}
-		}
-		if s.config.DemoMode && activeUsersSB == 0 {
-			if users := s.demoActiveSingboxUsers(time.Now()); len(users) > 0 {
-				activeUsersSBList = users
-				activeUsersSB = int64(len(users))
+			// Fallback: if threshold-based result is empty, show sessions with any traffic.
+			if activeUsersSB == 0 {
+				if users, err := s.store.GetActiveUsers(activeUsersWindow); err == nil {
+					activeUsersSBList = users
+					activeUsersSB = int64(len(users))
+				}
 			}
-		}
+			if s.config.DemoMode && activeUsersSB == 0 {
+				if users := s.demoActiveSingboxUsers(time.Now()); len(users) > 0 {
+					activeUsersSBList = users
+					activeUsersSB = int64(len(users))
+				}
+			}
+		}()
 	}
 
 	if s.config.EnableWireGuard {
-		if s.config.DemoMode {
-			wireguardStatus = true
-		} else {
-			wireguardStatus = s.checkService(ctx, "wireguard")
-		}
-		storedPeers, _ := s.store.GetWGPeerMeta()
-		var (
-			stats map[string]core.PeerStats
-			err   error
-		)
-		if s.executor != nil {
-			stats, err = s.executor.GetWireGuardStats(ctx)
-		} else {
-			stats, err = core.GetWireGuardStats()
-		}
-		threshold := time.Now().Add(-3 * time.Minute).Unix()
-		if err == nil {
-			for _, peer := range stats {
-				if peer.LatestHandshake >= threshold {
-					activeUsersWG++
-					name := ""
-					if meta, ok := storedPeers[peer.PublicKey]; ok && meta.Alias != "" {
-						name = meta.Alias
-					}
-					if name == "" {
-						if len(peer.PublicKey) >= 8 {
-							name = peer.PublicKey[:8]
-						} else {
-							name = peer.PublicKey
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if s.config.DemoMode {
+				wireguardStatus = true
+			} else {
+				wireguardStatus = s.checkService(ctx, "wireguard")
+			}
+			storedPeers, _ := s.store.GetWGPeerMeta()
+			var (
+				stats map[string]core.PeerStats
+				err   error
+			)
+			if s.executor != nil {
+				stats, err = s.executor.GetWireGuardStats(ctx)
+			} else {
+				stats, err = core.GetWireGuardStats()
+			}
+			threshold := time.Now().Add(-3 * time.Minute).Unix()
+			if err == nil {
+				for _, peer := range stats {
+					if peer.LatestHandshake >= threshold {
+						activeUsersWG++
+						name := ""
+						if meta, ok := storedPeers[peer.PublicKey]; ok && meta.Alias != "" {
+							name = meta.Alias
 						}
+						if name == "" {
+							if len(peer.PublicKey) >= 8 {
+								name = peer.PublicKey[:8]
+							} else {
+								name = peer.PublicKey
+							}
+						}
+						activeUsersWGList = append(activeUsersWGList, name)
 					}
-					activeUsersWGList = append(activeUsersWGList, name)
 				}
 			}
-		}
-		if s.config.DemoMode {
-			preferred := make(map[string]string, len(storedPeers))
-			for publicKey, meta := range storedPeers {
-				if strings.TrimSpace(meta.Alias) != "" {
-					preferred[publicKey] = meta.Alias
+			if s.config.DemoMode {
+				preferred := make(map[string]string, len(storedPeers))
+				for publicKey, meta := range storedPeers {
+					if strings.TrimSpace(meta.Alias) != "" {
+						preferred[publicKey] = meta.Alias
+					}
+				}
+				demoList := s.demoActiveWireGuardPeers(threshold, preferred, time.Now())
+				if len(demoList) > 0 {
+					activeUsersWGList = demoList
+					activeUsersWG = len(demoList)
 				}
 			}
-			demoList := s.demoActiveWireGuardPeers(threshold, preferred, time.Now())
-			if len(demoList) > 0 {
-				activeUsersWGList = demoList
-				activeUsersWG = len(demoList)
-			}
-		}
+		}()
 	}
+
+	wg.Wait()
 
 	if s.config.DemoMode {
 		// Demo mode intentionally shows both services as running for UX demos.
