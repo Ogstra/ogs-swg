@@ -67,7 +67,7 @@ export default function RawConfig() {
                 return
             }
 
-            setAvailableBackups(await api.getWireGuardConfigBackupsForInterface(nextWireGuardInterface))
+            setAvailableBackups(await api.getWireGuardConfigBackups(nextWireGuardInterface))
         } catch (err) {
             console.error('Failed to load backups', err)
             setAvailableBackups([])
@@ -88,7 +88,7 @@ export default function RawConfig() {
                     setWireguardConfig('')
                     setOriginalWireguardConfig('')
                 } else {
-                    const content = await api.getWireGuardConfigForInterface(activeWireguardInterface)
+                    const content = await api.getWireGuardConfig(activeWireguardInterface)
                     setWireguardConfig(content)
                     setOriginalWireguardConfig(content)
                 }
@@ -125,7 +125,7 @@ export default function RawConfig() {
                     const selectedIface = resolveActiveWireguardInterface(normalizedIfaces, activeWireguardInterface)
                     setActiveWireguardInterface(selectedIface)
                     if (selectedIface) {
-                        const wgRaw = await api.getWireGuardConfigForInterface(selectedIface)
+                        const wgRaw = await api.getWireGuardConfig(selectedIface)
                         setWireguardConfig(wgRaw)
                         setOriginalWireguardConfig(wgRaw)
                     } else {
@@ -201,7 +201,7 @@ export default function RawConfig() {
                     toastError('Select a WireGuard interface first')
                     return
                 }
-                await api.updateWireGuardConfigForInterface(activeWireguardInterface, wireguardConfig)
+                await api.updateWireGuardConfig(wireguardConfig, activeWireguardInterface)
                 setOriginalWireguardConfig(wireguardConfig)
             }
             success('Configuration saved successfully')
@@ -221,7 +221,7 @@ export default function RawConfig() {
                     toastError('Select a WireGuard interface first')
                     return
                 }
-                await api.backupWireGuardConfigForInterface(activeWireguardInterface)
+                await api.backupWireGuardConfig(activeWireguardInterface)
             }
             await loadBackupMeta()
             await loadAvailableBackups()
@@ -251,7 +251,7 @@ export default function RawConfig() {
                     toastError('Select a WireGuard interface first')
                     return
                 }
-                const content = await api.getWireGuardConfigBackupContentForInterface(activeWireguardInterface, backupName)
+                const content = await api.getWireGuardConfigBackupContent(backupName, activeWireguardInterface)
                 setWireguardConfig(content)
             }
             setSelectedBackupName(backupName)
