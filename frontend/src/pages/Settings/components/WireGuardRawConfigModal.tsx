@@ -31,7 +31,7 @@ export function WireGuardRawConfigModal({
         const load = async () => {
             setLoadingConfig(true)
             try {
-                const nextConfig = await api.getWireGuardConfigForInterface(iface)
+                const nextConfig = await api.getWireGuardConfig(iface)
                 if (!canceled) {
                     setConfigText(nextConfig)
                 }
@@ -65,7 +65,7 @@ export function WireGuardRawConfigModal({
 
         setSavingConfig(true)
         try {
-            await api.updateWireGuardConfigForInterface(iface, configText)
+            await api.updateWireGuardConfig(configText, iface)
             await onSaved(iface)
             success(`WireGuard raw config saved for ${iface}`)
             onClose()

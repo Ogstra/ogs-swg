@@ -663,18 +663,10 @@ export const api = {
         request<any>(iface ? `${wireGuardInterfaceBase(iface)}/interface` : '/api/wireguard/interface', { errorMsg: 'Failed to fetch interface config' }),
     updateWireGuardInterface: async (config: any, iface?: string): Promise<void> =>
         request(iface ? `${wireGuardInterfaceBase(iface)}/interface` : '/api/wireguard/interface', { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update interface' }),
-    getWireGuardConfigForInterface: async (iface: string): Promise<string> =>
-        request<string>(`${wireGuardInterfaceBase(iface)}/config`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard raw config' }),
-    getWireGuardConfigBackups: async (): Promise<ConfigBackupEntry[]> =>
-        request<ConfigBackupEntry[]>('/api/wireguard/config/backups', { errorMsg: 'Failed to fetch WireGuard config backups' }),
-    getWireGuardConfigBackupsForInterface: async (iface: string): Promise<ConfigBackupEntry[]> =>
-        request<ConfigBackupEntry[]>(`${wireGuardInterfaceBase(iface)}/config/backups`, { errorMsg: 'Failed to fetch WireGuard config backups' }),
-    getWireGuardConfigBackupContent: async (name: string): Promise<string> =>
-        request<string>(`/api/wireguard/config/backup?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard backup' }),
-    getWireGuardConfigBackupContentForInterface: async (iface: string, name: string): Promise<string> =>
-        request<string>(`${wireGuardInterfaceBase(iface)}/config/backup?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard backup' }),
-    updateWireGuardConfigForInterface: async (iface: string, config: string): Promise<void> =>
-        request(`${wireGuardInterfaceBase(iface)}/config`, { method: 'PUT', body: config, contentType: 'text/plain', parse: 'none', errorMsg: 'Failed to update WireGuard raw config' }),
+    getWireGuardConfigBackups: async (iface?: string): Promise<ConfigBackupEntry[]> =>
+        request<ConfigBackupEntry[]>(iface ? `${wireGuardInterfaceBase(iface)}/config/backups` : '/api/wireguard/config/backups', { errorMsg: 'Failed to fetch WireGuard config backups' }),
+    getWireGuardConfigBackupContent: async (name: string, iface?: string): Promise<string> =>
+        request<string>(`${iface ? wireGuardInterfaceBase(iface) + '/config/backup' : '/api/wireguard/config/backup'}?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard backup' }),
     updateWireGuardPeer: async (publicKey: string, config: any, iface?: string): Promise<void> =>
         request(`${iface ? wireGuardInterfaceBase(iface) + '/peer' : '/api/wireguard/peer'}?public_key=${encodeURIComponent(publicKey)}`, { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update peer' }),
     getWireGuardPeerConfig: async (publicKey: string, privateKey?: string, iface?: string): Promise<{ config: string }> => {
@@ -683,39 +675,25 @@ export const api = {
         const base = iface ? `${wireGuardInterfaceBase(iface)}/peer/config` : '/api/wireguard/peer/config'
         return request<{ config: string }>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch peer config' });
     },
-    getWireGuardTraffic: async (range: string): Promise<Record<string, { rx: number; tx: number }>> => {
+    getWireGuardTraffic: async (range: string, iface?: string): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ range })
-        return request<Record<string, { rx: number; tx: number }>>(`/api/wireguard/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
+        const base = iface ? `${wireGuardInterfaceBase(iface)}/traffic` : '/api/wireguard/traffic'
+        return request<Record<string, { rx: number; tx: number }>>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
-    getWireGuardTrafficForInterface: async (iface: string, range: string): Promise<Record<string, { rx: number; tx: number }>> => {
-        const params = new URLSearchParams({ range })
-        return request<Record<string, { rx: number; tx: number }>>(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
-    },
-    getWireGuardTrafficRange: async (start: number, end: number): Promise<Record<string, { rx: number; tx: number }>> => {
+    getWireGuardTrafficRange: async (start: number, end: number, iface?: string): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ start: String(start), end: String(end) })
-        return request<Record<string, { rx: number; tx: number }>>(`/api/wireguard/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
+        const base = iface ? `${wireGuardInterfaceBase(iface)}/traffic` : '/api/wireguard/traffic'
+        return request<Record<string, { rx: number; tx: number }>>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
-    getWireGuardTrafficRangeForInterface: async (iface: string, start: number, end: number): Promise<Record<string, { rx: number; tx: number }>> => {
-        const params = new URLSearchParams({ start: String(start), end: String(end) })
-        return request<Record<string, { rx: number; tx: number }>>(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
-    },
-    getWireGuardTrafficSeries: async (range?: string, peer?: string, limit?: number, start?: number, end?: number): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
+    getWireGuardTrafficSeries: async (range?: string, peer?: string, limit?: number, start?: number, end?: number, iface?: string): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
         const params = new URLSearchParams()
         if (range) params.append('range', range)
         if (peer) params.append('peer', peer)
         if (limit) params.append('limit', String(limit))
         if (start) params.append('start', String(start))
         if (end) params.append('end', String(end))
-        return request<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>>(`/api/wireguard/traffic/series?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic series' })
-    },
-    getWireGuardTrafficSeriesForInterface: async (iface: string, range?: string, peer?: string, limit?: number, start?: number, end?: number): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
-        const params = new URLSearchParams()
-        if (range) params.append('range', range)
-        if (peer) params.append('peer', peer)
-        if (limit) params.append('limit', String(limit))
-        if (start) params.append('start', String(start))
-        if (end) params.append('end', String(end))
-        return request<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>>(`${wireGuardInterfaceBase(iface)}/traffic/series?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic series' })
+        const base = iface ? `${wireGuardInterfaceBase(iface)}/traffic/series` : '/api/wireguard/traffic/series'
+        return request<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic series' })
     },
     enableWireGuardInterface: async (iface: string): Promise<void> =>
         request(`${wireGuardInterfaceBase(iface)}/enable`, { method: 'POST', parse: 'none', errorMsg: 'Failed to enable WireGuard interface' }),
@@ -790,12 +768,10 @@ export const api = {
     // Raw Config
     updateConfig: async (configText: string): Promise<void> =>
         request('/api/config', { method: 'PUT', body: configText, contentType: 'text/plain', parse: 'none', errorMsg: 'Failed to update config' }),
-    getWireGuardConfig: async (): Promise<string> =>
-        request<string>('/api/wireguard/config', { parse: 'text', errorMsg: 'Failed to fetch WireGuard config' }),
-    backupWireGuardConfig: async (): Promise<void> =>
-        request('/api/wireguard/config/backup', { method: 'POST', parse: 'none', errorMsg: 'Failed to backup WireGuard config' }),
-    backupWireGuardConfigForInterface: async (iface: string): Promise<void> =>
-        request(`${wireGuardInterfaceBase(iface)}/config/backup`, { method: 'POST', parse: 'none', errorMsg: 'Failed to backup WireGuard config' }),
+    getWireGuardConfig: async (iface?: string): Promise<string> =>
+        request<string>(iface ? `${wireGuardInterfaceBase(iface)}/config` : '/api/wireguard/config', { parse: 'text', errorMsg: iface ? 'Failed to fetch WireGuard raw config' : 'Failed to fetch WireGuard config' }),
+    backupWireGuardConfig: async (iface?: string): Promise<void> =>
+        request(iface ? `${wireGuardInterfaceBase(iface)}/config/backup` : '/api/wireguard/config/backup', { method: 'POST', parse: 'none', errorMsg: 'Failed to backup WireGuard config' }),
     restoreWireGuardConfig: async (): Promise<string> =>
         request<string>('/api/wireguard/config/restore', { method: 'POST', parse: 'text', errorMsg: 'Failed to restore WireGuard config' }),
     getBackupMeta: async (): Promise<{ singbox_last_backup?: string; wireguard_last_backup?: string }> =>
@@ -804,8 +780,8 @@ export const api = {
         request<ConfigBackupEntry[]>('/api/config/backups', { errorMsg: 'Failed to fetch config backups' }),
     getConfigBackupContent: async (name: string): Promise<string> =>
         request<string>(`/api/config/backup?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch config backup' }),
-    updateWireGuardConfig: async (config: string): Promise<void> =>
-        request('/api/wireguard/config', { method: 'PUT', body: config, contentType: 'text/plain', parse: 'none', errorMsg: 'Failed to update WireGuard config' }),
+    updateWireGuardConfig: async (config: string, iface?: string): Promise<void> =>
+        request(iface ? `${wireGuardInterfaceBase(iface)}/config` : '/api/wireguard/config', { method: 'PUT', body: config, contentType: 'text/plain', parse: 'none', errorMsg: iface ? 'Failed to update WireGuard raw config' : 'Failed to update WireGuard config' }),
 
     // Stats & Status
     getStats: async (range: string = '24h', start?: string, end?: string): Promise<any[]> => {
