@@ -1,5 +1,152 @@
 export type InboundType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks' | 'anytls' | 'naive'
 
+/**
+ * Protocol capability table. This MIRRORS internal/core/protocol_capability.go
+ * (ProtocolCapability / protocolCapabilities). Keep both in sync: any change to
+ * a protocol's capabilities must be made in both files in the same commit.
+ * `formSection` is frontend-only — it selects which protocol-specific block the
+ * inbound editor renders and has no Go counterpart.
+ */
+export interface ProtocolCapability {
+    credential: 'uuid' | 'id_or_uuid' | 'password_as_uuid' | 'password'
+    supportsFlow: boolean
+    supportsVmessFields: boolean
+    supportsTLS: boolean
+    tlsAlwaysEnabled: boolean
+    supportsReality: boolean
+    supportsALPN: boolean
+    supportsTransport: boolean
+    supportsMultiplex: boolean
+    supportsBandwidth: boolean
+    supportsObfs: boolean
+    supportsMethod: boolean
+    supportsServerKey: boolean
+    supportsNetwork: boolean
+    formSection: 'hysteria2' | 'shadowsocks' | 'anytls' | 'naive' | null
+}
+
+export const PROTOCOL_CAPABILITIES: Record<InboundType, ProtocolCapability> = {
+    vless: {
+        credential: 'uuid',
+        supportsFlow: true,
+        supportsVmessFields: false,
+        supportsTLS: true,
+        tlsAlwaysEnabled: false,
+        supportsReality: true,
+        supportsALPN: true,
+        supportsTransport: true,
+        supportsMultiplex: true,
+        supportsBandwidth: false,
+        supportsObfs: false,
+        supportsMethod: false,
+        supportsServerKey: false,
+        supportsNetwork: false,
+        formSection: null,
+    },
+    vmess: {
+        credential: 'id_or_uuid',
+        supportsFlow: false,
+        supportsVmessFields: true,
+        supportsTLS: true,
+        tlsAlwaysEnabled: false,
+        supportsReality: false,
+        supportsALPN: true,
+        supportsTransport: true,
+        supportsMultiplex: true,
+        supportsBandwidth: false,
+        supportsObfs: false,
+        supportsMethod: false,
+        supportsServerKey: false,
+        supportsNetwork: false,
+        formSection: null,
+    },
+    trojan: {
+        credential: 'password_as_uuid',
+        supportsFlow: false,
+        supportsVmessFields: true,
+        supportsTLS: true,
+        tlsAlwaysEnabled: false,
+        supportsReality: false,
+        supportsALPN: true,
+        supportsTransport: true,
+        supportsMultiplex: true,
+        supportsBandwidth: false,
+        supportsObfs: false,
+        supportsMethod: false,
+        supportsServerKey: false,
+        supportsNetwork: false,
+        formSection: null,
+    },
+    hysteria2: {
+        credential: 'password',
+        supportsFlow: false,
+        supportsVmessFields: false,
+        supportsTLS: true,
+        tlsAlwaysEnabled: true,
+        supportsReality: false,
+        supportsALPN: false,
+        supportsTransport: false,
+        supportsMultiplex: false,
+        supportsBandwidth: true,
+        supportsObfs: true,
+        supportsMethod: false,
+        supportsServerKey: false,
+        supportsNetwork: false,
+        formSection: 'hysteria2',
+    },
+    shadowsocks: {
+        credential: 'password',
+        supportsFlow: false,
+        supportsVmessFields: false,
+        supportsTLS: false,
+        tlsAlwaysEnabled: false,
+        supportsReality: false,
+        supportsALPN: false,
+        supportsTransport: false,
+        supportsMultiplex: true,
+        supportsBandwidth: false,
+        supportsObfs: false,
+        supportsMethod: true,
+        supportsServerKey: true,
+        supportsNetwork: true,
+        formSection: 'shadowsocks',
+    },
+    anytls: {
+        credential: 'password',
+        supportsFlow: false,
+        supportsVmessFields: false,
+        supportsTLS: true,
+        tlsAlwaysEnabled: true,
+        supportsReality: false,
+        supportsALPN: true,
+        supportsTransport: false,
+        supportsMultiplex: false,
+        supportsBandwidth: false,
+        supportsObfs: false,
+        supportsMethod: false,
+        supportsServerKey: false,
+        supportsNetwork: false,
+        formSection: 'anytls',
+    },
+    naive: {
+        credential: 'password',
+        supportsFlow: false,
+        supportsVmessFields: false,
+        supportsTLS: true,
+        tlsAlwaysEnabled: true,
+        supportsReality: false,
+        supportsALPN: false,
+        supportsTransport: false,
+        supportsMultiplex: false,
+        supportsBandwidth: false,
+        supportsObfs: false,
+        supportsMethod: false,
+        supportsServerKey: false,
+        supportsNetwork: true,
+        formSection: 'naive',
+    },
+}
+
 type InboundLike = Record<string, any>
 
 export interface InboundVisibility {
@@ -407,6 +554,9 @@ export function getDefaultInbound(type: unknown = 'vless') {
 export function getInboundTransportType(inbound: InboundLike | null | undefined): string {
     if (!inbound || typeof inbound !== 'object') return ''
     const type = toInboundType(inbound.type)
+    // NOTE: intentionally NOT `!PROTOCOL_CAPABILITIES[type].supportsTransport` — shadowsocks
+    // does not support the transport block but also does not early-return here, since its
+    // network field reuses this function's transport-type-detection to select the network form.
     if (type === 'hysteria2' || type === 'anytls' || type === 'naive') return ''
     const transport = inbound.transport
     if (!isTransportConfigured(transport)) return ''
@@ -415,31 +565,32 @@ export function getInboundTransportType(inbound: InboundLike | null | undefined)
 
 export function computeInboundVisibility(inbound: InboundLike | null | undefined): InboundVisibility {
     const type = toInboundType(inbound?.type)
+    const cap = PROTOCOL_CAPABILITIES[type]
     const tlsEnabled = !!inbound?.tls?.enabled
     const transportType = getInboundTransportType(inbound)
     const transportEnabled = transportType !== ''
-    const showTlsSection = type !== 'shadowsocks'
-    const showRealityToggle = type === 'vless' && tlsEnabled
+    const showTlsSection = cap.supportsTLS
+    const showRealityToggle = cap.supportsReality && tlsEnabled
     const showRealitySection = showRealityToggle && !!inbound?.tls?.reality?.enabled
-    const showTransport = type !== 'hysteria2' && type !== 'shadowsocks' && type !== 'anytls' && type !== 'naive'
-    const showMultiplex = type !== 'hysteria2' && type !== 'anytls' && type !== 'naive'
+    const showTransport = cap.supportsTransport
+    const showMultiplex = cap.supportsMultiplex
     const showWsFields = showTransport && transportEnabled && transportType === 'ws'
     return {
         showTlsSection,
         showRealitySection,
         showRealityToggle,
-        showLinkTlsVerification: type !== 'shadowsocks',
-        showAlpn: tlsEnabled && type !== 'hysteria2' && type !== 'shadowsocks' && type !== 'naive',
+        showLinkTlsVerification: cap.supportsTLS,
+        showAlpn: tlsEnabled && cap.supportsALPN,
         showTransport,
         showTransportPath: showTransport && transportEnabled && ['http', 'ws', 'httpupgrade'].includes(transportType),
         showTransportServiceName: showTransport && transportEnabled && transportType === 'grpc',
         showMultiplex,
-        showHysteria2Password: type === 'hysteria2',
-        showHysteria2Bandwidth: type === 'hysteria2',
-        showHysteria2Obfs: type === 'hysteria2',
-        showShadowsocksSection: type === 'shadowsocks',
-        showAnyTLSSection: type === 'anytls',
-        showNaiveSection: type === 'naive',
+        showHysteria2Password: cap.formSection === 'hysteria2',
+        showHysteria2Bandwidth: cap.formSection === 'hysteria2',
+        showHysteria2Obfs: cap.formSection === 'hysteria2',
+        showShadowsocksSection: cap.formSection === 'shadowsocks',
+        showAnyTLSSection: cap.formSection === 'anytls',
+        showNaiveSection: cap.formSection === 'naive',
         showWsHeaders: showWsFields,
         showWsEarlyData: showWsFields,
     }
@@ -587,7 +738,8 @@ function parseMasquerade(masquerade: unknown) {
 }
 
 export function canSelectInboundUserFlow(userType: string, inbound: InboundLike | null | undefined): boolean {
-    return String(userType || '').toLowerCase() === 'vless' && getInboundTransportType(inbound) !== 'ws'
+    const cap = PROTOCOL_CAPABILITIES[String(userType || '').toLowerCase() as InboundType]
+    return !!cap?.supportsFlow && getInboundTransportType(inbound) !== 'ws'
 }
 
 export function buildInboundSubmission(formData: InboundLike) {
