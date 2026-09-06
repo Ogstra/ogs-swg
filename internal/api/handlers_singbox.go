@@ -353,7 +353,17 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		inbType = "vless"
 	}
 
-	if inbType != "hysteria2" && inbType != "trojan" && inbType != "shadowsocks" && inbType != "anytls" && inbType != "naive" && userInfo.UUID == "" {
+	// The old exempt list {hysteria2, trojan, shadowsocks, anytls, naive} is
+	// exactly the set of known protocols whose Credential is CredentialPassword
+	// or CredentialPasswordAsUUID.
+	capability, capabilityKnown := core.CapabilityFor(inbType)
+	// Only UUID-carrying protocols (vless, vmess) are rejected up-front for a
+	// missing credential; password protocols and trojan validate inside their
+	// builder. Unknown types keep the historical strict check.
+	requiresUUID := !capabilityKnown ||
+		capability.Credential == core.CredentialUUID ||
+		capability.Credential == core.CredentialIDOrUUID
+	if requiresUUID && userInfo.UUID == "" {
 		return "", "", fmt.Errorf("User credential missing for inbound")
 	}
 

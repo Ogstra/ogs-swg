@@ -1636,6 +1636,85 @@ func TestBuildShadowsocksLink_TypedNoServerKeyFieldsOnly(t *testing.T) {
 	}
 }
 
+func TestBuildUserLink_CapabilityDrivenCredentialGuard(t *testing.T) {
+	const configJSON = `{
+		"inbounds": [
+			{"type":"vless","tag":"vless-in","listen":"::","listen_port":1000,"users":[{"name":"u"}]},
+			{"type":"vmess","tag":"vmess-in","listen":"::","listen_port":1001,"users":[{"name":"u"}]},
+			{"type":"trojan","tag":"trojan-in","listen":"::","listen_port":1002,"tls":{"enabled":true},"users":[{"name":"u"}]},
+			{"type":"hysteria2","tag":"hy2-in","listen":"::","listen_port":1003,"tls":{"enabled":true},"users":[{"name":"u"}]},
+			{"type":"shadowsocks","tag":"ss-in","listen":"::","listen_port":1004,"method":"aes-256-gcm","users":[{"name":"u"}]},
+			{"type":"anytls","tag":"anytls-in","listen":"::","listen_port":1005,"tls":{"enabled":true},"users":[{"name":"u"}]},
+			{"type":"naive","tag":"naive-in","listen":"::","listen_port":1006,"tls":{"enabled":true},"users":[{"name":"u"}]},
+			{"type":"socks","tag":"socks-in","listen":"::","listen_port":1007,"users":[{"name":"u"},{"name":"u2","uuid":"11111111-1111-1111-1111-111111111111"}]},
+			{"tag":"notype-in","listen":"::","listen_port":1008,"users":[{"name":"u"}]}
+		]
+	}`
+
+	server, _ := newSingboxHandlerTestServer(configJSON)
+	server.config.PublicIP = "203.0.113.1"
+
+	newReq := func(name, tag string) *http.Request {
+		req := httptest.NewRequest(http.MethodGet, "/api/users/"+name+"/link?inbound="+tag, nil)
+		req.SetPathValue("name", name)
+		return req
+	}
+
+	const wantCredentialMissing = "User credential missing for inbound"
+	const wantUnsupported = "Inbound type is not supported"
+
+	t.Run("vless missing uuid returns credential error", func(t *testing.T) {
+		_, _, err := server.buildUserLink(newReq("u", "vless-in"))
+		if err == nil || err.Error() != wantCredentialMissing {
+			t.Fatalf("err = %v; want %q", err, wantCredentialMissing)
+		}
+	})
+
+	t.Run("vmess missing uuid returns credential error", func(t *testing.T) {
+		_, _, err := server.buildUserLink(newReq("u", "vmess-in"))
+		if err == nil || err.Error() != wantCredentialMissing {
+			t.Fatalf("err = %v; want %q", err, wantCredentialMissing)
+		}
+	})
+
+	t.Run("trojan missing password skips early guard", func(t *testing.T) {
+		_, _, err := server.buildUserLink(newReq("u", "trojan-in"))
+		if err != nil && err.Error() == wantCredentialMissing {
+			t.Fatalf("trojan should not hit the early credential guard; got %q", err.Error())
+		}
+	})
+
+	for _, tag := range []string{"hy2-in", "ss-in", "anytls-in", "naive-in"} {
+		t.Run(tag+" missing password skips early guard", func(t *testing.T) {
+			_, _, err := server.buildUserLink(newReq("u", tag))
+			if err != nil && err.Error() == wantCredentialMissing {
+				t.Fatalf("%s should not hit the early credential guard; got %q", tag, err.Error())
+			}
+		})
+	}
+
+	t.Run("unmanaged type with empty uuid returns credential error", func(t *testing.T) {
+		_, _, err := server.buildUserLink(newReq("u", "socks-in"))
+		if err == nil || err.Error() != wantCredentialMissing {
+			t.Fatalf("err = %v; want %q", err, wantCredentialMissing)
+		}
+	})
+
+	t.Run("unmanaged type with non-empty uuid returns unsupported error", func(t *testing.T) {
+		_, _, err := server.buildUserLink(newReq("u2", "socks-in"))
+		if err == nil || err.Error() != wantUnsupported {
+			t.Fatalf("err = %v; want %q", err, wantUnsupported)
+		}
+	})
+
+	t.Run("empty inbound type defaults to vless and requires uuid", func(t *testing.T) {
+		_, _, err := server.buildUserLink(newReq("u", "notype-in"))
+		if err == nil || err.Error() != wantCredentialMissing {
+			t.Fatalf("err = %v; want %q", err, wantCredentialMissing)
+		}
+	})
+}
+
 func TestHandleGetUserInbounds_ShadowsocksRedaction(t *testing.T) {
 	const ssConfig = `{"inbounds":[{"type":"shadowsocks","tag":"ss-in","listen":"::","listen_port":8443,"method":"2022-blake3-aes-128-gcm","users":[{"name":"alice","password":"s3cr3t"}]}]}`
 
