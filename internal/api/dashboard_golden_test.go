@@ -67,7 +67,10 @@ func TestDashboardPayloadGolden(t *testing.T) {
 
 	golden := map[string]interface{}{
 		"fixed_window_default": captureDashboardPayload(t, server, "/api/dashboard?start=1&end=1000"),
-		"fixed_window_wide":    captureDashboardPayload(t, server, "/api/dashboard?start=0&end=100000"),
+		// start=1, not start=0: resolveDashboardWindow treats a zero start/end
+		// as "not provided" and falls back to a real time.Now()-relative
+		// window, which would make this golden test flaky across runs/days.
+		"fixed_window_wide": captureDashboardPayload(t, server, "/api/dashboard?start=1&end=100000"),
 	}
 
 	// Structural assertion 1: wireguard_interfaces has exactly the wg0/wg1 keys

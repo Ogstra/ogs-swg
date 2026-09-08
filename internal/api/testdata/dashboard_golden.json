@@ -122,7 +122,7 @@
           "up_wg": 800
         }
       ],
-      "public_ip": "201.216.219.144",
+      "public_ip": "203.0.113.10",
       "singbox_pending_changes": false,
       "stats_cards": {
         "singbox": {
@@ -186,181 +186,41 @@
       "chart_data": [
         {
           "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788642000,
+          "down_wg": 400,
+          "ts": 0,
           "up_sb": 0,
-          "up_wg": 0
+          "up_wg": 800
         },
         {
           "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788645600,
+          "down_wg": 400,
+          "ts": 21600,
           "up_sb": 0,
-          "up_wg": 0
+          "up_wg": 800
         },
         {
           "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788649200,
+          "down_wg": 400,
+          "ts": 43200,
           "up_sb": 0,
-          "up_wg": 0
+          "up_wg": 800
         },
         {
           "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788652800,
+          "down_wg": 400,
+          "ts": 64800,
           "up_sb": 0,
-          "up_wg": 0
+          "up_wg": 800
         },
         {
           "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788656400,
+          "down_wg": 400,
+          "ts": 86400,
           "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788660000,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788663600,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788667200,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788670800,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788674400,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788678000,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788681600,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788685200,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788688800,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788692400,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788696000,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788699600,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788703200,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788706800,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788710400,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788714000,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788717600,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788721200,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788724800,
-          "up_sb": 0,
-          "up_wg": 0
-        },
-        {
-          "down_sb": 0,
-          "down_wg": 0,
-          "ts": 1788728400,
-          "up_sb": 0,
-          "up_wg": 0
+          "up_wg": 800
         }
       ],
-      "public_ip": "201.216.219.144",
+      "public_ip": "203.0.113.10",
       "singbox_pending_changes": false,
       "stats_cards": {
         "singbox": {
@@ -368,8 +228,8 @@
           "uplink": 0
         },
         "wireguard": {
-          "downlink": 0,
-          "uplink": 0
+          "downlink": 400,
+          "uplink": 800
         }
       },
       "status": {
@@ -387,16 +247,33 @@
       },
       "top_consumers": {
         "singbox": [],
-        "wireguard": []
+        "wireguard": [
+          {
+            "flow": "WireGuard:wg0",
+            "interface_name": "wg0",
+            "key": "peer-wg0-public-key",
+            "name": "alice",
+            "quota_limit": 0,
+            "total": 900
+          },
+          {
+            "flow": "WireGuard:wg1",
+            "interface_name": "wg1",
+            "key": "peer-wg1-public-key",
+            "name": "bob",
+            "quota_limit": 0,
+            "total": 300
+          }
+        ]
       },
       "wireguard_interfaces": {
         "wg0": {
-          "downlink": 0,
-          "uplink": 0
+          "downlink": 300,
+          "uplink": 600
         },
         "wg1": {
-          "downlink": 0,
-          "uplink": 0
+          "downlink": 100,
+          "uplink": 200
         }
       }
     },
