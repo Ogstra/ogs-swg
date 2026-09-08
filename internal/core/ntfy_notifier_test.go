@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func TestNtfyNotifierDownThenUpFiresOncePerTransition(t *testing.T) {
 	}
 	down := (*recorded)[0].Message
 	want := NtfyServiceDownMessage(NtfyServiceSingbox)
-	if down.Title != want.Title || down.Tags != want.Tags || down.Priority != want.Priority {
+	if down.Title != want.Title || !slices.Equal(down.Tags, want.Tags) || down.Priority != want.Priority {
 		t.Fatalf("down message = %+v; want %+v", down, want)
 	}
 
@@ -127,7 +128,7 @@ func TestNtfyNotifierDownThenUpFiresOncePerTransition(t *testing.T) {
 	}
 	up := (*recorded)[1].Message
 	wantUp := NtfyServiceRecoveredMessage(NtfyServiceSingbox)
-	if up.Title != wantUp.Title || up.Tags != wantUp.Tags || up.Priority != wantUp.Priority {
+	if up.Title != wantUp.Title || !slices.Equal(up.Tags, wantUp.Tags) || up.Priority != wantUp.Priority {
 		t.Fatalf("recovered message = %+v; want %+v", up, wantUp)
 	}
 }
@@ -311,12 +312,12 @@ func TestNtfyNotifierCrashAfterReloadWindow(t *testing.T) {
 			}
 			msg := (*recorded)[0].Message
 			if tc.wantCrash {
-				if msg.Tags != "skull,gear" {
-					t.Fatalf("%s: tags = %q; want crash tags %q", tc.name, msg.Tags, "skull,gear")
+				if !slices.Equal(msg.Tags, []string{"skull", "gear"}) {
+					t.Fatalf("%s: tags = %q; want crash tags %q", tc.name, msg.Tags, []string{"skull", "gear"})
 				}
 			} else {
-				if msg.Tags != "rotating_light,warning" {
-					t.Fatalf("%s: tags = %q; want generic-down tags %q", tc.name, msg.Tags, "rotating_light,warning")
+				if !slices.Equal(msg.Tags, []string{"rotating_light", "warning"}) {
+					t.Fatalf("%s: tags = %q; want generic-down tags %q", tc.name, msg.Tags, []string{"rotating_light", "warning"})
 				}
 			}
 		})

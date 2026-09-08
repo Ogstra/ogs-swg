@@ -47,7 +47,7 @@ func (s NtfySettings) String() string {
 type NtfyMessage struct {
 	Title    string
 	Message  string
-	Tags     string
+	Tags     []string
 	Priority int
 }
 
@@ -92,7 +92,7 @@ type ntfyPublishBody struct {
 	Topic    string `json:"topic"`
 	Title    string `json:"title,omitempty"`
 	Message  string `json:"message,omitempty"`
-	Tags     string `json:"tags,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 	Priority int    `json:"priority,omitempty"`
 }
 
@@ -164,7 +164,7 @@ func NtfyServiceDownMessage(service string) NtfyMessage {
 	return NtfyMessage{
 		Title:    fmt.Sprintf("Service Down: %s", service),
 		Message:  fmt.Sprintf("%s is down.", service),
-		Tags:     "rotating_light,warning",
+		Tags:     []string{"rotating_light", "warning"},
 		Priority: 5,
 	}
 }
@@ -175,7 +175,7 @@ func NtfyServiceRecoveredMessage(service string) NtfyMessage {
 	return NtfyMessage{
 		Title:    fmt.Sprintf("Service Recovered: %s", service),
 		Message:  fmt.Sprintf("%s has recovered.", service),
-		Tags:     "white_check_mark",
+		Tags:     []string{"white_check_mark"},
 		Priority: 3,
 	}
 }
@@ -186,7 +186,7 @@ func NtfyConfigApplyFailedMessage(detail string) NtfyMessage {
 	return NtfyMessage{
 		Title:    "Sing-box config apply failed",
 		Message:  detail,
-		Tags:     "warning,gear",
+		Tags:     []string{"warning", "gear"},
 		Priority: 4,
 	}
 }
@@ -197,7 +197,7 @@ func NtfyCrashAfterReloadMessage(sinceReload time.Duration) NtfyMessage {
 	return NtfyMessage{
 		Title:    "Sing-box crashed after config reload",
 		Message:  fmt.Sprintf("sing-box crashed %s after the last config reload.", sinceReload.Round(time.Second)),
-		Tags:     "skull,gear",
+		Tags:     []string{"skull", "gear"},
 		Priority: 5,
 	}
 }
@@ -208,7 +208,7 @@ func NtfyHighTrafficMessage(totalBytes, thresholdBytes int64, window time.Durati
 	return NtfyMessage{
 		Title:    "High traffic",
 		Message:  fmt.Sprintf("Traffic reached %d bytes (threshold %d) over %s.", totalBytes, thresholdBytes, window.Round(time.Second)),
-		Tags:     "chart_with_upwards_trend",
+		Tags:     []string{"chart_with_upwards_trend"},
 		Priority: 3,
 	}
 }
@@ -219,7 +219,7 @@ func NtfyTestMessage() NtfyMessage {
 	return NtfyMessage{
 		Title:    "Test notification",
 		Message:  "This is a test notification from the panel.",
-		Tags:     "bell",
+		Tags:     []string{"bell"},
 		Priority: 1,
 	}
 }
