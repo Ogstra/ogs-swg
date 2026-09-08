@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -53,16 +54,16 @@ func TestPublishNtfyPayload(t *testing.T) {
 	cases := []struct {
 		name     string
 		msg      NtfyMessage
-		wantTags string
+		wantTags []string
 		wantPri  int
 		wantTtl  string
 	}{
-		{"service_down", NtfyServiceDownMessage("sing-box"), "rotating_light,warning", 5, "Service Down: sing-box"},
-		{"service_recovered", NtfyServiceRecoveredMessage("wireguard"), "white_check_mark", 3, "Service Recovered: wireguard"},
-		{"config_apply_failed", NtfyConfigApplyFailedMessage("bad json"), "warning,gear", 4, "Sing-box config apply failed"},
-		{"crash_after_reload", NtfyCrashAfterReloadMessage(30 * time.Second), "skull,gear", 5, "Sing-box crashed after config reload"},
-		{"high_traffic", NtfyHighTrafficMessage(1000, 500, time.Minute), "chart_with_upwards_trend", 3, "High traffic"},
-		{"test_message", NtfyTestMessage(), "bell", 1, "Test notification"},
+		{"service_down", NtfyServiceDownMessage("sing-box"), []string{"rotating_light", "warning"}, 5, "Service Down: sing-box"},
+		{"service_recovered", NtfyServiceRecoveredMessage("wireguard"), []string{"white_check_mark"}, 3, "Service Recovered: wireguard"},
+		{"config_apply_failed", NtfyConfigApplyFailedMessage("bad json"), []string{"warning", "gear"}, 4, "Sing-box config apply failed"},
+		{"crash_after_reload", NtfyCrashAfterReloadMessage(30 * time.Second), []string{"skull", "gear"}, 5, "Sing-box crashed after config reload"},
+		{"high_traffic", NtfyHighTrafficMessage(1000, 500, time.Minute), []string{"chart_with_upwards_trend"}, 3, "High traffic"},
+		{"test_message", NtfyTestMessage(), []string{"bell"}, 1, "Test notification"},
 	}
 
 	for _, tc := range cases {
@@ -74,7 +75,7 @@ func TestPublishNtfyPayload(t *testing.T) {
 			if req.Body.Title != tc.wantTtl {
 				t.Errorf("title = %q, want %q", req.Body.Title, tc.wantTtl)
 			}
-			if req.Body.Tags != tc.wantTags {
+			if !slices.Equal(req.Body.Tags, tc.wantTags) {
 				t.Errorf("tags = %q, want %q", req.Body.Tags, tc.wantTags)
 			}
 			if req.Body.Priority != tc.wantPri {
