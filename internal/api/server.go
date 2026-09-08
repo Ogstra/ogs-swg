@@ -70,6 +70,7 @@ type Server struct {
 	logSearchSem chan struct{}
 	logStore     *core.LogStore
 	logIngester  *core.LogIngester
+	ntfyNotifier *core.NtfyNotifier
 }
 
 func (s *Server) invalidateSamplerHistoryCache() {
@@ -125,6 +126,7 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		logSearchSem: make(chan struct{}, 2),
 	}
 	srv.reloadProtectionRules(context.Background())
+	srv.initNtfyNotifier()
 	return srv
 }
 
@@ -569,6 +571,8 @@ func StartServer(cfg *core.Config) *Server {
 	} else if cfg.EnableWireGuard && cfg.DemoMode {
 		log.Printf("Demo mode: skipping WireGuard sampler; seeded demo data is authoritative")
 	}
+
+	server.startNtfyNotifier()
 
 	// Start background maintenance (Retention & Vacuum)
 	if !cfg.DemoMode {
