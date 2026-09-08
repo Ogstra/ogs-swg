@@ -1171,14 +1171,19 @@ func (c *Config) ApplySingboxChanges() error {
 	if err != nil {
 		return err
 	}
+	var clashErr error
 	if api != nil {
 		if err := c.restartViaClashAPI(api); err == nil {
 			c.SingboxPendingChanges = false
 			return nil
+		} else {
+			// A configured Clash API that rejects/fails the reload is a genuine
+			// apply failure (NTFY-03); "no Clash API configured" is not (D-15).
+			clashErr = err
 		}
 	}
 
-	return &SingboxRestartRequiredError{Reason: "restart_required"}
+	return &SingboxRestartRequiredError{Reason: "restart_required", Err: clashErr}
 }
 
 func (c *Config) SyncInboundsFromSingbox() error {

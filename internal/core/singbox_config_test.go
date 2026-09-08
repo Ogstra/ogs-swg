@@ -758,6 +758,9 @@ func TestApplySingboxChanges_RequiresRestartWhenNoClashAPI(t *testing.T) {
 	if restartRequired.Reason != "restart_required" {
 		t.Fatalf("restart reason = %q, want restart_required", restartRequired.Reason)
 	}
+	if restartRequired.Err != nil {
+		t.Fatalf("restartRequired.Err = %v, want nil when no Clash API is configured", restartRequired.Err)
+	}
 	if tracker.restartCalled {
 		t.Fatalf("RestartService called before explicit confirmation")
 	}
@@ -794,6 +797,34 @@ func TestApplySingboxChanges_RequiresRestartWhenClashAPIFails(t *testing.T) {
 	}
 	if !cfg.GetSingboxPendingChanges() {
 		t.Fatalf("GetSingboxPendingChanges() = false, want true until confirmed restart")
+	}
+}
+
+func TestApplySingboxChanges_ClashAPIFailureCarriesCause(t *testing.T) {
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "127.0.0.1:1"
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	cfg.MarkSingboxPending()
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	err := cfg.ApplySingboxChanges()
+	var restartRequired *SingboxRestartRequiredError
+	if !errors.As(err, &restartRequired) {
+		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
+	}
+	if restartRequired.Reason != "restart_required" {
+		t.Fatalf("restart reason = %q, want restart_required", restartRequired.Reason)
+	}
+	if restartRequired.Err == nil {
+		t.Fatalf("restartRequired.Err = nil, want non-nil cause when a configured Clash API rejects the reload")
 	}
 }
 
