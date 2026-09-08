@@ -1463,6 +1463,12 @@ func (s *Server) handleApplySingboxChanges(w http.ResponseWriter, r *http.Reques
 	if err := s.config.ApplySingboxChanges(); err != nil {
 		var restartRequired *core.SingboxRestartRequiredError
 		if errors.As(err, &restartRequired) {
+			// D-15: "restart required" with no underlying cause means the Clash API
+			// simply isn't configured — a normal state, not a config failure. Only a
+			// configured Clash API that actually rejected the reload notifies.
+			if restartRequired.Err != nil {
+				s.ntfyNotifier.NotifyConfigApplyFailed(r.Context(), "Sing-box rejected the configuration reload: "+restartRequired.Err.Error())
+			}
 			writeJSON(w, http.StatusConflict, map[string]interface{}{
 				"success":          false,
 				"restart_required": true,
@@ -1470,9 +1476,11 @@ func (s *Server) handleApplySingboxChanges(w http.ResponseWriter, r *http.Reques
 			})
 			return
 		}
+		s.ntfyNotifier.NotifyConfigApplyFailed(r.Context(), "Failed to apply sing-box configuration: "+err.Error())
 		writeErr(w, http.StatusInternalServerError, "Failed to apply changes: "+err.Error())
 		return
 	}
+	s.ntfyNotifier.NotifyConfigApplySucceeded()
 
 	s.InvalidateSubCache()
 
