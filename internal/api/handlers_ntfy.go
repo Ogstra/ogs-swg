@@ -154,7 +154,12 @@ func (s *Server) handleTestNtfyNotification(w http.ResponseWriter, r *http.Reque
 	// "SECURITY:" comment) to never embed s.BearerToken/s.BasicPass into a
 	// returned error. If that contract ever changes, this must change too.
 	if err := core.PublishNtfy(ctx, settings, core.NtfyTestMessage()); err != nil {
-		writeErr(w, http.StatusBadGateway, "Test notification failed: "+err.Error())
+		// Not http.StatusBadGateway: Cloudflare (and other CDN proxies in front
+		// of this panel) intercept 502/503/504 from the origin and substitute
+		// their own branded error page, hiding this JSON body from the user.
+		// 422 is a normal application-level failure (bad ntfy config/URL), not
+		// an actual gateway problem, so it passes through untouched.
+		writeErr(w, http.StatusUnprocessableEntity, "Test notification failed: "+err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})

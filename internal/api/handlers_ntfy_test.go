@@ -365,8 +365,8 @@ func TestNtfyTestNotificationErrorIsRedacted(t *testing.T) {
 	testRec := httptest.NewRecorder()
 	server.handleTestNtfyNotification(testRec, testReq)
 
-	if testRec.Code != http.StatusBadGateway {
-		t.Fatalf("expected 502, got status=%d body=%q", testRec.Code, testRec.Body.String())
+	if testRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got status=%d body=%q", testRec.Code, testRec.Body.String())
 	}
 	body := testRec.Body.String()
 	if !strings.Contains(body, "unauthorized") {
