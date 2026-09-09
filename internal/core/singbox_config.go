@@ -34,11 +34,35 @@ func (c *Config) GetSingboxConfig() (string, error) {
 	return string(content), nil
 }
 
-func (c *Config) readSingboxConfigLocked() ([]byte, error) {
+func (c *Config) readSingboxConfigUncachedLocked() ([]byte, error) {
+	c.singboxDiskReads++
 	if c.executor != nil {
 		return c.executor.ReadConfig(context.Background(), c.SingboxConfigPath)
 	}
 	return os.ReadFile(c.SingboxConfigPath)
+}
+
+func (c *Config) readSingboxConfigLocked() ([]byte, error) {
+	modTime, size, ok := c.statSingboxConfigLocked()
+	if ok && c.singboxCacheValidLocked(modTime, size) {
+		return append([]byte(nil), c.singboxCache.raw...), nil
+	}
+	content, err := c.readSingboxConfigUncachedLocked()
+	if err != nil {
+		c.singboxCache = nil
+		return nil, err
+	}
+	if ok {
+		c.singboxCache = &singboxConfigCache{
+			path:    c.SingboxConfigPath,
+			modTime: modTime,
+			size:    size,
+			raw:     append([]byte(nil), content...),
+		}
+	} else {
+		c.singboxCache = nil
+	}
+	return content, nil
 }
 
 func (c *Config) readSingboxConfigMapLocked() (map[string]interface{}, error) {
@@ -46,15 +70,23 @@ func (c *Config) readSingboxConfigMapLocked() (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
+	if c.singboxCache != nil && c.singboxCache.parsed != nil {
+		return deepCopyJSONMap(c.singboxCache.parsed), nil
+	}
 
 	raw := make(map[string]interface{})
+	c.singboxJSONParses++
 	if err := json.Unmarshal(content, &raw); err != nil {
 		return nil, err
+	}
+	if c.singboxCache != nil {
+		c.singboxCache.parsed = deepCopyJSONMap(raw)
 	}
 	return raw, nil
 }
 
 func (c *Config) writeSingboxConfigLocked(data []byte) error {
+	c.invalidateSingboxConfigCacheLocked()
 	if c.executor != nil {
 		return c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644)
 	}
@@ -391,10 +423,12 @@ func (c *Config) UpdateSingboxConfig(content string) error {
 		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, []byte(content), 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	} else {
 		if err := os.WriteFile(c.SingboxConfigPath, []byte(content), 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	}
 
 	// 4. Mark pending restart (lock already held)
@@ -531,12 +565,26 @@ func decodeSingboxInboundView(rawInbound json.RawMessage) (SingboxInboundView, e
 		}
 	}
 
+	var obfs *SingboxObfsConfig
+	if obfsMap, ok := inboundMap["obfs"].(map[string]interface{}); ok {
+		obfsType, _ := obfsMap["type"].(string)
+		obfsPassword, _ := obfsMap["password"].(string)
+		obfs = &SingboxObfsConfig{Type: obfsType, Password: obfsPassword}
+	}
+	network, _ := inboundMap["network"].(string)
+	method, _ := inboundMap["method"].(string)
+	serverKey, _ := inboundMap["password"].(string)
+
 	return SingboxInboundView{
 		Tag:        meta.Tag,
 		Type:       meta.Type,
 		ListenPort: meta.ListenPort,
 		Users:      decodeSingboxInboundUserViews(inboundMap["users"]),
 		TLS:        tlsCfg,
+		Obfs:       obfs,
+		Network:    strings.TrimSpace(network),
+		Method:     strings.TrimSpace(method),
+		ServerKey:  strings.TrimSpace(serverKey),
 		Raw:        inboundMap,
 	}, nil
 }
@@ -569,6 +617,10 @@ func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 		return nil, err
 	}
 
+	if c.singboxCache != nil && c.singboxCache.views != nil {
+		return cloneSingboxInboundViews(c.singboxCache.views), nil
+	}
+
 	// Extract inbounds directly from the raw map to avoid failures from typed
 	// fields elsewhere in the config (e.g. Experimental with custom unmarshal).
 	var rawTop map[string]json.RawMessage
@@ -580,6 +632,7 @@ func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 	if err != nil {
 		return nil, err
 	}
+	c.singboxJSONParses++
 	views := make([]SingboxInboundView, 0, len(rawInbounds))
 	for _, rawInbound := range rawInbounds {
 		view, err := decodeSingboxInboundView(rawInbound)
@@ -587,6 +640,9 @@ func (c *Config) getSingboxInboundViewsLocked() ([]SingboxInboundView, error) {
 			return nil, err
 		}
 		views = append(views, view)
+	}
+	if c.singboxCache != nil {
+		c.singboxCache.views = cloneSingboxInboundViews(views)
 	}
 	return views, nil
 }
@@ -817,39 +873,28 @@ func (c *Config) GetUserInbounds(name string) ([]UserInboundInfo, error) {
 			}
 			uuid := user.UUID
 			flow := user.Flow
-			switch inbound.Type {
-			case "hysteria2":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "anytls":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "naive":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "shadowsocks":
-				result = append(result, UserInboundInfo{
-					Tag:      inbound.Tag,
-					Password: user.Password,
-				})
-				continue
-			case "trojan":
-				uuid = user.Password
-				flow = ""
-			case "vmess":
-				if uuid == "" {
-					uuid = user.ID
+			capability, known := CapabilityFor(inbound.Type)
+			if known {
+				switch capability.Credential {
+				case CredentialPassword:
+					// hysteria2, anytls, naive, shadowsocks: the secret is the user
+					// password and no UUID/flow/vmess metadata is surfaced.
+					result = append(result, UserInboundInfo{
+						Tag:      inbound.Tag,
+						Password: user.Password,
+					})
+					continue
+				case CredentialPasswordAsUUID:
+					uuid = user.Password
+					flow = ""
+				case CredentialIDOrUUID:
+					if uuid == "" {
+						uuid = user.ID
+					}
+					flow = ""
+				case CredentialUUID:
+					// vless keeps users[].uuid and users[].flow as-is.
 				}
-				flow = ""
 			}
 			result = append(result, UserInboundInfo{
 				Tag:           inbound.Tag,
@@ -1029,10 +1074,12 @@ func (c *Config) saveAndReload(rawConfig *SingboxConfig) error {
 		if err := c.executor.WriteConfig(context.Background(), c.SingboxConfigPath, data, 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	} else {
 		if err := os.WriteFile(c.SingboxConfigPath, data, 0644); err != nil {
 			return err
 		}
+		c.invalidateSingboxConfigCacheLocked()
 	}
 
 	return c.afterSingboxConfigWriteLocked(rawConfig)
@@ -1083,6 +1130,57 @@ func (c *Config) ValidateConfig(content []byte) error {
 	return nil
 }
 
+// inboundListenNetworks returns the transport network(s) ("tcp", "udp") that an
+// inbound of the given type actually binds a socket on. Two inbounds sharing a
+// listen_port only collide if they share a network: sing-box lets a UDP-only
+// protocol (e.g. hysteria2/QUIC) and a TCP protocol (e.g. vless) coexist on the
+// same port number since they bind different sockets at the OS level.
+func inboundListenNetworks(inbType string, inbMap map[string]interface{}) []string {
+	switch inbType {
+	case "hysteria2", "hysteria", "tuic":
+		// QUIC-based protocols bind UDP only.
+		return []string{"udp"}
+	case "shadowsocks", "naive":
+		// These protocols can be restricted to a subset of networks via the
+		// "network" field; default to both when unset/unrecognized.
+		if networks := parseInboundNetworkField(inbMap["network"]); len(networks) > 0 {
+			return networks
+		}
+		return []string{"tcp", "udp"}
+	case "vless", "vmess", "trojan", "anytls":
+		// TCP-only proxy protocols.
+		return []string{"tcp"}
+	default:
+		// Unknown/unmanaged inbound type (mixed, socks, http, direct, tun, etc.) -
+		// conservatively assume both networks so a real collision isn't missed.
+		return []string{"tcp", "udp"}
+	}
+}
+
+func parseInboundNetworkField(raw interface{}) []string {
+	switch v := raw.(type) {
+	case string:
+		s := strings.ToLower(strings.TrimSpace(v))
+		if s == "" {
+			return nil
+		}
+		return []string{s}
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				s = strings.ToLower(strings.TrimSpace(s))
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 // DetectPortCollision parses the config and checks for overlapping ports in inbounds
 func (c *Config) DetectPortCollision(content []byte) error {
 	var raw map[string]interface{}
@@ -1095,8 +1193,8 @@ func (c *Config) DetectPortCollision(content []byte) error {
 		return nil
 	}
 
-	// Map of Port -> Tag
-	usedPorts := make(map[int]string)
+	// Map of network -> Port -> Tag
+	usedPorts := make(map[string]map[int]string)
 
 	for _, inb := range inbounds {
 		inbMap, ok := inb.(map[string]interface{})
@@ -1105,15 +1203,24 @@ func (c *Config) DetectPortCollision(content []byte) error {
 		}
 
 		tag, _ := inbMap["tag"].(string)
+		inbType, _ := inbMap["type"].(string)
+		inbType = strings.ToLower(strings.TrimSpace(inbType))
 
 		// check "listen_port" (int)
 		if portVal, ok := inbMap["listen_port"]; ok {
 			if port, ok := portVal.(float64); ok { // json unmarshals numbers as float64
 				p := int(port)
-				if existingTag, exists := usedPorts[p]; exists {
-					return fmt.Errorf("port %d is already in use by inbound '%s'", p, existingTag)
+				for _, network := range inboundListenNetworks(inbType, inbMap) {
+					portsForNetwork := usedPorts[network]
+					if portsForNetwork == nil {
+						portsForNetwork = make(map[int]string)
+						usedPorts[network] = portsForNetwork
+					}
+					if existingTag, exists := portsForNetwork[p]; exists {
+						return fmt.Errorf("port %d (%s) is already in use by inbound '%s'", p, network, existingTag)
+					}
+					portsForNetwork[p] = tag
 				}
-				usedPorts[p] = tag
 			}
 		}
 
@@ -1553,6 +1660,32 @@ func routeTagByID(tags []UserRouteTag) map[int64]UserRouteTag {
 	return out
 }
 
+// CheckRouteTagInboundCompatibility returns an error if the rule restricts
+// traffic to specific inbounds and none of the user's inbound tags match.
+// An empty rule inbound list means no inbound restriction — always compatible.
+func CheckRouteTagInboundCompatibility(rule map[string]interface{}, userInboundTags []string) error {
+	raw, ok := rule["inbound"]
+	if !ok {
+		return nil
+	}
+	inbounds, ok := raw.([]interface{})
+	if !ok || len(inbounds) == 0 {
+		return nil
+	}
+	for _, ib := range inbounds {
+		ibStr, ok := ib.(string)
+		if !ok {
+			continue
+		}
+		for _, userIB := range userInboundTags {
+			if userIB == ibStr {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("user inbound not in rule inbound list")
+}
+
 func addAuthUser(users []string, userName string) []string {
 	if containsRouteTagString(users, userName) {
 		return users
@@ -1570,7 +1703,7 @@ func removeAuthUser(users []string, userName string) []string {
 	return out
 }
 
-func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []int64, tags []UserRouteTag) ([]UserRouteTag, error) {
+func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []int64, tags []UserRouteTag, userInboundTags []string) ([]UserRouteTag, error) {
 	userName = strings.TrimSpace(userName)
 	if userName == "" {
 		return nil, fmt.Errorf("user name is required")
@@ -1632,6 +1765,9 @@ func (c *Config) UpdateUserRouteTagMembership(userName string, targetTagIDs []in
 		}
 		nextUsers := resolution.AuthUsers
 		if _, shouldHave := targetSet[id]; shouldHave {
+			if err := CheckRouteTagInboundCompatibility(resolution.Rule, userInboundTags); err != nil {
+				return nil, fmt.Errorf("route tag inbound mismatch: tag %d %w", id, err)
+			}
 			nextUsers = addAuthUser(nextUsers, userName)
 		} else {
 			nextUsers = removeAuthUser(nextUsers, userName)

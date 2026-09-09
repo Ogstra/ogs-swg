@@ -22,6 +22,7 @@ services:
     volumes:
       - ./data:/app/data
       - ${OGS_ACCESS_LOG_HOST_DIR:-./data}:/app/access-logs:ro
+      - ${OGS_EXTERNAL_PROFILE_IP_HOST_DIR:-./homelab/ip}:/app/external-profile-ip:ro
       - ./config.json:/app/config.json
 
       # Bind-mount host config dirs at the same path (local + docker_local modes)

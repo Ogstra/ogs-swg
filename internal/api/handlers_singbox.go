@@ -36,7 +36,7 @@ func (s *Server) handleGetSingboxConfig(w http.ResponseWriter, r *http.Request) 
 
 	content, err := s.config.GetSingboxConfig()
 	if err != nil {
-		http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read config: "+err.Error())
 		return
 	}
 	if shouldRedactConfigReadOnly(r) {
@@ -54,12 +54,11 @@ func (s *Server) handleGetSingboxDNS(w http.ResponseWriter, r *http.Request) {
 
 	dns, err := s.config.GetSingboxDNS()
 	if err != nil {
-		http.Error(w, "Failed to get dns config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get dns config: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(dns)
+	writeJSON(w, http.StatusOK, dns)
 }
 
 func (s *Server) handleUpdateSingboxConfig(w http.ResponseWriter, r *http.Request) {
@@ -69,17 +68,17 @@ func (s *Server) handleUpdateSingboxConfig(w http.ResponseWriter, r *http.Reques
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read body: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to read body: "+err.Error())
 		return
 	}
 
 	if err := validateRawSingboxConfigPayload(body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := s.config.UpdateSingboxConfig(string(body)); err != nil {
-		http.Error(w, "Failed to update config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update config: "+err.Error())
 		return
 	}
 
@@ -92,13 +91,13 @@ func (s *Server) handleUpdateSingboxDNS(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var dns map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&dns); err != nil {
-		http.Error(w, "Failed to decode dns config: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &dns); err != nil {
+		writeErr(w, http.StatusBadRequest, "Failed to decode dns config: "+err.Error())
 		return
 	}
 
 	if err := s.config.UpdateSingboxDNS(dns); err != nil {
-		http.Error(w, "Failed to update dns config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update dns config: "+err.Error())
 		return
 	}
 
@@ -117,8 +116,7 @@ func (s *Server) handleGetSingboxOutbounds(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(outbounds)
+	writeJSON(w, http.StatusOK, outbounds)
 }
 
 func (s *Server) handleUpdateSingboxOutboundDomainStrategies(w http.ResponseWriter, r *http.Request) {
@@ -127,13 +125,13 @@ func (s *Server) handleUpdateSingboxOutboundDomainStrategies(w http.ResponseWrit
 	}
 
 	var updates []core.SingboxOutboundDomainStrategyUpdate
-	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
-		http.Error(w, "Failed to decode outbound updates: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &updates); err != nil {
+		writeErr(w, http.StatusBadRequest, "Failed to decode outbound updates: "+err.Error())
 		return
 	}
 
 	if err := s.config.UpdateSingboxOutboundDomainStrategies(updates); err != nil {
-		http.Error(w, "Failed to update outbound domain_strategy: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update outbound domain_strategy: "+err.Error())
 		return
 	}
 
@@ -206,8 +204,7 @@ func (s *Server) handleGetSingboxInbounds(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(inbounds)
+	writeJSON(w, http.StatusOK, inbounds)
 }
 
 func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
@@ -217,13 +214,13 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 
 	name := r.PathValue("name")
 	if name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 
 	inbounds, err := s.config.GetUserInbounds(name)
 	if err != nil {
-		http.Error(w, "Failed to get user inbounds: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to get user inbounds: "+err.Error())
 		return
 	}
 	if len(inbounds) == 0 && s.store != nil {
@@ -276,8 +273,7 @@ func (s *Server) handleGetUserInbounds(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(inbounds)
+	writeJSON(w, http.StatusOK, inbounds)
 }
 
 func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) {
@@ -285,22 +281,21 @@ func (s *Server) handleGetUserVLESSLink(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if shouldRedactUsersReadOnly(r) || shouldRedactConfigReadOnly(r) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	link, linkType, err := s.buildUserLink(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if linkType != "vless" {
-		http.Error(w, "Inbound type is not VLESS", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Inbound type is not VLESS")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"link": link})
+	writeJSON(w, http.StatusOK, map[string]string{"link": link})
 }
 
 func sanitiseInboundFields(inbound map[string]interface{}) {
@@ -312,18 +307,17 @@ func (s *Server) handleGetUserLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if shouldRedactUsersReadOnly(r) || shouldRedactConfigReadOnly(r) {
-		http.Error(w, "Forbidden", http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
 
 	link, linkType, err := s.buildUserLink(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"link": link, "type": linkType})
+	writeJSON(w, http.StatusOK, map[string]string{"link": link, "type": linkType})
 }
 
 func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
@@ -359,7 +353,17 @@ func (s *Server) buildUserLink(r *http.Request) (string, string, error) {
 		inbType = "vless"
 	}
 
-	if inbType != "hysteria2" && inbType != "trojan" && inbType != "shadowsocks" && inbType != "anytls" && inbType != "naive" && userInfo.UUID == "" {
+	// The old exempt list {hysteria2, trojan, shadowsocks, anytls, naive} is
+	// exactly the set of known protocols whose Credential is CredentialPassword
+	// or CredentialPasswordAsUUID.
+	capability, capabilityKnown := core.CapabilityFor(inbType)
+	// Only UUID-carrying protocols (vless, vmess) are rejected up-front for a
+	// missing credential; password protocols and trojan validate inside their
+	// builder. Unknown types keep the historical strict check.
+	requiresUUID := !capabilityKnown ||
+		capability.Credential == core.CredentialUUID ||
+		capability.Credential == core.CredentialIDOrUUID
+	if requiresUUID && userInfo.UUID == "" {
 		return "", "", fmt.Errorf("User credential missing for inbound")
 	}
 
@@ -764,14 +768,9 @@ func buildHysteria2Link(name string, userInfo *core.UserInboundInfo, view *core.
 	if tls.ServerName != "" {
 		params.Set("sni", tls.ServerName)
 	}
-	// Extract obfs from Raw — SingboxInboundView has no typed Obfs field
-	if obfsMap, ok := view.Raw["obfs"].(map[string]interface{}); ok {
-		obfsType, _ := obfsMap["type"].(string)
-		obfsPwd, _ := obfsMap["password"].(string)
-		if obfsType != "" && obfsPwd != "" {
-			params.Set("obfs", obfsType)
-			params.Set("obfs-password", obfsPwd)
-		}
+	if view.Obfs != nil && view.Obfs.Type != "" && view.Obfs.Password != "" {
+		params.Set("obfs", view.Obfs.Type)
+		params.Set("obfs-password", view.Obfs.Password)
 	}
 	nameTag := url.QueryEscape(name)
 	base := fmt.Sprintf("hysteria2://%s@%s:%s",
@@ -828,7 +827,7 @@ func buildNaiveLink(name string, userInfo *core.UserInboundInfo, view *core.Sing
 	}
 
 	scheme := "naive+https"
-	if network, _ := view.Raw["network"].(string); strings.EqualFold(strings.TrimSpace(network), "udp") {
+	if strings.EqualFold(view.Network, "udp") {
 		scheme = "naive+quic"
 	}
 	tls := extractTLSInfo(view)
@@ -860,8 +859,7 @@ func buildShadowsocksLink(name string, userInfo *core.UserInboundInfo, view *cor
 		return "", fmt.Errorf("User password missing for shadowsocks inbound")
 	}
 
-	method, _ := view.Raw["method"].(string)
-	method = strings.TrimSpace(method)
+	method := view.Method
 	if method == "" {
 		return "", fmt.Errorf("Shadowsocks inbound method missing")
 	}
@@ -869,8 +867,8 @@ func buildShadowsocksLink(name string, userInfo *core.UserInboundInfo, view *cor
 	// Shadowsocks 2022 multi-user: inbound has a top-level server key that the
 	// client must prepend to the user key ("server_key:user_key").
 	credential := method + ":"
-	if serverKey, _ := view.Raw["password"].(string); strings.TrimSpace(serverKey) != "" {
-		credential += strings.TrimSpace(serverKey) + ":" + password
+	if view.ServerKey != "" {
+		credential += view.ServerKey + ":" + password
 	} else {
 		credential += password
 	}
@@ -963,29 +961,29 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 	}
 
 	var newInbound map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&newInbound); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &newInbound); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid JSON: "+err.Error())
 		return
 	}
 	if err := normalizeInboundMultiplex(newInbound); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	sanitiseInboundFields(newInbound)
 
 	externalPort, externalPortSet, linkAllowInsecure, linkAllowInsecureSet, err := popInboundLinkMeta(newInbound)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	overrideAddress, overrideAddressSet := popOverrideAddress(newInbound)
 	if s.store == nil && (externalPortSet || linkAllowInsecureSet || overrideAddressSet) {
-		http.Error(w, "Inbound metadata store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Inbound metadata store unavailable")
 		return
 	}
 
 	if err := s.config.AddSingboxInbound(newInbound); err != nil {
-		http.Error(w, "Failed to add inbound: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to add inbound: "+err.Error())
 		return
 	}
 
@@ -1002,7 +1000,7 @@ func (s *Server) handleAddSingboxInbound(w http.ResponseWriter, r *http.Request)
 			meta.OverrideAddress = overrideAddress
 		}
 		if err := s.store.SaveInboundMeta(meta); err != nil {
-			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to save inbound metadata: "+err.Error())
 			return
 		}
 	}
@@ -1053,23 +1051,23 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	tag := r.URL.Query().Get("tag")
 	if tag == "" {
-		http.Error(w, "Missing tag query parameter", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Missing tag query parameter")
 		return
 	}
 
 	var updatedInbound map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&updatedInbound); err != nil {
-		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &updatedInbound); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid JSON: "+err.Error())
 		return
 	}
 	if err := normalizeInboundMultiplex(updatedInbound); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	originalInbound, err := s.getSingboxInboundRaw(tag)
 	if err != nil {
-		http.Error(w, "Failed to load inbound before update: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load inbound before update: "+err.Error())
 		return
 	}
 	warnings := buildInboundUpdateWarnings(originalInbound, updatedInbound)
@@ -1080,7 +1078,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	externalPort, externalPortSet, linkAllowInsecure, linkAllowInsecureSet, err := popInboundLinkMeta(updatedInbound)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	overrideAddress, overrideAddressSet := popOverrideAddress(updatedInbound)
@@ -1088,22 +1086,22 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 	newTag, _ := updatedInbound["tag"].(string)
 	tagChanged := newTag != "" && newTag != tag
 	if s.store == nil && (tagChanged || externalPortSet || linkAllowInsecureSet || overrideAddressSet) {
-		http.Error(w, "Inbound metadata store unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Inbound metadata store unavailable")
 		return
 	}
 
 	if err := s.config.UpdateSingboxInbound(tag, updatedInbound); err != nil {
-		http.Error(w, "Failed to update inbound: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update inbound: "+err.Error())
 		return
 	}
 
 	if tagChanged {
 		if err := s.store.RenameInboundReferences(tag, newTag); err != nil {
 			if rollbackErr := s.config.UpdateSingboxInbound(newTag, originalInbound); rollbackErr != nil {
-				http.Error(w, "Failed to update inbound metadata: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to update inbound metadata: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")")
 				return
 			}
-			http.Error(w, "Failed to update inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to update inbound metadata: "+err.Error())
 			return
 		}
 		tag = newTag
@@ -1111,7 +1109,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 	if externalPortSet || linkAllowInsecureSet || overrideAddressSet {
 		meta, err := s.store.GetInboundMeta(tag)
 		if err != nil {
-			http.Error(w, "Failed to load inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to load inbound metadata: "+err.Error())
 			return
 		}
 		if meta == nil {
@@ -1127,7 +1125,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 			meta.OverrideAddress = overrideAddress
 		}
 		if err := s.store.SaveInboundMeta(*meta); err != nil {
-			http.Error(w, "Failed to save inbound metadata: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to save inbound metadata: "+err.Error())
 			return
 		}
 	}
@@ -1136,9 +1134,7 @@ func (s *Server) handleUpdateSingboxInbound(w http.ResponseWriter, r *http.Reque
 	if tagChanged {
 		s.cache.Del(cacheKeyAllUsers)
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(inboundUpdateResponse{Warnings: warnings})
+	writeJSON(w, http.StatusOK, inboundUpdateResponse{Warnings: warnings})
 }
 
 func (s *Server) getSingboxInboundRaw(tag string) (map[string]interface{}, error) {
@@ -1223,14 +1219,14 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 
 	tag := r.URL.Query().Get("tag")
 	if tag == "" {
-		http.Error(w, "Missing tag query parameter", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Missing tag query parameter")
 		return
 	}
 
 	affectedUsers := usersForDeletedInbound(s.config, tag)
 
 	if err := s.config.DeleteSingboxInbound(tag); err != nil {
-		http.Error(w, "Failed to delete inbound: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete inbound: "+err.Error())
 		return
 	}
 
@@ -1238,7 +1234,7 @@ func (s *Server) handleDeleteSingboxInbound(w http.ResponseWriter, r *http.Reque
 		_ = s.store.DeleteInboundMeta(tag)
 		for _, user := range affectedUsers {
 			if err := s.removeUserFromSubscriptionsIfUnassigned(user); err != nil {
-				http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to remove user from subscriptions: "+err.Error())
 				return
 			}
 		}
@@ -1467,23 +1463,28 @@ func (s *Server) handleApplySingboxChanges(w http.ResponseWriter, r *http.Reques
 	if err := s.config.ApplySingboxChanges(); err != nil {
 		var restartRequired *core.SingboxRestartRequiredError
 		if errors.As(err, &restartRequired) {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusConflict)
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			// D-15: "restart required" with no underlying cause means the Clash API
+			// simply isn't configured — a normal state, not a config failure. Only a
+			// configured Clash API that actually rejected the reload notifies.
+			if restartRequired.Err != nil {
+				s.ntfyNotifier.NotifyConfigApplyFailed(r.Context(), "Sing-box rejected the configuration reload: "+restartRequired.Err.Error())
+			}
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
 				"success":          false,
 				"restart_required": true,
 				"message":          "Sing-box restart required to apply this configuration",
 			})
 			return
 		}
-		http.Error(w, "Failed to apply changes: "+err.Error(), http.StatusInternalServerError)
+		s.ntfyNotifier.NotifyConfigApplyFailed(r.Context(), "Failed to apply sing-box configuration: "+err.Error())
+		writeErr(w, http.StatusInternalServerError, "Failed to apply changes: "+err.Error())
 		return
 	}
+	s.ntfyNotifier.NotifyConfigApplySucceeded()
 
 	s.InvalidateSubCache()
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"success": true,
 		"message": "Sing-box configuration applied successfully",
 	})
@@ -1502,8 +1503,7 @@ func (s *Server) handleGetSingboxRouteRules(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rules)
+	writeJSON(w, http.StatusOK, rules)
 }
 
 func (s *Server) handleUpsertSingboxRouteRules(w http.ResponseWriter, r *http.Request) {
@@ -1512,13 +1512,13 @@ func (s *Server) handleUpsertSingboxRouteRules(w http.ResponseWriter, r *http.Re
 	}
 
 	var rules []map[string]interface{}
-	if err := json.NewDecoder(r.Body).Decode(&rules); err != nil {
-		http.Error(w, "Failed to decode rules: "+err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &rules); err != nil {
+		writeErr(w, http.StatusBadRequest, "Failed to decode rules: "+err.Error())
 		return
 	}
 
 	if err := s.config.UpsertSingboxRouteRules(rules); err != nil {
-		http.Error(w, "Failed to upsert route rules: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to upsert route rules: "+err.Error())
 		return
 	}
 

@@ -86,6 +86,13 @@ export default {
     if (!url.searchParams.has('client') && (incomingUA.toLowerCase().includes('happ') || hasHappDeviceHeaders)) {
       url.searchParams.set('client', 'happ')
     }
+    // Happ clients with a scheme-prefixed new-domain drop the /s/ path prefix,
+    // requesting /<token> directly. Rewrite so the panel's /s/{token} route matches.
+    const isHapp = incomingUA.toLowerCase().includes('happ') || hasHappDeviceHeaders
+    const tokenMatch = url.pathname.match(/^\/([a-f0-9]{32})\/?$/)
+    if (isHapp && tokenMatch) {
+      url.pathname = '/s/' + tokenMatch[1]
+    }
     const targetURL = origin + url.pathname + url.search
 
     // Explicitly copy request headers so client headers (User-Agent, X-Hwid, etc.)

@@ -35,11 +35,12 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
     const selectedVariant = variants.find(variant => variant.id === selectedVariantId) || variants[0]
     const activeLink = selectedVariant?.link || link || ''
     const isActiveLoading = loading || !!selectedVariant?.loading
+    const variantIds = variants.map(variant => variant.id).join('|')
 
     useEffect(() => {
         setSelectedVariantId(variants[0]?.id || 'default')
         setCopied(false)
-    }, [isOpen, link, linkVariants])
+    }, [isOpen, link, variantIds])
 
     const handleCopy = async () => {
         if (!activeLink) return
@@ -75,14 +76,14 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
                 {variants.length > 1 && (
                     <div
                         className="grid w-full gap-2"
-                        style={{ gridTemplateColumns: `repeat(${variants.length}, minmax(0, 1fr))` }}
+                        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(7.5rem, 1fr))' }}
                     >
                         {variants.map(variant => (
                             <Button
                                 key={variant.id}
                                 size="sm"
                                 variant={selectedVariant?.id === variant.id ? 'primary' : 'secondary'}
-                                className="w-full"
+                                className="w-full min-w-0 whitespace-normal break-words text-center"
                                 onClick={() => setSelectedVariantId(variant.id)}
                             >
                                 {variant.label}
@@ -97,15 +98,17 @@ export function QrLinkModal({ isOpen, onClose, title = 'QR Code', link, linkVari
                     </div>
                 ) : (
                     <div className="relative p-4 bg-white rounded-xl shadow-lg w-full">
-                        <div className={isActiveLoading ? 'blur-sm opacity-70' : ''}>
-                            <QRCode
-                                size={256}
-                                style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
-                                value={activeLink || 'placeholder'}
-                                viewBox="0 0 256 256"
-                            />
-                        </div>
-                        {isActiveLoading && (
+                        {activeLink && (
+                            <div className={isActiveLoading ? 'blur-sm opacity-70' : ''}>
+                                <QRCode
+                                    size={256}
+                                    style={{ height: 'auto', maxWidth: '100%', width: '100%' }}
+                                    value={activeLink}
+                                    viewBox="0 0 256 256"
+                                />
+                            </div>
+                        )}
+                        {(!activeLink || isActiveLoading) && (
                             <div className="absolute inset-0 flex items-center justify-center">
                                 <div className="w-8 h-8 rounded-full border-2 border-slate-300 border-t-slate-700 animate-spin" />
                             </div>

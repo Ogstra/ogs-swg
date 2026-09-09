@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { api, FeatureFlags, SamplerHistoryEntry, Subscription, SubscriptionRequestHistoryEntry, AuditEntry, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
 import type { WireGuardInterfaceSummary } from '../../services/api'
-import { Save, RefreshCw, UserCog, Shield, ShieldAlert, Plus, Trash2, Power, FileJson, Edit } from 'lucide-react'
+import { Save, RefreshCw, UserCog, Shield, ShieldAlert, Plus, Trash2, Power, FileJson, Edit, Bell } from 'lucide-react'
 import { useToast } from '../../context/ToastContext'
 import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
@@ -17,7 +17,10 @@ import { Tabs } from '../../components/ui/Tabs'
 import { Database, Settings as SettingsIcon, Server } from 'lucide-react'
 import PanelUsers from './components/PanelUsers'
 import SecurityTab from './components/SecurityTab'
+import NotificationsTab from './components/NotificationsTab'
 import LogsBackupsTab from './LogsBackupsTab'
+import { usePaginatedHistory } from '../../hooks/usePaginatedHistory'
+import ExternalProfilesTab from './components/ExternalProfilesTab'
 import { WireGuardRawConfigModal } from './components/WireGuardRawConfigModal'
 import {
     WG_INTERFACE_DEFAULTS,
@@ -57,24 +60,7 @@ export default function Settings() {
     const [loading, setLoading] = useState(false)
     const [samplerRunning, setSamplerRunning] = useState(false)
     const [dbInfo, setDbInfo] = useState<DbInfo>({ rows: 0, sizeMB: 0, auditSizeMB: 0 })
-    const [samplerHistory, setSamplerHistory] = useState<SamplerHistoryEntry[]>([])
-    const [samplerHistoryNextOffset, setSamplerHistoryNextOffset] = useState(0)
-    const [samplerHistoryHasMore, setSamplerHistoryHasMore] = useState(false)
-    const [samplerHistoryRefreshing, setSamplerHistoryRefreshing] = useState(false)
-    const [samplerHistoryLoadingMore, setSamplerHistoryLoadingMore] = useState(false)
-    const samplerHistoryRef = useRef<SamplerHistoryEntry[]>([])
-    const samplerHistoryRefreshingRef = useRef(false)
-    const samplerHistoryLoadingMoreRef = useRef(false)
-    const [subscriptionRequestHistory, setSubscriptionRequestHistory] = useState<SubscriptionRequestHistoryEntry[]>([])
-    const [subscriptionHistoryNextOffset, setSubscriptionHistoryNextOffset] = useState(0)
-    const [subscriptionHistoryHasMore, setSubscriptionHistoryHasMore] = useState(false)
-    const [subscriptionHistoryRefreshing, setSubscriptionHistoryRefreshing] = useState(false)
-    const [subscriptionHistoryLoadingMore, setSubscriptionHistoryLoadingMore] = useState(false)
-    const subscriptionRequestHistoryRef = useRef<SubscriptionRequestHistoryEntry[]>([])
-    const subscriptionHistoryRefreshingRef = useRef(false)
-    const subscriptionHistoryLoadingMoreRef = useRef(false)
     const [subscriptionHistorySubId, setSubscriptionHistorySubId] = useState('all')
-    const subscriptionHistorySubIdRef = useRef(0)
     const [features, setFeatures] = useState<FeatureFlags>({
         enable_singbox: true,
         enable_wireguard: true,
@@ -89,17 +75,10 @@ export default function Settings() {
         aggregation_days: 7,
         audit_log_max_mb: 50,
     })
-    const [auditLogItems, setAuditLogItems] = useState<AuditEntry[]>([])
-    const [auditLogNextOffset, setAuditLogNextOffset] = useState(0)
-    const [auditLogHasMore, setAuditLogHasMore] = useState(false)
-    const [auditLogRefreshing, setAuditLogRefreshing] = useState(false)
-    const [auditLogLoadingMore, setAuditLogLoadingMore] = useState(false)
     const [auditLogDomain, setAuditLogDomain] = useState('')
     const [auditLogAction, setAuditLogAction] = useState('')
     const auditLogDomainRef = useRef(auditLogDomain)
     const auditLogActionRef = useRef(auditLogAction)
-    const auditLogRefreshingRef = useRef(false)
-    const auditLogLoadingMoreRef = useRef(false)
 
     const [serviceStatus, setServiceStatus] = useState<{ singbox: boolean | null; wireguard: boolean | null }>({ singbox: null, wireguard: null })
     const [pendingServiceAction, setPendingServiceAction] = useState<PendingServiceAction | null>(null)
@@ -181,10 +160,6 @@ export default function Settings() {
     }, [statusQuery.data])
 
     useEffect(() => {
-        samplerHistoryRef.current = samplerHistory
-    }, [samplerHistory])
-
-    useEffect(() => {
         if (typeof publicIPQuery.data !== 'string') return
         setPublicIP(publicIPQuery.data || '')
     }, [publicIPQuery.data])
@@ -194,85 +169,49 @@ export default function Settings() {
         setSubscriptionDomain(subDomainQuery.data || '')
     }, [subDomainQuery.data])
 
-    useEffect(() => {
-        subscriptionRequestHistoryRef.current = subscriptionRequestHistory
-    }, [subscriptionRequestHistory])
-
     const selectedSubscriptionHistorySubId = subscriptionHistorySubId === 'all'
         ? 0
         : Number.parseInt(subscriptionHistorySubId, 10) || 0
 
-    useEffect(() => {
-        subscriptionHistorySubIdRef.current = selectedSubscriptionHistorySubId
-    }, [selectedSubscriptionHistorySubId])
-
-    const handleSubscriptionHistorySubChange = useCallback((value: string) => {
-        subscriptionRequestHistoryRef.current = []
-        setSubscriptionRequestHistory([])
-        setSubscriptionHistoryNextOffset(0)
-        setSubscriptionHistoryHasMore(false)
-        setSubscriptionHistorySubId(value)
-    }, [])
-
-    const refreshSubscriptionRequestHistory = useCallback(async () => {
-        if (subscriptionHistoryRefreshingRef.current) return
-        const subID = selectedSubscriptionHistorySubId
-        subscriptionHistoryRefreshingRef.current = true
-        setSubscriptionHistoryRefreshing(true)
-        try {
-            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
-            if (subscriptionHistorySubIdRef.current !== subID) return
-            const incomingIds = new Set(page.items.map(item => item.id))
+    const subscriptionHistoryPage = usePaginatedHistory<SubscriptionRequestHistoryEntry>({
+        pageSize: SUBSCRIPTION_HISTORY_PAGE_SIZE,
+        fetchPage: (limit, offset) => api.getSubscriptionRequestHistoryPage(limit, offset, selectedSubscriptionHistorySubId),
+        getKey: item => item.id,
+        offsetMode: 'merged',
+        token: selectedSubscriptionHistorySubId,
+        mergeRefresh: (incoming, existing) => {
+            const incomingIds = new Set(incoming.map(item => item.id))
             const nameBySubId = new Map<number, string>()
-            for (const item of page.items) {
+            for (const item of incoming) {
                 if (item.sub_id && item.name) nameBySubId.set(item.sub_id, item.name)
             }
-            const merged = [
-                ...page.items,
-                ...subscriptionRequestHistoryRef.current
+            return [
+                ...incoming,
+                ...existing
                     .filter(item => !incomingIds.has(item.id))
                     .map(item => {
                         const freshName = nameBySubId.get(item.sub_id)
                         return freshName && freshName !== item.name ? { ...item, name: freshName } : item
                     }),
             ]
-            subscriptionRequestHistoryRef.current = merged
-            setSubscriptionRequestHistory(merged)
-            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
-            setSubscriptionHistoryHasMore(page.has_more)
-        } finally {
-            subscriptionHistoryRefreshingRef.current = false
-            setSubscriptionHistoryRefreshing(false)
-        }
-    }, [selectedSubscriptionHistorySubId])
+        },
+    })
+    const subscriptionRequestHistory = subscriptionHistoryPage.items
+    const subscriptionHistoryHasMore = subscriptionHistoryPage.hasMore
+    const subscriptionHistoryRefreshing = subscriptionHistoryPage.refreshing
+    const subscriptionHistoryLoadingMore = subscriptionHistoryPage.loadingMore
+    const refreshSubscriptionRequestHistory = subscriptionHistoryPage.refresh
+    const hardRefreshSubscriptionHistory = subscriptionHistoryPage.hardRefresh
+    const loadMoreSubscriptionRequestHistory = subscriptionHistoryPage.loadMore
 
-    const hardRefreshSubscriptionHistory = useCallback(async () => {
-        subscriptionRequestHistoryRef.current = []
-        setSubscriptionRequestHistory([])
-        setSubscriptionHistoryNextOffset(0)
-        setSubscriptionHistoryHasMore(false)
-        const subID = subscriptionHistorySubIdRef.current
-        subscriptionHistoryRefreshingRef.current = true
-        setSubscriptionHistoryRefreshing(true)
-        try {
-            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, 0, subID)
-            if (subscriptionHistorySubIdRef.current !== subID) return
-            subscriptionRequestHistoryRef.current = page.items
-            setSubscriptionRequestHistory(page.items)
-            setSubscriptionHistoryNextOffset(page.next_offset)
-            setSubscriptionHistoryHasMore(page.has_more)
-        } finally {
-            subscriptionHistoryRefreshingRef.current = false
-            setSubscriptionHistoryRefreshing(false)
-        }
-    }, [])
+    const handleSubscriptionHistorySubChange = useCallback((value: string) => {
+        subscriptionHistoryPage.reset()
+        setSubscriptionHistorySubId(value)
+    }, [subscriptionHistoryPage])
 
     const removeSubscriptionRequestHistoryEntry = useCallback((id: number) => {
-        const next = subscriptionRequestHistoryRef.current.filter(item => item.id !== id)
-        subscriptionRequestHistoryRef.current = next
-        setSubscriptionRequestHistory(next)
-        setSubscriptionHistoryNextOffset(off => Math.max(0, off - 1))
-    }, [])
+        subscriptionHistoryPage.removeItems(item => item.id === id)
+    }, [subscriptionHistoryPage])
 
     const handleClearSubscriptionRequestsBySubID = useCallback(async (subId: number, label: string) => {
         if (subId === 0) return
@@ -286,57 +225,33 @@ export default function Settings() {
         }
     }, [hardRefreshSubscriptionHistory, success, toastError])
 
-    const hardRefreshAuditLog = useCallback(async () => {
-        if (auditLogRefreshingRef.current) return
-        auditLogRefreshingRef.current = true
-        setAuditLogRefreshing(true)
-        try {
-            const page = await api.getAuditLogPage(50, 0, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined)
-            setAuditLogItems(page.items)
-            setAuditLogNextOffset(page.next_offset)
-            setAuditLogHasMore(page.has_more)
-        } catch {
-            // silently ignore
-        } finally {
-            auditLogRefreshingRef.current = false
-            setAuditLogRefreshing(false)
-        }
-    }, [])
-
-    const loadMoreAuditLog = useCallback(async () => {
-        if (auditLogLoadingMoreRef.current || !auditLogHasMore) return
-        auditLogLoadingMoreRef.current = true
-        setAuditLogLoadingMore(true)
-        try {
-            const page = await api.getAuditLogPage(50, auditLogNextOffset, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined)
-            setAuditLogItems(prev => [...prev, ...page.items])
-            setAuditLogNextOffset(prev => Math.max(page.next_offset, prev + page.items.length))
-            setAuditLogHasMore(page.has_more)
-        } catch {
-            // silently ignore
-        } finally {
-            auditLogLoadingMoreRef.current = false
-            setAuditLogLoadingMore(false)
-        }
-    }, [auditLogHasMore, auditLogNextOffset])
+    const auditLogPage = usePaginatedHistory<AuditEntry>({
+        pageSize: 50,
+        fetchPage: (limit, offset) => api.getAuditLogPage(limit, offset, auditLogDomainRef.current || undefined, auditLogActionRef.current || undefined),
+        swallowErrors: true,
+    })
+    const auditLogItems = auditLogPage.items
+    const auditLogHasMore = auditLogPage.hasMore
+    const auditLogRefreshing = auditLogPage.refreshing
+    const auditLogLoadingMore = auditLogPage.loadingMore
+    const hardRefreshAuditLog = auditLogPage.refresh
+    const loadMoreAuditLog = auditLogPage.loadMore
 
     const handleAuditDomainChange = useCallback((value: string) => {
         auditLogDomainRef.current = value
         setAuditLogDomain(value)
-        setAuditLogNextOffset(0)
-        setAuditLogHasMore(false)
+        auditLogPage.reset({ keepItems: true })
         if (!isDatabaseTabActive) return
         void hardRefreshAuditLog()
-    }, [hardRefreshAuditLog, isDatabaseTabActive])
+    }, [auditLogPage, hardRefreshAuditLog, isDatabaseTabActive])
 
     const handleAuditActionChange = useCallback((value: string) => {
         auditLogActionRef.current = value
         setAuditLogAction(value)
-        setAuditLogNextOffset(0)
-        setAuditLogHasMore(false)
+        auditLogPage.reset({ keepItems: true })
         if (!isDatabaseTabActive) return
         void hardRefreshAuditLog()
-    }, [hardRefreshAuditLog, isDatabaseTabActive])
+    }, [auditLogPage, hardRefreshAuditLog, isDatabaseTabActive])
 
     useEffect(() => {
         if (!isDatabaseTabActive) return
@@ -344,31 +259,6 @@ export default function Settings() {
         const interval = setInterval(() => void hardRefreshAuditLog(), 30_000)
         return () => clearInterval(interval)
     }, [hardRefreshAuditLog, isDatabaseTabActive])
-
-    const loadMoreSubscriptionRequestHistory = useCallback(async () => {
-        if (subscriptionHistoryLoadingMoreRef.current || !subscriptionHistoryHasMore) return
-
-        const offset = subscriptionHistoryNextOffset
-        const subID = selectedSubscriptionHistorySubId
-        subscriptionHistoryLoadingMoreRef.current = true
-        setSubscriptionHistoryLoadingMore(true)
-        try {
-            const page = await api.getSubscriptionRequestHistoryPage(SUBSCRIPTION_HISTORY_PAGE_SIZE, offset, subID)
-            if (subscriptionHistorySubIdRef.current !== subID) return
-            const existingIds = new Set(subscriptionRequestHistoryRef.current.map(item => item.id))
-            const merged = [
-                ...subscriptionRequestHistoryRef.current,
-                ...page.items.filter(item => !existingIds.has(item.id)),
-            ]
-            subscriptionRequestHistoryRef.current = merged
-            setSubscriptionRequestHistory(merged)
-            setSubscriptionHistoryNextOffset(Math.max(page.next_offset, merged.length))
-            setSubscriptionHistoryHasMore(page.has_more)
-        } finally {
-            subscriptionHistoryLoadingMoreRef.current = false
-            setSubscriptionHistoryLoadingMore(false)
-        }
-    }, [selectedSubscriptionHistorySubId, subscriptionHistoryHasMore, subscriptionHistoryNextOffset])
 
     useEffect(() => {
         if (!isDatabaseTabActive) return
@@ -380,46 +270,21 @@ export default function Settings() {
         return () => window.clearInterval(interval)
     }, [features.sampler_interval_sec, features.wg_sampler_interval_sec, isDatabaseTabActive, refreshSubscriptionRequestHistory])
 
-    const hardRefreshSamplerHistory = useCallback(async () => {
-        if (samplerHistoryRefreshingRef.current) return
-        samplerHistoryRefreshingRef.current = true
-        setSamplerHistoryRefreshing(true)
-        try {
-            const items = await api.getSamplerHistory(SAMPLER_HISTORY_PAGE_SIZE, 0)
-            samplerHistoryRef.current = items
-            setSamplerHistory(items)
-            setSamplerHistoryNextOffset(items.length)
-            setSamplerHistoryHasMore(items.length === SAMPLER_HISTORY_PAGE_SIZE)
-        } catch {
-            // silently ignore
-        } finally {
-            samplerHistoryRefreshingRef.current = false
-            setSamplerHistoryRefreshing(false)
-        }
-    }, [])
-
-    const loadMoreSamplerHistory = useCallback(async () => {
-        if (samplerHistoryLoadingMoreRef.current || !samplerHistoryHasMore) return
-        samplerHistoryLoadingMoreRef.current = true
-        setSamplerHistoryLoadingMore(true)
-        try {
-            const items = await api.getSamplerHistory(SAMPLER_HISTORY_PAGE_SIZE, samplerHistoryNextOffset)
-            const existingKeys = new Set(samplerHistoryRef.current.map(r => `${r.ts ?? r.timestamp}:${r.source}`))
-            const merged = [
-                ...samplerHistoryRef.current,
-                ...items.filter(r => !existingKeys.has(`${r.ts ?? r.timestamp}:${r.source}`)),
-            ]
-            samplerHistoryRef.current = merged
-            setSamplerHistory(merged)
-            setSamplerHistoryNextOffset(prev => prev + items.length)
-            setSamplerHistoryHasMore(items.length === SAMPLER_HISTORY_PAGE_SIZE)
-        } catch {
-            // silently ignore
-        } finally {
-            samplerHistoryLoadingMoreRef.current = false
-            setSamplerHistoryLoadingMore(false)
-        }
-    }, [samplerHistoryHasMore, samplerHistoryNextOffset])
+    const samplerHistoryPage = usePaginatedHistory<SamplerHistoryEntry>({
+        pageSize: SAMPLER_HISTORY_PAGE_SIZE,
+        fetchPage: async (limit, offset) => {
+            const items = await api.getSamplerHistory(limit, offset)
+            return { items, next_offset: offset + items.length, has_more: items.length === limit }
+        },
+        getKey: r => `${r.ts ?? r.timestamp}:${r.source}`,
+        swallowErrors: true,
+    })
+    const samplerHistory = samplerHistoryPage.items
+    const samplerHistoryHasMore = samplerHistoryPage.hasMore
+    const samplerHistoryRefreshing = samplerHistoryPage.refreshing
+    const samplerHistoryLoadingMore = samplerHistoryPage.loadingMore
+    const hardRefreshSamplerHistory = samplerHistoryPage.refresh
+    const loadMoreSamplerHistory = samplerHistoryPage.loadMore
 
     useEffect(() => {
         if (!isDatabaseTabActive) return
@@ -703,6 +568,22 @@ export default function Settings() {
                     toastError={toastError}
                 />
             ),
+        },
+        {
+            id: 'notifications',
+            label: <span className="flex items-center gap-2"><Bell size={16} /> Notifications</span>,
+            content: (
+                <NotificationsTab
+                    canWriteSettings={canWriteSettings}
+                    success={success}
+                    toastError={toastError}
+                />
+            ),
+        },
+        {
+            id: 'external-profiles',
+            label: <span className="flex items-center gap-2"><Server size={16} /> External Profiles</span>,
+            content: <ExternalProfilesTab />,
         },
         ...(permissions?.can_read_panel_users ? [{
             id: 'panel-users',
@@ -1241,7 +1122,7 @@ function WireGuardInterfacesTab() {
         setBusyKey(key)
         setEditErrors({})
         try {
-            const cfg = await api.getWireGuardInterfaceForInterface(iface.name)
+            const cfg = await api.getWireGuardInterface(iface.name)
             setEditTarget(iface.name)
             setEditAddress(String(cfg?.address || ''))
             setEditBindAddress(String(cfg?.bind_address || ''))
@@ -1286,7 +1167,7 @@ function WireGuardInterfacesTab() {
 
         setBusyKey('edit')
         try {
-            await api.updateWireGuardInterfaceForInterface(editTarget, payload)
+            await api.updateWireGuardInterface(payload, editTarget)
             success(`Interface ${editTarget} updated`)
             closeEditModal()
             await refreshInterfaces()
@@ -1873,6 +1754,15 @@ function DatabaseTab({
                 if (entry.action === 'update') return d?.includes('to:') ? `Renamed route tag ${q(e)} to ${q(d.split('to:')[1])}` : e ? `Updated route tag ${q(e)}` : 'Updated route tag'
                 if (entry.action === 'delete') return e ? `Deleted route tag ${q(e)}` : 'Deleted route tag'
                 break
+            case 'backup':
+                if (entry.action === 'cold_export') return e ? `Cold log export → ${e}${d ? ` (${d})` : ''}` : 'Cold log segment exported'
+                if (entry.action === 'auto') return `Scheduled DB backup${d?.startsWith('archives:') ? ` (${d.slice(9)} archives)` : ''}`
+                if (entry.action === 'manual') return 'Manual DB backup triggered'
+                break
+            case 'retention':
+                if (entry.action === 'prune') return 'Manual retention prune'
+                if (entry.action === 'auto_prune') return `Automatic audit-log prune${d?.startsWith('max_mb:') ? ` (limit ${d.slice(7)} MB)` : ''}`
+                break
         }
         return `${entry.domain} · ${entry.action}${e ? ` · ${e}` : ''}`
     }
@@ -2289,7 +2179,24 @@ function DatabaseTab({
                             onScroll={handleSubscriptionHistoryScroll}
                         >
                             {subscriptionRequestHistory.filter(r => !pendingDeletes.has(r.id)).length === 0 && pendingDeletes.size === 0 ? (
-                                <p className="text-slate-500 text-xs italic">No history available</p>
+                                subscriptionHistoryRefreshing ? (
+                                    <div className="space-y-0">
+                                        {Array.from({ length: 5 }).map((_, i) => (
+                                            <div key={i} className="py-2 border-b border-slate-800/50 last:border-0 animate-pulse">
+                                                <div className="flex items-start justify-between gap-3 mb-1">
+                                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                        <div className="h-3 w-28 bg-slate-700/50 rounded" />
+                                                        <div className="h-4 w-20 bg-slate-700/50 rounded shrink-0" />
+                                                    </div>
+                                                    <div className="h-3 w-20 bg-slate-700/50 rounded shrink-0" />
+                                                </div>
+                                                <div className="h-2.5 w-40 bg-slate-700/50 rounded mt-1" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 text-xs italic">No history available</p>
+                                )
                             ) : (
                                 subscriptionRequestHistory
                                     .filter(run => !pendingDeletes.has(run.id))
@@ -2351,8 +2258,13 @@ function DatabaseTab({
                                                 </div>
                                                 <div className="shrink-0 text-right text-slate-500 text-[10px]">{formatHistoryDateTime(run.requested_at)}</div>
                                             </div>
-                                            <div className="truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
-                                                {formatClientLabel(run)}
+                                            <div className="flex items-center justify-between gap-2">
+                                                <div className="min-w-0 truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
+                                                    {formatClientLabel(run)}
+                                                </div>
+                                                {Boolean(run.via_worker) && (
+                                                    <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">Worker</span>
+                                                )}
                                             </div>
                                             {extraDetails && (
                                                 <div className="truncate text-slate-500 text-[10px]" title={extraDetails}>
@@ -2394,7 +2306,26 @@ function DatabaseTab({
                             }}
                         >
                             {samplerHistory.length === 0 ? (
-                                <p className="text-slate-500 text-xs italic">No history available</p>
+                                samplerHistoryRefreshing ? (
+                                    <div className="space-y-0">
+                                        {Array.from({ length: 5 }).map((_, i) => (
+                                            <div key={i} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0 animate-pulse">
+                                                <div className="min-w-0 space-y-1.5">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="h-3 w-14 bg-slate-700/50 rounded" />
+                                                        <div className="h-4 w-10 bg-slate-700/50 rounded" />
+                                                    </div>
+                                                </div>
+                                                <div className="shrink-0 text-right space-y-1">
+                                                    <div className="h-3 w-16 bg-slate-700/50 rounded ml-auto" />
+                                                    <div className="h-2.5 w-10 bg-slate-700/50 rounded ml-auto" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 text-xs italic">No history available</p>
+                                )
                             ) : (
                                 samplerHistory.map((run, idx) => (
                                     <div key={idx} className="flex justify-between items-center gap-3 py-2 border-b border-slate-800/50 last:border-0">
@@ -2487,7 +2418,24 @@ function DatabaseTab({
                             }}
                         >
                             {auditLogItems.length === 0 ? (
-                                <p className="text-slate-500 text-xs italic">No audit entries</p>
+                                auditLogRefreshing ? (
+                                    <div className="space-y-0">
+                                        {Array.from({ length: 3 }).map((_, i) => (
+                                            <div key={i} className="py-2 border-b border-slate-800/50 last:border-0 animate-pulse">
+                                                <div className="flex items-start justify-between gap-2 mb-1">
+                                                    <div className="h-3 w-48 bg-slate-700/50 rounded flex-1 min-w-0" />
+                                                    <div className="h-2.5 w-24 bg-slate-700/50 rounded shrink-0" />
+                                                </div>
+                                                <div className="flex items-center gap-2 mt-1">
+                                                    <div className="h-4 w-16 bg-slate-700/50 rounded" />
+                                                    <div className="h-4 w-14 bg-slate-700/50 rounded" />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-slate-500 text-xs italic">No audit entries</p>
+                                )
                             ) : (
                                 auditLogItems.map((entry) => (
                                     <div key={entry.id} className="py-2 border-b border-slate-800/50 last:border-0">

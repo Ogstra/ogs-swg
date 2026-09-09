@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -251,6 +252,29 @@ func TestSubscriptionHappConfigPersistsInDatabase(t *testing.T) {
 	}
 	if len(got.AdvancedParameters) != 2 || got.AdvancedParameters[0].Key != "subscription-autoconnect" || got.AdvancedParameters[1].Key != "ping-type" {
 		t.Fatalf("advanced_parameters=%v", got.AdvancedParameters)
+	}
+}
+
+func TestExtractEncryptedHappLinkAcceptsDocumentedAPIField(t *testing.T) {
+	got := extractEncryptedHappLink([]byte(`{"encrypted_link":"happ://crypt5/test-value"}`))
+	if got != "happ://crypt5/test-value" {
+		t.Fatalf("extractEncryptedHappLink()=%q", got)
+	}
+}
+
+func TestExtractEncryptedHappLinkKeepsLegacyFields(t *testing.T) {
+	tests := []string{
+		`{"encrypted_url":"happ://crypt5/encrypted-url"}`,
+		`{"url":"happ://crypt5/url"}`,
+		`{"result":"happ://crypt5/result"}`,
+		`{"data":"happ://crypt5/data"}`,
+		`happ://crypt5/raw`,
+	}
+	for _, tc := range tests {
+		got := extractEncryptedHappLink([]byte(tc))
+		if !strings.HasPrefix(got, "happ://crypt5/") {
+			t.Fatalf("extractEncryptedHappLink(%q)=%q", tc, got)
+		}
 	}
 }
 

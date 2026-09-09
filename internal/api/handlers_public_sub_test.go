@@ -297,7 +297,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	}
 	decoded := string(happBody)
 	for _, want := range []string{
-		"#providerid: provider-test-id",
+		"#providerid provider-test-id",
 		"#hide-settings: 1",
 		"#subscription-always-hwid-enable: 1",
 		"#subscription-auto-update-open-enable: 0",
@@ -345,7 +345,7 @@ func TestHandlePublicSubscription_HappParamsOnlyOnHappVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decode happ HWID body: %v", err)
 	}
-	if got := string(happHWIDBody); !strings.Contains(got, "#providerid: provider-test-id") {
+	if got := string(happHWIDBody); !strings.Contains(got, "#providerid provider-test-id") {
 		t.Fatalf("happ HWID body missing providerid: %q", got)
 	}
 }
@@ -1951,6 +1951,67 @@ func TestHandlePublicSubscription_IncludesShadowsocksLink(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "@sub.example.com:8443") {
 		t.Fatalf("subscription body missing host/port: %q", string(body))
+	}
+}
+
+func TestHandlePublicSubscription_IncludesExternalOnlyProfile(t *testing.T) {
+	server, dataStore := newPublicSubscriptionTestServer(t)
+
+	externalID, err := dataStore.UpsertExternalProfile(core.ExternalProfile{
+		Name:       "homelab-only",
+		Flag:       "🇦🇷",
+		Type:       "vless",
+		HostIPv4:   "external.example.test",
+		Port:       443,
+		UUID:       "22222222-2222-2222-2222-222222222222",
+		PublicKey:  "external-public-key",
+		ShortID:    "abc123",
+		ServerName: "sni.example.test",
+		ALPN:       "h2,http/1.1",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertExternalProfile: %v", err)
+	}
+
+	subID, err := dataStore.Queries.CreateSubscription(t.Context(), store.CreateSubscriptionParams{
+		Token:       "external-only-token",
+		Name:        "External Bundle",
+		QuotaLimit:  sql.NullInt64{Int64: 0, Valid: true},
+		QuotaPeriod: sql.NullString{String: "monthly", Valid: true},
+		ResetDay:    sql.NullInt64{Int64: 1, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateSubscription: %v", err)
+	}
+	if err := dataStore.Queries.AddUserToSubscription(t.Context(), store.AddUserToSubscriptionParams{
+		SubID:    subID,
+		UserName: "homelab-only",
+	}); err != nil {
+		t.Fatalf("AddUserToSubscription: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/s/external-only-token", nil)
+	req.SetPathValue("token", "external-only-token")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	body, err := base64.StdEncoding.DecodeString(strings.TrimSpace(rec.Body.String()))
+	if err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	bodyText := string(body)
+	if !strings.Contains(bodyText, "vless://22222222-2222-2222-2222-222222222222@external.example.test:443") {
+		t.Fatalf("subscription body missing external profile %d link: %q", externalID, bodyText)
+	}
+	if !strings.Contains(bodyText, "#%F0%9F%87%A6%F0%9F%87%B7homelab-only") {
+		t.Fatalf("subscription body missing external profile flag in display name: %q", bodyText)
+	}
+	if strings.Contains(bodyText, "11111111-1111-1111-1111-111111111111") {
+		t.Fatalf("subscription body unexpectedly included local alice link: %q", bodyText)
 	}
 }
 

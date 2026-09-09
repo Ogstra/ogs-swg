@@ -298,7 +298,7 @@ func TestUpdateUserRouteTagMembership_BatchesWritePreservesFieldsAndZeroAssignee
 		{ID: 2, Name: "Streaming", RuleMatchJSON: streamingMatch},
 	}
 
-	assigned, err := cfg.UpdateUserRouteTagMembership("alice", []int64{2}, tags)
+	assigned, err := cfg.UpdateUserRouteTagMembership("alice", []int64{2}, tags, nil)
 	if err != nil {
 		t.Fatalf("UpdateUserRouteTagMembership: %v", err)
 	}
@@ -363,12 +363,72 @@ func TestUpdateUserRouteTagMembership_ReturnsRelinkErrorBeforeWrite(t *testing.T
 
 	_, err := cfg.UpdateUserRouteTagMembership("alice", []int64{1, 2}, []UserRouteTag{
 		{ID: 1, Name: "Premium", RuleMatchJSON: matchJSON},
-	})
+	}, nil)
 	if err == nil || !strings.Contains(err.Error(), "route tag needs relink") {
 		t.Fatalf("error = %v; want route tag needs relink", err)
 	}
 	if tracker.writeCount != 0 {
 		t.Fatalf("writeCount = %d; want no write before relink error", tracker.writeCount)
+	}
+}
+
+func TestUpdateUserRouteTagMembership_BlocksInboundMismatch(t *testing.T) {
+	rule := map[string]interface{}{
+		"action":    "route",
+		"inbound":   []interface{}{"in-reality"},
+		"outbound":  "premium",
+		"auth_user": []interface{}{},
+	}
+	matchJSON, _ := CanonicalRouteTagRuleMatch(rule)
+	cfg, stub := newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","inbound":["in-reality"],"outbound":"premium","auth_user":[]}
+			]
+		}
+	}`)
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+	tags := []UserRouteTag{{ID: 1, Name: "Premium", RuleMatchJSON: matchJSON}}
+
+	// user on wrong inbound — must be blocked
+	_, err := cfg.UpdateUserRouteTagMembership("alice", []int64{1}, tags, []string{"in-vless"})
+	if err == nil || !strings.Contains(err.Error(), "route tag inbound mismatch") {
+		t.Fatalf("error = %v; want route tag inbound mismatch", err)
+	}
+	if tracker.writeCount != 0 {
+		t.Fatalf("writeCount = %d; want no write on inbound mismatch", tracker.writeCount)
+	}
+
+	// user on correct inbound — must succeed
+	_, err = cfg.UpdateUserRouteTagMembership("alice", []int64{1}, tags, []string{"in-reality"})
+	if err != nil {
+		t.Fatalf("UpdateUserRouteTagMembership with matching inbound: %v", err)
+	}
+	if tracker.writeCount != 1 {
+		t.Fatalf("writeCount = %d; want 1 write for matching inbound", tracker.writeCount)
+	}
+
+	// no inbound restriction on rule — always compatible
+	openRule := map[string]interface{}{
+		"action":    "route",
+		"outbound":  "direct",
+		"auth_user": []interface{}{},
+	}
+	openMatch, _ := CanonicalRouteTagRuleMatch(openRule)
+	cfg2, stub2 := newTestConfig(t, `{
+		"route": {
+			"rules": [
+				{"action":"route","outbound":"direct","auth_user":[]}
+			]
+		}
+	}`)
+	cfg2.SetExecutor(&reloadTrackingExecutor{stubExecutor: stub2})
+	_, err = cfg2.UpdateUserRouteTagMembership("alice", []int64{2}, []UserRouteTag{
+		{ID: 2, Name: "Direct", RuleMatchJSON: openMatch},
+	}, []string{"in-vless"})
+	if err != nil {
+		t.Fatalf("open rule should allow any inbound: %v", err)
 	}
 }
 
@@ -698,6 +758,9 @@ func TestApplySingboxChanges_RequiresRestartWhenNoClashAPI(t *testing.T) {
 	if restartRequired.Reason != "restart_required" {
 		t.Fatalf("restart reason = %q, want restart_required", restartRequired.Reason)
 	}
+	if restartRequired.Err != nil {
+		t.Fatalf("restartRequired.Err = %v, want nil when no Clash API is configured", restartRequired.Err)
+	}
 	if tracker.restartCalled {
 		t.Fatalf("RestartService called before explicit confirmation")
 	}
@@ -734,6 +797,34 @@ func TestApplySingboxChanges_RequiresRestartWhenClashAPIFails(t *testing.T) {
 	}
 	if !cfg.GetSingboxPendingChanges() {
 		t.Fatalf("GetSingboxPendingChanges() = false, want true until confirmed restart")
+	}
+}
+
+func TestApplySingboxChanges_ClashAPIFailureCarriesCause(t *testing.T) {
+	fixtureJSON := `{
+		"experimental": {
+			"clash_api": {
+				"external_controller": "127.0.0.1:1"
+			}
+		}
+	}`
+
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	cfg.MarkSingboxPending()
+	tracker := &reloadTrackingExecutor{stubExecutor: stub}
+	cfg.SetExecutor(tracker)
+
+	err := cfg.ApplySingboxChanges()
+	var restartRequired *SingboxRestartRequiredError
+	if !errors.As(err, &restartRequired) {
+		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
+	}
+	if restartRequired.Reason != "restart_required" {
+		t.Fatalf("restart reason = %q, want restart_required", restartRequired.Reason)
+	}
+	if restartRequired.Err == nil {
+		t.Fatalf("restartRequired.Err = nil, want non-nil cause when a configured Clash API rejects the reload")
 	}
 }
 
@@ -1574,5 +1665,318 @@ func TestGetUserInbounds_Hysteria2(t *testing.T) {
 	}
 	if info.UUID != "" {
 		t.Errorf("UUID = %q; want empty string", info.UUID)
+	}
+}
+
+// TestDetectPortCollision_TCPAndUDPSamePort_NotAFalsePositive covers a common,
+// valid sing-box deployment: a TCP proxy (vless-reality) and a UDP/QUIC proxy
+// (hysteria2) sharing the same port number. They bind different sockets at the
+// OS level, so this must not be reported as a collision.
+func TestDetectPortCollision_TCPAndUDPSamePort_NotAFalsePositive(t *testing.T) {
+	fixtureJSON := `{
+		"inbounds": [
+			{
+				"type": "vless",
+				"tag": "in-reality",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}],
+				"tls": {
+					"enabled": true,
+					"server_name": "example.com",
+					"reality": {
+						"enabled": true,
+						"handshake": {"server": "example.com", "server_port": 443},
+						"private_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+						"public_key":  "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=",
+						"short_id": ["deadbeef"]
+					}
+				}
+			},
+			{
+				"type": "hysteria2",
+				"tag": "hy2-in",
+				"listen": "0.0.0.0",
+				"listen_port": 443,
+				"users": [{"name":"carol","password":"pw"}]
+			}
+		]
+	}`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	cfg.ManagedInbounds = []string{"in-reality", "hy2-in"}
+
+	// Renaming a user does not touch ports at all; it must not trip port
+	// validation just because an unrelated pre-existing inbound shares the
+	// port number over a different transport.
+	if err := cfg.RenameUser("alice", "bob", "11111111-1111-1111-1111-111111111111", "xtls-rprx-vision", "", 0); err != nil {
+		t.Fatalf("RenameUser: unexpected false-positive port collision: %v", err)
+	}
+
+	// Editing the vless-reality inbound in place (same tag, same port) must
+	// also not report a self-collision against itself.
+	updated := map[string]interface{}{
+		"type":        "vless",
+		"tag":         "in-reality",
+		"listen":      "0.0.0.0",
+		"listen_port": float64(443),
+		"users": []interface{}{
+			map[string]interface{}{"name": "bob", "uuid": "11111111-1111-1111-1111-111111111111", "flow": "xtls-rprx-vision"},
+		},
+	}
+	if err := cfg.UpdateSingboxInbound("in-reality", updated); err != nil {
+		t.Fatalf("UpdateSingboxInbound: unexpected false-positive port collision: %v", err)
+	}
+}
+
+// TestDetectPortCollision_SameNetworkStillDetected ensures the network-aware
+// fix does not regress detection of genuine same-network port collisions.
+func TestDetectPortCollision_SameNetworkStillDetected(t *testing.T) {
+	t.Run("tcp/tcp", func(t *testing.T) {
+		fixtureJSON := `{
+			"inbounds": [
+				{"type":"vless","tag":"in-a","listen":"0.0.0.0","listen_port":443,"users":[{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111"}]},
+				{"type":"vmess","tag":"in-b","listen":"0.0.0.0","listen_port":443,"users":[]}
+			]
+		}`
+		cfg, _ := newTestConfig(t, fixtureJSON)
+		cfg.EnableSingbox = true
+		cfg.ManagedInbounds = []string{"in-a", "in-b"}
+
+		if err := cfg.RenameUser("alice", "bob", "11111111-1111-1111-1111-111111111111", "", "", 0); err == nil {
+			t.Fatal("expected genuine TCP/TCP port collision to still be detected")
+		}
+	})
+
+	t.Run("udp/udp", func(t *testing.T) {
+		fixtureJSON := `{
+			"inbounds": [
+				{"type":"hysteria2","tag":"hy2-a","listen":"0.0.0.0","listen_port":8443,"users":[{"name":"alice","password":"pw"}]},
+				{"type":"hysteria2","tag":"hy2-b","listen":"0.0.0.0","listen_port":8443,"users":[]}
+			]
+		}`
+		cfg, _ := newTestConfig(t, fixtureJSON)
+		cfg.EnableSingbox = true
+		cfg.ManagedInbounds = []string{"hy2-a", "hy2-b"}
+
+		if err := cfg.RenameUser("alice", "bob", "", "", "", 0); err == nil {
+			t.Fatal("expected genuine UDP/UDP port collision to still be detected")
+		}
+	})
+}
+
+func TestSingboxInboundView_ObfsDecoded(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "hysteria2",
+            "tag": "test-hy2",
+            "listen_port": 8443,
+            "users": [],
+            "obfs": {"type": "salamander", "password": "p"}
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-hy2")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Obfs == nil {
+		t.Fatal("Obfs is nil; expected *SingboxObfsConfig")
+	}
+	if view.Obfs.Type != "salamander" {
+		t.Errorf("Obfs.Type = %q; want %q", view.Obfs.Type, "salamander")
+	}
+	if view.Obfs.Password != "p" {
+		t.Errorf("Obfs.Password = %q; want %q", view.Obfs.Password, "p")
+	}
+}
+
+func TestSingboxInboundView_ObfsAbsentIsNil(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "hysteria2",
+            "tag": "test-hy2-noobfs",
+            "listen_port": 8443,
+            "users": []
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-hy2-noobfs")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Obfs != nil {
+		t.Errorf("Obfs should be nil when absent; got %+v", view.Obfs)
+	}
+}
+
+func TestSingboxInboundView_NetworkTrimmed(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "naive",
+            "tag": "test-naive",
+            "listen_port": 443,
+            "users": [],
+            "network": " UDP "
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-naive")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Network != "UDP" {
+		t.Errorf("Network = %q; want %q", view.Network, "UDP")
+	}
+}
+
+func TestSingboxInboundView_MethodAndServerKeyTrimmed(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "shadowsocks",
+            "tag": "test-ss",
+            "listen_port": 8388,
+            "users": [],
+            "method": " aes-256-gcm ",
+            "password": " server-key "
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-ss")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	if view.Method != "aes-256-gcm" {
+		t.Errorf("Method = %q; want %q", view.Method, "aes-256-gcm")
+	}
+	if view.ServerKey != "server-key" {
+		t.Errorf("ServerKey = %q; want %q", view.ServerKey, "server-key")
+	}
+}
+
+func TestSingboxInboundView_MarshalStability(t *testing.T) {
+	fixtureJSON := `{
+        "inbounds": [{
+            "type": "shadowsocks",
+            "tag": "test-ss-marshal",
+            "listen_port": 8388,
+            "users": [],
+            "method": "aes-256-gcm",
+            "password": "server-key",
+            "network": "tcp",
+            "obfs": {"type": "salamander", "password": "p"}
+        }]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+	view, err := cfg.GetSingboxInboundView("test-ss-marshal")
+	if err != nil {
+		t.Fatalf("GetSingboxInboundView: %v", err)
+	}
+	data, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("json.Marshal(view): %v", err)
+	}
+	s := string(data)
+	for _, forbidden := range []string{`"obfs"`, `"network"`, `"method"`, `"password"`} {
+		if strings.Contains(s, forbidden) {
+			t.Errorf("marshalled view contains %s, expected typed fields to stay json:\"-\": %s", forbidden, s)
+		}
+	}
+}
+
+// TestGetUserInbounds_CredentialMapping asserts the capability-driven
+// credential mapping in GetUserInbounds matches the pre-refactor behavior for
+// every known protocol plus one unmanaged/unknown type. See 54-01's golden
+// fixture (user_inbounds_golden.json) for the byte-identical end-to-end
+// contract this must not break.
+func TestGetUserInbounds_CredentialMapping(t *testing.T) {
+	fixtureJSON := `{
+      "inbounds": [
+        {"type":"vless","tag":"t-vless","listen_port":11001,"users":[{"name":"alice","uuid":"11111111-1111-1111-1111-111111111111","flow":"xtls-rprx-vision"}]},
+        {"type":"vmess","tag":"t-vmess-id-fallback","listen_port":11002,"users":[{"name":"alice","id":"22222222-2222-2222-2222-222222222222","security":"aes-128-gcm","alterId":2,"flow":"ignored-flow"}]},
+        {"type":"vmess","tag":"t-vmess-uuid","listen_port":11003,"users":[{"name":"alice","uuid":"33333333-3333-3333-3333-333333333333","id":"44444444-4444-4444-4444-444444444444"}]},
+        {"type":"trojan","tag":"t-trojan","listen_port":11004,"users":[{"name":"alice","password":"trojan-password","flow":"should-be-cleared","security":"aes-128-gcm","alterId":3}]},
+        {"type":"hysteria2","tag":"t-hysteria2","listen_port":11005,"users":[{"name":"alice","password":"hy2-password"}]},
+        {"type":"shadowsocks","tag":"t-shadowsocks","listen_port":11006,"method":"2022-blake3-aes-128-gcm","password":"server-key-placeholder","users":[{"name":"alice","password":"user-key-placeholder"}]},
+        {"type":"anytls","tag":"t-anytls","listen_port":11007,"users":[{"name":"alice","password":"anytls-password"}]},
+        {"type":"naive","tag":"t-naive","listen_port":11008,"network":"udp","users":[{"username":"alice","password":"naive-password"}]},
+        {"type":"socks","tag":"t-unknown","listen_port":11009,"users":[{"username":"alice","password":"socks-password","uuid":"55555555-5555-5555-5555-555555555555"}]}
+      ]
+    }`
+	cfg, _ := newTestConfig(t, fixtureJSON)
+
+	result, err := cfg.GetUserInbounds("alice")
+	if err != nil {
+		t.Fatalf("GetUserInbounds() error = %v", err)
+	}
+
+	byTag := map[string]UserInboundInfo{}
+	for _, info := range result {
+		byTag[info.Tag] = info
+	}
+
+	// Password-credential protocols: only Tag/Password set, everything else zero.
+	for _, tag := range []string{"t-hysteria2", "t-shadowsocks", "t-anytls", "t-naive"} {
+		info, ok := byTag[tag]
+		if !ok {
+			t.Fatalf("missing result for tag %q", tag)
+		}
+		if info.UUID != "" || info.Flow != "" || info.VmessSecurity != "" || info.VmessAlterID != 0 {
+			t.Errorf("tag %q: expected only Password set, got %+v", tag, info)
+		}
+		if info.Password == "" {
+			t.Errorf("tag %q: expected non-empty Password", tag)
+		}
+	}
+
+	// trojan: UUID = password, Flow cleared, vmess fields still copied through.
+	trojan := byTag["t-trojan"]
+	if trojan.UUID != "trojan-password" {
+		t.Errorf("trojan UUID = %q; want %q", trojan.UUID, "trojan-password")
+	}
+	if trojan.Flow != "" {
+		t.Errorf("trojan Flow = %q; want empty", trojan.Flow)
+	}
+	if trojan.VmessSecurity != "aes-128-gcm" || trojan.VmessAlterID != 3 {
+		t.Errorf("trojan vmess fields = (%q, %d); want (%q, %d)", trojan.VmessSecurity, trojan.VmessAlterID, "aes-128-gcm", 3)
+	}
+
+	// vmess with empty uuid falls back to id; flow always cleared.
+	vmessFallback := byTag["t-vmess-id-fallback"]
+	if vmessFallback.UUID != "22222222-2222-2222-2222-222222222222" {
+		t.Errorf("vmess id-fallback UUID = %q; want id value", vmessFallback.UUID)
+	}
+	if vmessFallback.Flow != "" {
+		t.Errorf("vmess id-fallback Flow = %q; want empty", vmessFallback.Flow)
+	}
+
+	// vmess with non-empty uuid keeps uuid over id.
+	vmessUUID := byTag["t-vmess-uuid"]
+	if vmessUUID.UUID != "33333333-3333-3333-3333-333333333333" {
+		t.Errorf("vmess uuid UUID = %q; want uuid value", vmessUUID.UUID)
+	}
+	if vmessUUID.Flow != "" {
+		t.Errorf("vmess uuid Flow = %q; want empty", vmessUUID.Flow)
+	}
+
+	// vless: uuid/flow preserved as-is.
+	vless := byTag["t-vless"]
+	if vless.UUID != "11111111-1111-1111-1111-111111111111" {
+		t.Errorf("vless UUID = %q; want uuid value", vless.UUID)
+	}
+	if vless.Flow != "xtls-rprx-vision" {
+		t.Errorf("vless Flow = %q; want %q", vless.Flow, "xtls-rprx-vision")
+	}
+
+	// Unknown type (socks): default branch behaves like vless — uuid/flow preserved.
+	unknown, ok := byTag["t-unknown"]
+	if !ok {
+		t.Fatalf("missing result for unknown type tag t-unknown")
+	}
+	if unknown.UUID != "55555555-5555-5555-5555-555555555555" {
+		t.Errorf("unknown type UUID = %q; want preserved uuid value", unknown.UUID)
+	}
+	if unknown.Password != "" {
+		t.Errorf("unknown type Password = %q; want empty (password-branch not taken)", unknown.Password)
 	}
 }
