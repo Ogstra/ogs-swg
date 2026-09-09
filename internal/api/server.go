@@ -70,6 +70,7 @@ type Server struct {
 	logSearchSem chan struct{}
 	logStore     *core.LogStore
 	logIngester  *core.LogIngester
+	ntfyNotifier *core.NtfyNotifier
 }
 
 func (s *Server) invalidateSamplerHistoryCache() {
@@ -125,6 +126,7 @@ func NewServer(store *core.Store, config *core.Config, executor core.SystemExecu
 		logSearchSem: make(chan struct{}, 2),
 	}
 	srv.reloadProtectionRules(context.Background())
+	srv.initNtfyNotifier()
 	return srv
 }
 
@@ -185,7 +187,7 @@ func (s *Server) secure(handler http.HandlerFunc) http.HandlerFunc {
 
 		// Otherwise, enforce API Key
 		if r.Header.Get("X-API-Key") != s.config.APIKey {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			writeErr(w, http.StatusUnauthorized, "Unauthorized")
 			return
 		}
 		handler(w, r)
@@ -213,7 +215,7 @@ func (s *Server) requirePerm(check func(*core.PanelUserPermissions) bool, h http
 		p := getPermissions(r)
 		// nil permissions means API-key auth — grant full access for backward compatibility
 		if p != nil && !check(p) {
-			http.Error(w, "Forbidden", http.StatusForbidden)
+			writeErr(w, http.StatusForbidden, "Forbidden")
 			return
 		}
 		h(w, r)
@@ -223,7 +225,7 @@ func (s *Server) requirePerm(check func(*core.PanelUserPermissions) bool, h http
 
 func (s *Server) requireSingbox(w http.ResponseWriter) bool {
 	if !s.config.EnableSingbox {
-		http.Error(w, "sing-box disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "sing-box disabled")
 		return false
 	}
 	return true
@@ -231,7 +233,7 @@ func (s *Server) requireSingbox(w http.ResponseWriter) bool {
 
 func (s *Server) requireWireGuard(w http.ResponseWriter) bool {
 	if !s.config.EnableWireGuard {
-		http.Error(w, "WireGuard disabled", http.StatusServiceUnavailable)
+		writeErr(w, http.StatusServiceUnavailable, "WireGuard disabled")
 		return false
 	}
 	return true
@@ -289,12 +291,17 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("DELETE /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleRemoveUserFromInbound))))
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserInInbound))))
 	protected.HandleFunc("PUT /api/users/{name}/route-tags", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserRouteTags))))
+	protected.HandleFunc("PUT /api/users/{name}/external-profiles", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserExternalProfiles))))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "create", s.handleBulkCreateUsers))))
 	protected.HandleFunc("GET /api/user-route-tags", s.secure(s.requirePerm(canReadUsers, s.handleGetUserRouteTags)))
 	protected.HandleFunc("POST /api/user-route-tags", s.secure(s.requirePerm(canWriteUsers, s.handleCreateUserRouteTag)))
 	protected.HandleFunc("PUT /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleUpdateUserRouteTag)))
 	protected.HandleFunc("DELETE /api/user-route-tags/{id}", s.secure(s.requirePerm(canWriteUsers, s.handleDeleteUserRouteTag)))
 	protected.HandleFunc("GET /api/user-route-tags/compatible-rules", s.secure(s.requirePerm(canReadConfig, s.handleGetCompatibleUserRouteRules)))
+	protected.HandleFunc("GET /api/external-profiles", s.secure(s.requirePerm(canReadConfig, s.handleListExternalProfiles)))
+	protected.HandleFunc("POST /api/external-profiles", s.secure(s.requirePerm(canWriteConfig, s.AuditLogger("external_profile", "upsert", s.handleUpsertExternalProfile))))
+	protected.HandleFunc("DELETE /api/external-profiles/{id}", s.secure(s.requirePerm(canWriteConfig, s.AuditLogger("external_profile", "delete", s.handleDeleteExternalProfile))))
+	protected.HandleFunc("GET /api/external-profiles/{id}/link", s.secure(s.requirePerm(canWriteUsers, s.handleGetExternalProfileLink)))
 
 	// Reports/logs
 	protected.HandleFunc("GET /api/report", s.secure(s.requirePerm(canReadUsers, s.handleGetReport)))
@@ -386,6 +393,9 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/settings/subscription-domain", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateSubscriptionDomain)))
 	protected.HandleFunc("GET /api/settings/cf-worker-url", s.secure(s.requirePerm(canReadSettings, s.handleGetCFWorkerURL)))
 	protected.HandleFunc("PUT /api/settings/cf-worker-url", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateCFWorkerURL)))
+	protected.HandleFunc("GET /api/settings/ntfy", s.secure(s.requirePerm(canReadSettings, s.handleGetNtfySettings)))
+	protected.HandleFunc("PUT /api/settings/ntfy", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateNtfySettings)))
+	protected.HandleFunc("POST /api/settings/ntfy/test", s.secure(s.requirePerm(canWriteSettings, s.handleTestNtfyNotification)))
 	protected.HandleFunc("POST /api/sampler/run", s.secure(s.requirePerm(canWriteSettings, s.handleRunSampler)))
 	protected.HandleFunc("GET /api/sampler/history", s.secure(s.requirePerm(canReadSettings, s.handleSamplerHistory)))
 	protected.HandleFunc("GET /api/subscription-requests/history", s.secure(s.requirePerm(canReadSettings, s.handleSubscriptionRequestHistory)))
@@ -393,10 +403,10 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("DELETE /api/subscription-requests", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("subscription_request", "delete", s.handleDeleteSubscriptionRequests))))
 	protected.HandleFunc("POST /api/sampler/pause", s.secure(s.requirePerm(canWriteSettings, s.handlePauseSampler)))
 	protected.HandleFunc("POST /api/sampler/resume", s.secure(s.requirePerm(canWriteSettings, s.handleResumeSampler)))
-	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.handlePruneNow)))
+	protected.HandleFunc("POST /api/retention/prune", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("retention", "prune", s.handlePruneNow))))
 	protected.HandleFunc("GET /api/settings/logs/stats", s.secure(s.requirePerm(canReadSettings, s.handleGetLogStoreStats)))
 	protected.HandleFunc("GET /api/settings/backup/download", s.secure(s.requirePerm(canWriteSettings, s.handleDownloadDBBackup)))
-	protected.HandleFunc("POST /api/settings/backup/trigger", s.secure(s.requirePerm(canWriteSettings, s.handleTriggerDBBackup)))
+	protected.HandleFunc("POST /api/settings/backup/trigger", s.secure(s.requirePerm(canWriteSettings, s.AuditLogger("backup", "manual", s.handleTriggerDBBackup))))
 
 	// Panel user management
 	protected.HandleFunc("GET /api/panel-users", s.secure(s.requirePerm(canReadPanelUsers, s.handleGetPanelUsers)))
@@ -562,6 +572,8 @@ func StartServer(cfg *core.Config) *Server {
 		log.Printf("Demo mode: skipping WireGuard sampler; seeded demo data is authoritative")
 	}
 
+	server.startNtfyNotifier()
+
 	// Start background maintenance (Retention & Vacuum)
 	if !cfg.DemoMode {
 		go func() {
@@ -628,24 +640,25 @@ func StartServer(cfg *core.Config) *Server {
 					if server.auditStore != nil && server.auditStore.SizeBytes() > maxBytes {
 						server.auditStore.PruneToSize(maxBytes)
 						log.Printf("Audit log pruned to %d MB limit", cfg.AuditLogMaxMB)
+						server.insertSystemAuditEntry("retention", "auto_prune", "audit.db",
+							fmt.Sprintf("max_mb:%d", cfg.AuditLogMaxMB))
 					}
 				}
 
 				// Log hot tier retention -> cold export
 				if server.logStore != nil {
-					coldDir := cfg.LogColdDir
-					if coldDir == "" {
-						coldDir = "data/logs"
-					}
+					coldDir := server.logColdDir()
 					if err := os.MkdirAll(coldDir, 0755); err == nil {
 						mode := cfg.LogRetentionMode
 						if mode == "" {
 							mode = "size"
 						}
-						if seg, err := server.logStore.CheckRetention(context.Background(), mode, cfg.LogRetentionMB, cfg.LogRetentionDays, cfg.LogRetentionUnit, coldDir); err != nil {
+						if seg, err := server.logStore.CheckRetention(context.Background(), mode, cfg.LogRetentionMB, cfg.LogRetentionTargetPct, cfg.LogRetentionMaxExportPct, cfg.LogRetentionDays, cfg.LogRetentionUnit, coldDir); err != nil {
 							log.Printf("Log retention export error: %v", err)
 						} else if seg != nil {
 							log.Printf("Log retention: exported %d rows to %s", seg.RowCount, seg.Filename)
+							server.insertSystemAuditEntry("backup", "cold_export", seg.Filename,
+								fmt.Sprintf("rows:%d KB:%d", seg.RowCount, seg.SizeBytes/1024))
 						}
 					}
 				}
@@ -683,16 +696,21 @@ func StartServer(cfg *core.Config) *Server {
 					}
 					ctx := context.Background()
 					ts := time.Now().Format("2006-01-02_150405")
+					var created []string
 
 					mainName := fmt.Sprintf("ogs_%s.tar.gz", ts)
 					if err := core.BackupDBToTarGz(ctx, store.DB(), "stats.db", filepath.Join(backupDir, mainName)); err != nil {
 						log.Printf("DB backup (main): %v", err)
+					} else {
+						created = append(created, mainName)
 					}
 
 					auditName := fmt.Sprintf("audit_%s.tar.gz", ts)
 					if server.auditStore != nil {
 						if err := core.BackupDBToTarGz(ctx, server.auditStore.DB(), "audit.db", filepath.Join(backupDir, auditName)); err != nil {
 							log.Printf("DB backup (audit): %v", err)
+						} else {
+							created = append(created, auditName)
 						}
 					}
 
@@ -708,7 +726,14 @@ func StartServer(cfg *core.Config) *Server {
 						}
 						if err := core.BackupDBToTarGz(ctx, server.logStore.DB(), "singbox_logs.db", filepath.Join(backupDir, logName)); err != nil {
 							log.Printf("DB backup (logs): %v", err)
+						} else {
+							created = append(created, logName)
 						}
+					}
+
+					if len(created) > 0 {
+						server.insertSystemAuditEntry("backup", "auto", created[0],
+							fmt.Sprintf("archives:%d", len(created)))
 					}
 				}
 				runBackup()
@@ -771,7 +796,7 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 	fs := http.FileServer(http.Dir(distDir))
 	assetHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if distDir == "" {
-			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "frontend assets not found")
 			return
 		}
 		w.Header().Set("Cache-Control", frontendAssetCacheControl)
@@ -793,7 +818,7 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 			return
 		}
 		if distDir == "" {
-			http.Error(w, "frontend assets not found", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "frontend assets not found")
 			return
 		}
 
@@ -847,9 +872,10 @@ type UserStatus struct {
 	ResetDay          int                  `json:"reset_day"`
 	Enabled           bool                 `json:"enabled"`
 	LastSeen          int64                `json:"last_seen"`
-	InboundTags       []string             `json:"inbound_tags"`
-	RouteTags         []UserRouteTagStatus `json:"route_tags"`
-	SubscriptionQuota *SubQuotaInfo        `json:"subscription_quota,omitempty"`
+	InboundTags       []string               `json:"inbound_tags"`
+	RouteTags         []UserRouteTagStatus   `json:"route_tags"`
+	ExternalProfiles  []core.ExternalProfile `json:"external_profiles,omitempty"`
+	SubscriptionQuota *SubQuotaInfo          `json:"subscription_quota,omitempty"`
 }
 
 func (s *Server) replaceUserInRouteRules(oldName, newName string) error {
@@ -930,14 +956,14 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	// 1. Load active users from Singbox Config
 	activeUsers, err := s.config.GetActiveUsers()
 	if err != nil {
-		http.Error(w, "Failed to load users: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load users: "+err.Error())
 		return
 	}
 
 	// 2. Load all metadata (includes disabled users)
 	allMeta, err := s.store.GetAllUserMetadata()
 	if err != nil {
-		http.Error(w, "Failed to load metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load metadata: "+err.Error())
 		return
 	}
 
@@ -977,7 +1003,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	routeTagDefinitions, err := s.store.ListUserRouteTags()
 	if err != nil {
-		http.Error(w, "Failed to load route tags: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load route tags: "+err.Error())
 		return
 	}
 
@@ -1118,10 +1144,17 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 				lastSeen = demoModeLastSeenInRange("singbox-user-idle", name, now, 6*60, 9*60*60)
 			}
 		}
-		routeTags, err := s.routeTagStatusesForUser(name, routeTagDefinitions)
+		routeTags, err := s.routeTagStatusesForUser(name, routeTagDefinitions, inboundTags)
 		if err != nil {
-			http.Error(w, "Failed to resolve route tags: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to resolve route tags: "+err.Error())
 			return
+		}
+
+		var externalProfiles []core.ExternalProfile
+		if s.store != nil {
+			if eps, err := s.store.GetUserExternalProfiles(name); err == nil {
+				externalProfiles = eps
+			}
 		}
 
 		// Subscription quota: check if this user belongs to a subscription with quota_limit > 0.
@@ -1160,6 +1193,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			LastSeen:          lastSeen,
 			InboundTags:       inboundTags,
 			RouteTags:         routeTags,
+			ExternalProfiles:  externalProfiles,
 			SubscriptionQuota: subQuota,
 		})
 	}
@@ -1211,17 +1245,17 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 	if req.InboundTag == "" {
-		http.Error(w, "Inbound Tag is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Inbound Tag is required")
 		return
 	}
 	if req.UUID == "" {
@@ -1236,10 +1270,10 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	if enabled {
 		if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 			if errors.Is(err, os.ErrInvalid) || errors.Is(err, core.ErrUserAssignedToAnotherInbound) {
-				http.Error(w, err.Error(), http.StatusBadRequest)
+				writeErr(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			http.Error(w, "Failed to add user to config: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to add user to config: "+err.Error())
 			return
 		}
 	}
@@ -1257,7 +1291,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		InboundTags:   canonicalInboundTags(req.InboundTag),
 	}
 	if err := s.store.SaveUserMetadata(meta); err != nil {
-		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error())
 		return
 	}
 
@@ -1271,13 +1305,13 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if req.Name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 
@@ -1319,15 +1353,15 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		nameChanged := originalName != req.Name
 		if nameChanged {
 			if err := s.config.RenameUser(originalName, req.Name, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); err != nil {
-				http.Error(w, "Failed to rename user in config: "+err.Error(), http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to rename user in config: "+err.Error())
 				return
 			}
 			if err := s.store.RenameUserTrafficIdentity(originalName, req.Name); err != nil {
 				if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
-					http.Error(w, "Failed to rename user traffic identity: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+					writeErr(w, http.StatusInternalServerError, "Failed to rename user traffic identity: "+err.Error()+" (rollback failed: "+rollbackErr.Error()+")")
 					return
 				}
-				http.Error(w, "Failed to rename user traffic identity: "+err.Error(), http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to rename user traffic identity: "+err.Error())
 				return
 			}
 		} else {
@@ -1346,7 +1380,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 						if addErr := s.config.AddUser(req.Name, req.UUID, req.Flow, tag, req.VmessSecurity, req.VmessAlterID); addErr != nil {
 							// Ignore "already exists" — propagate other errors.
 							if !strings.Contains(addErr.Error(), "already exists") {
-								http.Error(w, "Failed to restore user in inbound "+tag+": "+addErr.Error(), http.StatusInternalServerError)
+								writeErr(w, http.StatusInternalServerError, "Failed to restore user in inbound "+tag+": "+addErr.Error())
 								return
 							}
 						}
@@ -1356,7 +1390,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 				// No known inbounds: fall back to UpdateUser across all managed inbounds.
 				if err := s.config.UpdateUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
 					if err := s.config.AddUser(req.Name, req.UUID, req.Flow, req.InboundTag, req.VmessSecurity, req.VmessAlterID); err != nil {
-						http.Error(w, "Failed to update user in config: "+err.Error(), http.StatusInternalServerError)
+						writeErr(w, http.StatusInternalServerError, "Failed to update user in config: "+err.Error())
 						return
 					}
 				}
@@ -1404,15 +1438,15 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SaveUserMetadata(meta); err != nil {
 		if originalName != req.Name {
 			if rollbackErr := s.store.RenameUserTrafficIdentity(req.Name, originalName); rollbackErr != nil {
-				http.Error(w, "Failed to save metadata: "+err.Error()+" (store rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error()+" (store rollback failed: "+rollbackErr.Error()+")")
 				return
 			}
 			if rollbackErr := s.config.RenameUser(req.Name, originalName, req.UUID, req.Flow, req.VmessSecurity, req.VmessAlterID); rollbackErr != nil {
-				http.Error(w, "Failed to save metadata: "+err.Error()+" (config rollback failed: "+rollbackErr.Error()+")", http.StatusInternalServerError)
+				writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error()+" (config rollback failed: "+rollbackErr.Error()+")")
 				return
 			}
 		}
-		http.Error(w, "Failed to save metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error())
 		return
 	}
 	if originalName != req.Name {
@@ -1427,7 +1461,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		!existingMeta.Enabled
 	if shouldReconcileQuota {
 		if err := s.store.ReconcileUserQuotaNow(req.Name, s.config); err != nil {
-			http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to reconcile user quota: "+err.Error())
 			return
 		}
 	}
@@ -1444,12 +1478,12 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	name := r.URL.Query().Get("name")
 	if name == "" {
-		http.Error(w, "Name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name is required")
 		return
 	}
 
 	if err := s.config.RemoveUser(name); err != nil {
-		http.Error(w, "Failed to remove user from config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from config: "+err.Error())
 		return
 	}
 
@@ -1458,12 +1492,12 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.store.RemoveUserFromSubscriptions(name); err != nil {
-		http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from subscriptions: "+err.Error())
 		return
 	}
 
 	if err := s.store.DeleteUserMetadata(name); err != nil {
-		http.Error(w, "Failed to delete metadata: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete metadata: "+err.Error())
 		return
 	}
 
@@ -1482,17 +1516,17 @@ func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Requ
 	tag := r.PathValue("tag")
 
 	if name == "" || tag == "" {
-		http.Error(w, "Name and tag are required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name and tag are required")
 		return
 	}
 
 	if err := s.config.RemoveUserFromInbound(name, tag); err != nil {
-		http.Error(w, "Failed to remove user from inbound: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from inbound: "+err.Error())
 		return
 	}
 
 	if err := s.removeUserFromSubscriptionsIfUnassigned(name); err != nil {
-		http.Error(w, "Failed to remove user from subscriptions: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove user from subscriptions: "+err.Error())
 		return
 	}
 
@@ -1527,7 +1561,7 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 	name := r.PathValue("name")
 	tag := r.PathValue("tag")
 	if name == "" || tag == "" {
-		http.Error(w, "Name and tag are required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Name and tag are required")
 		return
 	}
 
@@ -1537,17 +1571,17 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 		VmessSecurity string `json:"vmess_security,omitempty"`
 		VmessAlterID  int    `json:"vmess_alter_id,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.UUID == "" {
-		http.Error(w, "UUID is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "UUID is required")
 		return
 	}
 
 	if err := s.config.UpdateUserInInbound(name, req.UUID, req.Flow, tag, req.VmessSecurity, req.VmessAlterID); err != nil {
-		http.Error(w, "Failed to update user in inbound: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update user in inbound: "+err.Error())
 		return
 	}
 
@@ -1565,7 +1599,7 @@ func (s *Server) handleUpdateUserInInbound(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := s.store.ReconcileUserQuotaNow(name, s.config); err != nil {
-		http.Error(w, "Failed to reconcile user quota: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to reconcile user quota: "+err.Error())
 		return
 	}
 
@@ -1579,8 +1613,8 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var reqs []CreateUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&reqs); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &reqs); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1651,7 +1685,7 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 
 	users, err := s.config.GetActiveUsers()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -1681,8 +1715,7 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleGetReportSummary(w http.ResponseWriter, r *http.Request) {
@@ -1721,7 +1754,7 @@ func (s *Server) handleGetReportSummary(w http.ResponseWriter, r *http.Request) 
 
 	users, err := s.config.GetActiveUsers()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -1754,8 +1787,7 @@ func (s *Server) handleGetReportSummary(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -1764,7 +1796,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	content, err := s.config.GetSingboxConfig()
 	if err != nil {
-		http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read config: "+err.Error())
 		return
 	}
 	if shouldRedactConfigReadOnly(r) {
@@ -1779,8 +1811,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.logStore == nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"logs": []string{}, "max_id": 0})
+		writeJSON(w, http.StatusOK, map[string]interface{}{"logs": []string{}, "max_id": 0})
 		return
 	}
 
@@ -1802,10 +1833,12 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	compiledQuery := compileLogQuery(qRaw)
 
-	// For queries that require post-filter (user correlation, AND/OR), fetch a
-	// larger window so connection-ID correlation can see the full context.
+	// When any filter is active, fetch a larger window so substring matches and
+	// connection-ID correlation have enough context. Without this, a simple query
+	// like "git" would only see the last 200 lines while a complex query like
+	// "[user] AND git" would see 5000.
 	fetchLimit := limit
-	if qRaw != "" && compiledQuery.requiresPostFilter() {
+	if qRaw != "" {
 		fetchLimit = 5000
 	}
 
@@ -1821,7 +1854,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(w, "log read failed: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "log read failed: "+err.Error())
 		return
 	}
 
@@ -1845,8 +1878,7 @@ func (s *Server) handleGetLogs(w http.ResponseWriter, r *http.Request) {
 		lines, _ = truncateRecentLogMatches(lines, limit)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"logs":   lines,
 		"max_id": maxID,
 	})
@@ -1858,12 +1890,12 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		http.Error(w, "q is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "q is required")
 		return
 	}
 	timeRange, err := parseLogTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
 	if err != nil {
-		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid time range: "+err.Error())
 		return
 	}
 	page, pageSize, effectiveLimit := parseSearchPageParams(r)
@@ -1891,8 +1923,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("handleSearchLogs: cannot search logs: %v", err)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"logs": []string{"Failed to search logs: " + err.Error()},
 		})
 		return
@@ -1909,8 +1940,7 @@ func (s *Server) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 	paged := lines[start:end]
 	hasMore := summary.truncated && end == len(lines)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"logs":      paged,
 		"page":      page,
 		"page_size": pageSize,
@@ -1924,12 +1954,12 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		http.Error(w, "q is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "q is required")
 		return
 	}
 	timeRange, err := parseLogTimeRange(r.URL.Query().Get("from"), r.URL.Query().Get("to"))
 	if err != nil {
-		http.Error(w, "invalid time range: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid time range: "+err.Error())
 		return
 	}
 	_, _, effectiveLimit := parseSearchPageParams(r)
@@ -1940,7 +1970,7 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -1991,4 +2021,3 @@ func (s *Server) handleSearchLogsStream(w http.ResponseWriter, r *http.Request) 
 		"truncated": summary.truncated,
 	})
 }
-

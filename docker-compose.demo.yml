@@ -29,6 +29,7 @@ services:
     volumes:
       - ./docker/demo:/demo:ro
       - ./data-demo:/app/data
+      - ${OGS_EXTERNAL_PROFILE_IP_HOST_DIR:-./homelab/ip}:/app/external-profile-ip:ro
     tmpfs:
       - /tmp:size=16m,noexec,nosuid,nodev
     logging:

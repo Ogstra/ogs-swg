@@ -109,7 +109,7 @@ func (i *LogIngester) retentionLoop() {
 		case <-ticker.C:
 			ctx := context.Background()
 			coldDir := coldDirFor(i.store.path)
-			seg, err := i.store.CheckRetention(ctx, "size", 200, 0, "days", coldDir)
+			seg, err := i.store.CheckRetention(ctx, "size", 200, 80, 25, 0, "days", coldDir)
 			if err != nil {
 				log.Printf("log ingester: retention check error: %v", err)
 				continue

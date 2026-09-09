@@ -28,6 +28,7 @@ export interface UserStatus {
     last_seen?: number;
     inbound_tags?: string[];
     route_tags?: UserRouteTag[];
+    external_profiles?: ExternalProfile[];
 }
 
 export interface UserRouteTag {
@@ -40,6 +41,29 @@ export interface UserRouteTag {
     broken: boolean;
     broken_reason?: string;
     auth_users: string[];
+}
+
+export interface ExternalProfile {
+    id: number;
+    name: string;
+    flag: string;
+    type: 'vless' | 'shadowsocks';
+    host_ipv4: string;
+    host_ipv6_file: string;
+    port: number;
+    uuid: string;
+    password: string;
+    ss_method: string;
+    ss_server_key: string;
+    public_key: string;
+    short_id: string;
+    server_name: string;
+    alpn: string;
+    flow: string;
+    enabled: boolean;
+    position: number;
+    created_at: number;
+    updated_at: number;
 }
 
 export interface CompatibleUserRouteRule {
@@ -94,6 +118,8 @@ export interface FeatureFlags {
     journalctl_available?: boolean;
     log_retention_mode?: 'size' | 'time';
     log_retention_mb?: number;
+    log_retention_target_percent?: number;
+    log_retention_max_export_percent?: number;
     log_retention_days?: number;
     log_retention_unit?: 'days' | 'weeks' | 'months';
     log_cold_dir?: string;
@@ -211,6 +237,7 @@ export interface SubscriptionRequestHistoryEntry {
     served_from_cache: number;
     blocked: number;
     block_reason: string;
+    via_worker: number;
 }
 
 export interface SubscriptionRequestHistoryPage {
@@ -323,6 +350,7 @@ export interface Subscription {
     alias: string;
     happ_routing_profile?: string;
     happ_color_profile?: string;
+    happ_direct_sites?: string;
     quota_limit: number;
     quota_period: string;
     used_bytes: number;
@@ -351,6 +379,7 @@ export interface SubscriptionMutationRequest {
     update_always: boolean;
     happ_routing_profile?: string;
     happ_color_profile?: string;
+    happ_direct_sites?: string;
 }
 
 export interface SubscriptionDefaults {
@@ -373,11 +402,40 @@ export interface SubscriptionHappConfig {
     color_profile: string;
     profile_flag: string;
     routing_profile?: string;
+    direct_sites?: string[];
     advanced_parameters: SubscriptionHappParameter[];
 }
 
 export interface SubscriptionDefaultDestinationsResponse {
     destinations: string[];
+}
+
+export interface NtfySettingsResponse {
+    server_url: string;
+    topic: string;
+    auth_mode: 'none' | 'bearer' | 'basic';
+    basic_user: string;
+    has_bearer_token: boolean;
+    has_basic_pass: boolean;
+    enable_singbox_down: boolean;
+    enable_wireguard_down: boolean;
+    enable_high_traffic: boolean;
+    enable_config_errors: boolean;
+    traffic_threshold_bytes: number;
+}
+
+export interface NtfySettingsRequest {
+    server_url: string;
+    topic: string;
+    auth_mode: 'none' | 'bearer' | 'basic';
+    bearer_token: string;
+    basic_user: string;
+    basic_pass: string;
+    enable_singbox_down: boolean;
+    enable_wireguard_down: boolean;
+    enable_high_traffic: boolean;
+    enable_config_errors: boolean;
+    traffic_threshold_bytes: number;
 }
 
 
@@ -417,202 +475,152 @@ const validateRawSingboxConfig = (config: string) => {
     }
 };
 
+type ParseMode = 'json' | 'text' | 'none' | 'raw';
+type ErrorMode = 'handled' | 'plain' | 'status';
+
+interface RequestOptions {
+    method?: string;
+    json?: unknown;
+    body?: BodyInit;
+    contentType?: string;
+    signal?: AbortSignal;
+    errorMsg?: string;
+    parse?: ParseMode;
+    errorMode?: ErrorMode;
+    allowStatus?: number[];
+}
+
+async function request<T = void>(path: string, options: RequestOptions = {}): Promise<T> {
+    const {
+        method = 'GET',
+        json,
+        body,
+        contentType,
+        signal,
+        errorMsg = 'Request failed',
+        parse = 'json',
+        errorMode = 'handled',
+        allowStatus,
+    } = options;
+
+    const headerContentType = contentType ?? (json !== undefined ? 'application/json' : undefined);
+    const init: RequestInit = { method, headers: buildHeaders(headerContentType) };
+    if (json !== undefined) {
+        init.body = JSON.stringify(json);
+    } else if (body !== undefined) {
+        init.body = body;
+    }
+    if (signal) init.signal = signal;
+
+    const res = await fetch(path, init);
+
+    if (!allowStatus || !allowStatus.includes(res.status)) {
+        if (errorMode === 'handled') {
+            await handleResponse(res, errorMsg);
+        } else if (errorMode === 'plain') {
+            if (!res.ok) throw new Error(errorMsg);
+        } else if (!res.ok) {
+            throw new Error(`${errorMsg}: ${res.status}`);
+        }
+    }
+
+    if (parse === 'raw') return res as unknown as T;
+    if (parse === 'none') return undefined as T;
+    if (parse === 'text') return (await res.text()) as unknown as T;
+    return (await res.json()) as T;
+}
+
 export const api = {
-    getUsers: async (): Promise<UserStatus[]> => {
-        const res = await fetch('/api/users', { headers: buildHeaders() });
-        if (!res.ok) throw new Error('Failed to fetch users');
-        return res.json();
-    },
-    pauseSampler: async (): Promise<void> => {
-        const res = await fetch('/api/sampler/pause', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to pause sampler');
-    },
-    resumeSampler: async (): Promise<void> => {
-        const res = await fetch('/api/sampler/resume', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to resume sampler');
-    },
-    updatePassword: async (currentPassword: string, newPassword: string): Promise<void> => {
-        const res = await fetch('/api/auth/password', {
+    getUsers: async (): Promise<UserStatus[]> =>
+        request<UserStatus[]>('/api/users', { errorMode: 'plain', errorMsg: 'Failed to fetch users' }),
+    pauseSampler: async (): Promise<void> =>
+        request('/api/sampler/pause', { method: 'POST', parse: 'none', errorMsg: 'Failed to pause sampler' }),
+    resumeSampler: async (): Promise<void> =>
+        request('/api/sampler/resume', { method: 'POST', parse: 'none', errorMsg: 'Failed to resume sampler' }),
+    updatePassword: async (currentPassword: string, newPassword: string): Promise<void> =>
+        request('/api/auth/password', {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
-        });
-        await handleResponse(res, 'Failed to update password');
-    },
-    updateUsername: async (currentPassword: string, newUsername: string): Promise<void> => {
-        const res = await fetch('/api/auth/username', {
+            json: { current_password: currentPassword, new_password: newPassword },
+            parse: 'none',
+            errorMsg: 'Failed to update password',
+        }),
+    updateUsername: async (currentPassword: string, newUsername: string): Promise<void> =>
+        request('/api/auth/username', {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ current_password: currentPassword, new_username: newUsername })
-        });
-        await handleResponse(res, 'Failed to update username');
-    },
-    createUser: async (user: CreateUserRequest): Promise<void> => {
-        const res = await fetch('/api/users', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(user)
-        });
-        await handleResponse(res, 'Failed to create user');
-    },
-    updateUser: async (user: CreateUserRequest): Promise<void> => {
-        const res = await fetch('/api/users', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(user)
-        });
-        await handleResponse(res, 'Failed to update user');
-    },
-    deleteUser: async (name: string): Promise<void> => {
-        const res = await fetch(`/api/users?name=${encodeURIComponent(name)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete user');
-    },
-    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; password?: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch user inbounds');
-        return res.json();
-    },
-    getUserRouteTags: async (): Promise<UserRouteTag[]> => {
-        const res = await fetch('/api/user-route-tags', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch user route tags');
-        return res.json();
-    },
-    getCompatibleUserRouteRules: async (): Promise<CompatibleUserRouteRule[]> => {
-        const res = await fetch('/api/user-route-tags/compatible-rules', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch compatible user route rules');
-        return res.json();
-    },
-    createUserRouteTag: async (payload: CreateUserRouteTagRequest): Promise<UserRouteTag> => {
-        const res = await fetch('/api/user-route-tags', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to create user route tag');
-        return res.json();
-    },
-    updateUserRouteTag: async (id: number, payload: { name: string; color?: string; description?: string; rule_index?: number }): Promise<UserRouteTag> => {
-        const res = await fetch(`/api/user-route-tags/${encodeURIComponent(String(id))}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to update user route tag');
-        return res.json();
-    },
-    deleteUserRouteTag: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/user-route-tags/${encodeURIComponent(String(id))}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete user route tag');
-    },
-    updateUserRouteTags: async (name: string, tagIds: number[]): Promise<UpdateUserRouteTagsResponse> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/route-tags`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ tag_ids: tagIds })
-        });
-        await handleResponse(res, 'Failed to update user route tags');
-        return res.json();
-    },
-    removeUserFromInbound: async (name: string, inboundTag: string): Promise<void> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to remove user from inbound');
-    },
-    updateUserInbound: async (name: string, inboundTag: string, payload: { uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }): Promise<void> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to update user inbound');
-    },
-    getUserLink: async (name: string, inboundTag: string): Promise<{ link: string; type?: string }> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/link?inbound=${encodeURIComponent(inboundTag)}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch link');
-        return res.json();
-    },
-    getUserVlessLink: async (name: string, inboundTag: string): Promise<{ link: string }> => {
-        const res = await fetch(`/api/users/${encodeURIComponent(name)}/vless?inbound=${encodeURIComponent(inboundTag)}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch VLESS link');
-        return res.json();
-    },
-    bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> => {
-        const res = await fetch('/api/users/bulk', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(users)
-        });
-        await handleResponse(res, 'Failed to bulk create users');
-    },
+            json: { current_password: currentPassword, new_username: newUsername },
+            parse: 'none',
+            errorMsg: 'Failed to update username',
+        }),
+    createUser: async (user: CreateUserRequest): Promise<void> =>
+        request('/api/users', { method: 'POST', json: user, parse: 'none', errorMsg: 'Failed to create user' }),
+    updateUser: async (user: CreateUserRequest): Promise<void> =>
+        request('/api/users', { method: 'PUT', json: user, parse: 'none', errorMsg: 'Failed to update user' }),
+    deleteUser: async (name: string): Promise<void> =>
+        request(`/api/users?name=${encodeURIComponent(name)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete user' }),
+    getUserInbounds: async (name: string): Promise<{ tag: string; uuid: string; password?: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }[]> =>
+        request(`/api/users/${encodeURIComponent(name)}/inbounds`, { errorMsg: 'Failed to fetch user inbounds' }),
+    getUserRouteTags: async (): Promise<UserRouteTag[]> =>
+        request<UserRouteTag[]>('/api/user-route-tags', { errorMsg: 'Failed to fetch user route tags' }),
+    getCompatibleUserRouteRules: async (): Promise<CompatibleUserRouteRule[]> =>
+        request<CompatibleUserRouteRule[]>('/api/user-route-tags/compatible-rules', { errorMsg: 'Failed to fetch compatible user route rules' }),
+    createUserRouteTag: async (payload: CreateUserRouteTagRequest): Promise<UserRouteTag> =>
+        request<UserRouteTag>('/api/user-route-tags', { method: 'POST', json: payload, errorMsg: 'Failed to create user route tag' }),
+    updateUserRouteTag: async (id: number, payload: { name: string; color?: string; description?: string; rule_index?: number }): Promise<UserRouteTag> =>
+        request<UserRouteTag>(`/api/user-route-tags/${encodeURIComponent(String(id))}`, { method: 'PUT', json: payload, errorMsg: 'Failed to update user route tag' }),
+    deleteUserRouteTag: async (id: number): Promise<void> =>
+        request(`/api/user-route-tags/${encodeURIComponent(String(id))}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete user route tag' }),
+    updateUserRouteTags: async (name: string, tagIds: number[]): Promise<UpdateUserRouteTagsResponse> =>
+        request<UpdateUserRouteTagsResponse>(`/api/users/${encodeURIComponent(name)}/route-tags`, { method: 'PUT', json: { tag_ids: tagIds }, errorMsg: 'Failed to update user route tags' }),
+    removeUserFromInbound: async (name: string, inboundTag: string): Promise<void> =>
+        request(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to remove user from inbound' }),
+    updateUserInbound: async (name: string, inboundTag: string, payload: { uuid: string; flow?: string; vmess_security?: string; vmess_alter_id?: number }): Promise<void> =>
+        request(`/api/users/${encodeURIComponent(name)}/inbounds/${encodeURIComponent(inboundTag)}`, { method: 'PUT', json: payload, parse: 'none', errorMsg: 'Failed to update user inbound' }),
+    getUserLink: async (name: string, inboundTag: string): Promise<{ link: string; type?: string }> =>
+        request(`/api/users/${encodeURIComponent(name)}/link?inbound=${encodeURIComponent(inboundTag)}`, { errorMsg: 'Failed to fetch link' }),
+    getUserVlessLink: async (name: string, inboundTag: string): Promise<{ link: string }> =>
+        request(`/api/users/${encodeURIComponent(name)}/vless?inbound=${encodeURIComponent(inboundTag)}`, { errorMsg: 'Failed to fetch VLESS link' }),
+    getExternalProfiles: async (): Promise<ExternalProfile[]> =>
+        request<ExternalProfile[]>('/api/external-profiles', { errorMsg: 'Failed to fetch external profiles' }),
+    upsertExternalProfile: async (profile: Partial<ExternalProfile>): Promise<{ id: number }> =>
+        request<{ id: number }>('/api/external-profiles', { method: 'POST', json: profile, errorMsg: 'Failed to save external profile' }),
+    deleteExternalProfile: async (id: number): Promise<void> =>
+        request(`/api/external-profiles/${id}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete external profile' }),
+    updateUserExternalProfiles: async (name: string, profileIds: number[]): Promise<void> =>
+        request(`/api/users/${encodeURIComponent(name)}/external-profiles`, { method: 'PUT', json: { profile_ids: profileIds }, parse: 'none', errorMsg: 'Failed to update user external profiles' }),
+    getExternalProfileLink: async (id: number, displayName: string): Promise<{ link: string; type: string }> =>
+        request<{ link: string; type: string }>(`/api/external-profiles/${id}/link?name=${encodeURIComponent(displayName)}`, { errorMsg: 'Failed to fetch external profile link' }),
+    bulkCreateUsers: async (users: CreateUserRequest[]): Promise<void> =>
+        request('/api/users/bulk', { method: 'POST', json: users, parse: 'none', errorMsg: 'Failed to bulk create users' }),
     getReport: async (start?: string, end?: string): Promise<UserStatus[]> => {
         const params = new URLSearchParams();
         if (start) params.append('start', start);
         if (end) params.append('end', end);
-        const res = await fetch(`/api/report?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch report');
-        return res.json();
+        return request<UserStatus[]>(`/api/report?${params.toString()}`, { errorMsg: 'Failed to fetch report' });
     },
     getReportSummary: async (start?: string, end?: string, limitBytes?: number): Promise<any[]> => {
         const params = new URLSearchParams();
         if (start) params.append('start', start);
         if (end) params.append('end', end);
         if (limitBytes) params.append('limit_bytes', limitBytes.toString());
-        const res = await fetch(`/api/report/summary?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch report summary');
-        return res.json();
+        return request<any[]>(`/api/report/summary?${params.toString()}`, { errorMsg: 'Failed to fetch report summary' });
     },
-    getConfig: async (): Promise<any> => {
-        const res = await fetch('/api/config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch config');
-        return res.json();
-    },
-    getSingboxDNS: async (): Promise<SingboxDNSConfig> => {
-        const res = await fetch('/api/singbox/dns', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch sing-box DNS config');
-        return res.json();
-    },
-    updateSingboxDNS: async (dns: SingboxDNSConfig): Promise<void> => {
-        const res = await fetch('/api/singbox/dns', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(dns),
-        });
-        await handleResponse(res, 'Failed to update sing-box DNS config');
-    },
-    getSingboxOutbounds: async (): Promise<SingboxOutboundView[]> => {
-        const res = await fetch('/api/singbox/outbounds', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch sing-box outbounds');
-        return res.json();
-    },
-    updateSingboxOutboundDomainStrategies: async (updates: SingboxOutboundDomainStrategyUpdate[]): Promise<void> => {
-        const res = await fetch('/api/singbox/outbounds/domain-strategy', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(updates),
-        });
-        await handleResponse(res, 'Failed to update sing-box outbound domain_strategy values');
-    },
+    getConfig: async (): Promise<any> =>
+        request<any>('/api/config', { errorMsg: 'Failed to fetch config' }),
+    getSingboxDNS: async (): Promise<SingboxDNSConfig> =>
+        request<SingboxDNSConfig>('/api/singbox/dns', { errorMsg: 'Failed to fetch sing-box DNS config' }),
+    updateSingboxDNS: async (dns: SingboxDNSConfig): Promise<void> =>
+        request('/api/singbox/dns', { method: 'PUT', json: dns, parse: 'none', errorMsg: 'Failed to update sing-box DNS config' }),
+    getSingboxOutbounds: async (): Promise<SingboxOutboundView[]> =>
+        request<SingboxOutboundView[]>('/api/singbox/outbounds', { errorMsg: 'Failed to fetch sing-box outbounds' }),
+    updateSingboxOutboundDomainStrategies: async (updates: SingboxOutboundDomainStrategyUpdate[]): Promise<void> =>
+        request('/api/singbox/outbounds/domain-strategy', { method: 'PUT', json: updates, parse: 'none', errorMsg: 'Failed to update sing-box outbound domain_strategy values' }),
     getLogs: async (params?: { q?: string; limit?: number; after_id?: number; signal?: AbortSignal }): Promise<{ logs: string[]; max_id?: number }> => {
         const query = new URLSearchParams();
         if (params?.q) query.set('q', params.q);
         if (params?.limit) query.set('limit', String(params.limit));
         if (params?.after_id && params.after_id > 0) query.set('after_id', String(params.after_id));
         const url = query.toString() ? `/api/logs?${query.toString()}` : '/api/logs';
-        const res = await fetch(url, { headers: buildHeaders(), signal: params?.signal });
-        await handleResponse(res, 'Failed to fetch logs');
-        return res.json();
+        return request<{ logs: string[]; max_id?: number }>(url, { signal: params?.signal, errorMsg: 'Failed to fetch logs' });
     },
     searchLogs: async ({ query, limit, page, from, to, signal }: LogSearchParams): Promise<{ logs: string[]; page?: number; page_size?: number; has_more?: boolean }> => {
         const params = new URLSearchParams({ q: query });
@@ -620,9 +628,7 @@ export const api = {
         if (page) params.set('page', String(page));
         if (from) params.set('from', from);
         if (to) params.set('to', to);
-        const res = await fetch(`/api/logs/search?${params.toString()}`, { headers: buildHeaders(), signal });
-        await handleResponse(res, 'Failed to search logs');
-        const text = await res.text();
+        const text = await request<string>(`/api/logs/search?${params.toString()}`, { signal, parse: 'text', errorMsg: 'Failed to search logs' });
         try {
             return JSON.parse(text);
         } catch {
@@ -637,8 +643,7 @@ export const api = {
         if (limit) params.set('limit', String(limit));
         if (from) params.set('from', from);
         if (to) params.set('to', to);
-        const res = await fetch(`/api/logs/search/stream?${params.toString()}`, { headers: buildHeaders(), signal });
-        await handleResponse(res, 'Failed to search logs');
+        const res = await request<Response>(`/api/logs/search/stream?${params.toString()}`, { signal, parse: 'raw', errorMsg: 'Failed to search logs' });
         if (!res.body) {
             throw new Error('Streaming response body missing')
         }
@@ -668,354 +673,115 @@ export const api = {
     },
 
     // WireGuard
-    getWireGuardInterfaces: async (): Promise<string[]> => {
-        const res = await fetch('/api/wireguard/interfaces', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard interfaces');
-        return res.json();
-    },
-    createWireGuardInterface: async (payload: CreateWireGuardInterfaceRequest): Promise<CreateWireGuardInterfaceResponse> => {
-        const res = await fetch('/api/wireguard/interfaces', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload),
-        });
-        await handleResponse(res, 'Failed to create WireGuard interface');
-        return res.json();
-    },
-    getWireGuardInterfacesStatus: async (): Promise<WireGuardInterfaceSummary[]> => {
-        const res = await fetch('/api/wireguard/interfaces/status', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard interface status');
-        return res.json();
-    },
-    getWireGuardPeers: async (): Promise<any[]> => {
-        const res = await fetch('/api/wireguard/peers', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch peers');
-        return res.json();
-    },
-    getWireGuardPeersForInterface: async (iface: string): Promise<any[]> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch peers');
-        return res.json();
-    },
-    createWireGuardPeer: async (payload: { alias: string; ip: string; endpoint?: string }): Promise<any> => {
-        const res = await fetch('/api/wireguard/peers', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to create peer');
-        return res.json();
-    },
-    createWireGuardPeerForInterface: async (iface: string, payload: { alias: string; ip: string; endpoint?: string }): Promise<any> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers`, {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to create peer');
-        return res.json();
-    },
-    deleteWireGuardPeer: async (publicKey: string): Promise<void> => {
-        const res = await fetch(`/api/wireguard/peers?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete peer');
-    },
-    deleteWireGuardPeerForInterface: async (iface: string, publicKey: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete peer');
-    },
-    restoreWireGuardPeer: async (peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }) => {
-        const res = await fetch('/api/wireguard/peers/restore', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(peer)
-        });
-        await handleResponse(res, 'Failed to restore peer');
-    },
-    restoreWireGuardPeerForInterface: async (iface: string, peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }) => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peers/restore`, {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(peer)
-        });
-        await handleResponse(res, 'Failed to restore peer');
-    },
-    getWireGuardInterface: async (): Promise<any> => {
-        const res = await fetch('/api/wireguard/interface', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch interface config');
-        return res.json();
-    },
-    getWireGuardInterfaceForInterface: async (iface: string): Promise<any> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/interface`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch interface config');
-        return res.json();
-    },
-    updateWireGuardInterface: async (config: any): Promise<void> => {
-        const res = await fetch('/api/wireguard/interface', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update interface');
-    },
-    updateWireGuardInterfaceForInterface: async (iface: string, config: any): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/interface`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update interface');
-    },
-    getWireGuardConfigForInterface: async (iface: string): Promise<string> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch WireGuard raw config');
-        return res.text();
-    },
-    getWireGuardConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
-        const res = await fetch('/api/wireguard/config/backups', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard config backups');
-        return res.json();
-    },
-    getWireGuardConfigBackupsForInterface: async (iface: string): Promise<ConfigBackupEntry[]> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backups`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard config backups');
-        return res.json();
-    },
-    getWireGuardConfigBackupContent: async (name: string): Promise<string> => {
-        const res = await fetch(`/api/wireguard/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard backup');
-        return res.text();
-    },
-    getWireGuardConfigBackupContentForInterface: async (iface: string, name: string): Promise<string> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard backup');
-        return res.text();
-    },
-    updateWireGuardConfigForInterface: async (iface: string, config: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config`, {
-            method: 'PUT',
-            headers: buildHeaders('text/plain'),
-            body: config
-        });
-        await handleResponse(res, 'Failed to update WireGuard raw config');
-    },
-    updateWireGuardPeer: async (publicKey: string, config: any): Promise<void> => {
-        const res = await fetch(`/api/wireguard/peer?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update peer');
-    },
-    updateWireGuardPeerForInterface: async (iface: string, publicKey: string, config: any): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peer?public_key=${encodeURIComponent(publicKey)}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(config)
-        });
-        await handleResponse(res, 'Failed to update peer');
-    },
-    getWireGuardPeerConfig: async (publicKey: string, privateKey?: string): Promise<{ config: string }> => {
+    getWireGuardInterfaces: async (): Promise<string[]> =>
+        request<string[]>('/api/wireguard/interfaces', { errorMsg: 'Failed to fetch WireGuard interfaces' }),
+    createWireGuardInterface: async (payload: CreateWireGuardInterfaceRequest): Promise<CreateWireGuardInterfaceResponse> =>
+        request<CreateWireGuardInterfaceResponse>('/api/wireguard/interfaces', { method: 'POST', json: payload, errorMsg: 'Failed to create WireGuard interface' }),
+    getWireGuardInterfacesStatus: async (): Promise<WireGuardInterfaceSummary[]> =>
+        request<WireGuardInterfaceSummary[]>('/api/wireguard/interfaces/status', { errorMsg: 'Failed to fetch WireGuard interface status' }),
+    getWireGuardPeers: async (iface?: string): Promise<any[]> =>
+        request<any[]>(iface ? `${wireGuardInterfaceBase(iface)}/peers` : '/api/wireguard/peers', { errorMsg: 'Failed to fetch peers' }),
+    createWireGuardPeer: async (payload: { alias: string; ip: string; endpoint?: string }, iface?: string): Promise<any> =>
+        request<any>(iface ? `${wireGuardInterfaceBase(iface)}/peers` : '/api/wireguard/peers', { method: 'POST', json: payload, errorMsg: 'Failed to create peer' }),
+    deleteWireGuardPeer: async (publicKey: string, iface?: string): Promise<void> =>
+        request(`${iface ? wireGuardInterfaceBase(iface) + '/peers' : '/api/wireguard/peers'}?public_key=${encodeURIComponent(publicKey)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete peer' }),
+    restoreWireGuardPeer: async (peer: { public_key: string; allowed_ips: string; endpoint?: string; alias?: string; preshared_key?: string }, iface?: string) =>
+        request(iface ? `${wireGuardInterfaceBase(iface)}/peers/restore` : '/api/wireguard/peers/restore', { method: 'POST', json: peer, parse: 'none', errorMsg: 'Failed to restore peer' }),
+    getWireGuardInterface: async (iface?: string): Promise<any> =>
+        request<any>(iface ? `${wireGuardInterfaceBase(iface)}/interface` : '/api/wireguard/interface', { errorMsg: 'Failed to fetch interface config' }),
+    updateWireGuardInterface: async (config: any, iface?: string): Promise<void> =>
+        request(iface ? `${wireGuardInterfaceBase(iface)}/interface` : '/api/wireguard/interface', { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update interface' }),
+    getWireGuardConfigBackups: async (iface?: string): Promise<ConfigBackupEntry[]> =>
+        request<ConfigBackupEntry[]>(iface ? `${wireGuardInterfaceBase(iface)}/config/backups` : '/api/wireguard/config/backups', { errorMsg: 'Failed to fetch WireGuard config backups' }),
+    getWireGuardConfigBackupContent: async (name: string, iface?: string): Promise<string> =>
+        request<string>(`${iface ? wireGuardInterfaceBase(iface) + '/config/backup' : '/api/wireguard/config/backup'}?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch WireGuard backup' }),
+    updateWireGuardPeer: async (publicKey: string, config: any, iface?: string): Promise<void> =>
+        request(`${iface ? wireGuardInterfaceBase(iface) + '/peer' : '/api/wireguard/peer'}?public_key=${encodeURIComponent(publicKey)}`, { method: 'PUT', json: config, parse: 'none', errorMsg: 'Failed to update peer' }),
+    getWireGuardPeerConfig: async (publicKey: string, privateKey?: string, iface?: string): Promise<{ config: string }> => {
         const params = new URLSearchParams({ public_key: publicKey })
         if (privateKey) params.set('private_key', privateKey)
-        const res = await fetch(`/api/wireguard/peer/config?${params.toString()}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch peer config');
-        return res.json();
+        const base = iface ? `${wireGuardInterfaceBase(iface)}/peer/config` : '/api/wireguard/peer/config'
+        return request<{ config: string }>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch peer config' });
     },
-    getWireGuardPeerConfigForInterface: async (iface: string, publicKey: string, privateKey?: string): Promise<{ config: string }> => {
-        const params = new URLSearchParams({ public_key: publicKey })
-        if (privateKey) params.set('private_key', privateKey)
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/peer/config?${params.toString()}`, {
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to fetch peer config');
-        return res.json();
-    },
-    getWireGuardTraffic: async (range: string): Promise<Record<string, { rx: number; tx: number }>> => {
+    getWireGuardTraffic: async (range: string, iface?: string): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ range })
-        const res = await fetch(`/api/wireguard/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
+        const base = iface ? `${wireGuardInterfaceBase(iface)}/traffic` : '/api/wireguard/traffic'
+        return request<Record<string, { rx: number; tx: number }>>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
-    getWireGuardTrafficForInterface: async (iface: string, range: string): Promise<Record<string, { rx: number; tx: number }>> => {
-        const params = new URLSearchParams({ range })
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
-    },
-    getWireGuardTrafficRange: async (start: number, end: number): Promise<Record<string, { rx: number; tx: number }>> => {
+    getWireGuardTrafficRange: async (start: number, end: number, iface?: string): Promise<Record<string, { rx: number; tx: number }>> => {
         const params = new URLSearchParams({ start: String(start), end: String(end) })
-        const res = await fetch(`/api/wireguard/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
+        const base = iface ? `${wireGuardInterfaceBase(iface)}/traffic` : '/api/wireguard/traffic'
+        return request<Record<string, { rx: number; tx: number }>>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic' })
     },
-    getWireGuardTrafficRangeForInterface: async (iface: string, start: number, end: number): Promise<Record<string, { rx: number; tx: number }>> => {
-        const params = new URLSearchParams({ start: String(start), end: String(end) })
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/traffic?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic');
-        return res.json()
-    },
-    getWireGuardTrafficSeries: async (range?: string, peer?: string, limit?: number, start?: number, end?: number): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
+    getWireGuardTrafficSeries: async (range?: string, peer?: string, limit?: number, start?: number, end?: number, iface?: string): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
         const params = new URLSearchParams()
         if (range) params.append('range', range)
         if (peer) params.append('peer', peer)
         if (limit) params.append('limit', String(limit))
         if (start) params.append('start', String(start))
         if (end) params.append('end', String(end))
-        const res = await fetch(`/api/wireguard/traffic/series?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic series');
-        return res.json()
+        const base = iface ? `${wireGuardInterfaceBase(iface)}/traffic/series` : '/api/wireguard/traffic/series'
+        return request<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>>(`${base}?${params.toString()}`, { errorMsg: 'Failed to fetch WireGuard traffic series' })
     },
-    getWireGuardTrafficSeriesForInterface: async (iface: string, range?: string, peer?: string, limit?: number, start?: number, end?: number): Promise<Record<string, { timestamp: number; rx: number; tx: number; endpoint?: string }[]>> => {
-        const params = new URLSearchParams()
-        if (range) params.append('range', range)
-        if (peer) params.append('peer', peer)
-        if (limit) params.append('limit', String(limit))
-        if (start) params.append('start', String(start))
-        if (end) params.append('end', String(end))
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/traffic/series?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch WireGuard traffic series');
-        return res.json()
-    },
-    enableWireGuardInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/enable`, { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to enable WireGuard interface');
-    },
-    disableWireGuardInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/disable`, { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to disable WireGuard interface');
-    },
-    deleteWireGuardInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}`, { method: 'DELETE', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to delete WireGuard interface');
-    },
+    enableWireGuardInterface: async (iface: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/enable`, { method: 'POST', parse: 'none', errorMsg: 'Failed to enable WireGuard interface' }),
+    disableWireGuardInterface: async (iface: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}/disable`, { method: 'POST', parse: 'none', errorMsg: 'Failed to disable WireGuard interface' }),
+    deleteWireGuardInterface: async (iface: string): Promise<void> =>
+        request(`${wireGuardInterfaceBase(iface)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete WireGuard interface' }),
 
     // Service Control
-    restartService: async (service: string): Promise<void> => {
-        const res = await fetch('/api/service/restart', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ service })
-        });
-        await handleResponse(res, 'Failed to restart service');
-    },
-    startService: async (service: string): Promise<void> => {
-        const res = await fetch('/api/service/start', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ service })
-        });
-        await handleResponse(res, 'Failed to start service');
-    },
-    stopService: async (service: string): Promise<void> => {
-        const res = await fetch('/api/service/stop', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ service })
-        });
-        await handleResponse(res, 'Failed to stop service');
-    },
+    restartService: async (service: string): Promise<void> =>
+        request('/api/service/restart', { method: 'POST', json: { service }, parse: 'none', errorMsg: 'Failed to restart service' }),
+    startService: async (service: string): Promise<void> =>
+        request('/api/service/start', { method: 'POST', json: { service }, parse: 'none', errorMsg: 'Failed to start service' }),
+    stopService: async (service: string): Promise<void> =>
+        request('/api/service/stop', { method: 'POST', json: { service }, parse: 'none', errorMsg: 'Failed to stop service' }),
 
     // Feature toggles
-    getFeatures: async (): Promise<FeatureFlags> => {
-        const res = await fetch('/api/settings/features', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch features');
-        return res.json();
-    },
-    updateFeatures: async (flags: FeatureFlags): Promise<void> => {
-        const res = await fetch('/api/settings/features', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(flags)
-        });
-        await handleResponse(res, 'Failed to update features');
-    },
-    getDashboardPreferences: async (): Promise<DashboardPreferences> => {
-        const res = await fetch('/api/settings/dashboard-preferences', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch dashboard preferences');
-        return res.json();
-    },
-    updateDashboardPreferences: async (prefs: DashboardPreferences): Promise<void> => {
-        const res = await fetch('/api/settings/dashboard-preferences', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(prefs),
-        });
-        await handleResponse(res, 'Failed to update dashboard preferences');
-    },
+    getFeatures: async (): Promise<FeatureFlags> =>
+        request<FeatureFlags>('/api/settings/features', { errorMsg: 'Failed to fetch features' }),
+    updateFeatures: async (flags: FeatureFlags): Promise<void> =>
+        request('/api/settings/features', { method: 'PUT', json: flags, parse: 'none', errorMsg: 'Failed to update features' }),
+    getDashboardPreferences: async (): Promise<DashboardPreferences> =>
+        request<DashboardPreferences>('/api/settings/dashboard-preferences', { errorMsg: 'Failed to fetch dashboard preferences' }),
+    updateDashboardPreferences: async (prefs: DashboardPreferences): Promise<void> =>
+        request('/api/settings/dashboard-preferences', { method: 'PUT', json: prefs, parse: 'none', errorMsg: 'Failed to update dashboard preferences' }),
     getPublicIP: async (): Promise<string> => {
-        const res = await fetch('/api/settings/public-ip', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch public IP');
-        const data = await res.json();
+        const data = await request<{ public_ip?: string }>('/api/settings/public-ip', { errorMsg: 'Failed to fetch public IP' });
         return data.public_ip || '';
     },
-    updatePublicIP: async (publicIP: string): Promise<void> => {
-        const res = await fetch('/api/settings/public-ip', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ public_ip: publicIP })
-        });
-        await handleResponse(res, 'Failed to update public IP');
-    },
+    updatePublicIP: async (publicIP: string): Promise<void> =>
+        request('/api/settings/public-ip', { method: 'PUT', json: { public_ip: publicIP }, parse: 'none', errorMsg: 'Failed to update public IP' }),
 
     // Sing-box Configuration
-    getSingboxRouteRules: async (): Promise<any[]> => {
-        const res = await fetch('/api/singbox/route/rules', { headers: buildHeaders() });
-        const handled = await handleResponse(res, 'Failed to fetch route rules');
-        return handled.json();
-    },
-    upsertSingboxRouteRules: async (rules: any[]): Promise<void> => {
-        const res = await fetch('/api/singbox/route/rules/upsert', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(rules),
-        });
-        await handleResponse(res, 'Failed to upsert route rules');
-    },
-    getSingboxConfig: async (): Promise<string> => {
-        const res = await fetch('/api/singbox/config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch Sing-box config');
-        return res.text();
-    },
+    getSingboxRouteRules: async (): Promise<any[]> =>
+        request<any[]>('/api/singbox/route/rules', { errorMsg: 'Failed to fetch route rules' }),
+    upsertSingboxRouteRules: async (rules: any[]): Promise<void> =>
+        request('/api/singbox/route/rules/upsert', { method: 'POST', json: rules, parse: 'none', errorMsg: 'Failed to upsert route rules' }),
+    getSingboxConfig: async (): Promise<string> =>
+        request<string>('/api/singbox/config', { parse: 'text', errorMsg: 'Failed to fetch Sing-box config' }),
     updateSingboxConfig: async (config: string): Promise<void> => {
         validateRawSingboxConfig(config);
-        const res = await fetch('/api/singbox/config', {
+        return request('/api/singbox/config', {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: config
+            body: config,
+            contentType: 'application/json',
+            parse: 'none',
+            errorMsg: 'Failed to update Sing-box config',
         });
-        await handleResponse(res, 'Failed to update Sing-box config');
     },
-    getSingboxInbounds: async (): Promise<any[]> => {
-        const res = await fetch('/api/singbox/inbounds', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch Sing-box inbounds');
-        return res.json();
-    },
-    addSingboxInbound: async (inbound: any): Promise<void> => {
-        const res = await fetch('/api/singbox/inbound', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(inbound)
-        });
-        await handleResponse(res, 'Failed to add Sing-box inbound');
-    },
+    getSingboxInbounds: async (): Promise<any[]> =>
+        request<any[]>('/api/singbox/inbounds', { errorMsg: 'Failed to fetch Sing-box inbounds' }),
+    addSingboxInbound: async (inbound: any): Promise<void> =>
+        request('/api/singbox/inbound', { method: 'POST', json: inbound, parse: 'none', errorMsg: 'Failed to add Sing-box inbound' }),
     updateSingboxInbound: async (tag: string, inbound: any): Promise<SingboxInboundUpdateResponse> => {
-        const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
+        const text = await request<string>(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
             method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(inbound)
+            json: inbound,
+            parse: 'text',
+            errorMsg: 'Failed to update Sing-box inbound',
         });
-        await handleResponse(res, 'Failed to update Sing-box inbound');
-        const text = await res.text();
         if (!text.trim()) {
             return { warnings: [] };
         }
@@ -1024,64 +790,26 @@ export const api = {
             warnings: Array.isArray(data.warnings) ? data.warnings.filter(Boolean) : [],
         };
     },
-    deleteSingboxInbound: async (tag: string): Promise<void> => {
-        const res = await fetch(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, {
-            method: 'DELETE',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to delete Sing-box inbound');
-    },
+    deleteSingboxInbound: async (tag: string): Promise<void> =>
+        request(`/api/singbox/inbound?tag=${encodeURIComponent(tag)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete Sing-box inbound' }),
 
     // Raw Config
-    updateConfig: async (configText: string): Promise<void> => {
-        const res = await fetch('/api/config', {
-            method: 'PUT',
-            headers: buildHeaders('text/plain'),
-            body: configText
-        });
-        await handleResponse(res, 'Failed to update config');
-    },
-    getWireGuardConfig: async (): Promise<string> => {
-        const res = await fetch('/api/wireguard/config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch WireGuard config');
-        return res.text();
-    },
-    backupWireGuardConfig: async (): Promise<void> => {
-        const res = await fetch('/api/wireguard/config/backup', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to backup WireGuard config');
-    },
-    backupWireGuardConfigForInterface: async (iface: string): Promise<void> => {
-        const res = await fetch(`${wireGuardInterfaceBase(iface)}/config/backup`, { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to backup WireGuard config');
-    },
-    restoreWireGuardConfig: async (): Promise<string> => {
-        const res = await fetch('/api/wireguard/config/restore', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to restore WireGuard config');
-        return res.text();
-    },
-    getBackupMeta: async (): Promise<{ singbox_last_backup?: string; wireguard_last_backup?: string }> => {
-        const res = await fetch('/api/config/backup/meta', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to load backup metadata');
-        return res.json();
-    },
-    getConfigBackups: async (): Promise<ConfigBackupEntry[]> => {
-        const res = await fetch('/api/config/backups', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch config backups');
-        return res.json();
-    },
-    getConfigBackupContent: async (name: string): Promise<string> => {
-        const res = await fetch(`/api/config/backup?name=${encodeURIComponent(name)}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch config backup');
-        return res.text();
-    },
-    updateWireGuardConfig: async (config: string): Promise<void> => {
-        const res = await fetch('/api/wireguard/config', {
-            method: 'PUT',
-            headers: buildHeaders('text/plain'),
-            body: config
-        });
-        await handleResponse(res, 'Failed to update WireGuard config');
-    },
+    updateConfig: async (configText: string): Promise<void> =>
+        request('/api/config', { method: 'PUT', body: configText, contentType: 'text/plain', parse: 'none', errorMsg: 'Failed to update config' }),
+    getWireGuardConfig: async (iface?: string): Promise<string> =>
+        request<string>(iface ? `${wireGuardInterfaceBase(iface)}/config` : '/api/wireguard/config', { parse: 'text', errorMsg: iface ? 'Failed to fetch WireGuard raw config' : 'Failed to fetch WireGuard config' }),
+    backupWireGuardConfig: async (iface?: string): Promise<void> =>
+        request(iface ? `${wireGuardInterfaceBase(iface)}/config/backup` : '/api/wireguard/config/backup', { method: 'POST', parse: 'none', errorMsg: 'Failed to backup WireGuard config' }),
+    restoreWireGuardConfig: async (): Promise<string> =>
+        request<string>('/api/wireguard/config/restore', { method: 'POST', parse: 'text', errorMsg: 'Failed to restore WireGuard config' }),
+    getBackupMeta: async (): Promise<{ singbox_last_backup?: string; wireguard_last_backup?: string }> =>
+        request('/api/config/backup/meta', { errorMsg: 'Failed to load backup metadata' }),
+    getConfigBackups: async (): Promise<ConfigBackupEntry[]> =>
+        request<ConfigBackupEntry[]>('/api/config/backups', { errorMsg: 'Failed to fetch config backups' }),
+    getConfigBackupContent: async (name: string): Promise<string> =>
+        request<string>(`/api/config/backup?name=${encodeURIComponent(name)}`, { parse: 'text', errorMsg: 'Failed to fetch config backup' }),
+    updateWireGuardConfig: async (config: string, iface?: string): Promise<void> =>
+        request(iface ? `${wireGuardInterfaceBase(iface)}/config` : '/api/wireguard/config', { method: 'PUT', body: config, contentType: 'text/plain', parse: 'none', errorMsg: iface ? 'Failed to update WireGuard raw config' : 'Failed to update WireGuard config' }),
 
     // Stats & Status
     getStats: async (range: string = '24h', start?: string, end?: string): Promise<any[]> => {
@@ -1089,118 +817,65 @@ export const api = {
         if (start && end) {
             url += `&start=${start}&end=${end}`;
         }
-        const res = await fetch(url, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch stats');
-        return res.json();
+        return request<any[]>(url, { errorMsg: 'Failed to fetch stats' });
     },
-    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; wireguard_pending_restart?: boolean; wg_sample_interval_sec?: number; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; audit_log_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> => {
-        const res = await fetch('/api/status', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch system status');
-        return res.json();
-    },
+    getSystemStatus: async (): Promise<{ singbox: boolean; wireguard: boolean; wireguard_pending_restart?: boolean; wg_sample_interval_sec?: number; active_users_singbox: number; active_users_wireguard: number; active_users_singbox_list?: string[]; active_users_wireguard_list?: string[]; singbox_sys_stats?: any; samples_count?: number; db_size_bytes?: number; audit_log_size_bytes?: number; sampler_paused?: boolean; systemctl_available?: boolean; journalctl_available?: boolean }> =>
+        request('/api/status', { errorMsg: 'Failed to fetch system status' }),
 
     // Sampler
-    runSampler: async (): Promise<void> => {
-        const res = await fetch('/api/sampler/run', {
-            method: 'POST',
-            headers: buildHeaders()
-        });
-        await handleResponse(res, 'Failed to run sampler');
-    },
+    runSampler: async (): Promise<void> =>
+        request('/api/sampler/run', { method: 'POST', parse: 'none', errorMsg: 'Failed to run sampler' }),
     getSamplerHistory: async (limit?: number, offset?: number): Promise<SamplerHistoryEntry[]> => {
         const params = new URLSearchParams()
         if (typeof limit === 'number') params.set('limit', String(limit))
         if (typeof offset === 'number' && offset > 0) params.set('offset', String(offset))
         const qs = params.toString()
         const url = qs ? `/api/sampler/history?${qs}` : '/api/sampler/history'
-        const res = await fetch(url, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch sampler history');
-        return res.json();
+        return request<SamplerHistoryEntry[]>(url, { errorMsg: 'Failed to fetch sampler history' });
     },
     getSubscriptionRequestHistory: async (limit?: number): Promise<SubscriptionRequestHistoryEntry[]> => {
         const url = limit ? `/api/subscription-requests/history?limit=${limit}` : '/api/subscription-requests/history';
-        const res = await fetch(url, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription request history');
-        return res.json();
+        return request<SubscriptionRequestHistoryEntry[]>(url, { errorMsg: 'Failed to fetch subscription request history' });
     },
     getSubscriptionRequestHistoryPage: async (limit: number = 20, offset: number = 0, subId?: number): Promise<SubscriptionRequestHistoryPage> => {
         const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
         if (subId && subId > 0) params.set('sub_id', String(subId));
-        const res = await fetch(`/api/subscription-requests/history?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription request history');
-        return res.json();
+        return request<SubscriptionRequestHistoryPage>(`/api/subscription-requests/history?${params.toString()}`, { errorMsg: 'Failed to fetch subscription request history' });
     },
     getAuditLogPage: async (limit: number = 50, offset: number = 0, domain?: string, action?: string): Promise<AuditLogPage> => {
         const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
         if (domain) params.set('domain', domain)
         if (action) params.set('action', action)
-        const res = await fetch(`/api/audit-log?${params.toString()}`, { headers: buildHeaders() })
-        await handleResponse(res, 'Failed to fetch audit log')
-        return res.json()
+        return request<AuditLogPage>(`/api/audit-log?${params.toString()}`, { errorMsg: 'Failed to fetch audit log' })
     },
-    getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> => {
-        const res = await fetch('/api/settings/subscription-protection', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription protection settings');
-        return res.json();
-    },
-    updateSubscriptionProtection: async (payload: Partial<SubscriptionProtectionConfig>): Promise<void> => {
-        const res = await fetch('/api/settings/subscription-protection', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload),
-        });
-        await handleResponse(res, 'Failed to update subscription protection settings');
-    },
-    getProtectionRules: async (): Promise<ProtectionRule[]> => {
-        const res = await fetch('/api/settings/protection-rules', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch protection rules');
-        return res.json();
-    },
-    createProtectionRule: async (payload: CreateProtectionRuleRequest): Promise<void> => {
-        const res = await fetch('/api/settings/protection-rules', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload),
-        });
-        await handleResponse(res, 'Failed to create protection rule');
-    },
-    deleteProtectionRule: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/settings/protection-rules/${id}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to delete protection rule');
-    },
+    getSubscriptionProtection: async (): Promise<SubscriptionProtectionConfig> =>
+        request<SubscriptionProtectionConfig>('/api/settings/subscription-protection', { errorMsg: 'Failed to fetch subscription protection settings' }),
+    updateSubscriptionProtection: async (payload: Partial<SubscriptionProtectionConfig>): Promise<void> =>
+        request('/api/settings/subscription-protection', { method: 'PUT', json: payload, parse: 'none', errorMsg: 'Failed to update subscription protection settings' }),
+    getProtectionRules: async (): Promise<ProtectionRule[]> =>
+        request<ProtectionRule[]>('/api/settings/protection-rules', { errorMsg: 'Failed to fetch protection rules' }),
+    createProtectionRule: async (payload: CreateProtectionRuleRequest): Promise<void> =>
+        request('/api/settings/protection-rules', { method: 'POST', json: payload, parse: 'none', errorMsg: 'Failed to create protection rule' }),
+    deleteProtectionRule: async (id: number): Promise<void> =>
+        request(`/api/settings/protection-rules/${id}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete protection rule' }),
     getBlockedSubscriptionRequestLog: async (limit: number, offset: number): Promise<BlockedSubscriptionRequestEntry[]> => {
         const params = new URLSearchParams({
             limit: String(limit),
             offset: String(offset),
         });
-        const res = await fetch(`/api/settings/protection-rules/blocked-log?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch blocked request log');
-        return res.json();
+        return request<BlockedSubscriptionRequestEntry[]>(`/api/settings/protection-rules/blocked-log?${params.toString()}`, { errorMsg: 'Failed to fetch blocked request log' });
     },
-    pruneNow: async (): Promise<{ deleted: number; cutoff: number }> => {
-        const res = await fetch('/api/retention/prune', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to prune');
-        return res.json();
-    },
-    backupConfig: async (): Promise<void> => {
-        const res = await fetch('/api/config/backup', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to backup config');
-    },
-    restoreConfig: async (): Promise<any> => {
-        const res = await fetch('/api/config/restore', { method: 'POST', headers: buildHeaders() });
-        await handleResponse(res, 'Failed to restore config');
-        return res.json();
-    },
+    pruneNow: async (): Promise<{ deleted: number; cutoff: number }> =>
+        request<{ deleted: number; cutoff: number }>('/api/retention/prune', { method: 'POST', errorMsg: 'Failed to prune' }),
+    backupConfig: async (): Promise<void> =>
+        request('/api/config/backup', { method: 'POST', parse: 'none', errorMsg: 'Failed to backup config' }),
+    restoreConfig: async (): Promise<any> =>
+        request<any>('/api/config/restore', { method: 'POST', errorMsg: 'Failed to restore config' }),
     getDashboardData: async (range: string = '24h', start?: string, end?: string): Promise<DashboardData> => {
         const params = new URLSearchParams({ range });
         if (start) params.append('start', start);
         if (end) params.append('end', end);
-        const res = await fetch(`/api/dashboard?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch dashboard data');
-        return res.json();
+        return request<DashboardData>(`/api/dashboard?${params.toString()}`, { errorMsg: 'Failed to fetch dashboard data' });
     },
     getDashboardConsumerChart: async (
         mode: 'singbox' | 'wireguard',
@@ -1218,239 +893,94 @@ export const api = {
         if (start) params.append('start', start);
         if (end) params.append('end', end);
         if (targetPoints && targetPoints > 0) params.append('target_points', String(targetPoints));
-        const res = await fetch(`/api/dashboard/consumer-chart?${params.toString()}`, { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch consumer chart');
-        return res.json();
+        return request<DashboardConsumerChartData>(`/api/dashboard/consumer-chart?${params.toString()}`, { errorMsg: 'Failed to fetch consumer chart' });
     },
-    generateRealityKeys: async (): Promise<{ private_key: string; public_key: string; short_id: string[] }> => {
-        const res = await fetch('/api/tools/reality-keys', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to generate Reality keys');
-        return res.json();
-    },
-    generateSelfSignedCert: async (payload: { tag?: string; common_name?: string }): Promise<{ cert_path: string; key_path: string }> => {
-        const res = await fetch('/api/tools/self-signed-cert', {
+    generateRealityKeys: async (): Promise<{ private_key: string; public_key: string; short_id: string[] }> =>
+        request('/api/tools/reality-keys', { errorMsg: 'Failed to generate Reality keys' }),
+    generateSelfSignedCert: async (payload: { tag?: string; common_name?: string }): Promise<{ cert_path: string; key_path: string }> =>
+        request('/api/tools/self-signed-cert', { method: 'POST', json: payload, errorMsg: 'Failed to generate self-signed certificate' }),
+    generateRandBase64: async (keyLength: number): Promise<{ value: string }> =>
+        request('/api/tools/rand-base64', { method: 'POST', json: { key_length: keyLength }, errorMsg: 'Failed to generate random base64' }),
+    applySingboxChanges: async (): Promise<ApplySingboxChangesResponse> =>
+        request<ApplySingboxChangesResponse>('/api/singbox/apply', {
             method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(payload)
-        });
-        await handleResponse(res, 'Failed to generate self-signed certificate');
-        return res.json();
-    },
-    generateRandBase64: async (keyLength: number): Promise<{ value: string }> => {
-        const res = await fetch('/api/tools/rand-base64', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ key_length: keyLength })
-        });
-        await handleResponse(res, 'Failed to generate random base64');
-        return res.json();
-    },
-    applySingboxChanges: async (): Promise<ApplySingboxChangesResponse> => {
-        const res = await fetch('/api/singbox/apply', {
-            method: 'POST',
-            headers: buildHeaders('application/json')
-        });
-        if (res.status === 409) {
-            return res.json();
-        }
-        await handleResponse(res, 'Failed to apply Sing-box changes');
-        return res.json();
-    },
+            contentType: 'application/json',
+            allowStatus: [409],
+            errorMsg: 'Failed to apply Sing-box changes',
+        }),
 
     // Panel user management
-    getPanelUsers: async (): Promise<PanelUserInfo[]> => {
-        const res = await fetch('/api/panel-users', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch panel users');
-        return res.json();
-    },
-    createPanelUser: async (data: CreatePanelUserRequest): Promise<void> => {
-        const res = await fetch('/api/panel-users', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to create panel user');
-    },
-    updatePanelUserPermissions: async (username: string, permissions: PanelUserPermissions): Promise<void> => {
-        const res = await fetch('/api/panel-users/permissions', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ username, permissions }),
-        });
-        await handleResponse(res, 'Failed to update permissions');
-    },
-    updatePanelUserUsername: async (username: string, new_username: string): Promise<void> => {
-        const res = await fetch('/api/panel-users/username', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ username, new_username }),
-        });
-        await handleResponse(res, 'Failed to update username');
-    },
-    updatePanelUserPassword: async (username: string, new_password: string): Promise<void> => {
-        const res = await fetch('/api/panel-users/password', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ username, new_password }),
-        });
-        await handleResponse(res, 'Failed to update password');
-    },
-    deletePanelUser: async (username: string): Promise<void> => {
-        const res = await fetch(`/api/panel-users?username=${encodeURIComponent(username)}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to delete panel user');
-    },
+    getPanelUsers: async (): Promise<PanelUserInfo[]> =>
+        request<PanelUserInfo[]>('/api/panel-users', { errorMsg: 'Failed to fetch panel users' }),
+    createPanelUser: async (data: CreatePanelUserRequest): Promise<void> =>
+        request('/api/panel-users', { method: 'POST', json: data, parse: 'none', errorMsg: 'Failed to create panel user' }),
+    updatePanelUserPermissions: async (username: string, permissions: PanelUserPermissions): Promise<void> =>
+        request('/api/panel-users/permissions', { method: 'PUT', json: { username, permissions }, parse: 'none', errorMsg: 'Failed to update permissions' }),
+    updatePanelUserUsername: async (username: string, new_username: string): Promise<void> =>
+        request('/api/panel-users/username', { method: 'PUT', json: { username, new_username }, parse: 'none', errorMsg: 'Failed to update username' }),
+    updatePanelUserPassword: async (username: string, new_password: string): Promise<void> =>
+        request('/api/panel-users/password', { method: 'PUT', json: { username, new_password }, parse: 'none', errorMsg: 'Failed to update password' }),
+    deletePanelUser: async (username: string): Promise<void> =>
+        request(`/api/panel-users?username=${encodeURIComponent(username)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete panel user' }),
 
     // Subscriptions
-    getSubscriptions: async (): Promise<Subscription[]> => {
-        const res = await fetch('/api/subscriptions', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscriptions');
-        return res.json();
-    },
-    getSubscriptionDefaults: async (): Promise<SubscriptionDefaults> => {
-        const res = await fetch('/api/subscriptions/defaults', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription defaults');
-        return res.json();
-    },
-    updateSubscriptionDefaults: async (data: SubscriptionDefaults): Promise<SubscriptionDefaults> => {
-        const res = await fetch('/api/subscriptions/defaults', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to update subscription defaults');
-        return res.json();
-    },
-    getSubscriptionDefaultDestinations: async (): Promise<SubscriptionDefaultDestinationsResponse> => {
-        const res = await fetch('/api/subscriptions/default-destinations', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription destination suggestions');
-        return res.json();
-    },
-    getSubscriptionHappConfig: async (): Promise<SubscriptionHappConfig> => {
-        const res = await fetch('/api/subscriptions/happ-config', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch Happ config');
-        return res.json();
-    },
-    updateSubscriptionHappConfig: async (data: SubscriptionHappConfig): Promise<SubscriptionHappConfig> => {
-        const res = await fetch('/api/subscriptions/happ-config', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to update Happ config');
-        return res.json();
-    },
-    encryptHappLink: async (url: string): Promise<{ encrypted_url: string }> => {
-        const res = await fetch('/api/happ/encrypt-link', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ url }),
-        });
-        await handleResponse(res, 'Failed to encrypt Happ link');
-        return res.json();
-    },
-    createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> => {
-        const res = await fetch('/api/subscriptions', {
-            method: 'POST',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to create subscription');
-        return res.json();
-    },
-    updateSubscription: async (id: number, data: SubscriptionMutationRequest): Promise<void> => {
-        const res = await fetch(`/api/subscriptions/${id}`, {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify(data),
-        });
-        await handleResponse(res, 'Failed to update subscription');
-    },
-    deleteSubscription: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/subscriptions/${id}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to delete subscription');
-    },
-    deleteSubscriptionRequest: async (id: number): Promise<void> => {
-        const res = await fetch(`/api/subscription-requests/${id}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        if (!res.ok) throw new Error(`Failed to delete: ${res.status}`);
-    },
+    getSubscriptions: async (): Promise<Subscription[]> =>
+        request<Subscription[]>('/api/subscriptions', { errorMsg: 'Failed to fetch subscriptions' }),
+    getSubscriptionDefaults: async (): Promise<SubscriptionDefaults> =>
+        request<SubscriptionDefaults>('/api/subscriptions/defaults', { errorMsg: 'Failed to fetch subscription defaults' }),
+    updateSubscriptionDefaults: async (data: SubscriptionDefaults): Promise<SubscriptionDefaults> =>
+        request<SubscriptionDefaults>('/api/subscriptions/defaults', { method: 'PUT', json: data, errorMsg: 'Failed to update subscription defaults' }),
+    getSubscriptionDefaultDestinations: async (): Promise<SubscriptionDefaultDestinationsResponse> =>
+        request<SubscriptionDefaultDestinationsResponse>('/api/subscriptions/default-destinations', { errorMsg: 'Failed to fetch subscription destination suggestions' }),
+    getSubscriptionHappConfig: async (): Promise<SubscriptionHappConfig> =>
+        request<SubscriptionHappConfig>('/api/subscriptions/happ-config', { errorMsg: 'Failed to fetch Happ config' }),
+    updateSubscriptionHappConfig: async (data: SubscriptionHappConfig): Promise<SubscriptionHappConfig> =>
+        request<SubscriptionHappConfig>('/api/subscriptions/happ-config', { method: 'PUT', json: data, errorMsg: 'Failed to update Happ config' }),
+    encryptHappLink: async (url: string): Promise<{ encrypted_url: string }> =>
+        request('/api/happ/encrypt-link', { method: 'POST', json: { url }, errorMsg: 'Failed to encrypt Happ link' }),
+    createSubscription: async (data: SubscriptionMutationRequest): Promise<{ id: number; token: string }> =>
+        request('/api/subscriptions', { method: 'POST', json: data, errorMsg: 'Failed to create subscription' }),
+    updateSubscription: async (id: number, data: SubscriptionMutationRequest): Promise<void> =>
+        request(`/api/subscriptions/${id}`, { method: 'PUT', json: data, parse: 'none', errorMsg: 'Failed to update subscription' }),
+    deleteSubscription: async (id: number): Promise<void> =>
+        request(`/api/subscriptions/${id}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete subscription' }),
+    deleteSubscriptionRequest: async (id: number): Promise<void> =>
+        request(`/api/subscription-requests/${id}`, { method: 'DELETE', parse: 'none', errorMode: 'status', errorMsg: 'Failed to delete' }),
 
-    bulkDeleteSubscriptionRequests: async (ids: number[]): Promise<void> => {
-        const res = await fetch('/api/subscription-requests', {
-            method: 'DELETE',
-            headers: { ...buildHeaders(), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ids }),
-        });
-        if (!res.ok) throw new Error(`Failed to bulk delete: ${res.status}`);
-    },
+    bulkDeleteSubscriptionRequests: async (ids: number[]): Promise<void> =>
+        request('/api/subscription-requests', { method: 'DELETE', json: { ids }, parse: 'none', errorMode: 'status', errorMsg: 'Failed to bulk delete' }),
 
-    clearSubscriptionRequestsBySubID: async (subId: number): Promise<void> => {
-        const res = await fetch(`/api/subscription-requests?sub_id=${subId}`, {
-            method: 'DELETE',
-            headers: buildHeaders(),
-        });
-        if (!res.ok) throw new Error(`Failed to clear: ${res.status}`);
-    },
+    clearSubscriptionRequestsBySubID: async (subId: number): Promise<void> =>
+        request(`/api/subscription-requests?sub_id=${subId}`, { method: 'DELETE', parse: 'none', errorMode: 'status', errorMsg: 'Failed to clear' }),
 
-    regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> => {
-        const res = await fetch(`/api/subscriptions/${id}/regenerate`, {
-            method: 'POST',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to regenerate token');
-        return res.json();
-    },
+    regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> =>
+        request(`/api/subscriptions/${id}/regenerate`, { method: 'POST', errorMsg: 'Failed to regenerate token' }),
     getSubscriptionDomain: async (): Promise<string> => {
-        const res = await fetch('/api/settings/subscription-domain', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch subscription domain');
-        const data = await res.json();
+        const data = await request<{ subscription_domain?: string }>('/api/settings/subscription-domain', { errorMsg: 'Failed to fetch subscription domain' });
         return data.subscription_domain || '';
     },
-    updateSubscriptionDomain: async (domain: string): Promise<void> => {
-        const res = await fetch('/api/settings/subscription-domain', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ subscription_domain: domain }),
-        });
-        await handleResponse(res, 'Failed to update subscription domain');
-    },
+    updateSubscriptionDomain: async (domain: string): Promise<void> =>
+        request('/api/settings/subscription-domain', { method: 'PUT', json: { subscription_domain: domain }, parse: 'none', errorMsg: 'Failed to update subscription domain' }),
     getCFWorkerURL: async (): Promise<string> => {
-        const res = await fetch('/api/settings/cf-worker-url', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch CF Worker URL');
-        const data = await res.json();
+        const data = await request<{ cf_worker_url?: string }>('/api/settings/cf-worker-url', { errorMsg: 'Failed to fetch CF Worker URL' });
         return data.cf_worker_url || '';
     },
-    updateCFWorkerURL: async (url: string): Promise<void> => {
-        const res = await fetch('/api/settings/cf-worker-url', {
-            method: 'PUT',
-            headers: buildHeaders('application/json'),
-            body: JSON.stringify({ cf_worker_url: url }),
-        });
-        await handleResponse(res, 'Failed to update CF Worker URL');
-    },
+    updateCFWorkerURL: async (url: string): Promise<void> =>
+        request('/api/settings/cf-worker-url', { method: 'PUT', json: { cf_worker_url: url }, parse: 'none', errorMsg: 'Failed to update CF Worker URL' }),
 
-    getLogStoreStats: async (): Promise<LogStoreStats> => {
-        const res = await fetch('/api/settings/logs/stats', { headers: buildHeaders() });
-        await handleResponse(res, 'Failed to fetch log store stats');
-        return res.json();
-    },
+    getLogStoreStats: async (): Promise<LogStoreStats> =>
+        request<LogStoreStats>('/api/settings/logs/stats', { errorMsg: 'Failed to fetch log store stats' }),
 
-    triggerDBBackup: async (): Promise<{ created: string[] }> => {
-        const res = await fetch('/api/settings/backup/trigger', {
-            method: 'POST',
-            headers: buildHeaders(),
-        });
-        await handleResponse(res, 'Failed to trigger backup');
-        return res.json();
-    },
+    triggerDBBackup: async (): Promise<{ created: string[] }> =>
+        request('/api/settings/backup/trigger', { method: 'POST', errorMsg: 'Failed to trigger backup' }),
+
+    // Notifications (ntfy)
+    getNtfySettings: async (): Promise<NtfySettingsResponse> =>
+        request<NtfySettingsResponse>('/api/settings/ntfy', { errorMsg: 'Failed to fetch notification settings' }),
+    updateNtfySettings: async (payload: NtfySettingsRequest): Promise<void> =>
+        request('/api/settings/ntfy', { method: 'PUT', json: payload, parse: 'none', errorMsg: 'Failed to save notification settings' }),
+    sendTestNtfyNotification: async (payload: NtfySettingsRequest): Promise<void> =>
+        request('/api/settings/ntfy/test', { method: 'POST', json: payload, parse: 'none', errorMsg: 'Test notification failed' }),
 };
 
 export function downloadDBBackupURL(target: 'main' | 'audit' | 'logs'): string {
@@ -1460,10 +990,7 @@ export function downloadDBBackupURL(target: 'main' | 'audit' | 'logs'): string {
 export async function downloadDBBackup(target: 'main' | 'audit' | 'logs', includeCold?: string): Promise<void> {
     let url = `/api/settings/backup/download?target=${target}`;
     if (target === 'logs' && includeCold && includeCold !== 'none') url += `&include_cold=${includeCold}`;
-    const res = await fetch(url, {
-        headers: buildHeaders(),
-    });
-    if (!res.ok) throw new Error(`Backup download failed: ${res.status}`);
+    const res = await request<Response>(url, { parse: 'raw', errorMode: 'status', errorMsg: 'Backup download failed' });
     const disposition = res.headers.get('Content-Disposition') ?? '';
     const match = disposition.match(/filename="([^"]+)"/);
     const filename = match ? match[1] : `${target}-backup.tar.gz`;

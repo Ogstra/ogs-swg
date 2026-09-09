@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { COUNTRIES, countryFlagEmoji } from '../../utils/countries'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, Subscription, SubscriptionDefaults, SubscriptionHappConfig } from '../../services/api'
@@ -31,6 +31,21 @@ const parseGBInput = (value: string): number => {
 }
 
 const toBase64 = (value: string): string => btoa(value)
+const withClientParam = (link: string, client: string): string => {
+    const url = new URL(link)
+    url.searchParams.set('client', client)
+    return url.toString()
+}
+const withProviderIdFragment = (link: string, providerId: string): string => {
+    const trimmedProviderId = providerId.trim()
+    if (!trimmedProviderId) return link
+
+    const url = new URL(link)
+    const params = new URLSearchParams(url.hash.startsWith('#?') ? url.hash.slice(2) : '')
+    params.set('providerid', trimmedProviderId)
+    url.hash = `?${params.toString()}`
+    return url.toString()
+}
 const DEFAULT_REFRESH_INTERVAL_HOURS = '24'
 const EMPTY_SUBSCRIPTION_DEFAULTS: SubscriptionDefaults = {
     profile_update_interval_hours: null,
@@ -64,6 +79,12 @@ type HappConfigDraft = {
     profileFlag: string
     routingProfile: string
     advancedParameters: string
+}
+
+type HappQrLinkState = {
+    link: string
+    loading: boolean
+    failed?: boolean
 }
 
 const compactJSON = (value: Record<string, unknown>) => JSON.stringify(value)
@@ -241,12 +262,6 @@ export default function Subscriptions() {
     const canManagePanelScopedDefaults = canWriteUsers && !!token
 
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
-    const [happEncrypted, setHappEncrypted] = useState<{
-        token: string | null
-        link: string
-        loading: boolean
-        error: string | null
-    }>({ token: null, link: '', loading: false, error: null })
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
     const [confirmRegenerate, setConfirmRegenerate] = useState<Subscription | null>(null)
     const [defaultsModalOpen, setDefaultsModalOpen] = useState(false)
@@ -279,7 +294,10 @@ export default function Subscriptions() {
     const [subHappRoutingProfile, setSubHappRoutingProfile] = useState('')
     const [subHappRoutingPresetId, setSubHappRoutingPresetId] = useState('')
     const [subHappThemeId, setSubHappThemeId] = useState('')
+    const [subHappDirectSites, setSubHappDirectSites] = useState('')
+    const [happDirectSites, setHappDirectSites] = useState('')
     const [subRoutingProfileOpen, setSubRoutingProfileOpen] = useState(false)
+    const [happQrLinks, setHappQrLinks] = useState<Record<string, HappQrLinkState>>({})
 
     const subsQuery = useQuery({ queryKey: ['subscriptions'], queryFn: () => api.getSubscriptions(), enabled: canReadUsers })
     const usersQuery = useQuery({ queryKey: ['users'], queryFn: () => api.getUsers(), enabled: canReadUsers })
@@ -330,26 +348,6 @@ export default function Subscriptions() {
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const happConfig = happConfigQuery.data || EMPTY_HAPP_CONFIG
 
-    useEffect(() => {
-        if (modalState.type !== 'qr') return
-        const token = modalState.data?.token
-        if (!token) return
-        if (happEncrypted.token === token && happEncrypted.link) return
-        let cancelled = false
-        setHappEncrypted({ token, link: '', loading: true, error: null })
-        const plaintext = buildHappLink(token)
-        api.encryptHappLink(plaintext)
-            .then(res => {
-                if (cancelled) return
-                setHappEncrypted({ token, link: res.encrypted_url || '', loading: false, error: null })
-            })
-            .catch(err => {
-                if (cancelled) return
-                setHappEncrypted({ token, link: '', loading: false, error: err?.message || 'Failed to encrypt Happ link' })
-            })
-        return () => { cancelled = true }
-    }, [modalState.type, modalState.data?.token])
-
     const sortedSubs = [...subs].sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1
         switch (sortKey) {
@@ -394,6 +392,7 @@ export default function Subscriptions() {
         setSubHappRoutingProfile('')
         setSubHappRoutingPresetId('')
         setSubHappThemeId(happThemeId)
+        setSubHappDirectSites('')
         setModalState({ type: 'create' })
     }
 
@@ -425,6 +424,7 @@ export default function Subscriptions() {
         setSubHappRoutingPresetId(resolveRoutingPresetId(subRouting))
         const subColorProfile = sub.happ_color_profile || ''
         setSubHappThemeId(subColorProfile ? resolveHappThemeId(subColorProfile) : happThemeId)
+        setSubHappDirectSites(sub.happ_direct_sites ?? '')
         setModalState({ type: 'edit', data: sub })
     }
 
@@ -455,6 +455,7 @@ export default function Subscriptions() {
         setHappProfileFlag(draft.profileFlag)
         setHappRoutingProfile(draft.routingProfile)
         setHappAdvancedParameters(draft.advancedParameters)
+        setHappDirectSites((happConfig.direct_sites ?? []).join('\n'))
         setHappConfigOpen(true)
     }
 
@@ -482,6 +483,7 @@ export default function Subscriptions() {
             update_always: updateAlways,
             happ_routing_profile: subHappRoutingPresetId === 'custom' ? subHappRoutingProfile.trim() : routingProfileForSubscriptionName(subHappRoutingPresetId, aliasInput.trim() || nameInput.trim()),
             happ_color_profile: subHappThemeId !== happThemeId ? (HAPP_THEME_PRESETS.find(t => t.id === subHappThemeId)?.value || '') : '',
+            happ_direct_sites: subHappDirectSites.trim(),
         }
 
         try {
@@ -547,6 +549,7 @@ export default function Subscriptions() {
                 profile_flag: happProfileFlag.trim(),
                 routing_profile: happRoutingProfile.trim(),
                 advanced_parameters: advancedParameters,
+                direct_sites: happDirectSites.split('\n').map(s => s.trim()).filter(Boolean),
             })
             await queryClient.invalidateQueries({ queryKey: ['subscription-happ-config'] })
             setHappConfigOpen(false)
@@ -617,6 +620,7 @@ export default function Subscriptions() {
     const openQr = (sub: Subscription) => {
         if (!canWriteUsers || !sub.token) return
         setModalState({ type: 'qr', data: sub })
+        void loadHappQrLink(sub.token)
     }
     const toggleUser = (userName: string) => {
         setSelectedProfiles(prev => {
@@ -752,21 +756,44 @@ export default function Subscriptions() {
         }
         return `${window.location.protocol}//${subDomain}/s/${token}`
     }
-    const buildShadowrocketLink = (token: string, name: string) => {
-        const url = new URL(subLink(token))
-        url.searchParams.set('client', 'shadowrocket')
-        return `sub://${toBase64(url.toString())}#${encodeURIComponent(name)}`
+    const happSubscriptionLink = (token: string) => (
+        withProviderIdFragment(withClientParam(subLink(token), 'happ'), happConfig.provider_id || '')
+    )
+    const loadHappQrLink = async (token: string) => {
+        const directHappLink = happSubscriptionLink(token)
+        const current = happQrLinks[token]
+        if (current?.loading || current?.link.startsWith('happ://crypt5/')) return
+
+        setHappQrLinks(prev => ({
+            ...prev,
+            [token]: { link: '', loading: true },
+        }))
+        try {
+            const result = await api.encryptHappLink(directHappLink)
+            setHappQrLinks(prev => ({
+                ...prev,
+                [token]: { link: result.encrypted_url || '', loading: !result.encrypted_url, failed: !result.encrypted_url },
+            }))
+        } catch (err) {
+            setHappQrLinks(prev => ({
+                ...prev,
+                [token]: { link: '', loading: true, failed: true },
+            }))
+        }
     }
-    const buildHappLink = (token: string) => {
-        const url = new URL(subLink(token))
-        url.searchParams.set('client', 'happ')
-        return url.toString()
+    const buildShadowrocketLink = (token: string, name: string) => {
+        return `sub://${toBase64(withClientParam(subLink(token), 'shadowrocket'))}#${encodeURIComponent(name)}`
     }
     const getSubscriptionLinkVariants = (sub: Subscription) => (
         sub.token
             ? [
                 { id: 'direct', label: 'Direct', link: subLink(sub.token) },
-                { id: 'happ', label: 'Happ', link: happEncrypted.token === sub.token && happEncrypted.link ? happEncrypted.link : buildHappLink(sub.token), loading: happEncrypted.token === sub.token && happEncrypted.loading },
+                {
+                    id: 'happ',
+                    label: 'Happ',
+                    link: happQrLinks[sub.token]?.link || '',
+                    loading: happQrLinks[sub.token]?.loading ?? true,
+                },
                 { id: 'shadowrocket', label: 'Shadowrocket', link: buildShadowrocketLink(sub.token, displaySubName(sub)) },
             ]
             : []
@@ -1172,6 +1199,17 @@ export default function Subscriptions() {
                         <p className="mt-1 text-xs text-slate-500">Overrides the global routing profile for this subscription. Use Off to send <code>happ://routing/off</code> and actively disable routing on the client.</p>
                     </div>
                     <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Direct Sites Override</label>
+                        <textarea
+                            value={subHappDirectSites}
+                            onChange={e => setSubHappDirectSites(e.target.value)}
+                            rows={3}
+                            className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                            placeholder={"panel.example.com\napi.internal.com"}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Additional direct sites for this subscription only. Merged with global direct sites.</p>
+                    </div>
+                    <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Theme Override</label>
                         <select
                             value={subHappThemeId}
@@ -1323,6 +1361,18 @@ export default function Subscriptions() {
                             placeholder='{"Name":"ogs","GlobalProxy":"true","RemoteDNSType":"DoH","RemoteDNSDomain":"https://1.1.1.1/dns-query","RemoteDNSIP":"1.1.1.1","DomainStrategy":"IPIfNonMatch","FakeDNS":"true"}'
                         />
                         <p className="mt-1 text-xs text-slate-500">Emits <code>happ://routing/onadd/&lt;base64&gt;</code> directly in the subscription body. Use <code>happ://routing/off</code> to actively disable routing on the client.</p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Direct Sites (global)</label>
+                        <textarea
+                            value={happDirectSites}
+                            onChange={e => setHappDirectSites(e.target.value)}
+                            rows={3}
+                            className="w-full resize-y bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500"
+                            placeholder={"panel.example.com\napi.internal.com"}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Domains injected into the DirectSites array of every Happ routing profile. One per line or comma-separated. Merged with per-subscription overrides.</p>
                     </div>
                 </div>
             </Modal>

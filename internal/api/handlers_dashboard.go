@@ -2,13 +2,13 @@ package api
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -205,15 +205,6 @@ func apiTrafficBucketsFromCore(in map[int64]core.TrafficStats) map[int64]Traffic
 	return out
 }
 
-func sumCoreTrafficMap(stats map[int64]core.TrafficStats) TrafficStats {
-	var out TrafficStats
-	for _, st := range stats {
-		out.Uplink += st.Uplink
-		out.Downlink += st.Downlink
-	}
-	return out
-}
-
 func (s *Server) discoverWireGuardPeersByInterface(ctx context.Context) (map[string][]string, map[string]string, map[string]string) {
 	byInterface := make(map[string][]string)
 	aliasByKey := make(map[string]string)
@@ -303,14 +294,28 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 	if cachedPayload, found := s.cache.Get(cacheKey); found {
 		if payload, ok := cachedPayload.(DashboardData); ok {
 			payload.SingboxPendingChanges = s.config.GetSingboxPendingChanges()
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(payload)
+			writeJSON(w, http.StatusOK, payload)
 			return
 		}
 	}
 
-	// 1. Fetch System Status
-	status := s.collectSystemStatus(r.Context(), activeUsersWindow)
+	// 1. Fetch System Status and the public IP concurrently — both are
+	// independent of the traffic queries below.
+	var (
+		status   map[string]interface{}
+		publicIP string
+		statusWG sync.WaitGroup
+	)
+	statusWG.Add(2)
+	go func() {
+		defer statusWG.Done()
+		status = s.collectSystemStatus(r.Context(), activeUsersWindow)
+	}()
+	go func() {
+		defer statusWG.Done()
+		publicIP = getPublicIP(s.config)
+	}()
+	statusWG.Wait()
 
 	// 2. Fetch WireGuard peers for range calculations
 	var wgPeerKeys []string
@@ -356,21 +361,18 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 				wgBuckets[ts] = TrafficStats{Uplink: stats.Uplink, Downlink: stats.Downlink}
 			}
 		}
-		ifaces := make([]string, 0, len(wgKeysByInterface))
-		for iface := range wgKeysByInterface {
-			ifaces = append(ifaces, iface)
-		}
-		sort.Strings(ifaces)
-		for _, iface := range ifaces {
-			keys := wgKeysByInterface[iface]
-			if len(keys) == 0 {
-				continue
+		// Single per-key totals query, then fold into per-interface sums in
+		// memory instead of re-running the same window-function query once
+		// per interface.
+		if keyTotals, err := s.store.GetWGKeyTotals(wgPeerKeys, start, end); err == nil {
+			for iface, keys := range wgKeysByInterface {
+				var stat TrafficStats
+				for _, key := range keys {
+					stat.Uplink += keyTotals[key].Uplink
+					stat.Downlink += keyTotals[key].Downlink
+				}
+				wgInterfaceStats[iface] = stat
 			}
-			buckets, err := s.store.GetWGTrafficBuckets(keys, start, end, interval)
-			if err != nil {
-				continue
-			}
-			wgInterfaceStats[iface] = sumCoreTrafficMap(buckets)
 		}
 	}
 
@@ -509,15 +511,14 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 			"singbox":   topSB,
 		},
 		SingboxPendingChanges: s.config.GetSingboxPendingChanges(),
-		PublicIP:              getPublicIP(s.config),
+		PublicIP:              publicIP,
 	}
 
 	// cache response
 	// Setting cost to 1 as default and TTL to 15 seconds
 	s.cache.SetWithTTL(cacheKey, resp, 1, 15*time.Second)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.Request) {
@@ -537,11 +538,11 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 
 	key = resolveConsumerKey(key, mode, name, iface, s, r)
 	if key == "" || key == maskedValue {
-		http.Error(w, "Missing consumer key", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Missing consumer key")
 		return
 	}
 	if mode != "singbox" && mode != "wireguard" {
-		http.Error(w, "Invalid consumer mode", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid consumer mode")
 		return
 	}
 
@@ -552,7 +553,7 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 		end = time.Now().Unix()
 	}
 	if end <= start {
-		http.Error(w, "Invalid dashboard window", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Invalid dashboard window")
 		return
 	}
 
@@ -572,12 +573,11 @@ func (s *Server) handleGetDashboardConsumerChart(w http.ResponseWriter, r *http.
 		buckets = apiTrafficBucketsFromCore(coreBuckets)
 	}
 	if err != nil {
-		http.Error(w, "Failed to fetch consumer chart: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to fetch consumer chart: "+err.Error())
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(DashboardConsumerChartData{
+	writeJSON(w, http.StatusOK, DashboardConsumerChartData{
 		ChartData: buildConsumerChartData(start, end, interval, buckets, mode),
 	})
 }
@@ -597,83 +597,95 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 	var activeUsersSBList []string
 	var activeUsersWGList []string
 
+	var wg sync.WaitGroup
+
 	if s.config.EnableSingbox {
-		if s.config.DemoMode {
-			singboxStatus = true
-		} else {
-			singboxStatus = s.checkService(ctx, "sing-box")
-		}
-		// Fetch active users list (previously we only fetched count)
-		// We use the same threshold mechanism
-		if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, s.config.ActiveThresholdBytes); err == nil {
-			activeUsersSBList = users
-			activeUsersSB = int64(len(users))
-		}
-		// Fallback: if threshold-based result is empty, show sessions with any traffic.
-		if activeUsersSB == 0 {
-			if users, err := s.store.GetActiveUsers(activeUsersWindow); err == nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if s.config.DemoMode {
+				singboxStatus = true
+			} else {
+				singboxStatus = s.checkService(ctx, "sing-box")
+			}
+			// Fetch active users list (previously we only fetched count)
+			// We use the same threshold mechanism
+			if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, s.config.ActiveThresholdBytes); err == nil {
 				activeUsersSBList = users
 				activeUsersSB = int64(len(users))
 			}
-		}
-		if s.config.DemoMode && activeUsersSB == 0 {
-			if users := s.demoActiveSingboxUsers(time.Now()); len(users) > 0 {
-				activeUsersSBList = users
-				activeUsersSB = int64(len(users))
+			// Fallback: if threshold-based result is empty, show sessions with any traffic.
+			if activeUsersSB == 0 {
+				if users, err := s.store.GetActiveUsers(activeUsersWindow); err == nil {
+					activeUsersSBList = users
+					activeUsersSB = int64(len(users))
+				}
 			}
-		}
+			if s.config.DemoMode && activeUsersSB == 0 {
+				if users := s.demoActiveSingboxUsers(time.Now()); len(users) > 0 {
+					activeUsersSBList = users
+					activeUsersSB = int64(len(users))
+				}
+			}
+		}()
 	}
 
 	if s.config.EnableWireGuard {
-		if s.config.DemoMode {
-			wireguardStatus = true
-		} else {
-			wireguardStatus = s.checkService(ctx, "wireguard")
-		}
-		storedPeers, _ := s.store.GetWGPeerMeta()
-		var (
-			stats map[string]core.PeerStats
-			err   error
-		)
-		if s.executor != nil {
-			stats, err = s.executor.GetWireGuardStats(ctx)
-		} else {
-			stats, err = core.GetWireGuardStats()
-		}
-		threshold := time.Now().Add(-3 * time.Minute).Unix()
-		if err == nil {
-			for _, peer := range stats {
-				if peer.LatestHandshake >= threshold {
-					activeUsersWG++
-					name := ""
-					if meta, ok := storedPeers[peer.PublicKey]; ok && meta.Alias != "" {
-						name = meta.Alias
-					}
-					if name == "" {
-						if len(peer.PublicKey) >= 8 {
-							name = peer.PublicKey[:8]
-						} else {
-							name = peer.PublicKey
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if s.config.DemoMode {
+				wireguardStatus = true
+			} else {
+				wireguardStatus = s.checkService(ctx, "wireguard")
+			}
+			storedPeers, _ := s.store.GetWGPeerMeta()
+			var (
+				stats map[string]core.PeerStats
+				err   error
+			)
+			if s.executor != nil {
+				stats, err = s.executor.GetWireGuardStats(ctx)
+			} else {
+				stats, err = core.GetWireGuardStats()
+			}
+			threshold := time.Now().Add(-3 * time.Minute).Unix()
+			if err == nil {
+				for _, peer := range stats {
+					if peer.LatestHandshake >= threshold {
+						activeUsersWG++
+						name := ""
+						if meta, ok := storedPeers[peer.PublicKey]; ok && meta.Alias != "" {
+							name = meta.Alias
 						}
+						if name == "" {
+							if len(peer.PublicKey) >= 8 {
+								name = peer.PublicKey[:8]
+							} else {
+								name = peer.PublicKey
+							}
+						}
+						activeUsersWGList = append(activeUsersWGList, name)
 					}
-					activeUsersWGList = append(activeUsersWGList, name)
 				}
 			}
-		}
-		if s.config.DemoMode {
-			preferred := make(map[string]string, len(storedPeers))
-			for publicKey, meta := range storedPeers {
-				if strings.TrimSpace(meta.Alias) != "" {
-					preferred[publicKey] = meta.Alias
+			if s.config.DemoMode {
+				preferred := make(map[string]string, len(storedPeers))
+				for publicKey, meta := range storedPeers {
+					if strings.TrimSpace(meta.Alias) != "" {
+						preferred[publicKey] = meta.Alias
+					}
+				}
+				demoList := s.demoActiveWireGuardPeers(threshold, preferred, time.Now())
+				if len(demoList) > 0 {
+					activeUsersWGList = demoList
+					activeUsersWG = len(demoList)
 				}
 			}
-			demoList := s.demoActiveWireGuardPeers(threshold, preferred, time.Now())
-			if len(demoList) > 0 {
-				activeUsersWGList = demoList
-				activeUsersWG = len(demoList)
-			}
-		}
+		}()
 	}
+
+	wg.Wait()
 
 	if s.config.DemoMode {
 		// Demo mode intentionally shows both services as running for UX demos.

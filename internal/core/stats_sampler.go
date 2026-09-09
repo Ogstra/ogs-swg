@@ -18,6 +18,19 @@ type StatsSampler struct {
 	paused            bool
 	cachedUsers       []UserAccount
 	lastConfigModTime time.Time
+
+	// onSampled, if set, is invoked once per completed (non-paused) sampling
+	// pass. Used by the ntfy high-traffic check so it rides the existing
+	// sampler cadence instead of introducing a separate ticker (D-04).
+	onSampled func(at time.Time)
+}
+
+// SetOnSampled installs (or clears, with nil) the hook invoked once per
+// completed sampling pass. Test/wiring seam.
+func (s *StatsSampler) SetOnSampled(fn func(at time.Time)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onSampled = fn
 }
 
 func NewStatsSampler(sb *SingboxClient, store *Store, cfg *Config) *StatsSampler {
@@ -116,6 +129,10 @@ func (s *StatsSampler) sampleOnce() {
 
 	if s.paused {
 		return
+	}
+
+	if s.onSampled != nil {
+		go s.onSampled(time.Now())
 	}
 
 	start := time.Now()

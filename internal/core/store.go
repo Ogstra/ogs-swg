@@ -118,6 +118,11 @@ func (s *Store) initSchema() error {
 		s.db.Exec("DROP TABLE daily_usage")
 	}
 
+	// idx_samples_user_ts duplicated uq_samples_user_ts exactly (same columns, no
+	// extra benefit); drop it on upgrade so existing installs stop paying its
+	// write-amplification cost on every sample insert.
+	s.db.Exec("DROP INDEX IF EXISTS idx_samples_user_ts")
+
 	query := `
 	CREATE TABLE IF NOT EXISTS samples (
 		user TEXT NOT NULL,
@@ -126,7 +131,7 @@ func (s *Store) initSchema() error {
 		downlink INTEGER NOT NULL
 	);
 	CREATE UNIQUE INDEX IF NOT EXISTS uq_samples_user_ts ON samples(user, ts);
-	CREATE INDEX IF NOT EXISTS idx_samples_user_ts ON samples(user, ts);
+	CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
 
 	CREATE TABLE IF NOT EXISTS users (
 		email TEXT PRIMARY KEY,
@@ -159,6 +164,7 @@ func (s *Store) initSchema() error {
 		endpoint TEXT DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_wg_samples_pub_ts ON wg_samples(public_key, ts);
+	CREATE INDEX IF NOT EXISTS idx_wg_samples_ts ON wg_samples(ts);
 	CREATE TABLE IF NOT EXISTS wg_peers (
 		public_key TEXT PRIMARY KEY,
 		alias TEXT NOT NULL,
@@ -302,6 +308,53 @@ func (s *Store) initSchema() error {
 		created_at INTEGER DEFAULT (strftime('%s','now')),
 		updated_at INTEGER DEFAULT (strftime('%s','now'))
 	);
+
+	CREATE TABLE IF NOT EXISTS external_profiles (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		flag TEXT NOT NULL DEFAULT '',
+		type TEXT NOT NULL DEFAULT 'vless',
+		host_ipv4 TEXT NOT NULL DEFAULT '',
+		host_ipv6_file TEXT NOT NULL DEFAULT '',
+		port INTEGER NOT NULL DEFAULT 0,
+		uuid TEXT NOT NULL DEFAULT '',
+		password TEXT NOT NULL DEFAULT '',
+		ss_method TEXT NOT NULL DEFAULT '',
+		ss_server_key TEXT NOT NULL DEFAULT '',
+		public_key TEXT NOT NULL DEFAULT '',
+		short_id TEXT NOT NULL DEFAULT '',
+		server_name TEXT NOT NULL DEFAULT '',
+		alpn TEXT NOT NULL DEFAULT '',
+		flow TEXT NOT NULL DEFAULT '',
+		enabled INTEGER NOT NULL DEFAULT 1,
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
+
+	CREATE TABLE IF NOT EXISTS user_external_profiles (
+		user_name TEXT NOT NULL,
+		external_profile_id INTEGER NOT NULL,
+		PRIMARY KEY (user_name, external_profile_id),
+		FOREIGN KEY (external_profile_id) REFERENCES external_profiles(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS ntfy_settings (
+		id INTEGER PRIMARY KEY CHECK (id = 1),
+		server_url TEXT NOT NULL DEFAULT '',
+		topic TEXT NOT NULL DEFAULT '',
+		auth_mode TEXT NOT NULL DEFAULT 'none',
+		bearer_token TEXT NOT NULL DEFAULT '',
+		basic_user TEXT NOT NULL DEFAULT '',
+		basic_pass TEXT NOT NULL DEFAULT '',
+		enable_singbox_down INTEGER NOT NULL DEFAULT 0,
+		enable_wireguard_down INTEGER NOT NULL DEFAULT 0,
+		enable_high_traffic INTEGER NOT NULL DEFAULT 0,
+		enable_config_errors INTEGER NOT NULL DEFAULT 0,
+		traffic_threshold_bytes INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER DEFAULT (strftime('%s','now')),
+		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
@@ -364,9 +417,21 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN block_reason TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked ON subscription_requests(blocked, requested_at DESC);")
+	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN via_worker INTEGER NOT NULL DEFAULT 0;")
 	// Upgrade path: add happ_routing_profile to existing subscriptions tables.
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_routing_profile TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_color_profile TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE external_profiles ADD COLUMN flag TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE external_profiles ADD COLUMN alpn TEXT NOT NULL DEFAULT '';")
+	s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_user_external_profiles_user ON user_external_profiles(user_name);`)
+	s.db.Exec(`
+		DELETE FROM subscription_users
+		WHERE NOT EXISTS (
+			SELECT 1 FROM users WHERE users.email = subscription_users.user_name
+		);
+	`)
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_direct_sites TEXT NOT NULL DEFAULT '';")
+
 	return nil
 }
 
@@ -414,6 +479,7 @@ type SubscriptionHappConfig struct {
 	ProfileFlag        string                      `json:"profile_flag"`
 	RoutingProfile     string                      `json:"routing_profile"`
 	AdvancedParameters []SubscriptionHappParameter `json:"advanced_parameters"`
+	DirectSites        []string                    `json:"direct_sites"`
 }
 
 type DashboardPreferences struct {
@@ -889,6 +955,59 @@ func (s *Store) UpdateDashboardPreferences(ctx context.Context, principal string
 			detail_chart_target_points = excluded.detail_chart_target_points,
 			updated_at = strftime('%s','now')
 	`, principal, prefs.DefaultService, prefs.RefreshMs, prefs.DefaultRange, prefs.ActiveUserWindowMinutes, prefs.DetailChartTargetPoints)
+	return err
+}
+
+func (s *Store) GetNtfySettings(ctx context.Context) (NtfySettings, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
+		       enable_singbox_down, enable_wireguard_down, enable_high_traffic,
+		       enable_config_errors, traffic_threshold_bytes
+		FROM ntfy_settings WHERE id = 1
+	`)
+	var out NtfySettings
+	var enableSingboxDown, enableWireguardDown, enableHighTraffic, enableConfigErrors int64
+	if err := row.Scan(&out.ServerURL, &out.Topic, &out.AuthMode, &out.BearerToken,
+		&out.BasicUser, &out.BasicPass, &enableSingboxDown, &enableWireguardDown,
+		&enableHighTraffic, &enableConfigErrors, &out.TrafficThresholdBytes); err != nil {
+		if err == sql.ErrNoRows {
+			return NormalizeNtfySettings(NtfySettings{}), nil
+		}
+		return NormalizeNtfySettings(NtfySettings{}), err
+	}
+	out.EnableSingboxDown = enableSingboxDown != 0
+	out.EnableWireguardDown = enableWireguardDown != 0
+	out.EnableHighTraffic = enableHighTraffic != 0
+	out.EnableConfigErrors = enableConfigErrors != 0
+	return NormalizeNtfySettings(out), nil
+}
+
+func (s *Store) UpdateNtfySettings(ctx context.Context, settings NtfySettings) error {
+	settings = NormalizeNtfySettings(settings)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO ntfy_settings (
+			id, server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
+			enable_singbox_down, enable_wireguard_down, enable_high_traffic,
+			enable_config_errors, traffic_threshold_bytes, created_at, updated_at
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+		ON CONFLICT(id) DO UPDATE SET
+			server_url = excluded.server_url,
+			topic = excluded.topic,
+			auth_mode = excluded.auth_mode,
+			bearer_token = excluded.bearer_token,
+			basic_user = excluded.basic_user,
+			basic_pass = excluded.basic_pass,
+			enable_singbox_down = excluded.enable_singbox_down,
+			enable_wireguard_down = excluded.enable_wireguard_down,
+			enable_high_traffic = excluded.enable_high_traffic,
+			enable_config_errors = excluded.enable_config_errors,
+			traffic_threshold_bytes = excluded.traffic_threshold_bytes,
+			updated_at = strftime('%s','now')
+	`, settings.ServerURL, settings.Topic, settings.AuthMode, settings.BearerToken,
+		settings.BasicUser, settings.BasicPass,
+		boolToInt64(settings.EnableSingboxDown), boolToInt64(settings.EnableWireguardDown),
+		boolToInt64(settings.EnableHighTraffic), boolToInt64(settings.EnableConfigErrors),
+		settings.TrafficThresholdBytes)
 	return err
 }
 
@@ -2332,6 +2451,84 @@ LIMIT ?`, start, end, limit)
 	return results, nil
 }
 
+// GetWGKeyTotals aggregates total usage (rx/tx deltas) per peer in the given
+// range, restricted to the given public keys. Used to derive per-interface
+// totals from a single query instead of one query per interface.
+func (s *Store) GetWGKeyTotals(publicKeys []string, start, end int64) (map[string]TrafficStats, error) {
+	out := make(map[string]TrafficStats)
+	if len(publicKeys) == 0 {
+		return out, nil
+	}
+
+	placeholders := strings.Repeat("?,", len(publicKeys))
+	placeholders = strings.TrimSuffix(placeholders, ",")
+
+	args := make([]interface{}, 0, len(publicKeys)+2)
+	for _, k := range publicKeys {
+		args = append(args, k)
+	}
+	args = append(args, start, end)
+
+	query := fmt.Sprintf(`
+WITH ordered AS (
+  SELECT
+    public_key,
+    ts,
+    rx,
+    tx,
+    LAG(rx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_rx,
+    LAG(tx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_tx
+  FROM wg_samples
+  WHERE public_key IN (%s) AND ts >= ? AND ts <= ?
+),
+diffs AS (
+  SELECT
+    public_key,
+    CASE
+      WHEN prev_tx IS NULL THEN 0
+      WHEN tx - prev_tx < 0 THEN 0
+      ELSE tx - prev_tx
+    END AS dx,
+    CASE
+      WHEN prev_rx IS NULL THEN 0
+      WHEN rx - prev_rx < 0 THEN 0
+      ELSE rx - prev_rx
+    END AS dr
+  FROM ordered
+)
+SELECT
+  public_key,
+  SUM(dr) AS rx_delta,
+  SUM(dx) AS tx_delta
+FROM diffs
+GROUP BY public_key
+`, placeholders)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var pub string
+		var rx, tx sql.NullInt64
+		if err := rows.Scan(&pub, &rx, &tx); err != nil {
+			return nil, err
+		}
+		r := rx.Int64
+		t := tx.Int64
+		if r < 0 {
+			r = 0
+		}
+		if t < 0 {
+			t = 0
+		}
+		out[pub] = TrafficStats{Uplink: t, Downlink: r}
+	}
+	return out, nil
+}
+
 // GetSBTrafficBuckets aggregates Sing-box traffic per time bucket.
 func (s *Store) GetSBTrafficBuckets(start, end, interval int64) (map[int64]TrafficStats, error) {
 	out := make(map[int64]TrafficStats)
@@ -2443,6 +2640,39 @@ func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, err
 		})
 	}
 	return res, nil
+}
+
+// GetCombinedTrafficTotal returns total panel traffic (sing-box uplink+downlink
+// plus WireGuard rx+tx deltas) in the inclusive [start, end] unix-second range.
+// Used by the ntfy high-traffic threshold check (NTFY-02).
+func (s *Store) GetCombinedTrafficTotal(start, end int64) (int64, error) {
+	var sbTotal int64
+	if err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(uplink), 0) + COALESCE(SUM(downlink), 0)
+		FROM samples WHERE ts >= ? AND ts <= ?
+	`, start, end).Scan(&sbTotal); err != nil {
+		return 0, err
+	}
+
+	var wgTotal int64
+	if err := s.db.QueryRow(`
+		WITH ordered AS (
+		  SELECT public_key, rx, tx,
+		         LAG(rx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_rx,
+		         LAG(tx) OVER (PARTITION BY public_key ORDER BY ts) AS prev_tx
+		  FROM wg_samples WHERE ts >= ? AND ts <= ?
+		),
+		diffs AS (
+		  SELECT CASE WHEN prev_rx IS NULL THEN 0 WHEN rx - prev_rx < 0 THEN 0 ELSE rx - prev_rx END AS dr,
+		         CASE WHEN prev_tx IS NULL THEN 0 WHEN tx - prev_tx < 0 THEN 0 ELSE tx - prev_tx END AS dx
+		  FROM ordered
+		)
+		SELECT COALESCE(SUM(dr), 0) + COALESCE(SUM(dx), 0) FROM diffs
+	`, start, end).Scan(&wgTotal); err != nil {
+		return 0, err
+	}
+
+	return sbTotal + wgTotal, nil
 }
 
 func (s *Store) PruneWGSamplesOlderThan(ts int64) error {

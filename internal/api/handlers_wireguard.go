@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -71,7 +70,7 @@ func (s *Server) scopedWireGuardInterfaceForRequest(r *http.Request) (string, er
 func (s *Server) runScopedWireGuardHandler(w http.ResponseWriter, r *http.Request, h func(*Server, http.ResponseWriter, *http.Request)) {
 	iface, err := s.scopedWireGuardInterfaceForRequest(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	h(s, w, r.WithContext(withWireGuardInterfaceContext(r.Context(), iface)))
@@ -85,7 +84,7 @@ func (s *Server) handleListWireGuardInterfaces(w http.ResponseWriter, r *http.Re
 	var registry core.WireGuardRegistry
 	ifaces, err := registry.DiscoverInterfaces(s.wireGuardConfigDir())
 	if err != nil {
-		http.Error(w, "Failed to discover interfaces: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to discover interfaces: "+err.Error())
 		return
 	}
 
@@ -95,8 +94,7 @@ func (s *Server) handleListWireGuardInterfaces(w http.ResponseWriter, r *http.Re
 		ifaces = []string{}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ifaces)
+	writeJSON(w, http.StatusOK, ifaces)
 }
 
 // WireGuardInterfaceSummary holds the operational summary of a single WireGuard interface.
@@ -117,7 +115,7 @@ func (s *Server) handleListWireGuardInterfacesStatus(w http.ResponseWriter, r *h
 	var registry core.WireGuardRegistry
 	configured, err := registry.DiscoverInterfaces(dir)
 	if err != nil {
-		http.Error(w, "Failed to discover interfaces: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to discover interfaces: "+err.Error())
 		return
 	}
 	sort.Strings(configured)
@@ -147,8 +145,7 @@ func (s *Server) handleListWireGuardInterfacesStatus(w http.ResponseWriter, r *h
 		result = append(result, summary)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.Request) {
@@ -156,42 +153,42 @@ func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 	if s.executor == nil {
-		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "WireGuard executor is unavailable")
 		return
 	}
 
 	var req CreateWireGuardInterfaceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if strings.TrimSpace(req.PrivateKey) != "" {
-		http.Error(w, "private_key is managed server-side", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "private_key is managed server-side")
 		return
 	}
 
 	iface := strings.TrimSpace(req.Name)
 	if !wireGuardInterfaceParamPattern.MatchString(iface) {
-		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid wireguard interface name")
 		return
 	}
 	if req.ListenPort < 1 || req.ListenPort > 65535 {
-		http.Error(w, "listen_port must be between 1 and 65535", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "listen_port must be between 1 and 65535")
 		return
 	}
 
 	subnetCIDR, subnetNet, err := normalizeWireGuardSubnet(req.Subnet)
 	if err != nil {
-		http.Error(w, "invalid subnet: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid subnet: "+err.Error())
 		return
 	}
 	address, err := firstInterfaceAddressFromSubnet(subnetNet)
 	if err != nil {
-		http.Error(w, "invalid subnet: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid subnet: "+err.Error())
 		return
 	}
 
@@ -199,12 +196,12 @@ func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.R
 	var registry core.WireGuardRegistry
 	existingIfaces, err := registry.DiscoverInterfaces(dir)
 	if err != nil {
-		http.Error(w, "Failed to discover interfaces: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to discover interfaces: "+err.Error())
 		return
 	}
 	for _, existing := range existingIfaces {
 		if existing == iface {
-			http.Error(w, "wireguard interface already exists", http.StatusConflict)
+			writeErr(w, http.StatusConflict, "wireguard interface already exists")
 			return
 		}
 		existingCfg, err := registry.LoadInterface(dir, existing)
@@ -216,27 +213,27 @@ func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.R
 			continue
 		}
 		if cidrOverlaps(existingNet, subnetNet) {
-			http.Error(w, "subnet overlaps with existing interface "+existing, http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "subnet overlaps with existing interface "+existing)
 			return
 		}
 	}
 
 	path, err := s.wireGuardConfigPathForIface(iface)
 	if err != nil {
-		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid wireguard interface name")
 		return
 	}
 	if _, err := os.Stat(path); err == nil {
-		http.Error(w, "wireguard interface already exists", http.StatusConflict)
+		writeErr(w, http.StatusConflict, "wireguard interface already exists")
 		return
 	} else if !os.IsNotExist(err) {
-		http.Error(w, "Failed to check interface path: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to check interface path: "+err.Error())
 		return
 	}
 
 	privateKey, publicKey, err := core.GenerateWireGuardKeys()
 	if err != nil {
-		http.Error(w, "Failed to generate keys: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to generate keys: "+err.Error())
 		return
 	}
 
@@ -250,18 +247,16 @@ func (s *Server) handleCreateWireGuardInterface(w http.ResponseWriter, r *http.R
 		Peers: []core.WireGuardPeer{},
 	}
 	if err := s.saveWireGuardConfigAtPath(r.Context(), path, cfg); err != nil {
-		http.Error(w, "Failed to persist interface config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to persist interface config: "+err.Error())
 		return
 	}
 	if err := s.executor.EnableWireGuardInterface(r.Context(), iface); err != nil {
-		http.Error(w, "Failed to enable interface: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to enable interface: "+err.Error())
 		return
 	}
 	s.clearWireGuardPending()
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(CreateWireGuardInterfaceResponse{
+	writeJSON(w, http.StatusCreated, CreateWireGuardInterfaceResponse{
 		Name:       iface,
 		Subnet:     subnetCIDR,
 		Address:    address,
@@ -324,18 +319,18 @@ func (s *Server) handleEnableWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 	if s.executor == nil {
-		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "WireGuard executor is unavailable")
 		return
 	}
 
 	iface := strings.TrimSpace(r.PathValue("iface"))
 	if !wireGuardInterfaceParamPattern.MatchString(iface) {
-		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid wireguard interface name")
 		return
 	}
 
 	if err := s.executor.EnableWireGuardInterface(r.Context(), iface); err != nil {
-		http.Error(w, "Failed to enable interface: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to enable interface: "+err.Error())
 		return
 	}
 	s.clearWireGuardPending()
@@ -347,18 +342,18 @@ func (s *Server) handleDisableWireGuardInterface(w http.ResponseWriter, r *http.
 		return
 	}
 	if s.executor == nil {
-		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "WireGuard executor is unavailable")
 		return
 	}
 
 	iface := strings.TrimSpace(r.PathValue("iface"))
 	if !wireGuardInterfaceParamPattern.MatchString(iface) {
-		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid wireguard interface name")
 		return
 	}
 
 	if err := s.executor.DisableWireGuardInterface(r.Context(), iface); err != nil {
-		http.Error(w, "Failed to disable interface: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to disable interface: "+err.Error())
 		return
 	}
 	s.clearWireGuardPending()
@@ -391,41 +386,41 @@ func (s *Server) handleDeleteWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 	if s.executor == nil {
-		http.Error(w, "WireGuard executor is unavailable", http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "WireGuard executor is unavailable")
 		return
 	}
 
 	iface := strings.TrimSpace(r.PathValue("iface"))
 	if !wireGuardInterfaceParamPattern.MatchString(iface) {
-		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid wireguard interface name")
 		return
 	}
 
 	path, err := s.wireGuardConfigPathForIface(iface)
 	if err != nil {
-		http.Error(w, "invalid wireguard interface name", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "invalid wireguard interface name")
 		return
 	}
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, "wireguard interface not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "wireguard interface not found")
 			return
 		}
-		http.Error(w, "failed to inspect interface config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "failed to inspect interface config: "+err.Error())
 		return
 	}
 
 	if err := s.executor.DisableWireGuardInterface(r.Context(), iface); err != nil && !shouldIgnoreWireGuardDisableError(err) {
-		http.Error(w, "Failed to disable interface: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to disable interface: "+err.Error())
 		return
 	}
 
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, "wireguard interface not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "wireguard interface not found")
 			return
 		}
-		http.Error(w, "Failed to delete interface config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete interface config: "+err.Error())
 		return
 	}
 
@@ -439,7 +434,7 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 	}
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 
@@ -549,10 +544,7 @@ func (s *Server) handleGetWireGuardPeers(w http.ResponseWriter, r *http.Request)
 	}
 
 	log.Printf("DEBUG: GetWireGuardPeers called. Response size: %d", len(response))
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		log.Printf("DEBUG: Encode error: %v", err)
-	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 type CreatePeerRequest struct {
@@ -750,12 +742,12 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var req CreatePeerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -765,11 +757,11 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 	if wgConfig.Interface.Address == "" {
-		http.Error(w, "Interface address is required before adding peers", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Interface address is required before adding peers")
 		return
 	}
 
@@ -779,13 +771,13 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	if priv == "" {
 		priv, pub, err = core.GenerateWireGuardKeys()
 		if err != nil {
-			http.Error(w, "Failed to generate keys: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to generate keys: "+err.Error())
 			return
 		}
 	} else {
 		pk, err = wgtypes.ParseKey(priv)
 		if err != nil {
-			http.Error(w, "Invalid private key", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "Invalid private key")
 			return
 		}
 		pub = pk.PublicKey().String()
@@ -811,12 +803,12 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 			}
 		}
 		if ipNet == nil {
-			http.Error(w, "Cannot auto-assign IP: interface address missing", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "Cannot auto-assign IP: interface address missing")
 			return
 		}
 		autoIP, err := findAvailableIP(ipNet, usedIPs)
 		if err != nil {
-			http.Error(w, "No IP addresses available", http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "No IP addresses available")
 			return
 		}
 		normalizedIPs = []string{autoIP}
@@ -824,11 +816,11 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	} else {
 		normalizedIPs, primaryIP, err = normalizeAllowedIPs(req.IP)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if ip, ok := extractHostIP(primaryIP); ok && usedIPs[ip.String()] {
-			http.Error(w, "IP already assigned to another peer", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "IP already assigned to another peer")
 			return
 		}
 	}
@@ -850,11 +842,11 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.AddPeer(peer) }); err != nil {
-		http.Error(w, "Failed to add peer: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to add peer: "+err.Error())
 		return
 	}
 	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
-		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to persist WireGuard config: "+err.Error())
 		return
 	}
 	_ = s.store.UpsertWGPeer(peer.PublicKey, alias, false)
@@ -867,9 +859,8 @@ func (s *Server) handleCreateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 		s.markWireGuardPending()
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	s.insertAuditEntry(r, "wireguard", "create", s.wireGuardInterfaceForContext(r.Context()), wireGuardPeerAuditDetail(peer.PublicKey, alias))
-	json.NewEncoder(w).Encode(peer)
+	writeJSON(w, http.StatusOK, peer)
 }
 
 func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Request) {
@@ -878,13 +869,13 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	}
 	pubKey := r.URL.Query().Get("public_key")
 	if pubKey == "" {
-		http.Error(w, "public_key is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "public_key is required")
 		return
 	}
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 
@@ -908,11 +899,11 @@ func (s *Server) handleDeleteWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	_ = s.store.UpsertWGPeer(pubKey, alias, true)
 
 	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.RemovePeer(pubKey) }); err != nil {
-		http.Error(w, "Failed to remove peer: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to remove peer: "+err.Error())
 		return
 	}
 	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
-		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to persist WireGuard config: "+err.Error())
 		return
 	}
 
@@ -937,18 +928,18 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req RestorePeerRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid payload")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 
@@ -973,11 +964,11 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.AddPeer(peer) }); err != nil {
-		http.Error(w, "Failed to restore peer: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to restore peer: "+err.Error())
 		return
 	}
 	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
-		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to persist WireGuard config: "+err.Error())
 		return
 	}
 	_ = s.store.UpsertWGPeer(peer.PublicKey, alias, false)
@@ -986,8 +977,7 @@ func (s *Server) handleRestoreWireGuardPeer(w http.ResponseWriter, r *http.Reque
 		s.markWireGuardPending()
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(peer)
+	writeJSON(w, http.StatusOK, peer)
 }
 
 func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request) {
@@ -997,7 +987,7 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 
 	cfgPath, err := s.wireGuardConfigPathForContext(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to resolve config path: "+err.Error())
 		return
 	}
 
@@ -1012,7 +1002,7 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 				return
 			}
 
-			http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to read config: "+err.Error())
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain")
@@ -1032,7 +1022,7 @@ func (s *Server) handleGetWireGuardConfig(w http.ResponseWriter, r *http.Request
 			w.Write([]byte(""))
 			return
 		}
-		http.Error(w, "Failed to read config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read config: "+err.Error())
 		return
 	}
 
@@ -1050,24 +1040,24 @@ func (s *Server) handleUpdateWireGuardConfig(w http.ResponseWriter, r *http.Requ
 	}
 	cfgPath, err := s.wireGuardConfigPathForContext(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to resolve config path: "+err.Error())
 		return
 	}
 
 	content, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read body: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to read body: "+err.Error())
 		return
 	}
 
 	if s.executor != nil {
 		if err := s.executor.WriteConfig(r.Context(), cfgPath, content, 0644); err != nil {
-			http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to write config: "+err.Error())
 			return
 		}
 	} else {
 		if err := os.WriteFile(cfgPath, content, 0644); err != nil {
-			http.Error(w, "Failed to write config: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to write config: "+err.Error())
 			return
 		}
 	}
@@ -1084,7 +1074,7 @@ func (s *Server) handleGetWireGuardInterface(w http.ResponseWriter, r *http.Requ
 	}
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 
@@ -1097,8 +1087,7 @@ func (s *Server) handleGetWireGuardInterface(w http.ResponseWriter, r *http.Requ
 		redactWireGuardInterfaceSecret(&wgConfig.Interface)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(wgConfig.Interface)
+	writeJSON(w, http.StatusOK, wgConfig.Interface)
 }
 
 func (s *Server) handleUpdateWireGuardInterface(w http.ResponseWriter, r *http.Request) {
@@ -1106,24 +1095,24 @@ func (s *Server) handleUpdateWireGuardInterface(w http.ResponseWriter, r *http.R
 		return
 	}
 	var req core.WireGuardInterface
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 	beforeIface := wgConfig.Interface
 
 	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.UpdateInterface(req) }); err != nil {
-		http.Error(w, "Failed to update interface: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update interface: "+err.Error())
 		return
 	}
 	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
-		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to persist WireGuard config: "+err.Error())
 		return
 	}
 
@@ -1140,25 +1129,25 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	}
 	pubKey := r.URL.Query().Get("public_key")
 	if pubKey == "" {
-		http.Error(w, "public_key is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "public_key is required")
 		return
 	}
 
 	var req core.WireGuardPeer
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 
 	normalizedIPs, primaryIP, err := normalizeAllowedIPs(req.AllowedIPs)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -1180,7 +1169,7 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 
 	if host, ok := extractHostIP(primaryIP); ok {
 		if owner, found := usedIPs[host.String()]; found && owner != pubKey {
-			http.Error(w, "IP already assigned to another peer", http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "IP already assigned to another peer")
 			return
 		}
 	}
@@ -1198,11 +1187,11 @@ func (s *Server) handleUpdateWireGuardPeer(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := mutateWireGuardConfig(wgConfig, func(c *core.WireGuardConfig) error { return c.UpdatePeer(pubKey, req) }); err != nil {
-		http.Error(w, "Failed to update peer: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update peer: "+err.Error())
 		return
 	}
 	if err := s.saveWireGuardConfig(r.Context(), wgConfig); err != nil {
-		http.Error(w, "Failed to persist WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to persist WireGuard config: "+err.Error())
 		return
 	}
 
@@ -1246,7 +1235,7 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 	}
 	pubKey := r.URL.Query().Get("public_key")
 	if pubKey == "" {
-		http.Error(w, "public_key is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "public_key is required")
 		return
 	}
 
@@ -1257,8 +1246,7 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 		response := map[string]string{
 			"config": cfgText,
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 
@@ -1267,7 +1255,7 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 	if priv != "" {
 		wgConfig, err := s.loadWireGuardConfig(r.Context())
 		if err != nil {
-			http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 			return
 		}
 		var peer *core.WireGuardPeer
@@ -1278,24 +1266,23 @@ func (s *Server) handleGetWireGuardPeerConfig(w http.ResponseWriter, r *http.Req
 			}
 		}
 		if peer == nil {
-			http.Error(w, "Peer not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Peer not found")
 			return
 		}
 		cfgText, err := buildPeerConfig(*wgConfig, *peer, priv, s.config.PublicIP)
 		if err != nil {
-			http.Error(w, "Failed to build peer config: "+err.Error(), http.StatusBadRequest)
+			writeErr(w, http.StatusBadRequest, "Failed to build peer config: "+err.Error())
 			return
 		}
 		s.storeQRConfig(pubKey, cfgText, time.Hour)
 		if shouldRedactWireGuardReadOnly(r) {
 			cfgText = redactWireGuardConfigText(cfgText)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"config": cfgText})
+		writeJSON(w, http.StatusOK, map[string]string{"config": cfgText})
 		return
 	}
 
-	http.Error(w, "QR/config not available for this peer", http.StatusNotFound)
+	writeErr(w, http.StatusNotFound, "QR/config not available for this peer")
 }
 
 func (s *Server) handleGetWireGuardTraffic(w http.ResponseWriter, r *http.Request) {
@@ -1336,7 +1323,7 @@ func (s *Server) handleGetWireGuardTraffic(w http.ResponseWriter, r *http.Reques
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 
@@ -1345,7 +1332,7 @@ func (s *Server) handleGetWireGuardTraffic(w http.ResponseWriter, r *http.Reques
 	for i, p := range wgConfig.Peers {
 		rx, tx, err := s.store.GetWGTrafficDelta(p.PublicKey, start, end)
 		if err != nil {
-			http.Error(w, "Failed to read traffic: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to read traffic: "+err.Error())
 			return
 		}
 		key := p.PublicKey
@@ -1358,8 +1345,7 @@ func (s *Server) handleGetWireGuardTraffic(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.Request) {
@@ -1407,7 +1393,7 @@ func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.
 
 	wgConfig, err := s.loadWireGuardConfig(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to load WireGuard config: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to load WireGuard config: "+err.Error())
 		return
 	}
 
@@ -1419,7 +1405,7 @@ func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.
 		}
 		series, err := s.store.GetWGTrafficSeries(p.PublicKey, start, end, limit)
 		if err != nil {
-			http.Error(w, "Failed to read traffic series: "+err.Error(), http.StatusInternalServerError)
+			writeErr(w, http.StatusInternalServerError, "Failed to read traffic series: "+err.Error())
 			return
 		}
 		key := p.PublicKey
@@ -1434,8 +1420,7 @@ func (s *Server) handleGetWireGuardTrafficSeries(w http.ResponseWriter, r *http.
 		result[key] = series
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func buildPeerConfig(cfg core.WireGuardConfig, peer core.WireGuardPeer, clientPrivateKey, publicIP string) (string, error) {
@@ -1635,11 +1620,11 @@ func (s *Server) handleBackupWireGuardConfig(w http.ResponseWriter, r *http.Requ
 	}
 	src, err := s.wireGuardConfigPathForContext(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to resolve config path: "+err.Error())
 		return
 	}
 	if err := s.createConfigBackup(r.Context(), src); err != nil {
-		http.Error(w, "Backup failed: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Backup failed: "+err.Error())
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -1655,16 +1640,16 @@ func (s *Server) handleRestoreWireGuardConfig(w http.ResponseWriter, r *http.Req
 	}
 	dst, err := s.wireGuardConfigPathForContext(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to resolve config path: "+err.Error())
 		return
 	}
 	src := dst + ".bak"
 	if err := s.copyConfig(r.Context(), src, dst); err != nil {
 		if isNotFoundErr(err) {
-			http.Error(w, "Backup not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Backup not found")
 			return
 		}
-		http.Error(w, "Restore failed: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Restore failed: "+err.Error())
 		return
 	}
 	var content []byte
@@ -1674,7 +1659,7 @@ func (s *Server) handleRestoreWireGuardConfig(w http.ResponseWriter, r *http.Req
 		content, err = os.ReadFile(dst)
 	}
 	if err != nil {
-		http.Error(w, "Restore succeeded but failed to read restored file: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Restore succeeded but failed to read restored file: "+err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")
@@ -1687,16 +1672,15 @@ func (s *Server) handleListWireGuardConfigBackups(w http.ResponseWriter, r *http
 	}
 	src, err := s.wireGuardConfigPathForContext(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to resolve config path: "+err.Error())
 		return
 	}
 	backups, err := s.listConfigBackups(src, 10)
 	if err != nil {
-		http.Error(w, "Failed to list backups: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to list backups: "+err.Error())
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(backups)
+	writeJSON(w, http.StatusOK, backups)
 }
 
 func (s *Server) handleListWireGuardConfigBackupsForInterface(w http.ResponseWriter, r *http.Request) {
@@ -1709,21 +1693,21 @@ func (s *Server) handleGetWireGuardConfigBackup(w http.ResponseWriter, r *http.R
 	}
 	src, err := s.wireGuardConfigPathForContext(r.Context())
 	if err != nil {
-		http.Error(w, "Failed to resolve config path: "+err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Failed to resolve config path: "+err.Error())
 		return
 	}
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	if name == "" {
-		http.Error(w, "backup name is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "backup name is required")
 		return
 	}
 	content, err := s.readNamedBackup(r.Context(), src, name)
 	if err != nil {
 		if isNotFoundErr(err) {
-			http.Error(w, "Backup not found", http.StatusNotFound)
+			writeErr(w, http.StatusNotFound, "Backup not found")
 			return
 		}
-		http.Error(w, "Failed to read backup: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to read backup: "+err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain")

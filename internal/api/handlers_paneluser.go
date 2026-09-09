@@ -56,12 +56,12 @@ func (s *Server) handleGetPanelUsers(w http.ResponseWriter, r *http.Request) {
 
 	users, err := s.store.GetAllPanelUsers()
 	if err != nil {
-		http.Error(w, "Failed to fetch panel users: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to fetch panel users: "+err.Error())
 		return
 	}
 	b, err := json.Marshal(users)
 	if err != nil {
-		http.Error(w, "Failed to encode panel users: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to encode panel users: "+err.Error())
 		return
 	}
 	s.cache.SetWithTTL(cacheKeyAllPanelUsers, b, int64(len(b)), 30*time.Second)
@@ -78,12 +78,12 @@ type createPanelUserRequest struct {
 
 func (s *Server) handleCreatePanelUser(w http.ResponseWriter, r *http.Request) {
 	var req createPanelUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -91,16 +91,16 @@ func (s *Server) handleCreatePanelUser(w http.ResponseWriter, r *http.Request) {
 
 	// Prevent privilege escalation: caller cannot grant permissions they don't have.
 	if err := ensureGrantablePermissions(getPermissions(r), req.Permissions); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 
 	if err := s.store.CreatePanelUser(req.Username, req.Password, req.Permissions); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint") {
-			http.Error(w, "Username already exists", http.StatusConflict)
+			writeErr(w, http.StatusConflict, "Username already exists")
 			return
 		}
-		http.Error(w, "Failed to create panel user: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to create panel user: "+err.Error())
 		return
 	}
 
@@ -115,12 +115,12 @@ type updatePanelUserPermissionsRequest struct {
 
 func (s *Server) handleUpdatePanelUserPermissions(w http.ResponseWriter, r *http.Request) {
 	var req updatePanelUserPermissionsRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -128,12 +128,12 @@ func (s *Server) handleUpdatePanelUserPermissions(w http.ResponseWriter, r *http
 
 	// Prevent privilege escalation.
 	if err := ensureGrantablePermissions(getPermissions(r), req.Permissions); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
+		writeErr(w, http.StatusForbidden, err.Error())
 		return
 	}
 
 	if err := s.store.UpdatePanelUserPermissions(req.Username, req.Permissions); err != nil {
-		http.Error(w, "Failed to update permissions: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update permissions: "+err.Error())
 		return
 	}
 
@@ -148,21 +148,21 @@ type updatePanelUserUsernameRequest struct {
 
 func (s *Server) handleUpdatePanelUserUsername(w http.ResponseWriter, r *http.Request) {
 	var req updatePanelUserUsernameRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := s.store.UpdatePanelUsername(req.Username, req.NewUsername); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
-			http.Error(w, err.Error(), http.StatusConflict)
+			writeErr(w, http.StatusConflict, err.Error())
 			return
 		}
-		http.Error(w, "Failed to update username: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update username: "+err.Error())
 		return
 	}
 
@@ -178,17 +178,17 @@ type updatePanelUserPasswordRequest struct {
 
 func (s *Server) handleUpdatePanelUserPassword(w http.ResponseWriter, r *http.Request) {
 	var req updatePanelUserPasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 	if err := s.validate.Struct(req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if err := s.store.UpdatePanelUserPassword(req.Username, req.NewPassword); err != nil {
-		http.Error(w, "Failed to update password: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to update password: "+err.Error())
 		return
 	}
 
@@ -199,19 +199,19 @@ func (s *Server) handleUpdatePanelUserPassword(w http.ResponseWriter, r *http.Re
 func (s *Server) handleDeletePanelUser(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 	if username == "" {
-		http.Error(w, "username query parameter is required", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "username query parameter is required")
 		return
 	}
 
 	// Prevent self-deletion
 	claims, _ := r.Context().Value(userContextKey).(map[string]interface{})
 	if sub, _ := claims["sub"].(string); sub == username {
-		http.Error(w, "Cannot delete your own account", http.StatusBadRequest)
+		writeErr(w, http.StatusBadRequest, "Cannot delete your own account")
 		return
 	}
 
 	if err := s.store.DeletePanelUser(username); err != nil {
-		http.Error(w, "Failed to delete panel user: "+err.Error(), http.StatusInternalServerError)
+		writeErr(w, http.StatusInternalServerError, "Failed to delete panel user: "+err.Error())
 		return
 	}
 

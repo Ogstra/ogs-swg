@@ -517,6 +517,10 @@ func newDashboardTestServer(t *testing.T) (*Server, string, string) {
 		EnableSingbox:       false,
 		WireGuardConfigPath: wg0Path,
 		WireGuardConfigDir:  tmp,
+		// Fixed so getPublicIP never falls through to a real DetectPublicIP()
+		// network call, which would make golden/snapshot tests flaky across
+		// environments (see dashboard_golden_test.go).
+		PublicIP: "203.0.113.10",
 	}
 
 	return NewServer(store, cfg, exec), keyWG0, keyWG1

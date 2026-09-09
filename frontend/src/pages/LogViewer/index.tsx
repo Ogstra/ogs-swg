@@ -38,6 +38,7 @@ interface LogTerminalProps {
     autoScroll: boolean
     setAutoScroll: (v: boolean) => void
     viewMode: 'tail' | 'search'
+    searching: boolean
     searchStatus: string
     containerRef: React.RefObject<HTMLDivElement | null>
     onScroll: () => void
@@ -50,6 +51,7 @@ function LogTerminal({
     autoScroll,
     setAutoScroll,
     viewMode,
+    searching,
     searchStatus,
     containerRef,
     onScroll,
@@ -95,6 +97,27 @@ function LogTerminal({
         }
     }, [lines.length, autoScroll, viewMode])
 
+    // Scroll to bottom on each search chunk and on completion.
+    // Synchronous scroll runs immediately inside useLayoutEffect before the next
+    // render — unlike rAFs it cannot be cancelled by the next chunk arriving.
+    // The rAF is a fine-tune pass for after the virtualizer measures new items;
+    // cancelling it on cleanup is fine because the sync scroll already ran.
+    useLayoutEffect(() => {
+        if (viewMode !== 'search') return
+        if (lines.length === 0) return
+        if (!autoScroll) return
+
+        const el = containerRef.current
+        virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+        if (el) el.scrollTop = el.scrollHeight
+
+        const frame = requestAnimationFrame(() => {
+            virtualizer.scrollToIndex(lines.length - 1, { align: 'end' })
+            if (el) el.scrollTop = el.scrollHeight
+        })
+        return () => cancelAnimationFrame(frame)
+    }, [lines.length, viewMode, autoScroll, searching])
+
     const virtualItems = virtualizer.getVirtualItems()
 
     return (
@@ -132,6 +155,7 @@ function LogTerminal({
                 className="logs-scrollbar flex-1 overflow-y-auto p-4 font-mono text-xs md:text-sm bg-black/20"
                 ref={containerRef}
                 onScroll={onScroll}
+                onTouchStart={() => setAutoScroll(false)}
             >
                 {lines.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-slate-500 opacity-50">
@@ -263,6 +287,7 @@ export default function LogViewer() {
     }, [tailRawLines, query, backendTailQuery, viewMode])
 
     const handleScroll = () => {
+        if (searching) return
         const el = containerRef.current
         if (!el) return
         const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 10
@@ -290,6 +315,7 @@ export default function LogViewer() {
         setSearching(true)
         setLines([])
         setViewMode('search')
+        setAutoScroll(true)
         setSearchStatus('Searching logs...')
         let completed = false
         let matchedCount = 0
@@ -327,8 +353,8 @@ export default function LogViewer() {
                 }
                 if (event.type === 'chunk') {
                     matchedCount = event.matched ?? matchedCount
-                    // Prepend newest lines: backend sends oldest-first within each chunk,
-                    // reverse so newest is at top when prepended.
+                    // Backend scans newest-first for limit correctness. Display search
+                    // results chronologically, oldest at top and newest at bottom.
                     const nextLines = [...(event.logs || [])].reverse()
                     // Accumulate into buffer; flush will batch these into one React render.
                     pendingLinesRef.current = [...nextLines, ...pendingLinesRef.current]
@@ -626,6 +652,7 @@ export default function LogViewer() {
                 autoScroll={autoScroll}
                 setAutoScroll={setAutoScroll}
                 viewMode={viewMode}
+                searching={searching}
                 searchStatus={searchStatus}
                 containerRef={containerRef}
                 onScroll={handleScroll}

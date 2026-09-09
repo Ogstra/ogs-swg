@@ -19,6 +19,17 @@ const DEFAULT_VLESS_FLOW = 'xtls-rprx-vision'
 const SUPPORTED_LINK_TYPES = new Set(['vless', 'vmess', 'trojan', 'hysteria2', 'shadowsocks', 'anytls', 'naive'])
 type UserType = 'vless' | 'vmess' | 'trojan' | 'hysteria2' | 'shadowsocks' | 'anytls' | 'naive'
 
+function withClientParam(link: string, client: string): string {
+    try {
+        const url = new URL(link)
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return link
+        url.searchParams.set('client', client)
+        return url.toString()
+    } catch {
+        return link
+    }
+}
+
 function bytesToGbString(bytes?: number) {
     return bytes && bytes > 0 ? (bytes / BYTES_PER_GB).toFixed(2) : ''
 }
@@ -61,6 +72,24 @@ function formatUserTypeLabel(type: UserType): string {
     return type.toUpperCase()
 }
 
+type ExternalProfileSummary = NonNullable<UserStatus['external_profiles']>[number]
+
+function externalProfileTag(profile: ExternalProfileSummary): string {
+    return `external-${String(profile.type || 'unknown').trim().toLowerCase()}`
+}
+
+function visibleUserTags(user: Pick<UserStatus, 'inbound_tags' | 'external_profiles'>): string[] {
+    const tags = [
+        ...(user.inbound_tags || []).map(tag => tag.trim()).filter(Boolean),
+        ...(user.external_profiles || []).map(externalProfileTag),
+    ]
+    return Array.from(new Set(tags))
+}
+
+function isExternalOnlyUser(user: Pick<UserStatus, 'inbound_tags' | 'external_profiles'>): boolean {
+    return (user.external_profiles || []).length > 0 && (user.inbound_tags || []).filter(tag => tag.trim()).length === 0
+}
+
 export default function UserManagement() {
     const { success, error: toastError } = useToast()
     const { permissions } = useAuth()
@@ -89,7 +118,6 @@ export default function UserManagement() {
     const [routeTagDeleteTarget, setRouteTagDeleteTarget] = useState<UserRouteTag | null>(null)
     const [routeTagSaving, setRouteTagSaving] = useState(false)
     const [routeTagDefinitionSaving, setRouteTagDefinitionSaving] = useState(false)
-
     const [isEditing, setIsEditing] = useState(false)
     const [sortKey, setSortKey] = useState<'user' | 'quota' | 'usage' | 'status' | 'last_seen'>('user')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
@@ -146,18 +174,50 @@ export default function UserManagement() {
         setQrLoading(true)
         setQrLink('')
         setQrError('')
-        const firstSupportedTag = (user.inbound_tags || []).find(
-            tag => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || '')
-        ) || ''
+        const inboundOptions = (user.inbound_tags || []).filter(canBuildQrForInboundTag)
+        const firstSupportedTag = inboundOptions[0]
+            || (user.external_profiles && user.external_profiles.length > 0 ? `ext:${user.external_profiles[0].id}` : '')
         setSelectedQrInbound(firstSupportedTag)
-        setQrLinkCache({})
+        const cache: Record<string, string> = {}
+        setQrLinkCache(cache)
         setModalState({ type: 'qr', data: user })
+        // Pre-fetch all inbound links + external profile links into cache
+        const allFetches: Array<Promise<void>> = []
+        const setFetchedLink = (key: string, link: string) => {
+            setQrLinkCache(prev => ({ ...prev, [key]: link }))
+            if (key === firstSupportedTag) {
+                setQrLink(link)
+            }
+        }
+        inboundOptions.forEach(tag => {
+            allFetches.push(
+                api.getUserLink(user.name, tag)
+                    .then(res => { setFetchedLink(tag, res.link || '') })
+                    .catch(err => {
+                        if (tag === firstSupportedTag) setQrError(String(err))
+                    })
+            )
+        });
+        (user.external_profiles || []).forEach(ep => {
+            const key = `ext:${ep.id}`
+            allFetches.push(
+                api.getExternalProfileLink(ep.id, user.name)
+                    .then(res => { setFetchedLink(key, res.link || '') })
+                    .catch(err => {
+                        if (key === firstSupportedTag) setQrError(String(err))
+                    })
+            )
+        })
+        if (!firstSupportedTag) {
+            setQrError('No supported link available for this user')
+        }
+        Promise.allSettled(allFetches).finally(() => setQrLoading(false))
     }
 
     const inferInboundsFromUsers = (userList: UserStatus[]) => {
         const uniqueTags = Array.from(
             new Set(
-                userList.flatMap(u => (u.inbound_tags || []).map(tag => tag.trim()).filter(Boolean))
+                userList.flatMap(u => visibleUserTags(u))
             )
         )
         return uniqueTags.map(tag => ({ tag, type: '' }))
@@ -242,6 +302,10 @@ export default function UserManagement() {
     )
 
     const getInboundType = (tag: string) => inboundTypeByTag.get(tag) as UserType | undefined
+    const canBuildQrForInboundTag = (tag: string) => {
+        const type = inboundTypeByTag.get(tag) || ''
+        return type === '' || SUPPORTED_LINK_TYPES.has(type)
+    }
     const getInboundByTag = (tag: string) => inbounds.find(inb => inb.tag === tag)
     const canEditFlowForInbound = (type: string, inboundTag: string) => canSelectInboundUserFlow(type, getInboundByTag(inboundTag) || null)
     const canShowBulkFlow = (inboundTag: string) => getInboundType(inboundTag) === 'vless' && canEditFlowForInbound('vless', inboundTag)
@@ -275,47 +339,16 @@ export default function UserManagement() {
     }
 
     useEffect(() => {
-        if (modalState.type === 'qr' && modalState.data?.inbound_tags?.length > 0) {
-            const firstSupported = (modalState.data.inbound_tags as string[]).find(
-                (tag: string) => SUPPORTED_LINK_TYPES.has(inboundTypeByTag.get(tag) || '')
-            ) || ''
-            setSelectedQrInbound(firstSupported)
-            setQrLink('')
-            setQrError('')
-            setQrLinkCache({})
-        }
         if (modalState.type !== 'qr') {
             setSelectedQrInbound('')
             setQrLink('')
             setQrError('')
             setQrLinkCache({})
         }
-    }, [modalState.type, modalState.data])
-
-    useEffect(() => {
-        if (modalState.type !== 'qr' || !modalState.data || !selectedQrInbound) return
-        const cached = qrLinkCache[selectedQrInbound]
-        if (cached) {
-            setQrLink(cached)
-            setQrError('')
-            return
-        }
-        setQrLoading(true)
-        setQrError('')
-        api.getUserLink(modalState.data.name, selectedQrInbound)
-            .then(res => {
-                setQrLink(res.link || '')
-                setQrLinkCache(prev => ({ ...prev, [selectedQrInbound]: res.link }))
-            })
-            .catch(err => {
-                setQrLink('')
-                setQrError(err?.message || 'Failed to load link')
-            })
-            .finally(() => setQrLoading(false))
-    }, [modalState.type, modalState.data, selectedQrInbound, qrLinkCache])
+    }, [modalState.type])
 
     const sortedUsers = users
-        .filter(u => !filterInbound || (u.inbound_tags && u.inbound_tags.includes(filterInbound)) || (!u.inbound_tags && !filterInbound))
+        .filter(u => !filterInbound || visibleUserTags(u).includes(filterInbound))
         .filter(u => !routeTagFilter || (u.route_tags || []).some(tag => String(tag.id) === routeTagFilter))
         .sort((a, b) => {
             const dir = sortDir === 'asc' ? 1 : -1
@@ -375,7 +408,7 @@ export default function UserManagement() {
                     className="max-w-[180px] truncate"
                     title={tag.broken_reason || tag.name}
                 >
-                    {tag.name}{tag.broken ? ' (needs relink)' : ''}
+                    {tag.name}{tag.broken ? (tag.broken_reason === 'inbound_mismatch' ? ' (inbound mismatch)' : ' (needs relink)') : ''}
                 </Badge>
             ))}
         </div>
@@ -391,6 +424,10 @@ export default function UserManagement() {
     }
 
     const openRouteTagsModal = (user: UserStatus) => {
+        if (isExternalOnlyUser(user)) {
+            toastError('External-only users cannot use route tags')
+            return
+        }
         setSelectedRouteTagIds(new Set((user.route_tags || []).map(tag => tag.id)))
         setModalState({ type: 'route_tags', data: user })
     }
@@ -412,6 +449,10 @@ export default function UserManagement() {
     const handleSaveUserRouteTags = async () => {
         if (!canWriteUsers || !modalState.data) return
         const user = modalState.data as UserStatus
+        if (isExternalOnlyUser(user)) {
+            toastError('External-only users cannot use route tags')
+            return
+        }
         setRouteTagSaving(true)
         try {
             const result = await api.updateUserRouteTags(user.name, Array.from(selectedRouteTagIds))
@@ -937,7 +978,7 @@ export default function UserManagement() {
                             <option value="">All Route Tags</option>
                             {(routeTagsQuery.data || []).map(tag => (
                                 <option key={tag.id} value={String(tag.id)}>
-                                    {tag.name}{tag.broken ? ' (needs relink)' : ''}
+                                    {tag.name}{tag.broken ? (tag.broken_reason === 'inbound_mismatch' ? ' (inbound mismatch)' : ' (needs relink)') : ''}
                                 </option>
                             ))}
                         </select>
@@ -1069,8 +1110,8 @@ export default function UserManagement() {
                                             </td>
                                             <td className="p-2">
                                                 <div className="flex flex-wrap gap-2 max-w-full">
-                                                    {(user.inbound_tags && user.inbound_tags.length > 0) ? (
-                                                        user.inbound_tags.map(tag => (
+                                                    {visibleUserTags(user).length > 0 ? (
+                                                        visibleUserTags(user).map(tag => (
                                                             <Badge key={tag} variant="info" className="max-w-[160px] truncate">
                                                                 {tag}
                                                             </Badge>
@@ -1097,7 +1138,7 @@ export default function UserManagement() {
                                                     </ActionIconButton>
                                                     <ActionIconButton
                                                         onClick={() => openRouteTagsModal(user)}
-                                                        disabled={!canWriteUsers}
+                                                        disabled={!canWriteUsers || isExternalOnlyUser(user)}
                                                         title="Route Tags"
                                                     >
                                                         <Tags size={16} />
@@ -1180,7 +1221,7 @@ export default function UserManagement() {
                                             </ActionIconButton>
                                             <ActionIconButton
                                                 onClick={() => openRouteTagsModal(user)}
-                                                disabled={!canWriteUsers}
+                                                disabled={!canWriteUsers || isExternalOnlyUser(user)}
                                                 title="Route Tags"
                                             >
                                                 <Tags size={16} />
@@ -1208,8 +1249,8 @@ export default function UserManagement() {
                                             <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>{statusText}</span>
                                         </div>
                                         <div className="min-w-0 flex flex-1 flex-wrap justify-end gap-1.5">
-                                            {(user.inbound_tags && user.inbound_tags.length > 0) ? (
-                                                user.inbound_tags.map(tag => (
+                                            {visibleUserTags(user).length > 0 ? (
+                                                visibleUserTags(user).map(tag => (
                                                     <Badge key={tag} variant="info" className="max-w-[140px] truncate" title={tag}>{tag}</Badge>
                                                 ))
                                             ) : (
@@ -1517,15 +1558,22 @@ export default function UserManagement() {
                                 No route tags configured.
                             </div>
                         ) : (
-                            (routeTagsQuery.data || []).map(tag => (
+                            (routeTagsQuery.data || []).map(tag => {
+                                const userInbounds: string[] = modalState.data?.inbound_tags || []
+                                const ruleInbounds: string[] = (() => {
+                                    try { return (JSON.parse(tag.rule_match_json) as any)?.inbound ?? [] } catch { return [] }
+                                })()
+                                const inboundMismatch = ruleInbounds.length > 0 && !ruleInbounds.some((ib: string) => userInbounds.includes(ib))
+                                const isDisabled = tag.broken || inboundMismatch || !canWriteUsers
+                                return (
                                 <label
                                     key={tag.id}
-                                    className={`flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 ${tag.broken ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-700'}`}
+                                    className={`flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 p-3 ${isDisabled ? 'cursor-not-allowed opacity-75' : 'cursor-pointer hover:border-slate-700'}`}
                                 >
                                     <input
                                         type="checkbox"
                                         checked={selectedRouteTagIds.has(tag.id)}
-                                        disabled={tag.broken || !canWriteUsers}
+                                        disabled={isDisabled}
                                         onChange={e => {
                                             const next = new Set(selectedRouteTagIds)
                                             if (e.target.checked) {
@@ -1541,12 +1589,15 @@ export default function UserManagement() {
                                         <span className="flex flex-wrap items-center gap-2">
                                             <span className="font-medium text-slate-100">{tag.name}</span>
                                             {tag.broken && <Badge variant="error">needs relink</Badge>}
+                                            {inboundMismatch && <Badge variant="error">inbound mismatch</Badge>}
                                         </span>
                                         {tag.description && <span className="mt-1 block text-xs text-slate-500">{tag.description}</span>}
                                         {tag.broken_reason && <span className="mt-1 block text-xs text-red-300">{tag.broken_reason}</span>}
+                                        {inboundMismatch && <span className="mt-1 block text-xs text-red-300">user inbound not in rule inbound list</span>}
                                     </span>
                                 </label>
-                            ))
+                                )
+                            })
                         )}
                     </div>
                 </div>
@@ -1927,14 +1978,59 @@ export default function UserManagement() {
             </Modal >
 
             {/* QR Code Modal */}
-            <QrLinkModal
-                isOpen={modalState.type === 'qr'}
-                onClose={() => setModalState({ type: null })}
-                title={modalState.data ? `${modalState.data.name}` : 'User Configuration'}
-                link={qrLoading ? '' : qrLink}
-                loading={qrLoading}
-                error={qrError && !qrLoading ? qrError : undefined}
-            />
+            {(() => {
+                const qrUser = modalState.data as UserStatus | undefined
+                const inboundOptions = (qrUser?.inbound_tags || [])
+                    .filter(canBuildQrForInboundTag)
+                    .map(tag => ({ id: tag, label: tag }))
+                const extOptions = (qrUser?.external_profiles || [])
+                    .map(ep => ({ id: `ext:${ep.id}`, label: externalProfileTag(ep) }))
+                const allOptions = [...inboundOptions, ...extOptions]
+                const linkVariants = allOptions.flatMap(opt => {
+                    const link = qrLinkCache[opt.id] || ''
+                    return [
+                        {
+                            id: opt.id,
+                            label: opt.label,
+                            link,
+                            loading: opt.id === selectedQrInbound && qrLoading,
+                        },
+                        {
+                            id: `${opt.id}:happ`,
+                            label: `${opt.label} Happ`,
+                            link: withClientParam(link, 'happ'),
+                            loading: opt.id === selectedQrInbound && qrLoading,
+                        },
+                    ]
+                })
+                if (allOptions.length > 1) {
+                    return (
+                        <QrLinkModal
+                            isOpen={modalState.type === 'qr'}
+                            onClose={() => setModalState({ type: null })}
+                            title={qrUser ? qrUser.name : 'User Configuration'}
+                            link={qrLoading ? '' : qrLink}
+                            loading={qrLoading}
+                            error={qrError && !qrLoading ? qrError : undefined}
+                            linkVariants={linkVariants}
+                        />
+                    )
+                }
+                return (
+                    <QrLinkModal
+                        isOpen={modalState.type === 'qr'}
+                        onClose={() => setModalState({ type: null })}
+                        title={qrUser ? qrUser.name : 'User Configuration'}
+                        link={qrLoading ? '' : qrLink}
+                        linkVariants={qrLink ? [
+                            { id: 'direct', label: 'Direct', link: qrLink, loading: qrLoading },
+                            { id: 'happ', label: 'Happ', link: withClientParam(qrLink, 'happ'), loading: qrLoading },
+                        ] : undefined}
+                        loading={qrLoading}
+                        error={qrError && !qrLoading ? qrError : undefined}
+                    />
+                )
+            })()}
 
             {/* Inbound Selection Modal */}
             <Modal

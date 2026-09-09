@@ -50,7 +50,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: 'stable'
+          go-version: '1.25'
 
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -204,6 +204,10 @@ jobs:
             fi
 
             docker network create ogs-bg-net >/dev/null 2>&1 || true
+
+            # Leftover bake state points at the slot we are about to start, with an
+            # expired window — the watchdog would gc the new slot mid-deploy.
+            rm -f .bluegreen.previous .bluegreen.bake_until
 
             BAKE_SECONDS='${{ github.event.inputs.bake_seconds || '600' }}'
             case "$BAKE_SECONDS" in

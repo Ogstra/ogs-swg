@@ -113,7 +113,7 @@ export default function WireGuard() {
 
     const peersQuery = useQuery({
         queryKey: ['wireguard-peers', activeInterface],
-        queryFn: () => api.getWireGuardPeersForInterface(activeInterface),
+        queryFn: () => api.getWireGuardPeers(activeInterface),
         enabled: !!activeInterface,
         refetchInterval: 5000,
         placeholderData: previousData => previousData,
@@ -122,7 +122,7 @@ export default function WireGuard() {
 
     const interfaceQuery = useQuery({
         queryKey: ['wireguard-interface', activeInterface],
-        queryFn: () => api.getWireGuardInterfaceForInterface(activeInterface),
+        queryFn: () => api.getWireGuardInterface(activeInterface),
         enabled: !!activeInterface,
         refetchInterval: 5000,
         placeholderData: previousData => previousData,
@@ -159,7 +159,7 @@ export default function WireGuard() {
             setConfigLoading(false)
             return
         }
-        api.getWireGuardPeerConfigForInterface(activeInterface, peer.public_key)
+        api.getWireGuardPeerConfig(peer.public_key, undefined, activeInterface)
             .then(res => {
                 setConfigText(res.config)
                 const expires = new Date(Date.now() + 60 * 60 * 1000)
@@ -189,7 +189,7 @@ export default function WireGuard() {
             return
         }
         try {
-            const peer = await api.createWireGuardPeerForInterface(activeInterface, { alias: newName, ip: newIp, endpoint: newEndpoint })
+            const peer = await api.createWireGuardPeer({ alias: newName, ip: newIp, endpoint: newEndpoint }, activeInterface)
             setNewName('')
             setNewIp('')
             setNewEndpoint('')
@@ -214,7 +214,7 @@ export default function WireGuard() {
         }
         try {
             const { persistent_keepalive, private_key, ...rest } = editingPeer as any
-            await api.updateWireGuardPeerForInterface(activeInterface, editingPeer.public_key, rest)
+            await api.updateWireGuardPeer(editingPeer.public_key, rest, activeInterface)
             setEditingPeer(null)
             setShowPeerModal(false)
             await refreshData()
@@ -242,7 +242,7 @@ export default function WireGuard() {
         const target = confirmDeletePeer
         setConfirmDeletePeer(null)
         try {
-            await api.deleteWireGuardPeerForInterface(activeInterface, target.public_key)
+            await api.deleteWireGuardPeer(target.public_key, activeInterface)
             setLastDeletedPeer(target)
             success('Peer deleted')
             await refreshData()
@@ -262,13 +262,13 @@ export default function WireGuard() {
             return
         }
         try {
-            await api.restoreWireGuardPeerForInterface(activeInterface, {
+            await api.restoreWireGuardPeer({
                 public_key: lastDeletedPeer.public_key,
                 allowed_ips: lastDeletedPeer.allowed_ips,
                 endpoint: lastDeletedPeer.endpoint,
                 alias: lastDeletedPeer.alias,
                 preshared_key: lastDeletedPeer.preshared_key
-            })
+            }, activeInterface)
             success('Peer restored')
             setLastDeletedPeer(null)
             await refreshData()
@@ -299,7 +299,7 @@ export default function WireGuard() {
         }
         try {
             const normalized = normalizeWireGuardInterfaceEditInput(editInput)
-            await api.updateWireGuardInterfaceForInterface(activeInterface, {
+            await api.updateWireGuardInterface({
                 ...editInterface,
                 address: normalized.address,
                 listen_port: normalized.listenPort,
@@ -308,7 +308,7 @@ export default function WireGuard() {
                 post_up: (editInterface.post_up || '').trim(),
                 post_down: (editInterface.post_down || '').trim(),
                 dns: (editInterface.dns || '').trim(),
-            })
+            }, activeInterface)
             setInterfaceErrors({})
             setShowInterfaceModal(false)
             await refreshData()

@@ -215,17 +215,51 @@ export default function LogsBackupsTab({
 
             {/* Cold Storage */}
             <Card title="Cold Storage">
-                <div>
-                    <label className="block text-sm font-medium text-slate-300 mb-2">Cold segment directory</label>
-                    <input
-                        type="text"
-                        value={features.log_cold_dir ?? 'data/logs'}
-                        onChange={e => setFeatures(prev => ({ ...prev, log_cold_dir: e.target.value }))}
-                        disabled={!canWriteSettings}
-                        placeholder="data/logs"
-                        className="w-full max-w-md bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
-                    />
-                    <p className="text-xs text-slate-500 mt-1">Directory where cold log segments are archived.</p>
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Cold segment directory</label>
+                        <input
+                            type="text"
+                            value={features.log_cold_dir ?? 'data/logs'}
+                            onChange={e => setFeatures(prev => ({ ...prev, log_cold_dir: e.target.value }))}
+                            disabled={!canWriteSettings}
+                            placeholder="data/logs"
+                            className="w-full max-w-md bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors font-mono"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">Directory where cold log segments are archived.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Hot target after export (%)</label>
+                        <input
+                            type="number"
+                            min={50}
+                            max={95}
+                            value={features.log_retention_target_percent ?? 80}
+                            onChange={e => {
+                                const value = Number(e.target.value) || 80
+                                setFeatures(prev => ({ ...prev, log_retention_target_percent: Math.min(95, Math.max(50, value)) }))
+                            }}
+                            disabled={!canWriteSettings}
+                            className="w-28 bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">When hot logs exceed max size, export enough old rows to land near this percentage of the max.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-2">Max export per run (%)</label>
+                        <input
+                            type="number"
+                            min={5}
+                            max={50}
+                            value={features.log_retention_max_export_percent ?? 25}
+                            onChange={e => {
+                                const value = Number(e.target.value) || 25
+                                setFeatures(prev => ({ ...prev, log_retention_max_export_percent: Math.min(50, Math.max(5, value)) }))
+                            }}
+                            disabled={!canWriteSettings}
+                            className="w-28 bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
+                        />
+                        <p className="text-xs text-slate-500 mt-1">Caps how much hot history can move to cold storage in a single maintenance pass.</p>
+                    </div>
                     <div className="flex justify-end mt-3 max-w-md">
                         <Button
                             onClick={handleSaveRetention}
