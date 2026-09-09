@@ -41,6 +41,7 @@ A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstr
 *   **Logs**: tail and filter Sing-box access logs in real time.
 *   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.
 *   **Raw Configuration**: full JSON editor for the Sing-box config file (Experimental).
+*   **Notifications**: push alerts via [ntfy](https://ntfy.sh) (self-hosted or ntfy.sh) for service down/recovery, high traffic thresholds, and Sing-box config apply failures — configurable per-event toggles, Settings-managed (no restart), with a test-notification button.
 
 ### Subscriptions
 
