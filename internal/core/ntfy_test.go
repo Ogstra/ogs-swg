@@ -297,21 +297,21 @@ func TestNtfyNewHWIDMessage(t *testing.T) {
 		info := NtfyNewHWIDInfo{
 			SubscriptionName: "family-plan",
 			Username:         "alice",
-			HWIDHash:         "abc123def456",
 			HWIDPrefix:       "abc123",
 			DeviceModel:      "iPhone15,2",
 			DeviceOS:         "iOS",
 			DeviceOSVersion:  "17.4",
 			AppVersion:       "1.2.3",
 			Country:          "AR",
+			ClientIP:         "203.0.113.10",
 		}
 		msg := NtfyNewHWIDMessage(info)
 
 		wantLines := []string{
 			"Subscription: family-plan",
 			"User: alice",
+			"IP: 203.0.113.10",
 			"HWID prefix: abc123",
-			"HWID hash: abc123def456",
 			"Device model: iPhone15,2",
 			"Device OS: iOS",
 			"OS version: 17.4",
@@ -331,8 +331,8 @@ func TestNtfyNewHWIDMessage(t *testing.T) {
 		wantLabels := []string{
 			"Subscription: -",
 			"User: -",
+			"IP: -",
 			"HWID prefix: -",
-			"HWID hash: -",
 			"Device model: -",
 			"Device OS: -",
 			"OS version: -",
@@ -354,8 +354,8 @@ func TestNtfyNewHWIDMessage(t *testing.T) {
 		if msg.Priority != 3 {
 			t.Errorf("Priority = %d, want 3", msg.Priority)
 		}
-		if !slices.Equal(msg.Tags, []string{"new"}) {
-			t.Errorf("Tags = %q, want [\"new\"]", msg.Tags)
+		if !slices.Equal(msg.Tags, []string{"iphone"}) {
+			t.Errorf("Tags = %q, want [\"iphone\"]", msg.Tags)
 		}
 	})
 
@@ -367,8 +367,8 @@ func TestNtfyNewHWIDMessage(t *testing.T) {
 		}
 		msg := NtfyNewHWIDMessage(info)
 		lines := strings.Split(msg.Message, "\n")
-		if len(lines) != 9 {
-			t.Fatalf("got %d lines, want exactly 9: %q", len(lines), lines)
+		if len(lines) != 10 {
+			t.Fatalf("got %d lines, want exactly 10: %q", len(lines), lines)
 		}
 		if !strings.Contains(lines[1], "alice Injected: line") {
 			t.Errorf("expected embedded newline collapsed to space within the User line, got %q", lines[1])

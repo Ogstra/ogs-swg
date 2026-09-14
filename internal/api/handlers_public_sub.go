@@ -438,15 +438,19 @@ func (s *Server) observeSubscriptionHWID(r *http.Request, sub store.GetSubscript
 		return
 	}
 	s.ntfyNotifier.ObserveSubscriptionHWID(r.Context(), core.NtfyNewHWIDInfo{
-		SubscriptionName: subscriptionDisplayName(sub.Name, sub.Alias),
+		// sub.Name (not sub.Alias) — the alias is the client-facing display
+		// name; this notification is for the operator, who identifies
+		// subscriptions by their real internal name.
+		SubscriptionName: sub.Name,
 		Username:         strings.Join(users, ", "),
-		HWIDHash:         meta.hwidHash,
 		HWIDPrefix:       meta.hwidPrefix,
 		DeviceModel:      meta.deviceModel,
 		DeviceOS:         meta.deviceOS,
 		DeviceOSVersion:  meta.deviceOSVersion,
 		AppVersion:       meta.appVersion,
 		Country:          meta.country,
+		ClientIP:         resolveSubscriptionRequestIP(r),
+		RequestedAt:      s.now(),
 	})
 }
 

@@ -230,13 +230,14 @@ func NtfyTestMessage() NtfyMessage {
 type NtfyNewHWIDInfo struct {
 	SubscriptionName string
 	Username         string
-	HWIDHash         string
 	HWIDPrefix       string
 	DeviceModel      string
 	DeviceOS         string
 	DeviceOSVersion  string
 	AppVersion       string
 	Country          string
+	ClientIP         string
+	RequestedAt      time.Time
 }
 
 // NtfyNewHWIDMessage builds the notification for a new device observed on a
@@ -252,11 +253,17 @@ func NtfyNewHWIDMessage(info NtfyNewHWIDInfo) NtfyMessage {
 		return v
 	}
 
+	requestedAt := info.RequestedAt
+	if requestedAt.IsZero() {
+		requestedAt = time.Now()
+	}
+
 	lines := []string{
 		"Subscription: " + field(info.SubscriptionName),
 		"User: " + field(info.Username),
+		"Date/time: " + requestedAt.Format("2006-01-02 15:04:05 MST"),
+		"IP: " + field(info.ClientIP),
 		"HWID prefix: " + field(info.HWIDPrefix),
-		"HWID hash: " + field(info.HWIDHash),
 		"Device model: " + field(info.DeviceModel),
 		"Device OS: " + field(info.DeviceOS),
 		"OS version: " + field(info.DeviceOSVersion),
@@ -267,7 +274,7 @@ func NtfyNewHWIDMessage(info NtfyNewHWIDInfo) NtfyMessage {
 	return NtfyMessage{
 		Title:    fmt.Sprintf("New device on subscription: %s", field(info.SubscriptionName)),
 		Message:  strings.Join(lines, "\n"),
-		Tags:     []string{"new"},
+		Tags:     []string{"iphone"},
 		Priority: 3,
 	}
 }
