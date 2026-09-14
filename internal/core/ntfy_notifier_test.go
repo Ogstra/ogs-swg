@@ -409,7 +409,7 @@ func TestObserveSubscriptionHWID(t *testing.T) {
 	sampleInfo := NtfyNewHWIDInfo{
 		SubscriptionName: "family-plan",
 		Username:         "alice",
-		HWIDHash:         "abc123def456",
+		HWIDPrefix:       "abc123",
 	}
 
 	t.Run("enabled_and_configured_publishes_once", func(t *testing.T) {
