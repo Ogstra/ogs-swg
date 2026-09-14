@@ -26,6 +26,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
     const [enableWireguardDown, setEnableWireguardDown] = useState(false)
     const [enableHighTraffic, setEnableHighTraffic] = useState(false)
     const [enableConfigErrors, setEnableConfigErrors] = useState(false)
+    const [enableNewHwid, setEnableNewHwid] = useState(false)
     const [trafficThresholdBytes, setTrafficThresholdBytes] = useState(0)
 
     const settingsQuery = useQuery({
@@ -47,6 +48,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
         setEnableWireguardDown(!!data.enable_wireguard_down)
         setEnableHighTraffic(!!data.enable_high_traffic)
         setEnableConfigErrors(!!data.enable_config_errors)
+        setEnableNewHwid(!!data.enable_new_hwid)
         setTrafficThresholdBytes(data.traffic_threshold_bytes || 0)
     }, [settingsQuery.data])
 
@@ -61,6 +63,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
         enable_wireguard_down: enableWireguardDown,
         enable_high_traffic: enableHighTraffic,
         enable_config_errors: enableConfigErrors,
+        enable_new_hwid: enableNewHwid,
         traffic_threshold_bytes: trafficThresholdBytes,
     })
 
@@ -274,6 +277,22 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
                         />
                         <div>
                             <div className="font-semibold text-white">High total traffic threshold reached</div>
+                        </div>
+                    </label>
+
+                    <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                        <input
+                            type="checkbox"
+                            checked={enableNewHwid}
+                            onChange={e => setEnableNewHwid(e.target.checked)}
+                            disabled={!canWriteSettings}
+                            className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 disabled:opacity-60"
+                        />
+                        <div>
+                            <div className="font-semibold text-white">New device on a subscription</div>
+                            <div className="text-sm text-slate-400 mt-1">
+                                Fires the first time a device (HWID) never seen before requests a given subscription. Notification only — access is never blocked.
+                            </div>
                         </div>
                     </label>
 
