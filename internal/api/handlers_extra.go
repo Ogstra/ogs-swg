@@ -78,6 +78,8 @@ func (s *Server) handleRestartService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.ntfyNotifier.NotifyServiceRestarting(req.Service)
+
 	if s.shouldDetachServiceAction("restart", req.Service) {
 		var afterSuccess func()
 		if req.Service == "sing-box" {
@@ -155,6 +157,8 @@ func (s *Server) handleStopService(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "System executor not initialized")
 		return
 	}
+
+	s.ntfyNotifier.NotifyServiceRestarting(req.Service)
 
 	if s.shouldDetachServiceAction("stop", req.Service) {
 		s.writeAcceptedServiceAction(w)

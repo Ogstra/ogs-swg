@@ -42,16 +42,25 @@ type NtfyNotifier struct {
 	trafficAbove bool
 
 	lastApplyOK time.Time // zero = no successful config apply observed yet
+
+	// restartGraceUntil holds, per service, the time until which an observed
+	// down or down->up transition is treated as an operator-initiated restart
+	// and never notified (neither as down/recovered nor as crash-after-reload).
+	// Without this, any panel-triggered restart (from "Apply changes" or the
+	// explicit Restart button) that the status poller happens to catch mid-
+	// bounce is indistinguishable from a genuine unexpected crash.
+	restartGraceUntil map[string]time.Time
 }
 
 // NewNtfyNotifier constructs a notifier with the given settings loader and
 // publish function. Defaults: now = time.Now, crash window = 120s.
 func NewNtfyNotifier(settings NtfySettingsFunc, publish NtfyPublishFunc) *NtfyNotifier {
 	return &NtfyNotifier{
-		settings:    settings,
-		publish:     publish,
-		now:         time.Now,
-		crashWindow: 120 * time.Second,
+		settings:          settings,
+		publish:           publish,
+		now:               time.Now,
+		crashWindow:       120 * time.Second,
+		restartGraceUntil: make(map[string]time.Time),
 	}
 }
 
@@ -101,6 +110,8 @@ func (n *NtfyNotifier) ObserveServiceStatus(ctx context.Context, service string,
 		return
 	}
 
+	inGrace := n.now().Before(n.restartGraceUntil[service])
+
 	if *ptr == nil {
 		v := up
 		*ptr = &v
@@ -115,6 +126,13 @@ func (n *NtfyNotifier) ObserveServiceStatus(ctx context.Context, service string,
 
 	v := up
 	*ptr = &v
+
+	if inGrace {
+		// Operator-initiated restart in progress (Apply changes / Restart
+		// button) — this down/up blip is expected, not a service incident.
+		n.mu.Unlock()
+		return
+	}
 
 	crash := service == NtfyServiceSingbox && !up &&
 		!n.lastApplyOK.IsZero() && n.now().Sub(n.lastApplyOK) <= n.crashWindow
@@ -178,6 +196,22 @@ func (n *NtfyNotifier) NotifyConfigApplySucceeded() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.lastApplyOK = n.now()
+}
+
+// NotifyServiceRestarting marks the given service as undergoing an
+// operator-initiated action (Restart, Stop, or the restart triggered by
+// "Apply changes"), so the status poller's next down/up observations within
+// the crash window are treated as expected rather than a
+// down/recovered/crash-after-reload event. It also clears any pending
+// config-apply crash correlation for sing-box, since this action supersedes
+// it.
+func (n *NtfyNotifier) NotifyServiceRestarting(service string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.restartGraceUntil[service] = n.now().Add(n.crashWindow)
+	if service == NtfyServiceSingbox {
+		n.lastApplyOK = time.Time{}
+	}
 }
 
 // NotifyConfigApplyFailed publishes a config-apply-failed notification every

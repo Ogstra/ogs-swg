@@ -324,6 +324,47 @@ func TestNtfyNotifierCrashAfterReloadWindow(t *testing.T) {
 	}
 }
 
+// TestNtfyNotifierOperatorRestartSuppressesCrashAndDownRecovered reproduces
+// the reported false positive: clicking "Apply changes" (a successful config
+// apply that requires a restart) followed by the panel's own Restart action
+// must NOT fire "crash after reload", "service down", or "service recovered"
+// for the resulting down->up blip, since the operator caused it deliberately.
+func TestNtfyNotifierOperatorRestartSuppressesCrashAndDownRecovered(t *testing.T) {
+	n, recorded, _ := newTestNotifier(t, baseSettings())
+	ctx := context.Background()
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cur := base
+	n.SetNow(func() time.Time { return cur })
+
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed up
+	n.NotifyConfigApplySucceeded()                        // "Apply changes" succeeds (Clash API hot-reload)
+
+	cur = base.Add(1 * time.Second)
+	n.NotifyServiceRestarting(NtfyServiceSingbox) // operator clicks Restart right after
+
+	cur = base.Add(2 * time.Second)
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false) // restart takes the process down briefly
+
+	cur = base.Add(5 * time.Second)
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // restart completes, back up
+
+	if len(*recorded) != 0 {
+		t.Fatalf("operator-initiated restart fired %d notification(s); want 0: %+v", len(*recorded), *recorded)
+	}
+
+	// After the grace window elapses, a genuine unrelated crash must still
+	// be detected normally.
+	cur = base.Add(1 * time.Second + n.crashWindow + time.Second)
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false)
+	if len(*recorded) != 1 {
+		t.Fatalf("post-grace down transition did not fire; got %d messages", len(*recorded))
+	}
+	if !slices.Equal((*recorded)[0].Message.Tags, []string{"rotating_light", "warning"}) {
+		t.Fatalf("post-grace transition should be a generic down, got tags %q", (*recorded)[0].Message.Tags)
+	}
+}
+
 func TestNtfyNotifierCrashRequiresConfigErrorsToggle(t *testing.T) {
 	s := baseSettings()
 	s.EnableConfigErrors = false
