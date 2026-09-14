@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -398,6 +399,85 @@ func TestNtfyNotifierConfigApplyFailedAlwaysSends(t *testing.T) {
 	if len(*recorded) != 3 {
 		t.Fatalf("three calls to NotifyConfigApplyFailed published %d messages; want 3", len(*recorded))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// New-HWID observation (NTFY-09)
+// ---------------------------------------------------------------------------
+
+func TestObserveSubscriptionHWID(t *testing.T) {
+	sampleInfo := NtfyNewHWIDInfo{
+		SubscriptionName: "family-plan",
+		Username:         "alice",
+		HWIDHash:         "abc123def456",
+	}
+
+	t.Run("enabled_and_configured_publishes_once", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = true
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 1 {
+			t.Fatalf("published %d messages; want 1", len(*recorded))
+		}
+		if !strings.HasPrefix((*recorded)[0].Message.Title, "New device on subscription:") {
+			t.Fatalf("Title = %q, want prefix %q", (*recorded)[0].Message.Title, "New device on subscription:")
+		}
+	})
+
+	t.Run("toggle_off_publishes_nothing", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = false
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 0 {
+			t.Fatalf("published %d messages; want 0 (toggle off)", len(*recorded))
+		}
+	})
+
+	t.Run("not_configured_publishes_nothing", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = true
+		s.ServerURL = ""
+		s.Topic = ""
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 0 {
+			t.Fatalf("published %d messages; want 0 (not configured)", len(*recorded))
+		}
+	})
+
+	t.Run("settings_load_error_publishes_nothing_and_does_not_panic", func(t *testing.T) {
+		publishFn := func(ctx context.Context, s NtfySettings, m NtfyMessage) error {
+			t.Fatal("publish should not be called when settings fail to load")
+			return nil
+		}
+		settingsFn := func(ctx context.Context) (NtfySettings, error) {
+			return NtfySettings{}, errors.New("settings load failed")
+		}
+		n := NewNtfyNotifier(settingsFn, publishFn)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+	})
+
+	t.Run("no_dedupe_two_identical_calls_publish_twice", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = true
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 2 {
+			t.Fatalf("published %d messages; want 2 (notifier does not dedupe)", len(*recorded))
+		}
+	})
 }
 
 // ---------------------------------------------------------------------------

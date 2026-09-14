@@ -214,6 +214,21 @@ func (n *NtfyNotifier) NotifyServiceRestarting(service string) {
 	}
 }
 
+// ObserveSubscriptionHWID publishes a new-device notification for a
+// subscription request whose HWID was not previously known for that
+// subscription. Unlike ObserveServiceStatus/ObserveTrafficTotal it holds no
+// in-memory transition state and takes no lock: de-duplication already
+// happened atomically in the store (Store.RecordSubscriptionHWIDFirstSeen
+// only reports "new" once per (sub_id, hwid_hash)), so re-deriving it here
+// would add a second, weaker source of truth. It never returns an error and
+// never blocks: send() delegates to the injected publisher, which in the
+// server is the async publisher from phase 56.
+func (n *NtfyNotifier) ObserveSubscriptionHWID(ctx context.Context, info NtfyNewHWIDInfo) {
+	n.send(ctx, func(s NtfySettings) bool { return s.EnableNewHwid }, func() NtfyMessage {
+		return NtfyNewHWIDMessage(info)
+	})
+}
+
 // NotifyConfigApplyFailed publishes a config-apply-failed notification every
 // time it is called (no dedupe — this represents a distinct operator-facing
 // action/error, not a poll result). Callers are responsible for not calling
