@@ -30,6 +30,68 @@ func TestNtfySettingsStore_FreshDBDefaults(t *testing.T) {
 	if got.ServerURL != "" || got.Topic != "" {
 		t.Errorf("expected empty ServerURL/Topic on fresh DB, got %+v", got)
 	}
+	if got.EnableNewHwid {
+		t.Errorf("EnableNewHwid = true, want false (default off) on fresh DB")
+	}
+}
+
+func TestNtfySettingsStore_EnableNewHwidRoundTrip(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	in := NtfySettings{
+		ServerURL:             "https://ntfy.example.internal",
+		Topic:                 "panel-alerts",
+		AuthMode:              "none",
+		EnableSingboxDown:     true,
+		EnableWireguardDown:   true,
+		EnableHighTraffic:     true,
+		EnableConfigErrors:    true,
+		EnableNewHwid:         true,
+		TrafficThresholdBytes: 42,
+	}
+
+	if err := store.UpdateNtfySettings(context.Background(), in); err != nil {
+		t.Fatalf("UpdateNtfySettings: %v", err)
+	}
+
+	got, err := store.GetNtfySettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetNtfySettings: %v", err)
+	}
+
+	if !got.EnableNewHwid {
+		t.Errorf("EnableNewHwid = false, want true after UpdateNtfySettings")
+	}
+	if got.ServerURL != in.ServerURL || got.Topic != in.Topic {
+		t.Errorf("ServerURL/Topic changed unexpectedly: got %+v", got)
+	}
+	if got.EnableSingboxDown != in.EnableSingboxDown ||
+		got.EnableWireguardDown != in.EnableWireguardDown ||
+		got.EnableHighTraffic != in.EnableHighTraffic ||
+		got.EnableConfigErrors != in.EnableConfigErrors {
+		t.Errorf("other enable flags changed unexpectedly: got %+v", got)
+	}
+	if got.TrafficThresholdBytes != in.TrafficThresholdBytes {
+		t.Errorf("TrafficThresholdBytes = %d, want %d", got.TrafficThresholdBytes, in.TrafficThresholdBytes)
+	}
+}
+
+func TestNtfySettingsStringDoesNotLeakEnableNewHwid(t *testing.T) {
+	s := NtfySettings{
+		ServerURL:     "https://ntfy.example.internal",
+		Topic:         "panel-alerts",
+		AuthMode:      "none",
+		EnableNewHwid: true,
+	}
+	str := s.String()
+	if got := "NtfySettings{server_url=set, topic=set, auth_mode=none}"; str != got {
+		t.Errorf("String() = %q, want %q (must only expose server/topic set-ness and auth_mode)", str, got)
+	}
 }
 
 func TestNtfySettingsStore_RoundTrip(t *testing.T) {
