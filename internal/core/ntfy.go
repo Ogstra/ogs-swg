@@ -27,6 +27,7 @@ type NtfySettings struct {
 	EnableWireguardDown   bool   `json:"enable_wireguard_down"`
 	EnableHighTraffic     bool   `json:"enable_high_traffic"`
 	EnableConfigErrors    bool   `json:"enable_config_errors"`
+	EnableNewHwid         bool   `json:"enable_new_hwid"`
 	TrafficThresholdBytes int64  `json:"traffic_threshold_bytes"`
 }
 

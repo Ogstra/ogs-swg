@@ -351,9 +351,18 @@ func (s *Store) initSchema() error {
 		enable_wireguard_down INTEGER NOT NULL DEFAULT 0,
 		enable_high_traffic INTEGER NOT NULL DEFAULT 0,
 		enable_config_errors INTEGER NOT NULL DEFAULT 0,
+		enable_new_hwid INTEGER NOT NULL DEFAULT 0,
 		traffic_threshold_bytes INTEGER NOT NULL DEFAULT 0,
 		created_at INTEGER DEFAULT (strftime('%s','now')),
 		updated_at INTEGER DEFAULT (strftime('%s','now'))
+	);
+
+	CREATE TABLE IF NOT EXISTS subscription_known_hwids (
+		sub_id INTEGER NOT NULL,
+		hwid_hash TEXT NOT NULL,
+		first_seen_at INTEGER NOT NULL,
+		PRIMARY KEY (sub_id, hwid_hash),
+		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
 	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
@@ -431,6 +440,7 @@ func (s *Store) initSchema() error {
 		);
 	`)
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_direct_sites TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE ntfy_settings ADD COLUMN enable_new_hwid INTEGER NOT NULL DEFAULT 0;")
 
 	return nil
 }
@@ -962,14 +972,14 @@ func (s *Store) GetNtfySettings(ctx context.Context) (NtfySettings, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
 		       enable_singbox_down, enable_wireguard_down, enable_high_traffic,
-		       enable_config_errors, traffic_threshold_bytes
+		       enable_config_errors, enable_new_hwid, traffic_threshold_bytes
 		FROM ntfy_settings WHERE id = 1
 	`)
 	var out NtfySettings
-	var enableSingboxDown, enableWireguardDown, enableHighTraffic, enableConfigErrors int64
+	var enableSingboxDown, enableWireguardDown, enableHighTraffic, enableConfigErrors, enableNewHwid int64
 	if err := row.Scan(&out.ServerURL, &out.Topic, &out.AuthMode, &out.BearerToken,
 		&out.BasicUser, &out.BasicPass, &enableSingboxDown, &enableWireguardDown,
-		&enableHighTraffic, &enableConfigErrors, &out.TrafficThresholdBytes); err != nil {
+		&enableHighTraffic, &enableConfigErrors, &enableNewHwid, &out.TrafficThresholdBytes); err != nil {
 		if err == sql.ErrNoRows {
 			return NormalizeNtfySettings(NtfySettings{}), nil
 		}
@@ -979,6 +989,7 @@ func (s *Store) GetNtfySettings(ctx context.Context) (NtfySettings, error) {
 	out.EnableWireguardDown = enableWireguardDown != 0
 	out.EnableHighTraffic = enableHighTraffic != 0
 	out.EnableConfigErrors = enableConfigErrors != 0
+	out.EnableNewHwid = enableNewHwid != 0
 	return NormalizeNtfySettings(out), nil
 }
 
@@ -988,8 +999,8 @@ func (s *Store) UpdateNtfySettings(ctx context.Context, settings NtfySettings) e
 		INSERT INTO ntfy_settings (
 			id, server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
 			enable_singbox_down, enable_wireguard_down, enable_high_traffic,
-			enable_config_errors, traffic_threshold_bytes, created_at, updated_at
-		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+			enable_config_errors, enable_new_hwid, traffic_threshold_bytes, created_at, updated_at
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
 		ON CONFLICT(id) DO UPDATE SET
 			server_url = excluded.server_url,
 			topic = excluded.topic,
@@ -1001,12 +1012,14 @@ func (s *Store) UpdateNtfySettings(ctx context.Context, settings NtfySettings) e
 			enable_wireguard_down = excluded.enable_wireguard_down,
 			enable_high_traffic = excluded.enable_high_traffic,
 			enable_config_errors = excluded.enable_config_errors,
+			enable_new_hwid = excluded.enable_new_hwid,
 			traffic_threshold_bytes = excluded.traffic_threshold_bytes,
 			updated_at = strftime('%s','now')
 	`, settings.ServerURL, settings.Topic, settings.AuthMode, settings.BearerToken,
 		settings.BasicUser, settings.BasicPass,
 		boolToInt64(settings.EnableSingboxDown), boolToInt64(settings.EnableWireguardDown),
 		boolToInt64(settings.EnableHighTraffic), boolToInt64(settings.EnableConfigErrors),
+		boolToInt64(settings.EnableNewHwid),
 		settings.TrafficThresholdBytes)
 	return err
 }
@@ -1554,6 +1567,40 @@ func (s *Store) DeleteSubscriptionRequestsByIDs(ids []int64) error {
 func (s *Store) DeleteSubscriptionRequestsBySubID(subID int64) error {
 	_, err := s.db.Exec("DELETE FROM subscription_requests WHERE sub_id = ?", subID)
 	return err
+}
+
+// RecordSubscriptionHWIDFirstSeen marks hwidHash as known for subID and reports
+// whether this call is the one that first recorded it. It is deliberately a
+// single INSERT OR IGNORE + RowsAffected check rather than a SELECT-then-INSERT:
+// two concurrent requests carrying the same new HWID must produce exactly one
+// "new" result, and a read-then-write would let both observe "not known".
+// An empty/whitespace hash is ignored (requests without an X-Hwid header are
+// not trackable devices).
+func (s *Store) RecordSubscriptionHWIDFirstSeen(ctx context.Context, subID int64, hwidHash string, firstSeenAt int64) (bool, error) {
+	hwidHash = strings.TrimSpace(hwidHash)
+	if hwidHash == "" {
+		return false, nil
+	}
+	res, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO subscription_known_hwids (sub_id, hwid_hash, first_seen_at)
+		VALUES (?, ?, ?)
+	`, subID, hwidHash, firstSeenAt)
+	if err != nil {
+		return false, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return affected == 1, nil
+}
+
+// CountSubscriptionKnownHWIDs returns how many distinct HWIDs have ever been
+// recorded for subID.
+func (s *Store) CountSubscriptionKnownHWIDs(ctx context.Context, subID int64) (int64, error) {
+	var count int64
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_known_hwids WHERE sub_id = ?`, subID).Scan(&count)
+	return count, err
 }
 
 func (s *Store) CountSamples() (int64, error) {
