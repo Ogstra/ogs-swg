@@ -224,3 +224,50 @@ func NtfyTestMessage() NtfyMessage {
 		Priority: 1,
 	}
 }
+
+// NtfyNewHWIDInfo carries every field captured for a subscription request
+// that came from a device never before seen on that subscription.
+type NtfyNewHWIDInfo struct {
+	SubscriptionName string
+	Username         string
+	HWIDHash         string
+	HWIDPrefix       string
+	DeviceModel      string
+	DeviceOS         string
+	DeviceOSVersion  string
+	AppVersion       string
+	Country          string
+}
+
+// NtfyNewHWIDMessage builds the notification for a new device observed on a
+// subscription. Every field is always rendered, even when empty (NTFY-09):
+// an absent value is informative to the operator, so it shows as "-" rather
+// than vanishing from the body.
+func NtfyNewHWIDMessage(info NtfyNewHWIDInfo) NtfyMessage {
+	field := func(v string) string {
+		v = strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(v))
+		if v == "" {
+			return "-"
+		}
+		return v
+	}
+
+	lines := []string{
+		"Subscription: " + field(info.SubscriptionName),
+		"User: " + field(info.Username),
+		"HWID prefix: " + field(info.HWIDPrefix),
+		"HWID hash: " + field(info.HWIDHash),
+		"Device model: " + field(info.DeviceModel),
+		"Device OS: " + field(info.DeviceOS),
+		"OS version: " + field(info.DeviceOSVersion),
+		"App version: " + field(info.AppVersion),
+		"Country: " + field(info.Country),
+	}
+
+	return NtfyMessage{
+		Title:    fmt.Sprintf("New device on subscription: %s", field(info.SubscriptionName)),
+		Message:  strings.Join(lines, "\n"),
+		Tags:     []string{"new"},
+		Priority: 3,
+	}
+}

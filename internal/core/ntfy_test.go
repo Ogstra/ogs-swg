@@ -292,6 +292,90 @@ func TestNormalizeNtfySettings(t *testing.T) {
 	})
 }
 
+func TestNtfyNewHWIDMessage(t *testing.T) {
+	t.Run("fully_populated", func(t *testing.T) {
+		info := NtfyNewHWIDInfo{
+			SubscriptionName: "family-plan",
+			Username:         "alice",
+			HWIDHash:         "abc123def456",
+			HWIDPrefix:       "abc123",
+			DeviceModel:      "iPhone15,2",
+			DeviceOS:         "iOS",
+			DeviceOSVersion:  "17.4",
+			AppVersion:       "1.2.3",
+			Country:          "AR",
+		}
+		msg := NtfyNewHWIDMessage(info)
+
+		wantLines := []string{
+			"Subscription: family-plan",
+			"User: alice",
+			"HWID prefix: abc123",
+			"HWID hash: abc123def456",
+			"Device model: iPhone15,2",
+			"Device OS: iOS",
+			"OS version: 17.4",
+			"App version: 1.2.3",
+			"Country: AR",
+		}
+		for _, line := range wantLines {
+			if !strings.Contains(msg.Message, line) {
+				t.Errorf("message %q missing line %q", msg.Message, line)
+			}
+		}
+	})
+
+	t.Run("all_empty_still_renders_all_lines", func(t *testing.T) {
+		msg := NtfyNewHWIDMessage(NtfyNewHWIDInfo{})
+
+		wantLabels := []string{
+			"Subscription: -",
+			"User: -",
+			"HWID prefix: -",
+			"HWID hash: -",
+			"Device model: -",
+			"Device OS: -",
+			"OS version: -",
+			"App version: -",
+			"Country: -",
+		}
+		for _, label := range wantLabels {
+			if !strings.Contains(msg.Message, label) {
+				t.Errorf("message %q missing label %q", msg.Message, label)
+			}
+		}
+	})
+
+	t.Run("title_priority_tags", func(t *testing.T) {
+		msg := NtfyNewHWIDMessage(NtfyNewHWIDInfo{SubscriptionName: "family-plan"})
+		if msg.Title != "New device on subscription: family-plan" {
+			t.Errorf("Title = %q, want %q", msg.Title, "New device on subscription: family-plan")
+		}
+		if msg.Priority != 3 {
+			t.Errorf("Priority = %d, want 3", msg.Priority)
+		}
+		if !slices.Equal(msg.Tags, []string{"new"}) {
+			t.Errorf("Tags = %q, want [\"new\"]", msg.Tags)
+		}
+	})
+
+	t.Run("newline_injection_neutralized", func(t *testing.T) {
+		info := NtfyNewHWIDInfo{
+			SubscriptionName: "family-plan",
+			Username:         "alice\nInjected: line",
+			HWIDPrefix:       "abc\r123",
+		}
+		msg := NtfyNewHWIDMessage(info)
+		lines := strings.Split(msg.Message, "\n")
+		if len(lines) != 9 {
+			t.Fatalf("got %d lines, want exactly 9: %q", len(lines), lines)
+		}
+		if !strings.Contains(lines[1], "alice Injected: line") {
+			t.Errorf("expected embedded newline collapsed to space within the User line, got %q", lines[1])
+		}
+	})
+}
+
 func TestNtfySettingsStringRedacts(t *testing.T) {
 	const token = "test-token-placeholder"
 	const pass = "test-pass-placeholder"
