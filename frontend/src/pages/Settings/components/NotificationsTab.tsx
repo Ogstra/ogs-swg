@@ -290,9 +290,6 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
                         />
                         <div>
                             <div className="font-semibold text-white">New device on a subscription</div>
-                            <div className="text-sm text-slate-400 mt-1">
-                                Fires the first time a device (HWID) never seen before requests a given subscription. Notification only — access is never blocked.
-                            </div>
                         </div>
                     </label>
 
