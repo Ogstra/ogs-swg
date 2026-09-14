@@ -421,6 +421,7 @@ export interface NtfySettingsResponse {
     enable_wireguard_down: boolean;
     enable_high_traffic: boolean;
     enable_config_errors: boolean;
+    enable_new_hwid: boolean;
     traffic_threshold_bytes: number;
 }
 
@@ -435,6 +436,7 @@ export interface NtfySettingsRequest {
     enable_wireguard_down: boolean;
     enable_high_traffic: boolean;
     enable_config_errors: boolean;
+    enable_new_hwid: boolean;
     traffic_threshold_bytes: number;
 }
 
