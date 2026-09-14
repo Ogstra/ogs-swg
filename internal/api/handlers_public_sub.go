@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -216,6 +217,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
 			s.recordSubscriptionRequest(r, sub.ID, users, true)
+			s.observeSubscriptionHWID(r, sub, users)
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
 			return
 		}
@@ -258,6 +260,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
 	s.recordSubscriptionRequest(r, sub.ID, users, false)
+	s.observeSubscriptionHWID(r, sub, users)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
 }
 
@@ -402,6 +405,49 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 	}); err == nil {
 		s.invalidateSubscriptionHistoryCache()
 	}
+}
+
+// observeSubscriptionHWID records the requesting device as known for this
+// subscription and, the first time a given HWID is seen for it, fires a
+// new-device notification (NTFY-08).
+//
+// CONTRACT: this is side-effect only. It takes no http.ResponseWriter, never
+// writes a response, never returns an error to the caller, and its failures
+// are swallowed after logging — the subscription must be served identically
+// whether this succeeds, fails, or is disabled (NTFY-10/NTFY-11, D-02).
+//
+// The store call is a single indexed INSERT OR IGNORE and runs synchronously
+// so two concurrent requests with the same new HWID can never both be judged
+// "new" (Store.RecordSubscriptionHWIDFirstSeen decides atomically via
+// RowsAffected). The notification publish itself is already off the request
+// path via newNtfyAsyncPublisher, so no outbound HTTP happens inline.
+func (s *Server) observeSubscriptionHWID(r *http.Request, sub store.GetSubscriptionByTokenRow, users []string) {
+	if s.store == nil || s.ntfyNotifier == nil {
+		return
+	}
+	meta := extractSubscriptionRequestMetadata(r)
+	if meta.hwidHash == "" {
+		return
+	}
+	isNew, err := s.store.RecordSubscriptionHWIDFirstSeen(r.Context(), sub.ID, meta.hwidHash, s.now().Unix())
+	if err != nil {
+		log.Printf("observeSubscriptionHWID: record hwid for sub %d: %v", sub.ID, err)
+		return
+	}
+	if !isNew {
+		return
+	}
+	s.ntfyNotifier.ObserveSubscriptionHWID(r.Context(), core.NtfyNewHWIDInfo{
+		SubscriptionName: subscriptionDisplayName(sub.Name, sub.Alias),
+		Username:         strings.Join(users, ", "),
+		HWIDHash:         meta.hwidHash,
+		HWIDPrefix:       meta.hwidPrefix,
+		DeviceModel:      meta.deviceModel,
+		DeviceOS:         meta.deviceOS,
+		DeviceOSVersion:  meta.deviceOSVersion,
+		AppVersion:       meta.appVersion,
+		Country:          meta.country,
+	})
 }
 
 // blockedRecordDedupTTL is the window within which a duplicate blocked-request
