@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 )
@@ -50,6 +51,12 @@ type NtfyNotifier struct {
 	// explicit Restart button) that the status poller happens to catch mid-
 	// bounce is indistinguishable from a genuine unexpected crash.
 	restartGraceUntil map[string]time.Time
+
+	// baseURL returns the panel's public base URL (e.g. "https://swg.example.com"),
+	// used to build each message's Icon and Click link from the ClickPath a
+	// builder sets. Defaults to a no-op returning "", so Icon/Click are simply
+	// omitted until SetBaseURL is called (e.g. no subscription domain configured).
+	baseURL func() string
 }
 
 // NewNtfyNotifier constructs a notifier with the given settings loader and
@@ -61,7 +68,17 @@ func NewNtfyNotifier(settings NtfySettingsFunc, publish NtfyPublishFunc) *NtfyNo
 		now:               time.Now,
 		crashWindow:       120 * time.Second,
 		restartGraceUntil: make(map[string]time.Time),
+		baseURL:           func() string { return "" },
 	}
+}
+
+// SetBaseURL sets the function used to resolve the panel's public base URL
+// for Icon/Click links (see baseURL field doc). Call once at wiring time;
+// safe to call with a func that reads a live, operator-editable config value.
+func (n *NtfyNotifier) SetBaseURL(f func() string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.baseURL = f
 }
 
 // SetNow overrides the clock used for crash-window correlation. Test seam.
@@ -81,12 +98,27 @@ func (n *NtfyNotifier) SetCrashWindow(d time.Duration) {
 // send loads live settings, checks the per-event toggle and Configured(),
 // then publishes. It is a no-op (no publish) whenever settings fail to load,
 // the event's toggle is off, or the ntfy server URL/topic is not configured.
+//
+// If a base URL is configured (SetBaseURL), this also fills in Icon (always
+// the panel's sing-box logo) and Click (baseURL + the message's ClickPath,
+// if the builder set one) — centralized here so individual message builders
+// stay pure functions with no config/URL knowledge of their own.
 func (n *NtfyNotifier) send(ctx context.Context, enabled func(NtfySettings) bool, build func() NtfyMessage) {
 	s, err := n.settings(ctx)
 	if err != nil || !enabled(s) || !s.Configured() {
 		return
 	}
-	_ = n.publish(ctx, s, build())
+	msg := build()
+	n.mu.Lock()
+	base := strings.TrimRight(n.baseURL(), "/")
+	n.mu.Unlock()
+	if base != "" {
+		msg.Icon = base + "/sing-box-white.svg"
+		if msg.ClickPath != "" {
+			msg.Click = base + msg.ClickPath
+		}
+	}
+	_ = n.publish(ctx, s, msg)
 }
 
 // ObserveServiceStatus records the latest observed up/down status for a

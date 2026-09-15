@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -39,6 +40,20 @@ func (s *Server) initNtfyNotifier() {
 		func(ctx context.Context) (core.NtfySettings, error) { return s.store.GetNtfySettings(ctx) },
 		newNtfyAsyncPublisher(),
 	)
+	// Icon/Click links use the same public domain configured for subscription
+	// delivery (Settings > Subscription Domain) — read live so an operator
+	// edit takes effect without a restart, same as ntfy settings themselves.
+	// Empty domain means Icon/Click are simply omitted (see NtfyNotifier.send).
+	s.ntfyNotifier.SetBaseURL(func() string {
+		domain := strings.TrimSpace(s.config.SubscriptionDomain)
+		if domain == "" {
+			return ""
+		}
+		if strings.Contains(domain, "://") {
+			return domain
+		}
+		return "https://" + domain
+	})
 }
 
 // startNtfyNotifier starts the dedicated background status poller (NTFY-01)

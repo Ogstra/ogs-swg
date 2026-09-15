@@ -308,7 +308,7 @@ func TestNtfyNewHWIDMessage(t *testing.T) {
 		msg := NtfyNewHWIDMessage(info)
 
 		wantLines := []string{
-			"Subscription: family-plan",
+			"Subscription: **family-plan**",
 			"User: alice",
 			"IP: 203.0.113.10",
 			"HWID prefix: abc123",
@@ -329,7 +329,7 @@ func TestNtfyNewHWIDMessage(t *testing.T) {
 		msg := NtfyNewHWIDMessage(NtfyNewHWIDInfo{})
 
 		wantLabels := []string{
-			"Subscription: -",
+			"Subscription: **-**",
 			"User: -",
 			"IP: -",
 			"HWID prefix: -",
