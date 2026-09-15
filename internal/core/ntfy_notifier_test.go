@@ -504,3 +504,44 @@ func TestNtfyNotifierPublishErrorDoesNotBlockState(t *testing.T) {
 		t.Fatalf("publish attempted %d times; want 1 (state must advance despite publish error)", calls)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Icon/Click link wiring (SetBaseURL)
+// ---------------------------------------------------------------------------
+
+func TestNtfyNotifierIconAndClickUseBaseURL(t *testing.T) {
+	n, recorded, _ := newTestNotifier(t, baseSettings())
+	n.SetBaseURL(func() string { return "https://panel.example.test" })
+	ctx := context.Background()
+
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false)
+
+	if len(*recorded) != 1 {
+		t.Fatalf("got %d messages; want 1", len(*recorded))
+	}
+	msg := (*recorded)[0].Message
+	if msg.Icon != "https://panel.example.test/sing-box-white.svg" {
+		t.Errorf("Icon = %q, want the panel logo URL", msg.Icon)
+	}
+	if msg.Click != "https://panel.example.test/" {
+		t.Errorf("Click = %q, want base URL + ClickPath", msg.Click)
+	}
+}
+
+func TestNtfyNotifierNoBaseURLOmitsIconAndClick(t *testing.T) {
+	n, recorded, _ := newTestNotifier(t, baseSettings())
+	// No SetBaseURL call — must default to no icon/click, not panic or send "/".
+	ctx := context.Background()
+
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false)
+
+	if len(*recorded) != 1 {
+		t.Fatalf("got %d messages; want 1", len(*recorded))
+	}
+	msg := (*recorded)[0].Message
+	if msg.Icon != "" || msg.Click != "" {
+		t.Errorf("Icon/Click = %q/%q, want both empty with no base URL configured", msg.Icon, msg.Click)
+	}
+}

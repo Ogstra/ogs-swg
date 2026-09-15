@@ -50,6 +50,20 @@ type NtfyMessage struct {
 	Message  string
 	Tags     []string
 	Priority int
+	// Markdown, when true, tells ntfy clients to render Message as Markdown
+	// (e.g. **bold**) instead of plain text.
+	Markdown bool
+	// ClickPath is a path relative to the panel's base URL (e.g.
+	// "/subscriptions"), set by the message builder. NtfyNotifier.send fills
+	// in the full Click URL from this plus the configured base URL — builders
+	// stay pure and know nothing about the panel's actual domain.
+	ClickPath string
+	// Icon and Click are the fully-resolved ntfy fields, filled in by
+	// NtfyNotifier.send (or left empty when no base URL is configured, or by
+	// tests/callers that construct a message directly without going through
+	// send). Builders should not set these directly — set ClickPath instead.
+	Icon  string
+	Click string
 }
 
 // NormalizeNtfySettings trims whitespace, coerces AuthMode to a known value,
@@ -90,11 +104,14 @@ func (s NtfySettings) Configured() bool {
 }
 
 type ntfyPublishBody struct {
-	Topic    string `json:"topic"`
-	Title    string `json:"title,omitempty"`
-	Message  string `json:"message,omitempty"`
+	Topic    string   `json:"topic"`
+	Title    string   `json:"title,omitempty"`
+	Message  string   `json:"message,omitempty"`
 	Tags     []string `json:"tags,omitempty"`
-	Priority int    `json:"priority,omitempty"`
+	Priority int      `json:"priority,omitempty"`
+	Markdown bool     `json:"markdown,omitempty"`
+	Icon     string   `json:"icon,omitempty"`
+	Click    string   `json:"click,omitempty"`
 }
 
 // SECURITY: PublishNtfy must never allow s.BearerToken, s.BasicPass, or a
@@ -113,6 +130,9 @@ func PublishNtfy(ctx context.Context, s NtfySettings, m NtfyMessage) error {
 		Message:  m.Message,
 		Tags:     m.Tags,
 		Priority: m.Priority,
+		Markdown: m.Markdown,
+		Icon:     m.Icon,
+		Click:    m.Click,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -163,10 +183,12 @@ func PublishNtfy(ctx context.Context, s NtfySettings, m NtfyMessage) error {
 // going down.
 func NtfyServiceDownMessage(service string) NtfyMessage {
 	return NtfyMessage{
-		Title:    fmt.Sprintf("Service Down: %s", service),
-		Message:  fmt.Sprintf("%s is down.", service),
-		Tags:     []string{"rotating_light", "warning"},
-		Priority: 5,
+		Title:     fmt.Sprintf("Service Down: %s", service),
+		Message:   fmt.Sprintf("**%s** is down.", service),
+		Tags:      []string{"rotating_light", "warning"},
+		Priority:  5,
+		Markdown:  true,
+		ClickPath: "/",
 	}
 }
 
@@ -174,10 +196,12 @@ func NtfyServiceDownMessage(service string) NtfyMessage {
 // service recovering.
 func NtfyServiceRecoveredMessage(service string) NtfyMessage {
 	return NtfyMessage{
-		Title:    fmt.Sprintf("Service Recovered: %s", service),
-		Message:  fmt.Sprintf("%s has recovered.", service),
-		Tags:     []string{"white_check_mark"},
-		Priority: 3,
+		Title:     fmt.Sprintf("Service Recovered: %s", service),
+		Message:   fmt.Sprintf("**%s** has recovered.", service),
+		Tags:      []string{"white_check_mark"},
+		Priority:  3,
+		Markdown:  true,
+		ClickPath: "/",
 	}
 }
 
@@ -185,10 +209,12 @@ func NtfyServiceRecoveredMessage(service string) NtfyMessage {
 // sing-box config apply.
 func NtfyConfigApplyFailedMessage(detail string) NtfyMessage {
 	return NtfyMessage{
-		Title:    "Sing-box config apply failed",
-		Message:  detail,
-		Tags:     []string{"warning", "gear"},
-		Priority: 4,
+		Title:     "Sing-box config apply failed",
+		Message:   fmt.Sprintf("**Sing-box** rejected the configuration:\n%s", detail),
+		Tags:      []string{"warning", "gear"},
+		Priority:  4,
+		Markdown:  true,
+		ClickPath: "/settings?tab=singbox",
 	}
 }
 
@@ -196,10 +222,12 @@ func NtfyConfigApplyFailedMessage(detail string) NtfyMessage {
 // shortly after a config reload.
 func NtfyCrashAfterReloadMessage(sinceReload time.Duration) NtfyMessage {
 	return NtfyMessage{
-		Title:    "Sing-box crashed after config reload",
-		Message:  fmt.Sprintf("sing-box crashed %s after the last config reload.", sinceReload.Round(time.Second)),
-		Tags:     []string{"skull", "gear"},
-		Priority: 5,
+		Title:     "Sing-box crashed after config reload",
+		Message:   fmt.Sprintf("**sing-box** crashed %s after the last config reload.", sinceReload.Round(time.Second)),
+		Tags:      []string{"skull", "gear"},
+		Priority:  5,
+		Markdown:  true,
+		ClickPath: "/settings?tab=singbox",
 	}
 }
 
@@ -207,10 +235,12 @@ func NtfyCrashAfterReloadMessage(sinceReload time.Duration) NtfyMessage {
 // configured threshold within a window.
 func NtfyHighTrafficMessage(totalBytes, thresholdBytes int64, window time.Duration) NtfyMessage {
 	return NtfyMessage{
-		Title:    "High traffic",
-		Message:  fmt.Sprintf("Traffic reached %d bytes (threshold %d) over %s.", totalBytes, thresholdBytes, window.Round(time.Second)),
-		Tags:     []string{"chart_with_upwards_trend"},
-		Priority: 3,
+		Title:     "High traffic",
+		Message:   fmt.Sprintf("Traffic reached **%d bytes** (threshold %d) over %s.", totalBytes, thresholdBytes, window.Round(time.Second)),
+		Tags:      []string{"chart_with_upwards_trend"},
+		Priority:  3,
+		Markdown:  true,
+		ClickPath: "/",
 	}
 }
 
@@ -259,7 +289,7 @@ func NtfyNewHWIDMessage(info NtfyNewHWIDInfo) NtfyMessage {
 	}
 
 	lines := []string{
-		"Subscription: " + field(info.SubscriptionName),
+		"Subscription: **" + field(info.SubscriptionName) + "**",
 		"User: " + field(info.Username),
 		"Date/time: " + requestedAt.Format("2006-01-02 15:04:05 MST"),
 		"IP: " + field(info.ClientIP),
@@ -272,9 +302,11 @@ func NtfyNewHWIDMessage(info NtfyNewHWIDInfo) NtfyMessage {
 	}
 
 	return NtfyMessage{
-		Title:    fmt.Sprintf("New device on subscription: %s", field(info.SubscriptionName)),
-		Message:  strings.Join(lines, "\n"),
-		Tags:     []string{"iphone"},
-		Priority: 3,
+		Title:     fmt.Sprintf("New device on subscription: %s", field(info.SubscriptionName)),
+		Message:   strings.Join(lines, "\n"),
+		Tags:      []string{"iphone"},
+		Priority:  3,
+		Markdown:  true,
+		ClickPath: "/subscriptions",
 	}
 }
