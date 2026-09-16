@@ -81,6 +81,21 @@ func (n *NtfyNotifier) SetBaseURL(f func() string) {
 	n.baseURL = f
 }
 
+// IconURL resolves the panel's sing-box logo against the configured base URL,
+// the same way send() does for every event-driven notification. Returns ""
+// when no base URL is configured. Exposed for handlers (e.g. the operator
+// "send test notification" action) that publish via core.PublishNtfy
+// directly instead of through an Observe*/Notify* method.
+func (n *NtfyNotifier) IconURL() string {
+	n.mu.Lock()
+	base := strings.TrimRight(n.baseURL(), "/")
+	n.mu.Unlock()
+	if base == "" {
+		return ""
+	}
+	return base + "/sing-box-white.svg"
+}
+
 // SetNow overrides the clock used for crash-window correlation. Test seam.
 func (n *NtfyNotifier) SetNow(now func() time.Time) {
 	n.mu.Lock()

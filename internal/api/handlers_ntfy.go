@@ -157,7 +157,9 @@ func (s *Server) handleTestNtfyNotification(w http.ResponseWriter, r *http.Reque
 	// internal/core/ntfy.go's PublishNtfy is documented (see its
 	// "SECURITY:" comment) to never embed s.BearerToken/s.BasicPass into a
 	// returned error. If that contract ever changes, this must change too.
-	if err := core.PublishNtfy(ctx, settings, core.NtfyTestMessage()); err != nil {
+	msg := core.NtfyTestMessage()
+	msg.Icon = s.ntfyNotifier.IconURL()
+	if err := core.PublishNtfy(ctx, settings, msg); err != nil {
 		// Not http.StatusBadGateway: Cloudflare (and other CDN proxies in front
 		// of this panel) intercept 502/503/504 from the origin and substitute
 		// their own branded error page, hiding this JSON body from the user.
