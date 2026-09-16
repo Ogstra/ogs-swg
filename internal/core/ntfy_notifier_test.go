@@ -521,7 +521,7 @@ func TestNtfyNotifierIconAndClickUseBaseURL(t *testing.T) {
 		t.Fatalf("got %d messages; want 1", len(*recorded))
 	}
 	msg := (*recorded)[0].Message
-	if msg.Icon != "https://panel.example.test/sing-box-white.svg" {
+	if msg.Icon != "https://panel.example.test/sing-box-icon.png" {
 		t.Errorf("Icon = %q, want the panel logo URL", msg.Icon)
 	}
 	if msg.Click != "https://panel.example.test/" {

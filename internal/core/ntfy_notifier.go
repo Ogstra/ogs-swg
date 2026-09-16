@@ -93,7 +93,7 @@ func (n *NtfyNotifier) IconURL() string {
 	if base == "" {
 		return ""
 	}
-	return base + "/sing-box-white.svg"
+	return base + "/sing-box-icon.png"
 }
 
 // SetNow overrides the clock used for crash-window correlation. Test seam.
@@ -128,7 +128,7 @@ func (n *NtfyNotifier) send(ctx context.Context, enabled func(NtfySettings) bool
 	base := strings.TrimRight(n.baseURL(), "/")
 	n.mu.Unlock()
 	if base != "" {
-		msg.Icon = base + "/sing-box-white.svg"
+		msg.Icon = base + "/sing-box-icon.png"
 		if msg.ClickPath != "" {
 			msg.Click = base + msg.ClickPath
 		}
