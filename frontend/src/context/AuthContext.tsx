@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { attemptReloadThrottled } from '../lib/reloadGuard';
 
 export interface PanelUserPermissions {
     can_read_users: boolean;
@@ -118,8 +119,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // every page load and never expires. A 401 here means the server
             // was briefly unavailable (e.g. container restart). Reload the page
             // so the autologin script re-runs and auth is restored automatically.
+            // Throttled, not one-shot: if the server stays down, retry every
+            // 10s instead of hot-looping reloads or giving up forever.
             if (localStorage.getItem('demo_mode') === '1') {
-                window.location.reload();
+                attemptReloadThrottled('demo-auth', 10_000);
                 return;
             }
             logout();
