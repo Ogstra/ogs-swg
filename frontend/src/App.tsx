@@ -5,6 +5,7 @@ import { Login } from './pages/Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import { Layout } from './layouts/Layout';
+import { attemptReloadOnce, clearReloadGuard } from './lib/reloadGuard';
 
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const UserManagement = lazy(() => import('./pages/UserManagement'));
@@ -14,11 +15,29 @@ const LogViewer = lazy(() => import('./pages/LogViewer'));
 const RawConfig = lazy(() => import('./pages/RawConfig'));
 const Subscriptions = lazy(() => import('./pages/Subscriptions'));
 
-class ChunkErrorBoundary extends Component<{ children: ReactNode }, { errored: boolean }> {
-    state = { errored: false }
+class ChunkErrorBoundary extends Component<{ children: ReactNode }, { errored: boolean; giveUp: boolean }> {
+    state = { errored: false, giveUp: false }
     static getDerivedStateFromError() { return { errored: true } }
-    componentDidCatch(_err: Error, _info: ErrorInfo) { window.location.reload() }
-    render() { return this.state.errored ? null : this.props.children }
+    componentDidMount() { clearReloadGuard('chunk-load') }
+    componentDidCatch(_err: Error, _info: ErrorInfo) {
+        if (!attemptReloadOnce('chunk-load')) this.setState({ giveUp: true })
+    }
+    render() {
+        if (this.state.giveUp) {
+            return (
+                <div className="flex min-h-screen flex-col items-center justify-center gap-3 text-sm text-slate-400">
+                    <p>Something went wrong loading the app.</p>
+                    <button
+                        className="rounded bg-slate-700 px-4 py-2 text-slate-100 hover:bg-slate-600"
+                        onClick={() => { clearReloadGuard('chunk-load'); window.location.reload() }}
+                    >
+                        Reload
+                    </button>
+                </div>
+            )
+        }
+        return this.state.errored ? null : this.props.children
+    }
 }
 
 function RouteFallback() {
