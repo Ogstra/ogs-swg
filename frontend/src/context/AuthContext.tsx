@@ -146,6 +146,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const data = await res.json();
         clearDashboardStartupCache();
+        // A real username/password login is never demo mode. Without this, a
+        // 'demo_mode' flag left over from an earlier demo session on this
+        // origin would permanently misroute this session's 401s to the
+        // demo-auth reload-retry path instead of a normal logout/redirect.
+        localStorage.removeItem('demo_mode');
         setApiKey(null);
         setToken(data.token);
         setPermissions(data.permissions ? normalizePermissions(data.permissions) : null);
@@ -159,6 +164,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         localStorage.removeItem('token');
         localStorage.removeItem(API_KEY_KEY);
         localStorage.removeItem(PERMISSIONS_KEY);
+        localStorage.removeItem('demo_mode');
     };
 
     return (
