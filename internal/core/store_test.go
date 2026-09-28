@@ -756,3 +756,154 @@ func TestReconcileUserQuotaNow_ReEnablesUserImmediately(t *testing.T) {
 		t.Fatalf("active users = %#v; want restored alice", users)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// samples_hourly rollup — dashboard "last month" perf fast path
+// ---------------------------------------------------------------------------
+
+func TestBulkInsertAndAddSample_KeepSamplesHourlyInSync(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	hourStart := (time.Now().Unix() / 3600) * 3600
+
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: hourStart + 10, Uplink: 100, Downlink: 200},
+		{User: "alice", Timestamp: hourStart + 20, Uplink: 5, Downlink: 7},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+	// Duplicate (user, ts) — samples de-dupes via INSERT OR IGNORE; the
+	// rollup must not double-count it.
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: hourStart + 10, Uplink: 999, Downlink: 999},
+	}); err != nil {
+		t.Fatalf("BulkInsert duplicate: %v", err)
+	}
+	if err := store.AddSample(Sample{User: "alice", Timestamp: hourStart + 30, Uplink: 3, Downlink: 4}); err != nil {
+		t.Fatalf("AddSample: %v", err)
+	}
+	// Duplicate via AddSample too.
+	if err := store.AddSample(Sample{User: "alice", Timestamp: hourStart + 30, Uplink: 999, Downlink: 999}); err != nil {
+		t.Fatalf("AddSample duplicate: %v", err)
+	}
+
+	var up, down int64
+	if err := store.db.QueryRow(
+		"SELECT uplink, downlink FROM samples_hourly WHERE user = ? AND ts = ?", "alice", hourStart,
+	).Scan(&up, &down); err != nil {
+		t.Fatalf("query samples_hourly: %v", err)
+	}
+	if up != 108 || down != 211 {
+		t.Fatalf("samples_hourly = (up=%d, down=%d); want (up=108, down=211)", up, down)
+	}
+}
+
+func TestGetSBTrafficBuckets_WideRangeUsesHourlyRollup(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	now := time.Now().Unix()
+	hourStart := (now / 3600) * 3600
+	dayAgo := hourStart - 25*3600
+
+	if err := store.BulkInsert([]Sample{
+		{User: "alice", Timestamp: hourStart, Uplink: 10, Downlink: 20},
+		{User: "alice", Timestamp: dayAgo, Uplink: 100, Downlink: 200},
+	}); err != nil {
+		t.Fatalf("BulkInsert: %v", err)
+	}
+
+	// interval=3600 (1h) is the fast-path threshold — a 1w/1m-sized dashboard
+	// range always requests an interval this coarse or coarser.
+	buckets, err := store.GetSBTrafficBuckets(dayAgo-3600, hourStart+3600, 3600)
+	if err != nil {
+		t.Fatalf("GetSBTrafficBuckets: %v", err)
+	}
+
+	var totalUp, totalDown int64
+	for _, b := range buckets {
+		totalUp += b.Uplink
+		totalDown += b.Downlink
+	}
+	if totalUp != 110 || totalDown != 220 {
+		t.Fatalf("GetSBTrafficBuckets totals = (up=%d, down=%d); want (up=110, down=220)", totalUp, totalDown)
+	}
+
+	// Sanity: the narrow-range path still reads raw samples directly and
+	// agrees with the hourly-rollup path for the same data.
+	narrow, err := store.GetSBTrafficBuckets(hourStart-60, hourStart+3600, 60)
+	if err != nil {
+		t.Fatalf("GetSBTrafficBuckets (narrow): %v", err)
+	}
+	var narrowUp int64
+	for _, b := range narrow {
+		narrowUp += b.Uplink
+	}
+	if narrowUp != 10 {
+		t.Fatalf("narrow-range total uplink = %d; want 10", narrowUp)
+	}
+}
+
+func TestSamplesHourlyBackfill_PopulatesFromPreExistingRawSamples(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "store.db")
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	hourStart := (time.Now().Unix() / 3600) * 3600
+	// Insert directly into samples, bypassing BulkInsert/AddSample, to
+	// simulate rows that predate the samples_hourly rollup (upgrade path) —
+	// then clear the one-time backfill flag NewStore already set, so the
+	// next open behaves like a genuinely pre-rollup database.
+	if _, err := store.db.Exec(
+		"INSERT INTO samples (user, ts, uplink, downlink) VALUES (?, ?, ?, ?)",
+		"legacy-user", hourStart+5, int64(42), int64(84),
+	); err != nil {
+		t.Fatalf("insert raw sample: %v", err)
+	}
+	if _, err := store.db.Exec("DELETE FROM app_settings WHERE key = 'samples_hourly_backfill_done'"); err != nil {
+		t.Fatalf("reset backfill flag: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Reopening runs initSchema again, which must backfill the pre-existing
+	// row exactly once.
+	store2, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore (reopen): %v", err)
+	}
+	t.Cleanup(func() { _ = store2.Close() })
+
+	var up, down int64
+	if err := store2.db.QueryRow(
+		"SELECT uplink, downlink FROM samples_hourly WHERE user = ? AND ts = ?", "legacy-user", hourStart,
+	).Scan(&up, &down); err != nil {
+		t.Fatalf("query samples_hourly: %v", err)
+	}
+	if up != 42 || down != 84 {
+		t.Fatalf("backfilled samples_hourly = (up=%d, down=%d); want (up=42, down=84)", up, down)
+	}
+
+	// Idempotent: running it again (e.g. a third open) must not double the totals.
+	store2.backfillSamplesHourly()
+	if err := store2.db.QueryRow(
+		"SELECT uplink, downlink FROM samples_hourly WHERE user = ? AND ts = ?", "legacy-user", hourStart,
+	).Scan(&up, &down); err != nil {
+		t.Fatalf("query samples_hourly after re-run: %v", err)
+	}
+	if up != 42 || down != 84 {
+		t.Fatalf("samples_hourly after re-backfill = (up=%d, down=%d); want unchanged (up=42, down=84)", up, down)
+	}
+}

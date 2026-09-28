@@ -133,6 +133,20 @@ func (s *Store) initSchema() error {
 	CREATE UNIQUE INDEX IF NOT EXISTS uq_samples_user_ts ON samples(user, ts);
 	CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
 
+	-- samples_hourly is an always-on rollup kept in sync with every samples
+	-- write (see AddSample/BulkInsert), independent of the opt-in
+	-- retention/aggregation feature. Wide dashboard ranges (1w/1m, where the
+	-- chart bucket is already >= 1h) read this instead of scanning every raw
+	-- sample, without deleting or compressing anything in samples itself.
+	CREATE TABLE IF NOT EXISTS samples_hourly (
+		user TEXT NOT NULL,
+		ts   INTEGER NOT NULL,
+		uplink   INTEGER NOT NULL DEFAULT 0,
+		downlink INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (user, ts)
+	);
+	CREATE INDEX IF NOT EXISTS idx_samples_hourly_ts ON samples_hourly(ts);
+
 	CREATE TABLE IF NOT EXISTS users (
 		email TEXT PRIMARY KEY,
 		quota_limit INTEGER DEFAULT 0,
@@ -442,7 +456,40 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_direct_sites TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE ntfy_settings ADD COLUMN enable_new_hwid INTEGER NOT NULL DEFAULT 0;")
 
+	s.backfillSamplesHourly()
+
 	return nil
+}
+
+// backfillSamplesHourly populates samples_hourly from any samples rows that
+// predate the rollup (upgrade path) or were written before this ran at
+// startup. Guarded by app_settings so the one-time full-table scan only ever
+// runs once per database, not on every boot.
+func (s *Store) backfillSamplesHourly() {
+	const doneKey = "samples_hourly_backfill_done"
+	var v string
+	if err := s.db.QueryRow("SELECT value FROM app_settings WHERE key = ?", doneKey).Scan(&v); err == nil && v == "1" {
+		return
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO samples_hourly (user, ts, uplink, downlink)
+		SELECT user, (ts / 3600) * 3600, SUM(uplink), SUM(downlink)
+		FROM samples
+		GROUP BY user, (ts / 3600) * 3600
+		ON CONFLICT(user, ts) DO UPDATE SET
+			uplink = uplink + excluded.uplink,
+			downlink = downlink + excluded.downlink
+	`)
+	if err != nil {
+		log.Printf("samples_hourly backfill failed (will retry next boot): %v", err)
+		return
+	}
+	if _, err := s.db.Exec(
+		"INSERT INTO app_settings (key, value) VALUES (?, '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
+		doneKey,
+	); err != nil {
+		log.Printf("samples_hourly backfill: failed to record completion: %v", err)
+	}
 }
 
 // PanelUserPermissions holds the set of permissions for a panel user.
@@ -1790,6 +1837,7 @@ func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
 	}{
 		{table: "users", column: "email"},
 		{table: "samples", column: "user"},
+		{table: "samples_hourly", column: "user"},
 		{table: "daily_usage", column: "user"},
 	} {
 		var exists int
@@ -1803,6 +1851,9 @@ func (s *Store) RenameUserTrafficIdentity(oldName, newName string) error {
 	}
 
 	if _, err := tx.Exec("UPDATE samples SET user = ? WHERE user = ?", newName, oldName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE samples_hourly SET user = ? WHERE user = ?", newName, oldName); err != nil {
 		return err
 	}
 	if _, err := tx.Exec("UPDATE daily_usage SET user = ? WHERE user = ?", newName, oldName); err != nil {
@@ -1977,13 +2028,43 @@ func (s *Store) GetActiveUsersWithThreshold(duration time.Duration, threshold in
 	return users, nil
 }
 
+const samplesHourlyBucketSize = 3600
+
+// upsertSamplesHourly adds a sample's contribution into its hour bucket.
+// Callers must only call this for a sample that was actually newly inserted
+// (not an INSERT OR IGNORE no-op on a duplicate), otherwise a retried write
+// would double-count in the rollup even though samples itself de-duplicated it.
+func upsertSamplesHourly(exec interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}, user string, ts, uplink, downlink int64) error {
+	bucket := (ts / samplesHourlyBucketSize) * samplesHourlyBucketSize
+	_, err := exec.Exec(`
+		INSERT INTO samples_hourly (user, ts, uplink, downlink) VALUES (?, ?, ?, ?)
+		ON CONFLICT(user, ts) DO UPDATE SET
+			uplink = uplink + excluded.uplink,
+			downlink = downlink + excluded.downlink
+	`, user, bucket, uplink, downlink)
+	return err
+}
+
 func (s *Store) AddSample(sample Sample) error {
-	return s.Queries.InsertSample(context.Background(), sqlcStore.InsertSampleParams{
-		User:     sample.User,
-		Ts:       sample.Timestamp,
-		Uplink:   sample.Uplink,
-		Downlink: sample.Downlink,
-	})
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec("INSERT OR IGNORE INTO samples (user, ts, uplink, downlink) VALUES (?, ?, ?, ?)",
+		sample.User, sample.Timestamp, sample.Uplink, sample.Downlink)
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected > 0 {
+		if err := upsertSamplesHourly(tx, sample.User, sample.Timestamp, sample.Uplink, sample.Downlink); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) BulkInsert(samples []Sample) error {
@@ -2008,9 +2089,16 @@ func (s *Store) BulkInsert(samples []Sample) error {
 	defer stmt.Close()
 
 	for _, smp := range samples {
-		if _, err := stmt.Exec(smp.User, smp.Timestamp, smp.Uplink, smp.Downlink); err != nil {
+		res, err := stmt.Exec(smp.User, smp.Timestamp, smp.Uplink, smp.Downlink)
+		if err != nil {
 			tx.Rollback()
 			return err
+		}
+		if affected, _ := res.RowsAffected(); affected > 0 {
+			if err := upsertSamplesHourly(tx, smp.User, smp.Timestamp, smp.Uplink, smp.Downlink); err != nil {
+				tx.Rollback()
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -2582,13 +2670,32 @@ func (s *Store) GetSBTrafficBuckets(start, end, interval int64) (map[int64]Traff
 	if interval <= 0 {
 		interval = 60
 	}
-	rows, err := s.db.Query(`
+	// Wide dashboard ranges (1w/1m) already request a chart bucket of 1h or
+	// coarser (see resolveDashboardWindow), which samples_hourly can satisfy
+	// directly — a table 30-60x smaller than samples, since it's kept as a
+	// running rollup on every write instead of one row per raw sample.
+	// samples_hourly's own bucket is 1h, so this is only safe when the
+	// requested interval is a multiple of that (always true for >= 3600 here).
+	sourceTable := "samples"
+	queryStart, queryEnd := start, end
+	if interval >= samplesHourlyBucketSize {
+		sourceTable = "samples_hourly"
+		// A custom (non-preset) range isn't guaranteed to land on hour
+		// boundaries. samples_hourly's ts is the START of its hour, so a
+		// plain ts >= start could silently drop a partial hour's data at the
+		// near edge. Widen to the enclosing hour boundaries instead — the
+		// caller only reads buckets it asked for, so the extra edge data
+		// (at most ~1h) is computed but simply never looked up.
+		queryStart = (start / samplesHourlyBucketSize) * samplesHourlyBucketSize
+		queryEnd = ((end / samplesHourlyBucketSize) + 1) * samplesHourlyBucketSize
+	}
+	rows, err := s.db.Query(fmt.Sprintf(`
 		SELECT (ts / ?) * ? AS bucket_ts, SUM(uplink), SUM(downlink)
-		FROM samples
+		FROM %s
 		WHERE ts >= ? AND ts <= ?
 		GROUP BY bucket_ts
 		ORDER BY bucket_ts ASC
-	`, interval, interval, start, end)
+	`, sourceTable), interval, interval, queryStart, queryEnd)
 	if err != nil {
 		return nil, err
 	}
@@ -2642,11 +2749,28 @@ func (s *Store) GetSBUserTrafficBuckets(user string, start, end, interval int64)
 
 // GetSBTopTotals aggregates Sing-box usage per user in the range.
 func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, error) {
-	rows, err := s.db.Query(`
+	// Same rationale as GetSBTrafficBuckets: a wide "top consumers" range
+	// (1w/1m) is dominated by scanning every raw sample. samples_hourly is
+	// kept live on every write (see upsertSamplesHourly), so it's always
+	// current — no gap at the recent end. Widen to hour boundaries so a
+	// non-hour-aligned custom range never silently drops edge data.
+	//
+	// NOTE for whoever wires up the (currently disabled) aggregation
+	// feature: CompressOldSamples deletes raw samples into daily_usage but
+	// never touches samples_hourly, which keeps full history regardless.
+	// Once aggregation can be enabled, unioning daily_usage with
+	// samples_hourly here would double-count any period both cover.
+	table, qStart, qEnd := "samples", start, end
+	if end-start >= 86400 {
+		table = "samples_hourly"
+		qStart = (start / samplesHourlyBucketSize) * samplesHourlyBucketSize
+		qEnd = ((end / samplesHourlyBucketSize) + 1) * samplesHourlyBucketSize
+	}
+	rows, err := s.db.Query(fmt.Sprintf(`
 		SELECT user, SUM(uplink) AS up, SUM(downlink) AS down
 		FROM (
 			SELECT user, uplink, downlink
-			FROM samples
+			FROM %s
 			WHERE ts >= ? AND ts <= ?
 
 			UNION ALL
@@ -2658,7 +2782,7 @@ func (s *Store) GetSBTopTotals(start, end int64, limit int) ([]TrafficTotal, err
 		GROUP BY user
 		ORDER BY (up + down) DESC
 		LIMIT ?
-	`, start, end, start, end, limit)
+	`, table), qStart, qEnd, start, end, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -2789,6 +2913,15 @@ func (s *Store) CompressOldSamples(olderThanTs int64) error {
 	err = qtx.PruneSamplesOlderThan(context.Background(), olderThanTs)
 	if err != nil {
 		return fmt.Errorf("compress delete failed: %v", err)
+	}
+
+	// samples_hourly is a live rollup of samples, kept in sync on every write
+	// (see upsertSamplesHourly) and never pruned on its own. Now that this
+	// range has been moved into daily_usage, drop the matching rows here too
+	// so wide-range dashboard queries (which read samples_hourly instead of
+	// samples for speed) don't double-count it against daily_usage.
+	if _, err := tx.Exec("DELETE FROM samples_hourly WHERE ts < ?", olderThanTs); err != nil {
+		return fmt.Errorf("compress: prune samples_hourly failed: %v", err)
 	}
 
 	if err := tx.Commit(); err != nil {
