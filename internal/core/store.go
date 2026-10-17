@@ -378,6 +378,22 @@ func (s *Store) initSchema() error {
 		PRIMARY KEY (sub_id, hwid_hash),
 		FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS subscription_hwid_migrations (
+		source_sub_id INTEGER NOT NULL,
+		hwid_hash TEXT NOT NULL,
+		target_sub_id INTEGER NOT NULL,
+		status TEXT NOT NULL DEFAULT 'pending',
+		attempts INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL,
+		delivered_at INTEGER NOT NULL DEFAULT 0,
+		confirmed_at INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (source_sub_id, hwid_hash),
+		FOREIGN KEY (source_sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE,
+		FOREIGN KEY (target_sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_hwid_migrations_target
+		ON subscription_hwid_migrations(target_sub_id, hwid_hash);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
