@@ -198,6 +198,10 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		addSites(sub.HappDirectSites)
 	}
 
+	// Resolved per request and applied after the cache: the cache is keyed per
+	// token, not per device, so this must never end up in a cached payload.
+	migrationNewURL := s.pendingHWIDMigrationURL(r, sub)
+
 	cacheKey := "sub:" + token
 	if happParams != nil {
 		cacheKey += ":happ:" + happSubscriptionParamsCacheKey(happParams)
@@ -218,7 +222,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		if c, ok := val.(cachedSub); ok {
 			s.recordSubscriptionRequest(r, sub.ID, users, true)
 			s.observeSubscriptionHWID(r, sub, users)
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 			return
 		}
 	}
@@ -261,7 +265,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	s.recordSubscriptionRequest(r, sub.ID, users, false)
 	s.observeSubscriptionHWID(r, sub, users)
-	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 }
 
 func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string, subColorProfile string) ([]happSubscriptionParam, string) {
@@ -895,7 +899,7 @@ func servedFromCacheToInt64(v bool) int64 {
 	return 0
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool, happParams []happSubscriptionParam) {
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool, happParams []happSubscriptionParam, migrationNewURL string) {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
 	parts = append(parts, fmt.Sprintf("download=%d", down))
@@ -914,6 +918,12 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 	}
 	for _, param := range happParams {
 		w.Header().Set(param.Key, param.Value)
+	}
+	if migrationNewURL != "" {
+		// fallback-url would otherwise send the device back to the source sub.
+		w.Header().Set("new-url", migrationNewURL)
+		w.Header().Set("fallback-url", migrationNewURL)
+		w.Header().Del("new-domain")
 	}
 	w.Header().Set("Subscription-Userinfo", strings.Join(parts, "; "))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
