@@ -1448,8 +1448,8 @@ func TestExtractSubscriptionRequestMetadata_FallsBackToParsedSamsungUserAgent(t 
 
 	got := extractSubscriptionRequestMetadata(req)
 
-	if got.deviceModel != "Samsung SM-S918B" {
-		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "Samsung SM-S918B")
+	if got.deviceModel != "Galaxy S23 Ultra" {
+		t.Fatalf("deviceModel=%q want %q", got.deviceModel, "Galaxy S23 Ultra")
 	}
 	if got.deviceOS != "Android" {
 		t.Fatalf("deviceOS=%q want %q", got.deviceOS, "Android")
@@ -1518,7 +1518,11 @@ func TestResolveSubscriptionDeviceModel(t *testing.T) {
 		{name: "apple iphone identifier", input: "iPhone15,3", want: "iPhone 14 Pro Max"},
 		{name: "apple ipad identifier", input: "iPad13,18", want: "iPad (10th generation)"},
 		{name: "apple mac identifier", input: "Mac15,12", want: "MacBook Air (13-inch, M3, 2024)"},
-		{name: "samsung code", input: "SM-S918B", want: "Samsung SM-S918B"},
+		{name: "samsung code", input: "SM-S918B", want: "Galaxy S23 Ultra"},
+		{name: "samsung recent flagship", input: "SM-S938B", want: "Galaxy S25 Ultra"},
+		{name: "samsung foldable", input: "SM-F956B", want: "Galaxy Z Fold6"},
+		{name: "samsung lowercase", input: "sm-s918b", want: "Galaxy S23 Ultra"},
+		{name: "samsung unknown model keeps the code", input: "SM-Z999Q", want: "Samsung SM-Z999Q"},
 		{name: "unknown passthrough", input: "Pixel 9 Pro", want: "Pixel 9 Pro"},
 	}
 
@@ -2193,5 +2197,24 @@ func TestHandleSubscriptionRequestHistory_PrefersCFConnectingIPOverRemoteAddr(t 
 	// Must record the real client IP from CF-Connecting-IP, not the Cloudflare edge IP.
 	if got[0].RequestIp != "2001:db8::cafe" {
 		t.Fatalf("request_ip=%q want %q (CF-Connecting-IP)", got[0].RequestIp, "2001:db8::cafe")
+	}
+}
+
+func TestResolveSubscriptionDeviceModel_SamsungRegionalVariantFallsBackToItsFamily(t *testing.T) {
+	loadSubscriptionDeviceCatalog()
+	// Build a code for the S23 Ultra family (SM-S918) that is not in the list.
+	var variant string
+	for letter := 'A'; letter <= 'Z'; letter++ {
+		candidate := "SM-S918" + string(letter) + "9"
+		if _, known := subscriptionSamsungCatalog[candidate]; !known {
+			variant = candidate
+			break
+		}
+	}
+	if variant == "" {
+		t.Fatal("could not build an unknown SM-S918 variant")
+	}
+	if got := resolveSubscriptionDeviceModel(variant); got != "Galaxy S23 Ultra" {
+		t.Fatalf("resolveSubscriptionDeviceModel(%q)=%q want the family name", variant, got)
 	}
 }
