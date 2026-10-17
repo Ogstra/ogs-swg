@@ -64,10 +64,14 @@ func (s *Server) pendingHWIDMigration(r *http.Request, sub store.GetSubscription
 	if failed {
 		s.insertSystemAuditEntry("subscription", "hwid_migration_failed", sub.Name, "device never reached the target subscription")
 		if s.ntfyNotifier != nil {
+			meta := extractSubscriptionRequestMetadata(r)
 			s.ntfyNotifier.ObserveHWIDMigration(r.Context(), core.NtfyHWIDMigrationInfo{
 				SourceSubscription: sub.Name,
 				TargetSubscription: target.Name,
-				HWIDPrefix:         extractSubscriptionRequestMetadata(r).hwidPrefix,
+				HWIDPrefix:         meta.hwidPrefix,
+				DeviceModel:        meta.deviceModel,
+				DeviceOS:           meta.deviceOS,
+				DeviceOSVersion:    meta.deviceOSVersion,
 				Failed:             true,
 			})
 		}
@@ -111,6 +115,9 @@ func (s *Server) observeHWIDMigrationArrival(r *http.Request, sub store.GetSubsc
 		s.ntfyNotifier.ObserveHWIDMigration(r.Context(), core.NtfyHWIDMigrationInfo{
 			TargetSubscription: sub.Name,
 			HWIDPrefix:         meta.hwidPrefix,
+			DeviceModel:        meta.deviceModel,
+			DeviceOS:           meta.deviceOS,
+			DeviceOSVersion:    meta.deviceOSVersion,
 		})
 	}
 }

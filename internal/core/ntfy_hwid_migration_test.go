@@ -35,6 +35,35 @@ func TestNtfyHWIDMigrationMessage(t *testing.T) {
 	})
 }
 
+func TestNtfyHWIDMigrationMessageNamesTheDevice(t *testing.T) {
+	info := NtfyHWIDMigrationInfo{
+		SourceSubscription: "a", TargetSubscription: "b", HWIDPrefix: "abc12345",
+		DeviceModel: "iPhone 14 Pro", DeviceOS: "iOS", DeviceOSVersion: "17.4",
+	}
+
+	moved := NtfyHWIDMigrationMessage(info)
+	if moved.Title != "iPhone 14 Pro · iOS 17.4 moved to subscription: b" {
+		t.Errorf("Title = %q", moved.Title)
+	}
+	for _, want := range []string{"**iPhone 14 Pro · iOS 17.4**", "abc12345"} {
+		if !strings.Contains(moved.Message, want) {
+			t.Errorf("Message = %q; want %q", moved.Message, want)
+		}
+	}
+
+	info.Failed = true
+	failed := NtfyHWIDMigrationMessage(info)
+	if !strings.Contains(failed.Message, "**iPhone 14 Pro · iOS 17.4**") || !strings.Contains(failed.Message, "abc12345") {
+		t.Errorf("failed Message = %q; want the device and HWID prefix", failed.Message)
+	}
+
+	// No device info on the request: keep the generic wording.
+	bare := NtfyHWIDMigrationMessage(NtfyHWIDMigrationInfo{TargetSubscription: "b", HWIDPrefix: "abc12345"})
+	if bare.Title != "Device moved to subscription: b" || !strings.HasPrefix(bare.Message, "Device is now requesting") {
+		t.Errorf("bare = %q / %q", bare.Title, bare.Message)
+	}
+}
+
 func TestObserveHWIDMigration(t *testing.T) {
 	info := NtfyHWIDMigrationInfo{SourceSubscription: "a", TargetSubscription: "b", HWIDPrefix: "abc123"}
 
