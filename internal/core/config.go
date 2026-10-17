@@ -1178,8 +1178,11 @@ func (c *Config) ApplySingboxChanges() error {
 			return nil
 		} else {
 			// A configured Clash API that rejects/fails the reload is a genuine
-			// apply failure (NTFY-03); "no Clash API configured" is not (D-15).
-			clashErr = err
+			// apply failure; "no Clash API configured" or an API without a
+			// /restart endpoint just means a systemd restart is needed.
+			if !errors.Is(err, errClashRestartUnsupported) {
+				clashErr = err
+			}
 		}
 	}
 

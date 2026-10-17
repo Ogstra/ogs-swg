@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -1258,6 +1259,11 @@ func (c *Config) ReloadSingbox() error {
 	return cmd.Run()
 }
 
+// errClashRestartUnsupported means the Clash API is reachable but this
+// sing-box build doesn't expose POST /restart (404). That is "hot reload not
+// available", not a configuration being rejected.
+var errClashRestartUnsupported = errors.New("clash API restart endpoint not supported")
+
 func (c *Config) restartViaClashAPI(api *ClashAPI) error {
 	req, err := http.NewRequest(
 		http.MethodPost,
@@ -1280,6 +1286,9 @@ func (c *Config) restartViaClashAPI(api *ClashAPI) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("clash API restart: unexpected status %d: %w", resp.StatusCode, errClashRestartUnsupported)
+	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("clash API restart: unexpected status %d", resp.StatusCode)
 	}

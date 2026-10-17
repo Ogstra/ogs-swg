@@ -769,6 +769,31 @@ func TestApplySingboxChanges_RequiresRestartWhenNoClashAPI(t *testing.T) {
 	}
 }
 
+func TestApplySingboxChanges_ClashAPIRestart404IsNotAnApplyFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	fixtureJSON := `{"experimental":{"clash_api":{"external_controller":"` + strings.TrimPrefix(server.URL, "http://") + `"}}}`
+	cfg, stub := newTestConfig(t, fixtureJSON)
+	cfg.EnableSingbox = true
+	cfg.MarkSingboxPending()
+	cfg.SetExecutor(&reloadTrackingExecutor{stubExecutor: stub})
+
+	err := cfg.ApplySingboxChanges()
+	var restartRequired *SingboxRestartRequiredError
+	if !errors.As(err, &restartRequired) {
+		t.Fatalf("ApplySingboxChanges error = %v, want SingboxRestartRequiredError", err)
+	}
+	if restartRequired.Err != nil {
+		t.Fatalf("restartRequired.Err = %v, want nil: a Clash API without /restart is not a rejected config", restartRequired.Err)
+	}
+	if !cfg.GetSingboxPendingChanges() {
+		t.Fatalf("GetSingboxPendingChanges() = false, want true until confirmed restart")
+	}
+}
+
 func TestApplySingboxChanges_RequiresRestartWhenClashAPIFails(t *testing.T) {
 	fixtureJSON := `{
 		"experimental": {
