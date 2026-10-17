@@ -150,6 +150,22 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	// Load global Happ config once; reuse for routing profile, direct sites, and shadowrocket flag.
+	// A device being moved gets the TARGET sub's profiles in this same response:
+	// the client replaces its saved link but does not refetch it right away, so
+	// serving the source's profiles would leave it showing stale ones. Protection
+	// checks, request recording and device tracking above/below stay on the
+	// source sub. The new-url is resolved per request and applied after the
+	// cache: the cache is keyed per token, not per device, so it must never end
+	// up in a cached payload.
+	contentSub, contentToken, contentMemberRows := sub, token, memberRows
+	migrationNewURL := ""
+	if migration := s.pendingHWIDMigration(r, sub); migration != nil {
+		migrationNewURL = migration.NewURL
+		if targetRows, err := s.store.Queries.GetSubscriptionMembers(r.Context(), migration.Target.ID); err == nil && len(targetRows) > 0 {
+			contentSub, contentToken, contentMemberRows = migration.Target, migration.Target.Token, targetRows
+		}
+	}
+
 	var globalHappCfg core.SubscriptionHappConfig
 	var globalHappCfgLoaded bool
 	loadGlobalHappCfg := func() core.SubscriptionHappConfig {
@@ -162,7 +178,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return globalHappCfg
 	}
 
-	happParams, happFlag := s.happSubscriptionParamsForRequest(r, token, sub.HappColorProfile)
+	happParams, happFlag := s.happSubscriptionParamsForRequest(r, contentToken, contentSub.HappColorProfile)
 	profileFlag := happFlag
 	if profileFlag == "" && isShadowrocketRequest(r) {
 		profileFlag = loadGlobalHappCfg().ProfileFlag
@@ -170,8 +186,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	routingProfileJSON := ""
 	if happParams != nil {
-		if sub.HappRoutingProfile != "" {
-			routingProfileJSON = sub.HappRoutingProfile
+		if contentSub.HappRoutingProfile != "" {
+			routingProfileJSON = contentSub.HappRoutingProfile
 		} else {
 			routingProfileJSON = loadGlobalHappCfg().RoutingProfile
 		}
@@ -195,22 +211,18 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 		globalCfg := loadGlobalHappCfg()
 		addSites(strings.Join(globalCfg.DirectSites, "\n"))
-		addSites(sub.HappDirectSites)
+		addSites(contentSub.HappDirectSites)
 	}
 
-	// Resolved per request and applied after the cache: the cache is keyed per
-	// token, not per device, so this must never end up in a cached payload.
-	migrationNewURL := s.pendingHWIDMigrationURL(r, sub)
-
-	cacheKey := "sub:" + token
+	cacheKey := "sub:" + contentToken
 	if happParams != nil {
 		cacheKey += ":happ:" + happSubscriptionParamsCacheKey(happParams)
 	}
 	if routingProfileJSON != "" {
 		cacheKey += ":r:" + routingProfileJSON
 	}
-	if sub.HappColorProfile != "" {
-		cacheKey += ":cp:" + sub.HappColorProfile
+	if contentSub.HappColorProfile != "" {
+		cacheKey += ":cp:" + contentSub.HappColorProfile
 	}
 	if profileFlag != "" {
 		cacheKey += ":flag:" + profileFlag
@@ -228,8 +240,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	members := make([]subscriptionMember, 0, len(memberRows))
-	for _, member := range memberRows {
+	members := make([]subscriptionMember, 0, len(contentMemberRows))
+	for _, member := range contentMemberRows {
 		members = append(members, subscriptionMember{UserName: member.UserName, Alias: member.Alias})
 	}
 
@@ -248,15 +260,15 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	c := buildSubscription(buildSubscriptionInput{
 		Members:               members,
-		DisplayTitle:          subscriptionDisplayName(sub.Name, sub.Alias),
+		DisplayTitle:          subscriptionDisplayName(contentSub.Name, contentSub.Alias),
 		Host:                  s.resolvePublicHost(r),
 		ProfileFlag:           profileFlag,
 		HappParams:            happParams,
 		RoutingProfileJSON:    routingProfileJSON,
 		MergedDirectSites:     mergedDirectSites,
-		SubQuotaLimit:         sub.QuotaLimit.Int64,
-		ProfileUpdateInterval: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
-		UpdateAlways:          int64ToBool(sub.UpdateAlways),
+		SubQuotaLimit:         contentSub.QuotaLimit.Int64,
+		ProfileUpdateInterval: nullableInt64Ptr(contentSub.ProfileUpdateIntervalHours),
+		UpdateAlways:          int64ToBool(contentSub.UpdateAlways),
 		Now:                   s.now(),
 		Users:                 subUsers,
 		Inbounds:              subInbounds,

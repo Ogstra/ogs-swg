@@ -141,3 +141,28 @@ func TestPublicSub_NoNewURLWithoutProviderID(t *testing.T) {
 		t.Fatalf("migration = %#v; an undeliverable request must not count as an attempt", m)
 	}
 }
+
+func TestPublicSub_MigratingDeviceGetsTargetProfilesInSameResponse(t *testing.T) {
+	f := newMigrationFixture(t, nil)
+
+	moved := hitSub(t, f.server, migrationTestSrcToken, migrationTestHWID)
+	target := hitSub(t, f.server, migrationTestDstToken, "hwid-someone-else")
+	source := hitSub(t, f.server, migrationTestSrcToken, "hwid-someone-else")
+
+	if source.Body.String() == target.Body.String() {
+		t.Fatal("fixture source and target bodies are identical; the test would prove nothing")
+	}
+	if moved.Body.String() != target.Body.String() {
+		t.Fatalf("migrating device body = %q; want the target sub's profiles %q", moved.Body.String(), target.Body.String())
+	}
+	if got, want := moved.Header().Get("Profile-Title"), target.Header().Get("Profile-Title"); got != want {
+		t.Fatalf("Profile-Title = %q; want the target's %q", got, want)
+	}
+	if got := moved.Header().Get("new-url"); got == "" {
+		t.Fatal("migrating device did not get new-url")
+	}
+	// Everyone else on the source sub still gets the source's profiles.
+	if source.Header().Get("new-url") != "" {
+		t.Fatal("unrelated device got new-url")
+	}
+}
