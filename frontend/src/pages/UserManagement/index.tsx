@@ -901,16 +901,42 @@ export default function UserManagement() {
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
 
-                <div className="grid grid-cols-2 gap-3 w-full md:flex md:flex-wrap md:items-center md:justify-end">
-                    <SearchInput
-                        value={search}
-                        onChange={setSearch}
-                        placeholder="Search users..."
-                        inlineFrom="2xl"
-                        className="2xl:flex-1 2xl:min-w-[8rem] 2xl:max-w-64"
-                        collapsedClassName="col-span-2 justify-self-end md:col-span-1 md:justify-self-auto"
-                        expandedClassName="col-span-2 md:col-span-1 md:basis-full md:order-first 2xl:basis-auto 2xl:order-none"
-                    />
+                <div className="grid grid-cols-2 gap-3 w-full md:flex md:flex-wrap md:items-center md:justify-end lg:justify-between">
+                    <div className="contents lg:flex lg:flex-1 lg:min-w-[27rem] lg:items-center lg:gap-3">
+                        <SearchInput
+                            value={search}
+                            onChange={setSearch}
+                            placeholder="Search users..."
+                            className="lg:flex-1 lg:min-w-[7rem] lg:max-w-64"
+                        />
+                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto order-2 lg:order-none lg:max-w-[9rem] lg:shrink-0">
+                        <select
+                            value={filterInbound}
+                            onChange={(e) => setFilterInbound(e.target.value)}
+                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
+                        >
+                            <option value="">All Inbounds</option>
+                            {inbounds.map((inb) => (
+                                <option key={inb.tag} value={inb.tag}>{inb.tag}</option>
+                            ))}
+                        </select>
+                    </div>
+                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto order-2 lg:order-none lg:max-w-[9rem] lg:shrink-0">
+                        <select
+                            value={routeTagFilter}
+                            onChange={(e) => setRouteTagFilter(e.target.value)}
+                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
+                        >
+                            <option value="">All Route Tags</option>
+                            {(routeTagsQuery.data || []).map(tag => (
+                                <option key={tag.id} value={String(tag.id)}>
+                                    {tag.name}{tag.broken ? (tag.broken_reason === 'inbound_mismatch' ? ' (inbound mismatch)' : ' (needs relink)') : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    </div>
+                    <div className="contents lg:flex lg:items-center lg:gap-3 lg:ml-auto">
                     <Button
                         onClick={() => {
                             if (!canWriteUsers) return
@@ -970,32 +996,8 @@ export default function UserManagement() {
                     >
                         Route Tags
                     </Button>
-                    <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
-                        <select
-                            value={filterInbound}
-                            onChange={(e) => setFilterInbound(e.target.value)}
-                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
-                        >
-                            <option value="">All Inbounds</option>
-                            {inbounds.map((inb) => (
-                                <option key={inb.tag} value={inb.tag}>{inb.tag}</option>
-                            ))}
-                        </select>
                     </div>
-                    <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto">
-                        <select
-                            value={routeTagFilter}
-                            onChange={(e) => setRouteTagFilter(e.target.value)}
-                            className="select-field bg-transparent text-slate-300 text-sm px-3 py-1 outline-none w-full text-center md:text-left"
-                        >
-                            <option value="">All Route Tags</option>
-                            {(routeTagsQuery.data || []).map(tag => (
-                                <option key={tag.id} value={String(tag.id)}>
-                                    {tag.name}{tag.broken ? (tag.broken_reason === 'inbound_mismatch' ? ' (inbound mismatch)' : ' (needs relink)') : ''}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+
                 </div>
             </div>
 

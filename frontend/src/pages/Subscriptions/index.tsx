@@ -858,13 +858,12 @@ export default function Subscriptions() {
 
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
-            <div className="flex flex-row flex-wrap items-center justify-between gap-2 sm:gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
                 <SearchInput
                     value={search}
                     onChange={setSearch}
                     placeholder="Search subscriptions..."
-                    className="md:w-64"
-                    expandedClassName="w-full order-first"
+                    className="lg:mr-auto lg:w-64"
                 />
                 <div className="flex items-center justify-end gap-2">
                     <ActionIconButton
