@@ -140,6 +140,46 @@ func (s *Server) handleCancelHWIDMigration(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleDeleteSubscriptionDevice removes a device that has already been moved,
+// so the operator can clear it from the list. Other devices are not removable.
+func (s *Server) handleDeleteSubscriptionDevice(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid ID")
+		return
+	}
+	hash := strings.TrimSpace(r.PathValue("hwid_hash"))
+	if hash == "" {
+		writeErr(w, http.StatusBadRequest, "hwid_hash is required")
+		return
+	}
+	if _, err := s.store.Queries.GetSubscriptionByID(r.Context(), id); err != nil {
+		writeErr(w, http.StatusNotFound, "Subscription not found")
+		return
+	}
+	migrations, err := s.store.ListHWIDMigrations(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to load migrations")
+		return
+	}
+	moved := false
+	for _, m := range migrations {
+		if m.HWIDHash == hash {
+			moved = m.Status == "confirmed"
+			break
+		}
+	}
+	if !moved {
+		writeErr(w, http.StatusConflict, "Only devices that have been moved can be removed")
+		return
+	}
+	if err := s.store.DeleteSubscriptionDevice(r.Context(), id, hash); err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to remove device")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleCancelAllHWIDMigrations is the operator kill switch: it stops every
 // live migration without a redeploy.
 func (s *Server) handleCancelAllHWIDMigrations(w http.ResponseWriter, r *http.Request) {

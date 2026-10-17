@@ -213,3 +213,34 @@ func TestAdminCreateHWIDMigrationRejectsRearmingConfirmedMove(t *testing.T) {
 		t.Fatalf("status = %d want 409 body=%q", rec.Code, rec.Body.String())
 	}
 }
+
+func TestAdminDeleteSubscriptionDeviceOnlyWhenMoved(t *testing.T) {
+	f := newMigrationAdminFixture(t)
+	ctx := context.Background()
+	path := map[string]string{"id": strconv.FormatInt(f.srcID, 10), "hwid_hash": f.hash}
+
+	// Not moved yet: refused.
+	if rec := adminCall(f.server.handleDeleteSubscriptionDevice, http.MethodDelete, "", path); rec.Code != http.StatusConflict {
+		t.Fatalf("status before the move = %d want 409", rec.Code)
+	}
+	// Armed but not confirmed: still refused.
+	if err := f.store.CreateHWIDMigration(ctx, f.srcID, f.hash, f.dstID, 30); err != nil {
+		t.Fatal(err)
+	}
+	if rec := adminCall(f.server.handleDeleteSubscriptionDevice, http.MethodDelete, "", path); rec.Code != http.StatusConflict {
+		t.Fatalf("status while pending = %d want 409", rec.Code)
+	}
+	// Confirmed: removable.
+	if _, err := f.store.MarkHWIDMigrationDelivered(ctx, f.srcID, f.hash, 35); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := f.store.ConfirmHWIDMigration(ctx, f.dstID, f.hash, 40); err != nil || !ok {
+		t.Fatalf("ConfirmHWIDMigration = %v, %v", ok, err)
+	}
+	if rec := adminCall(f.server.handleDeleteSubscriptionDevice, http.MethodDelete, "", path); rec.Code != http.StatusNoContent {
+		t.Fatalf("status after the move = %d want 204 body=%q", rec.Code, rec.Body.String())
+	}
+	if known, _ := f.store.HasSubscriptionKnownHWID(ctx, f.srcID, f.hash); known {
+		t.Fatal("removed device is still known on the source sub")
+	}
+}

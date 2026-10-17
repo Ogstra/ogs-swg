@@ -427,6 +427,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/happ/encrypt-link", s.secure(s.requirePerm(canReadUsers, s.handleEncryptHappLink)))
 	protected.HandleFunc("POST /api/subscriptions/hwid-migrations/cancel-all", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("subscription", "hwid_migration_cancel_all", s.handleCancelAllHWIDMigrations))))
 	protected.HandleFunc("GET /api/subscriptions/{id}/devices", s.secure(s.requirePerm(canReadUsers, s.handleListSubscriptionDevices)))
+	protected.HandleFunc("DELETE /api/subscriptions/{id}/devices/{hwid_hash}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("subscription", "hwid_device_remove", s.handleDeleteSubscriptionDevice))))
 	protected.HandleFunc("POST /api/subscriptions/{id}/hwid-migrations", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("subscription", "hwid_migration_create", s.handleCreateHWIDMigration))))
 	protected.HandleFunc("DELETE /api/subscriptions/{id}/hwid-migrations/{hwid_hash}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("subscription", "hwid_migration_cancel", s.handleCancelHWIDMigration))))
 	protected.HandleFunc("GET /api/subscriptions/{id}", s.secure(s.requirePerm(canReadUsers, s.handleGetSubscription)))

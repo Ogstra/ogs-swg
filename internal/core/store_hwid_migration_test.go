@@ -135,3 +135,30 @@ func TestHWIDMigration_PendingIsNotConfirmedByTargetRequest(t *testing.T) {
 		t.Fatalf("migration = %#v; want still pending", live)
 	}
 }
+
+func TestDeleteSubscriptionDevice_ForgetsDeviceAndItsMigrations(t *testing.T) {
+	ctx := context.Background()
+	store := newMigrationTestStore(t)
+	if _, err := store.RecordSubscriptionHWIDFirstSeen(ctx, 1, "hash-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.RecordSubscriptionHWIDFirstSeen(ctx, 2, "hash-a", 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateHWIDMigration(ctx, 1, "hash-a", 2, 100); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.DeleteSubscriptionDevice(ctx, 1, "hash-a"); err != nil {
+		t.Fatalf("DeleteSubscriptionDevice: %v", err)
+	}
+	if known, _ := store.HasSubscriptionKnownHWID(ctx, 1, "hash-a"); known {
+		t.Fatal("device still known on the source sub")
+	}
+	if rows, _ := store.ListHWIDMigrations(ctx, 1); len(rows) != 0 {
+		t.Fatalf("migrations left behind: %#v", rows)
+	}
+	if known, _ := store.HasSubscriptionKnownHWID(ctx, 2, "hash-a"); !known {
+		t.Fatal("the device was also removed from the other subscription")
+	}
+}

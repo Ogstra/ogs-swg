@@ -207,3 +207,20 @@ func (s *Store) HasSubscriptionKnownHWID(ctx context.Context, subID int64, hwidH
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_known_hwids WHERE sub_id = ? AND hwid_hash = ?`, subID, hwidHash).Scan(&n)
 	return n > 0, err
 }
+
+// DeleteSubscriptionDevice forgets a device on one subscription: its known-HWID
+// row and its migration rows for that sub. Request history is left alone.
+func (s *Store) DeleteSubscriptionDevice(ctx context.Context, subID int64, hwidHash string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_hwid_migrations WHERE source_sub_id = ? AND hwid_hash = ?`, subID, hwidHash); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM subscription_known_hwids WHERE sub_id = ? AND hwid_hash = ?`, subID, hwidHash); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
