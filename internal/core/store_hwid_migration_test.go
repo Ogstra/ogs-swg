@@ -120,3 +120,18 @@ func TestHWIDMigration_RejectsSelfTargetAndEmptyHash(t *testing.T) {
 		t.Fatalf("empty hwid accepted")
 	}
 }
+
+func TestHWIDMigration_PendingIsNotConfirmedByTargetRequest(t *testing.T) {
+	ctx := context.Background()
+	store := newMigrationTestStore(t)
+	if err := store.CreateHWIDMigration(ctx, 1, "hash-a", 2, 100); err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := store.ConfirmHWIDMigration(ctx, 2, "hash-a", 150)
+	if err != nil || confirmed {
+		t.Fatalf("ConfirmHWIDMigration before delivery = %v, %v; want false", confirmed, err)
+	}
+	if live, _ := store.GetLiveHWIDMigration(ctx, 1, "hash-a"); live == nil || live.Status != "pending" {
+		t.Fatalf("migration = %#v; want still pending", live)
+	}
+}

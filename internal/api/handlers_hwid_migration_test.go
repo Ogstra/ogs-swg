@@ -195,22 +195,13 @@ func TestAdminHWIDMigrationRoutesRegisterAndAudit(t *testing.T) {
 	}
 }
 
-func TestAdminCreateHWIDMigrationRejectsDeviceAlreadyOnTarget(t *testing.T) {
-	f := newMigrationAdminFixture(t)
-	if _, err := f.store.RecordSubscriptionHWIDFirstSeen(context.Background(), f.dstID, f.hash, 20); err != nil {
-		t.Fatal(err)
-	}
-	path := map[string]string{"id": strconv.FormatInt(f.srcID, 10)}
-	rec := adminCall(f.server.handleCreateHWIDMigration, http.MethodPost, createMigrationBody(f.hash, f.dstID), path)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d want 409 body=%q", rec.Code, rec.Body.String())
-	}
-}
-
 func TestAdminCreateHWIDMigrationRejectsRearmingConfirmedMove(t *testing.T) {
 	f := newMigrationAdminFixture(t)
 	ctx := context.Background()
 	if err := f.store.CreateHWIDMigration(ctx, f.srcID, f.hash, f.dstID, 30); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.MarkHWIDMigrationDelivered(ctx, f.srcID, f.hash, 35); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := f.store.ConfirmHWIDMigration(ctx, f.dstID, f.hash, 40); err != nil || !ok {

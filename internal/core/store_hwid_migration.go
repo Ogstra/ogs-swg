@@ -112,9 +112,11 @@ func (s *Store) CancelAllHWIDMigrations(ctx context.Context) (int64, error) {
 	return res.RowsAffected()
 }
 
-// ConfirmHWIDMigration marks every live migration targeting targetSubID for
-// this HWID as confirmed. Returns true only for the call that actually flipped
-// a row (RowsAffected), so the confirmation fires exactly once.
+// ConfirmHWIDMigration marks every migration targeting targetSubID for this
+// HWID as confirmed, but only once new-url has actually been sent for it
+// (status delivered): a device that already requests the target sub must not
+// confirm a move it was never told about. Returns true only for the call that
+// flipped a row (RowsAffected), so the confirmation fires exactly once.
 func (s *Store) ConfirmHWIDMigration(ctx context.Context, targetSubID int64, hwidHash string, now int64) (bool, error) {
 	hwidHash = strings.TrimSpace(hwidHash)
 	if hwidHash == "" {
@@ -123,7 +125,7 @@ func (s *Store) ConfirmHWIDMigration(ctx context.Context, targetSubID int64, hwi
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE subscription_hwid_migrations
 		SET status = 'confirmed', confirmed_at = ?
-		WHERE target_sub_id = ? AND hwid_hash = ? AND status IN ('pending', 'delivered')
+		WHERE target_sub_id = ? AND hwid_hash = ? AND status = 'delivered'
 	`, now, targetSubID, hwidHash)
 	if err != nil {
 		return false, err
