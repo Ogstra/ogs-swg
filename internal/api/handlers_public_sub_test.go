@@ -2201,12 +2201,11 @@ func TestHandleSubscriptionRequestHistory_PrefersCFConnectingIPOverRemoteAddr(t 
 }
 
 func TestResolveSubscriptionDeviceModel_SamsungRegionalVariantFallsBackToItsFamily(t *testing.T) {
-	loadSubscriptionDeviceCatalog()
 	// Build a code for the S23 Ultra family (SM-S918) that is not in the list.
 	var variant string
 	for letter := 'A'; letter <= 'Z'; letter++ {
 		candidate := "SM-S918" + string(letter) + "9"
-		if _, known := subscriptionSamsungCatalog[candidate]; !known {
+		if _, known := currentDeviceCatalog().samsung[candidate]; !known {
 			variant = candidate
 			break
 		}

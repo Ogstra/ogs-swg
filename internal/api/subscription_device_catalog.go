@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // Apple identifiers are sourced from kyle-seongwoo-jun/apple-device-identifiers (MIT).
@@ -16,39 +17,63 @@ var appleIOSDeviceIdentifiersJSON []byte
 var appleMacDeviceIdentifiersJSON []byte
 
 // Samsung names come from Google's Play supported-devices list; regenerate them
-// with scripts/update-device-catalog.py when new models should be recognised.
+// with scripts/update-device-catalog.py when the embedded copy should be
+// refreshed (the running panel also refreshes itself, see device_catalog_updater.go).
 //
 //go:embed devicedata/samsung-device-names.json
 var samsungDeviceNamesJSON []byte
 
-var (
-	subscriptionDeviceCatalogOnce sync.Once
-	subscriptionAppleCatalog      map[string]string
-	subscriptionSamsungCatalog    map[string]string
-	// subscriptionSamsungFamily maps the first 7 characters of a model code
-	// (e.g. "SM-S918") to a name, only when every known variant agrees on it.
-	// It names regional variants that are not in the list yet.
-	subscriptionSamsungFamily map[string]string
-)
-
 const samsungFamilyPrefixLen = 7
 
-func loadSubscriptionDeviceCatalog() {
-	subscriptionDeviceCatalogOnce.Do(func() {
-		subscriptionAppleCatalog = make(map[string]string)
-		loadSubscriptionDeviceCatalogJSON(appleIOSDeviceIdentifiersJSON)
-		loadSubscriptionDeviceCatalogJSON(appleMacDeviceIdentifiersJSON)
-		loadSubscriptionSamsungCatalog(samsungDeviceNamesJSON)
-	})
+// deviceCatalog is immutable once built, so readers never need a lock: the
+// updater swaps in a whole new value atomically.
+type deviceCatalog struct {
+	apple   map[string]string
+	samsung map[string]string
+	// samsungFamily maps the first 7 characters of a model code (e.g.
+	// "SM-S918") to a name, only when every known variant agrees on it. It
+	// names regional variants that are not in the list yet.
+	samsungFamily map[string]string
 }
 
-func loadSubscriptionDeviceCatalogJSON(raw []byte) {
+var (
+	deviceCatalogOnce    sync.Once
+	deviceCatalogCurrent atomic.Pointer[deviceCatalog]
+)
+
+func currentDeviceCatalog() *deviceCatalog {
+	deviceCatalogOnce.Do(func() {
+		deviceCatalogCurrent.Store(buildDeviceCatalog(nil, nil))
+	})
+	return deviceCatalogCurrent.Load()
+}
+
+// buildDeviceCatalog layers remote overrides on top of the embedded data, so a
+// partial or empty download can only add names, never remove them.
+func buildDeviceCatalog(remoteApple, remoteSamsung map[string]string) *deviceCatalog {
+	apple := parseDeviceCatalogJSON(appleIOSDeviceIdentifiersJSON)
+	for key, value := range parseDeviceCatalogJSON(appleMacDeviceIdentifiersJSON) {
+		apple[key] = value
+	}
+	for key, value := range remoteApple {
+		apple[key] = value
+	}
+
+	samsung := parseDeviceCatalogJSON(samsungDeviceNamesJSON)
+	for key, value := range remoteSamsung {
+		samsung[strings.ToUpper(strings.TrimSpace(key))] = value
+	}
+	return &deviceCatalog{apple: apple, samsung: samsung, samsungFamily: samsungFamilyNames(samsung)}
+}
+
+func parseDeviceCatalogJSON(raw []byte) map[string]string {
+	out := make(map[string]string)
 	if len(raw) == 0 {
-		return
+		return out
 	}
 	var entries map[string]string
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		return
+		return out
 	}
 	for key, value := range entries {
 		identifier := strings.TrimSpace(key)
@@ -56,48 +81,37 @@ func loadSubscriptionDeviceCatalogJSON(raw []byte) {
 		if identifier == "" || name == "" {
 			continue
 		}
-		subscriptionAppleCatalog[identifier] = name
+		out[identifier] = name
 	}
+	return out
 }
 
-func loadSubscriptionSamsungCatalog(raw []byte) {
-	subscriptionSamsungCatalog = make(map[string]string)
-	subscriptionSamsungFamily = make(map[string]string)
-	if len(raw) == 0 {
-		return
-	}
-	var entries map[string]string
-	if err := json.Unmarshal(raw, &entries); err != nil {
-		return
-	}
+func samsungFamilyNames(samsung map[string]string) map[string]string {
+	family := make(map[string]string)
 	ambiguous := make(map[string]bool)
-	for key, value := range entries {
-		code := strings.ToUpper(strings.TrimSpace(key))
-		name := strings.TrimSpace(value)
-		if code == "" || name == "" {
-			continue
-		}
-		subscriptionSamsungCatalog[code] = name
+	for code, name := range samsung {
+		code = strings.ToUpper(code)
 		if len(code) <= samsungFamilyPrefixLen {
 			continue
 		}
 		prefix := code[:samsungFamilyPrefixLen]
-		if existing, ok := subscriptionSamsungFamily[prefix]; ok && existing != name {
+		if existing, ok := family[prefix]; ok && existing != name {
 			ambiguous[prefix] = true
 		} else {
-			subscriptionSamsungFamily[prefix] = name
+			family[prefix] = name
 		}
 	}
 	for prefix := range ambiguous {
-		delete(subscriptionSamsungFamily, prefix)
+		delete(family, prefix)
 	}
+	return family
 }
 
-func resolveSamsungModel(model string) string {
+func resolveSamsungModel(catalog *deviceCatalog, model string) string {
 	code := strings.ToUpper(model)
-	name, ok := subscriptionSamsungCatalog[code]
+	name, ok := catalog.samsung[code]
 	if !ok && len(code) > samsungFamilyPrefixLen {
-		name, ok = subscriptionSamsungFamily[code[:samsungFamilyPrefixLen]]
+		name, ok = catalog.samsungFamily[code[:samsungFamilyPrefixLen]]
 	}
 	if !ok {
 		return "Samsung " + model
@@ -114,13 +128,13 @@ func resolveSubscriptionDeviceModel(model string) string {
 		return ""
 	}
 
-	loadSubscriptionDeviceCatalog()
-	if resolved, ok := subscriptionAppleCatalog[trimmed]; ok {
+	catalog := currentDeviceCatalog()
+	if resolved, ok := catalog.apple[trimmed]; ok {
 		return resolved
 	}
 
 	if strings.HasPrefix(strings.ToUpper(trimmed), "SM-") {
-		return resolveSamsungModel(trimmed)
+		return resolveSamsungModel(catalog, trimmed)
 	}
 
 	return trimmed

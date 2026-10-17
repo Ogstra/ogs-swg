@@ -578,6 +578,7 @@ func StartServer(cfg *core.Config) *Server {
 	}
 
 	server.startNtfyNotifier()
+	server.startDeviceCatalogUpdater()
 
 	// Start background maintenance (Retention & Vacuum)
 	if !cfg.DemoMode {
