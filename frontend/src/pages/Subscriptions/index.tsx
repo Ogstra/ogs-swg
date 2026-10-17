@@ -9,6 +9,8 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
+import { SearchInput } from '../../components/ui/SearchInput'
+import { matchesSearch } from '../../lib/search'
 import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical, Smartphone } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
@@ -282,6 +284,7 @@ export default function Subscriptions() {
     const [draggedProfile, setDraggedProfile] = useState<string | null>(null)
     const [sortKey, setSortKey] = useState<'name' | 'last_request' | 'users' | 'quota'>('name')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+    const [search, setSearch] = useState('')
     const [happProviderId, setHappProviderId] = useState('')
     const [happHideSettings, setHappHideSettings] = useState<'' | '0' | '1'>('')
     const [happAlwaysHwid, setHappAlwaysHwid] = useState<'' | '0' | '1'>('')
@@ -348,7 +351,13 @@ export default function Subscriptions() {
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const happConfig = happConfigQuery.data || EMPTY_HAPP_CONFIG
 
-    const sortedSubs = [...subs].sort((a, b) => {
+    const sortedSubs = subs.filter(sub => matchesSearch(search, [
+        sub.name,
+        sub.alias,
+        sub.token,
+        ...(sub.users || []),
+        ...(sub.members || []).map(member => member.alias),
+    ])).sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1
         switch (sortKey) {
             case 'last_request':
@@ -849,7 +858,14 @@ export default function Subscriptions() {
 
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
+            <div className="flex flex-row flex-wrap items-center justify-between gap-2 sm:gap-4">
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search subscriptions..."
+                    className="md:w-64"
+                    expandedClassName="w-full order-first"
+                />
                 <div className="flex items-center justify-end gap-2">
                     <ActionIconButton
                         onClick={openHappConfig}

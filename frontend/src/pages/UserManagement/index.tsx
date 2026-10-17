@@ -10,6 +10,8 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
+import { SearchInput } from '../../components/ui/SearchInput'
+import { matchesSearch } from '../../lib/search'
 import { canSelectInboundUserFlow } from '../../components/singbox/inboundVisibility'
 import { keyLengthForShadowsocksMethod } from '../../utils/shadowsocks'
 import { formatBytes, formatTimeAgo } from '../../utils/traffic'
@@ -124,6 +126,7 @@ export default function UserManagement() {
     const [originalName, setOriginalName] = useState<string>('')
     const [filterInbound, setFilterInbound] = useState<string>('')
     const [routeTagFilter, setRouteTagFilter] = useState<string>('')
+    const [search, setSearch] = useState('')
 
     // Usage Report State
     const [usageStart, setUsageStart] = useState<string>('')
@@ -350,6 +353,7 @@ export default function UserManagement() {
     const sortedUsers = users
         .filter(u => !filterInbound || visibleUserTags(u).includes(filterInbound))
         .filter(u => !routeTagFilter || (u.route_tags || []).some(tag => String(tag.id) === routeTagFilter))
+        .filter(u => matchesSearch(search, [u.name, u.uuid, ...(u.inbound_tags || []), ...(u.route_tags || []).map(tag => tag.name)]))
         .sort((a, b) => {
             const dir = sortDir === 'asc' ? 1 : -1
             switch (sortKey) {
@@ -897,7 +901,16 @@ export default function UserManagement() {
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
 
-                <div className="grid grid-cols-2 gap-3 w-full md:w-auto md:flex md:flex-wrap">
+                <div className="grid grid-cols-2 gap-3 w-full md:flex md:flex-wrap md:items-center md:justify-end">
+                    <SearchInput
+                        value={search}
+                        onChange={setSearch}
+                        placeholder="Search users..."
+                        inlineFrom="2xl"
+                        className="2xl:flex-1 2xl:min-w-[8rem] 2xl:max-w-64"
+                        collapsedClassName="col-span-2 justify-self-end md:col-span-1 md:justify-self-auto"
+                        expandedClassName="col-span-2 md:col-span-1 md:basis-full md:order-first 2xl:basis-auto 2xl:order-none"
+                    />
                     <Button
                         onClick={() => {
                             if (!canWriteUsers) return

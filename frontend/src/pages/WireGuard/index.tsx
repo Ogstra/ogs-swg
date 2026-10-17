@@ -8,6 +8,8 @@ import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
+import { SearchInput } from '../../components/ui/SearchInput'
+import { matchesSearch } from '../../lib/search'
 import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 import { WG_INTERFACE_DEFAULTS, normalizeWireGuardInterfaceEditInput, validateWireGuardInterfaceEdit } from '../../utils/wireguardForms'
 
@@ -61,6 +63,7 @@ export default function WireGuard() {
     // Interface Edit State
     const [editInterface, setEditInterface] = useState<WireGuardInterface | null>(null)
     const [sortKey, setSortKey] = useState<'alias' | 'ip' | 'endpoint' | 'traffic' | 'handshake'>('alias')
+    const [search, setSearch] = useState('')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
     // Config modal state
@@ -321,7 +324,14 @@ export default function WireGuard() {
 
     const sortedPeers = useMemo(() => {
         const dir = sortDir === 'asc' ? 1 : -1
-        return [...peers].sort((a, b) => {
+        return peers.filter(peer => matchesSearch(search, [
+            peer.alias,
+            peer.name,
+            peer.public_key,
+            peer.allowed_ips,
+            peer.endpoint,
+            peer.stats?.endpoint,
+        ])).sort((a, b) => {
             switch (sortKey) {
                 case 'endpoint': {
                     const ea = (a.stats?.endpoint || a.endpoint || '').toLowerCase()
@@ -352,7 +362,7 @@ export default function WireGuard() {
                 }
             }
         })
-    }, [peers, sortDir, sortKey])
+    }, [peers, search, sortDir, sortKey])
 
     const toggleSort = (key: typeof sortKey) => {
         if (sortKey === key) {
@@ -404,6 +414,14 @@ export default function WireGuard() {
                     </div>
                 )}
                 <div className="grid grid-cols-2 gap-3 w-full md:w-auto md:flex md:flex-wrap">
+                    <SearchInput
+                        value={search}
+                        onChange={setSearch}
+                        placeholder="Search peers..."
+                        className="md:col-span-1 md:w-64 md:justify-self-stretch"
+                        collapsedClassName="col-span-2 justify-self-end"
+                        expandedClassName="col-span-2"
+                    />
                     <button
                         onClick={() => {
                             if (!canWriteWireguard) return
