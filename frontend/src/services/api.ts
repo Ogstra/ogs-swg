@@ -169,6 +169,8 @@ export interface UnifiedChartPoint {
 export interface Consumer {
     name: string;
     total: number;
+    upload?: number;
+    download?: number;
     flow: string;
     interface_name?: string;
     quota_limit: number;

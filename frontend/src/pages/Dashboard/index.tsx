@@ -335,8 +335,10 @@ function ServiceRow({ name, icon, running, upload, download, activeNames, active
     activeCount: number
 }) {
     const state = running === true ? SERVICE_STATE.up : running === false ? SERVICE_STATE.down : SERVICE_STATE.unknown
-    const shown = activeNames.slice(0, 8)
-    const hidden = Math.max(0, activeNames.length - shown.length)
+    // The backend list comes from a map, so its order changes between polls.
+    const sortedNames = [...activeNames].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    const shown = sortedNames.slice(0, 8)
+    const hidden = Math.max(0, sortedNames.length - shown.length)
     return (
         <div className={`grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 md:grid-cols-[minmax(11rem,1.2fr)_repeat(3,minmax(5.5rem,1fr))_minmax(11rem,1.8fr)] md:items-center sm:px-5 ${running === false ? 'bg-red-500/5' : ''}`}>
             <div className="order-1 flex items-center gap-3 md:order-none">
@@ -349,16 +351,18 @@ function ServiceRow({ name, icon, running, upload, download, activeNames, active
                     </div>
                 </div>
             </div>
-            <div className="order-2 flex flex-col items-end gap-0.5 justify-self-end md:hidden">
-                <span className="flex items-center gap-1.5" title="Upload">
-                    <ArrowUp size={12} className="shrink-0 text-slate-500" aria-label="Upload" />
-                    <ByteFigure bytes={upload} className="text-xs text-slate-300" />
-                </span>
+            <div className="order-2 flex flex-col items-end gap-1 justify-self-end md:hidden">
                 <ByteFigure bytes={upload + download} className="text-lg font-medium leading-tight text-slate-50" />
-                <span className="flex items-center gap-1.5" title="Download">
-                    <ArrowDown size={12} className="shrink-0 text-slate-500" aria-label="Download" />
-                    <ByteFigure bytes={download} className="text-xs text-slate-300" />
-                </span>
+                <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1" title="Upload">
+                        <ArrowUp size={12} className="shrink-0 text-slate-500" aria-label="Upload" />
+                        <ByteFigure bytes={upload} className="text-xs text-slate-300" />
+                    </span>
+                    <span className="flex items-center gap-1" title="Download">
+                        <ArrowDown size={12} className="shrink-0 text-slate-500" aria-label="Download" />
+                        <ByteFigure bytes={download} className="text-xs text-slate-300" />
+                    </span>
+                </div>
             </div>
             <div className="hidden items-center gap-1.5 md:flex" title="Upload">
                 <ArrowUp size={12} className="shrink-0 text-slate-500" aria-label="Upload" />
@@ -657,9 +661,10 @@ export default function Dashboard() {
 
     const uploadKey = chartMode === 'singbox' ? 'up_sb' : 'down_wg'
     const downloadKey = chartMode === 'singbox' ? 'down_sb' : 'up_wg'
-    const chartHasTraffic = chartDisplayData.some(point => (
-        (point.up_sb || 0) + (point.down_sb || 0) + (point.up_wg || 0) + (point.down_wg || 0)
-    ) > 0)
+    const chartHasTraffic = chartDisplayData.some(point => {
+        const values = point as unknown as Record<string, number>
+        return (values[uploadKey] || 0) + (values[downloadKey] || 0) > 0
+    })
     const yTicks = niceByteTicks(chartDisplayData.reduce((max, point) => {
         const values = point as unknown as Record<string, number>
         return Math.max(max, values[uploadKey] || 0, values[downloadKey] || 0)
@@ -945,6 +950,18 @@ export default function Dashboard() {
                                             </div>
                                             <ByteFigure bytes={u.total} className="shrink-0 text-sm text-slate-100" />
                                         </div>
+                                        {(u.upload !== undefined || u.download !== undefined) && (
+                                            <div className="mt-1 flex items-center gap-3">
+                                                <span className="flex items-center gap-1" title="Upload">
+                                                    <ArrowUp size={11} className="shrink-0 text-slate-500" aria-label="Upload" />
+                                                    <ByteFigure bytes={u.upload ?? 0} className="text-[11px] text-slate-400" />
+                                                </span>
+                                                <span className="flex items-center gap-1" title="Download">
+                                                    <ArrowDown size={11} className="shrink-0 text-slate-500" aria-label="Download" />
+                                                    <ByteFigure bytes={u.download ?? 0} className="text-[11px] text-slate-400" />
+                                                </span>
+                                            </div>
+                                        )}
                                     </button>
                                 )
                             })
