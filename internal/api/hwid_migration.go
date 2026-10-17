@@ -75,6 +75,38 @@ func (s *Server) pendingHWIDMigrationURL(r *http.Request, sub store.GetSubscript
 	return s.migrationSubscriptionURL(r, base, target.Token)
 }
 
+// observeHWIDMigrationArrival confirms a migration once its device requests
+// the target sub. Same contract as observeSubscriptionHWID: side-effect only,
+// failures are logged and swallowed. When it confirms, the HWID is recorded as
+// known on the target so the new-device ntfy is not fired for a moved device.
+func (s *Server) observeHWIDMigrationArrival(r *http.Request, sub store.GetSubscriptionByTokenRow) {
+	if s.store == nil {
+		return
+	}
+	meta := extractSubscriptionRequestMetadata(r)
+	if meta.hwidHash == "" {
+		return
+	}
+	confirmed, err := s.store.ConfirmHWIDMigration(r.Context(), sub.ID, meta.hwidHash, s.now().Unix())
+	if err != nil {
+		log.Printf("hwid migration: confirm for sub %d: %v", sub.ID, err)
+		return
+	}
+	if !confirmed {
+		return
+	}
+	if _, err := s.store.RecordSubscriptionHWIDFirstSeen(r.Context(), sub.ID, meta.hwidHash, s.now().Unix()); err != nil {
+		log.Printf("hwid migration: record hwid for sub %d: %v", sub.ID, err)
+	}
+	s.insertSystemAuditEntry("subscription", "hwid_migration_confirmed", sub.Name, "device "+meta.hwidPrefix+" reached the target subscription")
+	if s.ntfyNotifier != nil {
+		s.ntfyNotifier.ObserveHWIDMigration(r.Context(), core.NtfyHWIDMigrationInfo{
+			TargetSubscription: sub.Name,
+			HWIDPrefix:         meta.hwidPrefix,
+		})
+	}
+}
+
 // migrationSubscriptionURL builds the link the CLIENT must use: the global
 // new-domain if set, else the configured subscription domain, else the
 // request's public host. It is never derived from the global fallback-url,

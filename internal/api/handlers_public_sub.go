@@ -221,6 +221,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
 			s.recordSubscriptionRequest(r, sub.ID, users, true)
+			s.observeHWIDMigrationArrival(r, sub)
 			s.observeSubscriptionHWID(r, sub, users)
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 			return
@@ -264,6 +265,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
 	s.recordSubscriptionRequest(r, sub.ID, users, false)
+	s.observeHWIDMigrationArrival(r, sub)
 	s.observeSubscriptionHWID(r, sub, users)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 }
