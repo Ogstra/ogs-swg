@@ -289,7 +289,7 @@ function ByteFigure({ bytes, className = '' }: { bytes: number; className?: stri
     return (
         <span className={`font-mono tabular-nums ${className}`}>
             {value}
-            {unit && <span className="ml-1 text-[0.7em] text-slate-500">{unit}</span>}
+            {unit && <span className="ml-1 text-slate-400" style={{ fontSize: 'max(0.8em, 10px)' }}>{unit}</span>}
         </span>
     )
 }
@@ -381,7 +381,7 @@ function ServiceRow({ name, icon, running, upload, download, activeNames, active
                     <span className="ml-1.5 text-xs text-slate-500">active</span>
                 </div>
                 {shown.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-[11px] text-slate-400">
+                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-xs text-slate-400">
                         {shown.map(item => (
                             <span key={item} className="max-w-[10rem] truncate" title={item}>{item}</span>
                         ))}
@@ -694,9 +694,9 @@ export default function Dashboard() {
                 </div>
             )}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <span className="hidden font-mono text-xs text-slate-500 sm:inline">Updated {formatClock(lastUpdated, true)}</span>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
                 <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:flex-wrap">
+                    <span className="mr-1 hidden font-mono text-xs text-slate-400 sm:inline">Updated {formatClock(lastUpdated, true)}</span>
                     <div className="flex flex-1 items-center rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 sm:flex-none">
                         <select
                             value={timeRange}
@@ -911,8 +911,7 @@ export default function Dashboard() {
                 </section>
 
                 <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
-                    <h2 className="text-sm font-semibold text-slate-200">Most traffic</h2>
-                    <div className="-mx-3 mt-3 max-h-80 overflow-y-auto">
+                    <div className="-mx-3 -my-1 max-h-80 overflow-y-auto">
                         {topConsumers.length === 0 ? (
                             <div className="py-10 text-center text-sm text-slate-500">No activity in this range</div>
                         ) : (
@@ -945,7 +944,7 @@ export default function Dashboard() {
                                             <div className="flex min-w-0 items-baseline gap-2.5">
                                                 <span className="truncate text-sm text-slate-100" title={u.name}>{u.name}</span>
                                                 {interfaceLabel && (
-                                                    <span className="shrink-0 font-mono text-[11px] text-slate-500" title={interfaceLabel}>{interfaceLabel}</span>
+                                                    <span className="shrink-0 font-mono text-xs text-slate-400" title={interfaceLabel}>{interfaceLabel}</span>
                                                 )}
                                             </div>
                                             <ByteFigure bytes={u.total} className="shrink-0 text-sm text-slate-100" />
@@ -953,12 +952,12 @@ export default function Dashboard() {
                                         {(u.upload !== undefined || u.download !== undefined) && (
                                             <div className="mt-1 flex items-center gap-3">
                                                 <span className="flex items-center gap-1" title="Upload">
-                                                    <ArrowUp size={11} className="shrink-0 text-slate-500" aria-label="Upload" />
-                                                    <ByteFigure bytes={u.upload ?? 0} className="text-[11px] text-slate-400" />
+                                                    <ArrowUp size={12} className="shrink-0 text-slate-500" aria-label="Upload" />
+                                                    <ByteFigure bytes={u.upload ?? 0} className="text-xs text-slate-400" />
                                                 </span>
                                                 <span className="flex items-center gap-1" title="Download">
-                                                    <ArrowDown size={11} className="shrink-0 text-slate-500" aria-label="Download" />
-                                                    <ByteFigure bytes={u.download ?? 0} className="text-[11px] text-slate-400" />
+                                                    <ArrowDown size={12} className="shrink-0 text-slate-500" aria-label="Download" />
+                                                    <ByteFigure bytes={u.download ?? 0} className="text-xs text-slate-400" />
                                                 </span>
                                             </div>
                                         )}
