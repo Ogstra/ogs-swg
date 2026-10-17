@@ -987,6 +987,8 @@ export const api = {
         request<HWIDMigration>(`/api/subscriptions/${id}/hwid-migrations`, { method: 'POST', json: data, errorMsg: 'Failed to move device' }),
     cancelHWIDMigration: async (id: number, hwidHash: string): Promise<void> =>
         request(`/api/subscriptions/${id}/hwid-migrations/${encodeURIComponent(hwidHash)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to cancel move' }),
+    removeSubscriptionDevice: async (id: number, hwidHash: string): Promise<void> =>
+        request(`/api/subscriptions/${id}/devices/${encodeURIComponent(hwidHash)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to remove device' }),
     cancelAllHWIDMigrations: async (): Promise<{ cancelled: number }> =>
         request<{ cancelled: number }>('/api/subscriptions/hwid-migrations/cancel-all', { method: 'POST', errorMsg: 'Failed to cancel moves' }),
     regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> =>

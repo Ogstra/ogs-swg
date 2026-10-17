@@ -49,6 +49,7 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
     const others = subs.filter(candidate => candidate.id !== sub.id)
     const nameOf = (id: number) => subs.find(candidate => candidate.id === id)?.name || `#${id}`
     const devices = devicesQuery.data || []
+    const movedHashes = devices.filter(device => device.migration?.status === 'confirmed').map(device => device.hwid_hash)
 
     const refresh = () => queryClient.invalidateQueries({ queryKey: ['subscription-devices', sub.id] })
 
@@ -74,6 +75,19 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
             await refresh()
         } catch (err) {
             toastError('Failed to cancel move: ' + err)
+        } finally {
+            setBusy(null)
+        }
+    }
+
+    const removeMoved = async (hashes: string[]) => {
+        setBusy('remove')
+        try {
+            await Promise.all(hashes.map(hash => api.removeSubscriptionDevice(sub.id, hash)))
+            await refresh()
+        } catch (err) {
+            toastError('Failed to remove device: ' + err)
+            await refresh()
         } finally {
             setBusy(null)
         }
@@ -105,7 +119,14 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                             <Button variant="ghost" size="sm" onClick={() => setConfirmAll(false)}>Keep</Button>
                         </div>
                     ) : (
-                        <Button variant="ghost" size="sm" onClick={() => setConfirmAll(true)} disabled={!canWrite}>Cancel all pending moves</Button>
+                        <div className="flex items-center gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => setConfirmAll(true)} disabled={!canWrite}>Cancel all pending moves</Button>
+                            {movedHashes.length > 0 && (
+                                <Button variant="ghost" size="sm" onClick={() => removeMoved(movedHashes)} disabled={!canWrite || busy === 'remove'}>
+                                    Remove moved ({movedHashes.length})
+                                </Button>
+                            )}
+                        </div>
                     )}
                     <Button variant="secondary" onClick={onClose}>Close</Button>
                 </div>
@@ -137,7 +158,17 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     {migration && migrationBadge(migration, nameOf(migration.target_sub_id))}
-                                    {moved ? null : live ? (
+                                    {moved ? (
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="ml-auto"
+                                            disabled={!canWrite || busy === 'remove'}
+                                            onClick={() => removeMoved([device.hwid_hash])}
+                                        >
+                                            Remove
+                                        </Button>
+                                    ) : live ? (
                                         <Button variant="ghost" size="sm" disabled={!canWrite || busy === device.hwid_hash} onClick={() => cancel(device)}>
                                             Cancel move
                                         </Button>
