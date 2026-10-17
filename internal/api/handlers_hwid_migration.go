@@ -91,6 +91,30 @@ func (s *Server) handleCreateHWIDMigration(w http.ResponseWriter, r *http.Reques
 		writeErr(w, http.StatusConflict, "Device is not known for this subscription")
 		return
 	}
+	// A device that already requests the target sub would confirm the move on
+	// its next request without ever having switched, so the signal would lie.
+	if onTarget, err := s.store.HasSubscriptionKnownHWID(r.Context(), req.TargetSubID, req.HWIDHash); err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to check device")
+		return
+	} else if onTarget {
+		writeErr(w, http.StatusConflict, "Device already uses the target subscription")
+		return
+	}
+	// A confirmed move is final; it is not offered again.
+	existing, err := s.store.ListHWIDMigrations(r.Context(), id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to load migrations")
+		return
+	}
+	for _, m := range existing {
+		if m.HWIDHash == req.HWIDHash {
+			if m.Status == "confirmed" {
+				writeErr(w, http.StatusConflict, "Device was already moved")
+				return
+			}
+			break
+		}
+	}
 	if err := s.store.CreateHWIDMigration(r.Context(), id, req.HWIDHash, req.TargetSubID, s.now().Unix()); err != nil {
 		writeErr(w, http.StatusInternalServerError, "Failed to create migration")
 		return
