@@ -335,10 +335,9 @@ function ServiceRow({ name, icon, running, upload, download, activeNames, active
     activeCount: number
 }) {
     const state = running === true ? SERVICE_STATE.up : running === false ? SERVICE_STATE.down : SERVICE_STATE.unknown
-    // The backend list comes from a map, so its order changes between polls.
-    const sortedNames = [...activeNames].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    const shown = sortedNames.slice(0, 8)
-    const hidden = Math.max(0, sortedNames.length - shown.length)
+    // The backend sends these busiest/most-recent first.
+    const shown = activeNames.slice(0, 8)
+    const hidden = Math.max(0, activeNames.length - shown.length)
     return (
         <div className={`grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 md:grid-cols-[minmax(11rem,1.2fr)_repeat(3,minmax(5.5rem,1fr))_minmax(11rem,1.8fr)] md:items-center sm:px-5 ${running === false ? 'bg-red-500/5' : ''}`}>
             <div className="order-1 flex items-center gap-3 md:order-none">

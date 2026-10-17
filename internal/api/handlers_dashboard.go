@@ -618,13 +618,20 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 			}
 			// Fetch active users list (previously we only fetched count)
 			// We use the same threshold mechanism
-			if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, s.config.ActiveThresholdBytes); err == nil {
+			// Both lookups return the busiest users first; a threshold of 1 byte
+			// means "any traffic" but keeps that traffic ordering (the
+			// no-threshold path would list users alphabetically).
+			threshold := s.config.ActiveThresholdBytes
+			if threshold < 1 {
+				threshold = 1
+			}
+			if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, threshold); err == nil {
 				activeUsersSBList = users
 				activeUsersSB = int64(len(users))
 			}
 			// Fallback: if threshold-based result is empty, show sessions with any traffic.
 			if activeUsersSB == 0 {
-				if users, err := s.store.GetActiveUsers(activeUsersWindow); err == nil {
+				if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, 1); err == nil {
 					activeUsersSBList = users
 					activeUsersSB = int64(len(users))
 				}
@@ -658,6 +665,11 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 				stats, err = core.GetWireGuardStats()
 			}
 			threshold := time.Now().Add(-3 * time.Minute).Unix()
+			type activePeer struct {
+				name      string
+				handshake int64
+			}
+			var activePeers []activePeer
 			if err == nil {
 				for _, peer := range stats {
 					if peer.LatestHandshake >= threshold {
@@ -673,9 +685,19 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 								name = peer.PublicKey
 							}
 						}
-						activeUsersWGList = append(activeUsersWGList, name)
+						activePeers = append(activePeers, activePeer{name: name, handshake: peer.LatestHandshake})
 					}
 				}
+			}
+			// stats is a map, so sort to keep the list stable: most recent handshake first.
+			sort.Slice(activePeers, func(i, j int) bool {
+				if activePeers[i].handshake != activePeers[j].handshake {
+					return activePeers[i].handshake > activePeers[j].handshake
+				}
+				return activePeers[i].name < activePeers[j].name
+			})
+			for _, p := range activePeers {
+				activeUsersWGList = append(activeUsersWGList, p.name)
 			}
 			if s.config.DemoMode {
 				preferred := make(map[string]string, len(storedPeers))
