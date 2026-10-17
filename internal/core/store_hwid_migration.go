@@ -159,3 +159,49 @@ func (s *Store) ListHWIDMigrations(ctx context.Context, sourceSubID int64) ([]HW
 	}
 	return out, rows.Err()
 }
+
+// SubscriptionDevice is a known device of a subscription with its most
+// recent request metadata. Only the HWID hash and prefix are exposed.
+type SubscriptionDevice struct {
+	HWIDHash    string `json:"hwid_hash"`
+	HWIDPrefix  string `json:"hwid_prefix"`
+	DeviceModel string `json:"device_model"`
+	DeviceOS    string `json:"device_os"`
+	Country     string `json:"country"`
+	FirstSeenAt int64  `json:"first_seen_at"`
+	LastSeenAt  int64  `json:"last_seen_at"`
+}
+
+func (s *Store) ListSubscriptionDevices(ctx context.Context, subID int64) ([]SubscriptionDevice, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT k.hwid_hash, k.first_seen_at,
+		       COALESCE(r.hwid_prefix,''), COALESCE(r.device_model,''), COALESCE(r.device_os,''),
+		       COALESCE(r.country,''), COALESCE(r.requested_at,0)
+		FROM subscription_known_hwids k
+		LEFT JOIN subscription_requests r ON r.id = (
+			SELECT id FROM subscription_requests
+			WHERE sub_id = k.sub_id AND hwid_hash = k.hwid_hash
+			ORDER BY requested_at DESC LIMIT 1)
+		WHERE k.sub_id = ? ORDER BY k.first_seen_at DESC
+	`, subID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SubscriptionDevice{}
+	for rows.Next() {
+		var d SubscriptionDevice
+		if err := rows.Scan(&d.HWIDHash, &d.FirstSeenAt, &d.HWIDPrefix, &d.DeviceModel, &d.DeviceOS, &d.Country, &d.LastSeenAt); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// HasSubscriptionKnownHWID reports whether hwidHash is a known device of subID.
+func (s *Store) HasSubscriptionKnownHWID(ctx context.Context, subID int64, hwidHash string) (bool, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM subscription_known_hwids WHERE sub_id = ? AND hwid_hash = ?`, subID, hwidHash).Scan(&n)
+	return n > 0, err
+}
