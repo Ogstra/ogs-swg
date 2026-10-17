@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/Ogstra/ogs-swg/internal/core"
 	"github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
@@ -48,8 +49,20 @@ func (s *Server) pendingHWIDMigrationURL(r *http.Request, sub store.GetSubscript
 		log.Printf("hwid migration: target sub %d: %v", m.TargetSubID, err)
 		return ""
 	}
-	if _, err := s.store.MarkHWIDMigrationDelivered(r.Context(), sub.ID, hash, s.now().Unix()); err != nil {
+	failed, err := s.store.MarkHWIDMigrationDelivered(r.Context(), sub.ID, hash, s.now().Unix())
+	if err != nil {
 		log.Printf("hwid migration: mark delivered: %v", err)
+	}
+	if failed {
+		s.insertSystemAuditEntry("subscription", "hwid_migration_failed", sub.Name, "device never reached the target subscription")
+		if s.ntfyNotifier != nil {
+			s.ntfyNotifier.ObserveHWIDMigration(r.Context(), core.NtfyHWIDMigrationInfo{
+				SourceSubscription: sub.Name,
+				TargetSubscription: target.Name,
+				HWIDPrefix:         extractSubscriptionRequestMetadata(r).hwidPrefix,
+				Failed:             true,
+			})
+		}
 	}
 
 	base := ""

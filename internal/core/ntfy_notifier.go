@@ -276,6 +276,14 @@ func (n *NtfyNotifier) ObserveSubscriptionHWID(ctx context.Context, info NtfyNew
 	})
 }
 
+// ObserveHWIDMigration publishes a device-migration outcome. It shares the
+// new-device toggle because both are device events.
+func (n *NtfyNotifier) ObserveHWIDMigration(ctx context.Context, info NtfyHWIDMigrationInfo) {
+	n.send(ctx, func(s NtfySettings) bool { return s.EnableNewHwid }, func() NtfyMessage {
+		return NtfyHWIDMigrationMessage(info)
+	})
+}
+
 // NotifyConfigApplyFailed publishes a config-apply-failed notification every
 // time it is called (no dedupe — this represents a distinct operator-facing
 // action/error, not a poll result). Callers are responsible for not calling
