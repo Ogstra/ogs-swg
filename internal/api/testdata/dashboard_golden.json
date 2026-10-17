@@ -151,20 +151,24 @@
         "singbox": [],
         "wireguard": [
           {
+            "download": 600,
             "flow": "WireGuard:wg0",
             "interface_name": "wg0",
             "key": "peer-wg0-public-key",
             "name": "alice",
             "quota_limit": 0,
-            "total": 900
+            "total": 900,
+            "upload": 300
           },
           {
+            "download": 200,
             "flow": "WireGuard:wg1",
             "interface_name": "wg1",
             "key": "peer-wg1-public-key",
             "name": "bob",
             "quota_limit": 0,
-            "total": 300
+            "total": 300,
+            "upload": 100
           }
         ]
       },
@@ -249,20 +253,24 @@
         "singbox": [],
         "wireguard": [
           {
+            "download": 600,
             "flow": "WireGuard:wg0",
             "interface_name": "wg0",
             "key": "peer-wg0-public-key",
             "name": "alice",
             "quota_limit": 0,
-            "total": 900
+            "total": 900,
+            "upload": 300
           },
           {
+            "download": 200,
             "flow": "WireGuard:wg1",
             "interface_name": "wg1",
             "key": "peer-wg1-public-key",
             "name": "bob",
             "quota_limit": 0,
-            "total": 300
+            "total": 300,
+            "upload": 100
           }
         ]
       },

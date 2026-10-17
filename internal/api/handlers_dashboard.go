@@ -45,6 +45,10 @@ type Consumer struct {
 	Interface  string `json:"interface_name,omitempty"`
 	QuotaLimit int64  `json:"quota_limit"` // 0 if none
 	Key        string `json:"key"`         // For linking/identification
+	// Upload/Download are from the client's point of view. The store's Rx/Tx
+	// mean opposite things for sing-box and WireGuard, so they are mapped here.
+	Upload   int64 `json:"upload"`
+	Download int64 `json:"download"`
 }
 
 type DashboardConsumerChartData struct {
@@ -433,6 +437,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 					Flow:       wireGuardFlowLabel(iface),
 					Interface:  iface,
 					QuotaLimit: 0,
+					Upload:     t.Rx,
+					Download:   t.Tx,
 				})
 			}
 		}
@@ -469,6 +475,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 					Flow:       "Proxy",
 					QuotaLimit: meta.QuotaLimit,
 					Key:        t.Key,
+					Upload:     t.Tx,
+					Download:   t.Rx,
 				})
 			}
 		}
