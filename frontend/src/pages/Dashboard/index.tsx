@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UnifiedChartPoint, Consumer, TrafficStats, DashboardData, DashboardPreferences as StoredDashboardPreferences } from '../../services/api'
-import { ArrowDown, ArrowUp, Clock, RefreshCw, Shield, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, RefreshCw, TriangleAlert, X } from 'lucide-react'
 import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
-import { Card } from '../../components/ui/Card'
 import { Button } from '../../components/ui/Button'
 import { formatBytes } from '../../utils/traffic'
 import { useToast } from '../../context/ToastContext'
@@ -248,6 +247,148 @@ const WireGuardIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
     </svg>
 )
 
+const UPLOAD_COLOR = '#b7b2a5'
+const DOWNLOAD_COLOR = '#e58f4e'
+const MONO_FONT = '"IBM Plex Mono", ui-monospace, Menlo, monospace'
+
+const splitBytes = (bytes: number): [string, string] => {
+    const text = formatBytes(bytes)
+    const i = text.lastIndexOf(' ')
+    return i === -1 ? [text, ''] : [text.slice(0, i), text.slice(i + 1)]
+}
+
+const formatClock = (date: Date, withSeconds = false) => date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' } : {}),
+    hour12: false,
+})
+
+// Recharts picks decimal "nice" ticks (1e9, 2e9...) which formatBytes then
+// labels in binary units ("954 MB" for 1e9). Pick the step in the binary unit
+// the labels use so ticks land on round values.
+const niceByteTicks = (max: number, count = 4): number[] => {
+    if (!(max > 0)) return [0]
+    const unitIndex = Math.min(Math.floor(Math.log(max) / Math.log(1024)), 8)
+    const unit = Math.pow(1024, Math.max(unitIndex, 0))
+    const maxInUnit = max / unit
+    const rawStep = maxInUnit / count
+    const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)))
+    const normalized = rawStep / magnitude
+    const step = (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude
+    const ticks: number[] = []
+    for (let value = 0; ; value += step) {
+        ticks.push(value * unit)
+        if (value >= maxInUnit) break
+    }
+    return ticks
+}
+
+function ByteFigure({ bytes, className = '' }: { bytes: number; className?: string }) {
+    const [value, unit] = splitBytes(bytes)
+    return (
+        <span className={`font-mono tabular-nums ${className}`}>
+            {value}
+            {unit && <span className="ml-1 text-[0.7em] text-slate-500">{unit}</span>}
+        </span>
+    )
+}
+
+function Segmented<T extends string>({ value, onChange, options, label, className = '' }: {
+    value: T
+    onChange: (value: T) => void
+    options: { value: T; label: string; title?: string }[]
+    label: string
+    className?: string
+}) {
+    return (
+        <div role="group" aria-label={label} className={`inline-flex rounded-md border border-slate-800 bg-slate-950 p-0.5 ${className}`}>
+            {options.map(option => (
+                <button
+                    key={option.value}
+                    type="button"
+                    title={option.title}
+                    aria-pressed={value === option.value}
+                    onClick={() => onChange(option.value)}
+                    className={`flex-1 whitespace-nowrap rounded px-2.5 py-1 text-xs sm:px-3 font-medium transition-colors sm:flex-none ${value === option.value ? 'bg-slate-800 text-slate-50' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                    {option.label}
+                </button>
+            ))}
+        </div>
+    )
+}
+
+const SERVICE_STATE = {
+    up: { word: 'Running', dot: 'bg-emerald-400', text: 'text-emerald-400' },
+    down: { word: 'Stopped', dot: 'bg-red-400', text: 'text-red-400' },
+    unknown: { word: 'Unknown', dot: 'bg-slate-500', text: 'text-slate-500' },
+} as const
+
+function ServiceRow({ name, icon, running, upload, download, activeNames, activeCount }: {
+    name: string
+    icon: React.ReactNode
+    running: boolean | null
+    upload: number
+    download: number
+    activeNames: string[]
+    activeCount: number
+}) {
+    const state = running === true ? SERVICE_STATE.up : running === false ? SERVICE_STATE.down : SERVICE_STATE.unknown
+    const shown = activeNames.slice(0, 8)
+    const hidden = Math.max(0, activeNames.length - shown.length)
+    return (
+        <div className={`grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 md:grid-cols-[minmax(11rem,1.2fr)_repeat(3,minmax(5.5rem,1fr))_minmax(11rem,1.8fr)] md:items-center sm:px-5 ${running === false ? 'bg-red-500/5' : ''}`}>
+            <div className="order-1 flex items-center gap-3 md:order-none">
+                <span className="text-slate-300">{icon}</span>
+                <div className="leading-tight">
+                    <div className="text-sm font-semibold text-slate-50">{name}</div>
+                    <div className={`mt-0.5 flex items-center gap-1.5 text-xs ${state.text}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${state.dot}`} />
+                        {state.word}
+                    </div>
+                </div>
+            </div>
+            <div className="order-2 flex flex-col items-end gap-0.5 justify-self-end md:hidden">
+                <span className="flex items-center gap-1.5" title="Upload">
+                    <ArrowUp size={12} className="shrink-0 text-slate-500" aria-label="Upload" />
+                    <ByteFigure bytes={upload} className="text-xs text-slate-300" />
+                </span>
+                <ByteFigure bytes={upload + download} className="text-lg font-medium leading-tight text-slate-50" />
+                <span className="flex items-center gap-1.5" title="Download">
+                    <ArrowDown size={12} className="shrink-0 text-slate-500" aria-label="Download" />
+                    <ByteFigure bytes={download} className="text-xs text-slate-300" />
+                </span>
+            </div>
+            <div className="hidden items-center gap-1.5 md:flex" title="Upload">
+                <ArrowUp size={12} className="shrink-0 text-slate-500" aria-label="Upload" />
+                <ByteFigure bytes={upload} className="text-sm text-slate-200" />
+            </div>
+            <div className="hidden items-center gap-1.5 md:flex" title="Download">
+                <ArrowDown size={12} className="shrink-0 text-slate-500" aria-label="Download" />
+                <ByteFigure bytes={download} className="text-sm text-slate-200" />
+            </div>
+            <div className="hidden md:block" title="Total">
+                <ByteFigure bytes={upload + download} className="text-lg font-medium text-slate-50" />
+            </div>
+            <div className="order-5 col-span-2 md:order-none md:col-span-1">
+                <div className="text-sm text-slate-200">
+                    <span className="font-mono tabular-nums">{activeCount}</span>
+                    <span className="ml-1.5 text-xs text-slate-500">active</span>
+                </div>
+                {shown.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 font-mono text-[11px] text-slate-400">
+                        {shown.map(item => (
+                            <span key={item} className="max-w-[10rem] truncate" title={item}>{item}</span>
+                        ))}
+                        {hidden > 0 && <span className="text-slate-500">+{hidden}</span>}
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
 export default function Dashboard() {
     const { success, error: toastError } = useToast()
     const queryClient = useQueryClient()
@@ -268,7 +409,7 @@ export default function Dashboard() {
     const [customStart, setCustomStart] = useState(formatDateTimeLocalValue(initialCustomStart))
     const [customEnd, setCustomEnd] = useState(formatDateTimeLocalValue(now))
     const chartContainerRef = useRef<HTMLDivElement | null>(null)
-    const [chartSize, setChartSize] = useState({ width: 0, height: 300 })
+    const [chartSize, setChartSize] = useState({ width: 0, height: 200 })
     const detailChartCacheRef = useRef<DensifiedChartCache | null>(null)
     const [detailChartTargetPoints, setDetailChartTargetPoints] = useState<number>(initialDashboardPrefs?.detailChartTargetPoints || defaultDetailChartTargetPoints)
     const [singboxApplyLoading, setSingboxApplyLoading] = useState(false)
@@ -313,7 +454,7 @@ export default function Dashboard() {
         if (!el || typeof ResizeObserver === 'undefined') return
         const update = () => {
             const nextWidth = Math.max(0, Math.floor(el.clientWidth))
-            const nextHeight = Math.max(300, Math.floor(el.clientHeight))
+            const nextHeight = Math.max(160, Math.floor(el.clientHeight))
             setChartSize({ width: nextWidth, height: nextHeight })
         }
         update()
@@ -513,16 +654,27 @@ export default function Dashboard() {
         ])
     }
 
+
+    const uploadKey = chartMode === 'singbox' ? 'up_sb' : 'down_wg'
+    const downloadKey = chartMode === 'singbox' ? 'down_sb' : 'up_wg'
+    const chartHasTraffic = chartDisplayData.some(point => (
+        (point.up_sb || 0) + (point.down_sb || 0) + (point.up_wg || 0) + (point.down_wg || 0)
+    ) > 0)
+    const yTicks = niceByteTicks(chartDisplayData.reduce((max, point) => {
+        const values = point as unknown as Record<string, number>
+        return Math.max(max, values[uploadKey] || 0, values[downloadKey] || 0)
+    }, 0))
+    const chartIsLoading = !!selectedConsumer && selectedConsumerQuery.isPending
+
     return (
-        <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
-            {/* Pending Changes Banner */}
+        <div className="space-y-6 pb-4 sm:pb-0">
             {singboxPendingChanges && (
-                <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                        <Shield className="text-yellow-500" size={20} />
+                <div className="flex flex-col gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-start gap-3">
+                        <TriangleAlert className="mt-0.5 shrink-0 text-amber-400" size={18} />
                         <div>
-                            <p className="text-sm font-medium text-yellow-200">Sing-box Configuration Changes Pending</p>
-                            <p className="text-xs text-yellow-300/70 mt-0.5">Changes have been saved but not yet applied. Click "Apply Changes" to apply them.</p>
+                            <p className="text-sm font-medium text-slate-50">sing-box changes not applied</p>
+                            <p className="mt-0.5 text-xs text-slate-400">The running service still uses the previous configuration.</p>
                         </div>
                     </div>
                     <Button
@@ -530,57 +682,51 @@ export default function Dashboard() {
                         variant="primary"
                         size="sm"
                         isLoading={singboxApplyLoading}
-                        className="whitespace-nowrap bg-yellow-600 hover:bg-yellow-700 text-white"
+                        className="whitespace-nowrap px-3 py-1.5 text-sm"
                     >
-                        Apply Changes
+                        Apply changes
                     </Button>
                 </div>
             )}
 
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
-                <div className="hidden sm:block">
-                    <div className="flex items-center gap-2">
-                        <span className="text-slate-500 text-xs">Updated {lastUpdated.toLocaleTimeString()}</span>
-                    </div>
-                </div>
-                <div className="w-full sm:w-auto flex items-center gap-3 flex-wrap justify-end">
-                    <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm">
-                        <Clock size={14} className="text-slate-500" />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span className="hidden font-mono text-xs text-slate-500 sm:inline">Updated {formatClock(lastUpdated, true)}</span>
+                <div className="flex w-full items-center justify-end gap-2 sm:w-auto sm:flex-wrap">
+                    <div className="flex flex-1 items-center rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 sm:flex-none">
                         <select
                             value={timeRange}
                             onChange={(e) => setTimeRange(e.target.value as DashboardRange)}
-                            className="select-field bg-transparent text-xs text-slate-300 border-none focus:ring-0 p-1 outline-none w-28 font-medium cursor-pointer"
+                            className="select-field w-full min-w-[9.5rem] cursor-pointer border-none bg-transparent p-1 text-xs font-medium text-slate-200 outline-none focus:ring-0 sm:w-auto"
                         >
-                            <option value="30m">Last 30 Minutes</option>
-                            <option value="1h">Last Hour</option>
-                            <option value="6h">Last 6 Hours</option>
-                            <option value="24h">Last 24 Hours</option>
-                            <option value="1w">Last Week</option>
-                            <option value="1m">Last Month</option>
-                            <option value="custom">Custom Range</option>
+                            <option value="30m">Last 30 minutes</option>
+                            <option value="1h">Last hour</option>
+                            <option value="6h">Last 6 hours</option>
+                            <option value="24h">Last 24 hours</option>
+                            <option value="1w">Last 7 days</option>
+                            <option value="1m">Last 30 days</option>
+                            <option value="custom">Custom range</option>
                         </select>
                     </div>
 
                     {timeRange === 'custom' && (
                         <div className="flex flex-col gap-1">
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 shadow-sm">
+                            <div className="flex flex-col gap-2 rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 sm:flex-row sm:items-center">
                                 <input
                                     type="datetime-local"
                                     value={customStart}
                                     onChange={e => setCustomStart(e.target.value)}
-                                    className="bg-transparent text-xs text-slate-300 border-none outline-none focus:ring-0 cursor-pointer"
+                                    className="cursor-pointer border-none bg-transparent text-xs text-slate-200 outline-none focus:ring-0"
                                 />
-                                <span className="hidden sm:inline text-slate-500">-</span>
+                                <span className="hidden text-slate-500 sm:inline">to</span>
                                 <input
                                     type="datetime-local"
                                     value={customEnd}
                                     onChange={e => setCustomEnd(e.target.value)}
-                                    className="bg-transparent text-xs text-slate-300 border-none outline-none focus:ring-0 cursor-pointer"
+                                    className="cursor-pointer border-none bg-transparent text-xs text-slate-200 outline-none focus:ring-0"
                                 />
                             </div>
                             {!customRangeState.isValid && (
-                                <span className="text-[11px] text-amber-400">The end date/time must be after the start date/time.</span>
+                                <span className="text-[11px] text-amber-400">The end must be after the start.</span>
                             )}
                         </div>
                     )}
@@ -591,322 +737,221 @@ export default function Dashboard() {
                         disabled={timeRange === 'custom' && !customRangeState.isValid}
                         variant="icon"
                         size="icon"
+                        aria-label="Refresh"
                         icon={<RefreshCw size={16} />}
                     />
                 </div>
             </div>
 
-            {/* Unified Service & Traffic Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                {/* sing-box Card */}
-                <Card className={`transition-all ${status.singbox === true ? 'bg-slate-900 border-slate-800' : status.singbox === false ? 'bg-red-900/10 border-red-900/20' : 'bg-slate-900 border-slate-800'}`}>
-                    <div className="flex items-start justify-between mb-6">
-                        <div className="flex items-center gap-4">
-                            <div className={`p-3 rounded-xl ${status.singbox === true ? 'bg-slate-800 text-emerald-400' : status.singbox === false ? 'bg-red-500/10 text-red-400' : 'bg-slate-800 text-slate-400'}`}>
-                                <SingBoxIcon className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-2">
-                                    <h3 className="text-lg font-bold text-white">sing-box</h3>
-                                    <span className={`w-2 h-2 rounded-full ${status.singbox === true ? 'bg-emerald-500' : status.singbox === false ? 'bg-red-500' : 'bg-slate-500'}`}></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="text-right">
-                            <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Traffic</p>
-                            <p className="text-2xl font-bold text-white mt-1">{formatBytes(statsCards.singbox.uplink + statsCards.singbox.downlink)}</p>
-                        </div>
-                    </div>
+            <section className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900/60">
+                <div className="divide-y divide-slate-800">
+                    <ServiceRow
+                        name="sing-box"
+                        icon={<SingBoxIcon className="h-6 w-6" />}
+                        running={status.singbox}
+                        upload={statsCards.singbox.uplink}
+                        download={statsCards.singbox.downlink}
+                        activeNames={status.active_users_singbox_list || []}
+                        activeCount={status.active_users_singbox}
+                    />
+                    <ServiceRow
+                        name="WireGuard"
+                        icon={<WireGuardIcon className="h-6 w-6" />}
+                        running={status.wireguard}
+                        upload={statsCards.wireguard.downlink}
+                        download={statsCards.wireguard.uplink}
+                        activeNames={status.active_users_wireguard_list || []}
+                        activeCount={status.active_users_wireguard}
+                    />
+                </div>
+            </section>
 
-                    <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
-                            <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
-                                <ArrowDown size={12} /> Received
-                            </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.uplink)}</p>
-                        </div>
-                        <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
-                            <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
-                                <ArrowUp size={12} /> Sent
-                            </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.singbox.downlink)}</p>
-                        </div>
-                    </div>
-
-                    <div className="border-t border-slate-800 pt-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <p className="text-sm font-semibold text-slate-300">Active Sessions</p>
-                            <span className="text-xs font-mono bg-slate-800 text-white px-2 py-0.5 rounded-md border border-slate-700">
-                                {status.active_users_singbox} clients
-                            </span>
-                        </div>
-                        {status.active_users_singbox_list && status.active_users_singbox_list.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                                {status.active_users_singbox_list.map((user: string, idx: number) => (
-                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20" title={user}>
-                                        {user}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </Card>
-
-                {/* WireGuard Card */}
-                <Card className={`transition-all ${status.wireguard === true ? 'bg-slate-900 border-slate-800' : status.wireguard === false ? 'bg-red-900/10 border-red-900/20' : 'bg-slate-900 border-slate-800'}`}>
-                    <div className="flex items-start justify-between mb-6">
-                        <div className="flex items-center gap-4">
-                            <div className={`p-3 rounded-xl ${status.wireguard === true ? 'bg-slate-800 text-blue-400' : status.wireguard === false ? 'bg-red-500/10 text-red-400' : 'bg-slate-800 text-slate-400'}`}>
-                                <WireGuardIcon className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-2">
-                                    <h3 className="text-lg font-bold text-white">WireGuard</h3>
-                                    <span className={`w-2 h-2 rounded-full ${status.wireguard === true ? 'bg-emerald-500' : status.wireguard === false ? 'bg-red-500' : 'bg-slate-500'}`}></span>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="text-right">
-                            <p className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Traffic</p>
-                            <p className="text-2xl font-bold text-white mt-1">{formatBytes(statsCards.wireguard.uplink + statsCards.wireguard.downlink)}</p>
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4 mb-6">
-                        <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
-                            <div className="flex items-center gap-2 text-blue-400 text-xs font-medium mb-1">
-                                <ArrowDown size={12} /> Received
-                            </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.wireguard.downlink)}</p>
-                        </div>
-                        <div className="bg-slate-950/50 rounded-lg p-3 border border-slate-800/50">
-                            <div className="flex items-center gap-2 text-emerald-400 text-xs font-medium mb-1">
-                                <ArrowUp size={12} /> Sent
-                            </div>
-                            <p className="text-lg font-mono text-white">{formatBytes(statsCards.wireguard.uplink)}</p>
-                        </div>
-                    </div>
-
-                    <div className="border-t border-slate-800 pt-4">
-                        <div className="flex items-center justify-between mb-3">
-                            <p className="text-sm font-semibold text-slate-300">Active Peers</p>
-                            <span className="text-xs font-mono bg-slate-800 text-white px-2 py-0.5 rounded-md border border-slate-700">
-                                {status.active_users_wireguard} peers
-                            </span>
-                        </div>
-                        {status.active_users_wireguard_list && status.active_users_wireguard_list.length > 0 && (
-                            <div className="flex flex-wrap gap-2 mt-2">
-                                {status.active_users_wireguard_list.map((peer: string, idx: number) => (
-                                    <span key={idx} className="max-w-[180px] truncate text-[10px] font-medium bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded border border-blue-500/20" title={peer}>
-                                        {peer}
-                                    </span>
-                                ))}
-                            </div>
-                        )}
-                    </div>
-                </Card>
+            <div className="grid grid-cols-[auto_1fr] items-center gap-2 sm:flex sm:flex-wrap sm:justify-between sm:gap-3">
+                <div className="flex items-center gap-3">
+                    <Segmented
+                        className="w-full sm:w-auto"
+                        label="Service"
+                        value={chartMode}
+                        onChange={setChartMode}
+                        options={[{ value: 'singbox', label: 'sing-box' }, { value: 'wireguard', label: 'WireGuard' }]}
+                    />
+                    {selectedConsumer && (
+                        <button
+                            onClick={() => setSelectedConsumers(prev => ({ ...prev, [chartMode]: null }))}
+                            className="hidden items-center gap-1.5 sm:inline-flex rounded-md border border-blue-500/40 bg-blue-500/10 px-2.5 py-1 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20"
+                        >
+                            <span className="max-w-[12rem] truncate">{selectedConsumer.name}</span>
+                            <X size={12} />
+                        </button>
+                    )}
+                </div>
+                <div className="flex items-center gap-2">
+                    <Segmented
+                        className="w-full sm:w-auto"
+                        label="Chart view"
+                        value={trafficChartView}
+                        onChange={setTrafficChartView}
+                        options={[
+                            { value: 'cumulative', label: 'Cumulative', title: 'Running total across the range' },
+                            { value: 'sample', label: 'Per interval', title: 'Traffic in each sampling interval' },
+                        ]}
+                    />
+                </div>
+                {selectedConsumer && (
+                    <button
+                        onClick={() => setSelectedConsumers(prev => ({ ...prev, [chartMode]: null }))}
+                        className="col-span-2 inline-flex items-center justify-between gap-1.5 rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300 transition-colors hover:bg-blue-500/20 sm:hidden"
+                    >
+                        <span className="truncate">{selectedConsumer.name}</span>
+                        <X size={12} className="shrink-0" />
+                    </button>
+                )}
             </div>
 
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-                {/* Traffic Chart */}
-                <div className="lg:col-span-2">
-                    <Card
-                        title={selectedConsumer ? `Traffic Overview · ${selectedConsumer.name}` : "Traffic Overview"}
-                        titleClassName="hidden sm:block"
-                        className="h-full"
-                        action={
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                                {selectedConsumer && (
-                                    <button
-                                        onClick={() => setSelectedConsumers(prev => ({ ...prev, [chartMode]: null }))}
-                                        className="inline-flex items-center gap-1 rounded-md border border-slate-800 bg-slate-950 px-2.5 py-1 text-[11px] font-medium text-slate-300 transition-colors hover:border-slate-700 hover:text-white"
-                                    >
-                                        <X size={12} />
-                                        Clear
-                                    </button>
-                                )}
-                                <div className="flex shrink-0 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                                    <button
-                                        onClick={() => setChartMode('singbox')}
-                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
-                                    >
-                                        Sing-Box
-                                    </button>
-                                    <button
-                                        onClick={() => setChartMode('wireguard')}
-                                        className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'wireguard' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
-                                    >
-                                        WireGuard
-                                    </button>
-                                </div>
-                                <div className="flex shrink-0 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                                    <button
-                                        type="button"
-                                        title="Cumulative traffic"
-                                        onClick={() => setTrafficChartView('cumulative')}
-                                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${trafficChartView === 'cumulative' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
-                                    >
-                                        Total
-                                    </button>
-                                    <button
-                                        type="button"
-                                        title="Traffic per sample"
-                                        onClick={() => setTrafficChartView('sample')}
-                                        className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${trafficChartView === 'sample' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
-                                    >
-                                        Sample
-                                    </button>
-                                </div>
-                            </div>
-                        }
-                    >
-                        <div ref={chartContainerRef} className="h-[300px] min-h-[300px] w-full min-w-0 mt-4">
-                            {chartSize.width > 0 ? (
-                                <AreaChart
-                                    width={chartSize.width}
-                                    height={chartSize.height}
-                                    data={chartDisplayData}
-                                    margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
-                                >
-                                    <defs>
-                                        <linearGradient id="colorUp" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                                        </linearGradient>
-                                        <linearGradient id="colorDown" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                                            <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                        </linearGradient>
-                                    </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                    <XAxis
-                                        dataKey="ts"
-                                        tickFormatter={(ts) => {
-                                            const date = new Date(ts * 1000)
-                                            if (['30m', '1h', '6h', '24h'].includes(timeRange)) {
-                                                return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                            }
-                                            return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-                                        }}
-                                        stroke="#64748b"
-                                        fontSize={12}
-                                        tickMargin={10}
-                                        axisLine={false}
-                                        tickLine={false}
-                                        type="number"
-                                        domain={chartDomain}
-                                    />
-                                    <YAxis
-                                        tickFormatter={(bytes) => formatBytes(bytes, 0)}
-                                        stroke="#64748b"
-                                        fontSize={12}
-                                        width={40}
-                                        tickMargin={10}
-                                        axisLine={false}
-                                        tickLine={false}
-                                    />
-                                    <Tooltip
-                                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '0.75rem', color: '#f8fafc' }}
-                                        itemStyle={{ color: '#f8fafc' }}
-                                        formatter={(val) => formatBytes(typeof val === 'number' ? val : 0)}
-                                        labelFormatter={(ts) => new Date(ts * 1000).toLocaleString()}
-                                    />
-                                    <Area
-                                        type={trafficChartView === 'sample' ? 'stepAfter' : 'monotone'}
-                                        dataKey={chartMode === 'singbox' ? "up_sb" : "up_wg"}
-                                        name={chartMode === 'singbox' ? "Received" : "Sent"}
-                                        stroke={chartMode === 'singbox' ? "#3b82f6" : "#10b981"}
-                                        strokeWidth={2}
-                                        isAnimationActive={false}
-                                        fillOpacity={1}
-                                        fill={chartMode === 'singbox' ? "url(#colorUp)" : "url(#colorDown)"}
-                                    />
-                                    <Area
-                                        type={trafficChartView === 'sample' ? 'stepAfter' : 'monotone'}
-                                        dataKey={chartMode === 'singbox' ? "down_sb" : "down_wg"}
-                                        name={chartMode === 'singbox' ? "Sent" : "Received"}
-                                        stroke={chartMode === 'singbox' ? "#10b981" : "#3b82f6"}
-                                        strokeWidth={2}
-                                        isAnimationActive={false}
-                                        fillOpacity={1}
-                                        fill={chartMode === 'singbox' ? "url(#colorDown)" : "url(#colorUp)"}
-                                    />
-                                </AreaChart>
-                            ) : null}
-                        </div>
-                    </Card>
-                </div>
-
-                {/* Top Consumers */}
-                <Card
-                    title="Top Consumers"
-                    className="h-full"
-                    action={
-                        <div className="flex flex-wrap bg-slate-950 p-0.5 rounded-lg border border-slate-800">
-                            <button
-                                onClick={() => setChartMode('singbox')}
-                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'singbox' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 sm:p-5 lg:col-span-2">
+                    <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-slate-400">
+                        <span className="flex items-center gap-2">
+                            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: DOWNLOAD_COLOR }} />
+                            Download
+                        </span>
+                        <span className="flex items-center gap-2">
+                            <span className="h-0.5 w-4 rounded" style={{ backgroundColor: UPLOAD_COLOR }} />
+                            Upload
+                        </span>
+                    </div>
+                    <div ref={chartContainerRef} className="mt-3 h-[200px] min-h-[200px] w-full min-w-0 sm:mt-4 sm:h-[300px] sm:min-h-[300px]">
+                        {chartIsLoading ? (
+                            <div className="flex h-full items-center justify-center text-sm text-slate-500">Loading…</div>
+                        ) : !chartHasTraffic ? (
+                            <div className="flex h-full items-center justify-center text-sm text-slate-500">No traffic in this range</div>
+                        ) : chartSize.width > 0 ? (
+                            <AreaChart
+                                width={chartSize.width}
+                                height={chartSize.height}
+                                data={chartDisplayData}
+                                margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
                             >
-                                Sing-Box
-                            </button>
-                            <button
-                                onClick={() => setChartMode('wireguard')}
-                                className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${chartMode === 'wireguard' ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-300'}`}
-                            >
-                                WireGuard
-                            </button>
-                        </div>
-                    }
-                >
-                    <div className="space-y-4 mt-2 max-h-72 overflow-y-auto">
+                                <defs>
+                                    <linearGradient id="gradDownload" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={DOWNLOAD_COLOR} stopOpacity={0.28} />
+                                        <stop offset="100%" stopColor={DOWNLOAD_COLOR} stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="gradUpload" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={UPLOAD_COLOR} stopOpacity={0.16} />
+                                        <stop offset="100%" stopColor={UPLOAD_COLOR} stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid stroke="#2a2926" vertical={false} />
+                                <XAxis
+                                    dataKey="ts"
+                                    tickFormatter={(ts) => {
+                                        const date = new Date(ts * 1000)
+                                        if (['30m', '1h', '6h', '24h'].includes(timeRange)) {
+                                            return formatClock(date)
+                                        }
+                                        return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                                    }}
+                                    stroke="#7a766a"
+                                    tick={{ fontFamily: MONO_FONT }}
+                                    fontSize={11}
+                                    tickMargin={10}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    type="number"
+                                    domain={chartDomain}
+                                />
+                                <YAxis
+                                    tickFormatter={(bytes) => formatBytes(bytes, 1)}
+                                    ticks={yTicks}
+                                    domain={[0, yTicks[yTicks.length - 1]]}
+                                    stroke="#7a766a"
+                                    tick={{ fontFamily: MONO_FONT }}
+                                    fontSize={11}
+                                    width={56}
+                                    tickMargin={10}
+                                    axisLine={false}
+                                    tickLine={false}
+                                />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#1d1c1a', border: '1px solid #3b3935', borderRadius: '0.5rem', color: '#f6f4f0', fontFamily: MONO_FONT, fontSize: 12 }}
+                                    itemStyle={{ color: '#f6f4f0' }}
+                                    cursor={{ stroke: '#504d45' }}
+                                    formatter={(val) => formatBytes(typeof val === 'number' ? val : 0)}
+                                    labelFormatter={(ts) => new Date(ts * 1000).toLocaleString([], { hour12: false })}
+                                />
+                                <Area
+                                    type={trafficChartView === 'sample' ? 'stepAfter' : 'monotone'}
+                                    dataKey={downloadKey}
+                                    name="Download"
+                                    stroke={DOWNLOAD_COLOR}
+                                    strokeWidth={1.75}
+                                    isAnimationActive={false}
+                                    fillOpacity={1}
+                                    fill="url(#gradDownload)"
+                                />
+                                <Area
+                                    type={trafficChartView === 'sample' ? 'stepAfter' : 'monotone'}
+                                    dataKey={uploadKey}
+                                    name="Upload"
+                                    stroke={UPLOAD_COLOR}
+                                    strokeWidth={1.75}
+                                    isAnimationActive={false}
+                                    fillOpacity={1}
+                                    fill="url(#gradUpload)"
+                                />
+                            </AreaChart>
+                        ) : null}
+                    </div>
+                </section>
+
+                <section className="rounded-lg border border-slate-800 bg-slate-900/60 p-4 sm:p-5">
+                    <h2 className="text-sm font-semibold text-slate-200">Most traffic</h2>
+                    <div className="-mx-3 mt-3 max-h-80 overflow-y-auto">
                         {topConsumers.length === 0 ? (
-                            <div className="text-center text-slate-500 py-8 text-sm italic">No active users</div>
+                            <div className="py-10 text-center text-sm text-slate-500">No activity in this range</div>
                         ) : (
-                            topConsumers.map((u, i) => {
+                            topConsumers.map(u => {
                                 const selectionId = getConsumerSelectionId(u, chartMode)
                                 const isSelected = selectedConsumerSelectionId === selectionId
                                 const canSelect = !!selectionId
+                                const interfaceLabel = chartMode === 'wireguard'
+                                    ? (u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'default')
+                                    : ''
 
                                 return (
-                                <button
-                                    key={selectionId || u.name}
-                                    type="button"
-                                    disabled={!canSelect}
-                                    onClick={() => {
-                                        setSelectedConsumers(prev => ({
-                                            ...prev,
-                                            [chartMode]: getConsumerSelectionId(prev[chartMode], chartMode) === selectionId ? null : u,
-                                        }))
-                                    }}
-                                    className={`flex h-[62px] w-full items-center justify-between gap-3 overflow-hidden rounded-lg border p-3 text-left transition-colors ${
-                                        isSelected
-                                            ? 'border-blue-500/60 bg-blue-500/10'
-                                            : 'border-slate-800/50 bg-slate-950/50 hover:border-slate-800'
-                                    } ${canSelect ? 'cursor-pointer' : 'cursor-not-allowed'}`}
-                                >
-                                    <div className="flex min-w-0 items-center gap-3">
-                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${i === 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-slate-800 text-slate-400'}`}>
-                                            {i + 1}
+                                    <button
+                                        key={selectionId || u.name}
+                                        type="button"
+                                        disabled={!canSelect}
+                                        onClick={() => {
+                                            setSelectedConsumers(prev => ({
+                                                ...prev,
+                                                [chartMode]: getConsumerSelectionId(prev[chartMode], chartMode) === selectionId ? null : u,
+                                            }))
+                                        }}
+                                        className={`block w-full border-b border-l-2 border-b-slate-800/70 px-3 py-2.5 text-left transition-colors last:border-b-0 ${
+                                            isSelected
+                                                ? 'border-l-blue-500 bg-blue-500/10'
+                                                : 'border-l-transparent hover:bg-slate-800/50'
+                                        } ${canSelect ? 'cursor-pointer' : 'cursor-not-allowed'}`}
+                                    >
+                                        <div className="flex items-baseline justify-between gap-3">
+                                            <div className="flex min-w-0 items-baseline gap-2.5">
+                                                <span className="truncate text-sm text-slate-100" title={u.name}>{u.name}</span>
+                                                {interfaceLabel && (
+                                                    <span className="shrink-0 font-mono text-[11px] text-slate-500" title={interfaceLabel}>{interfaceLabel}</span>
+                                                )}
+                                            </div>
+                                            <ByteFigure bytes={u.total} className="shrink-0 text-sm text-slate-100" />
                                         </div>
-                                        <div className="min-w-0 max-w-[200px]">
-                                            <div className="truncate font-medium text-sm text-slate-200" title={u.name}>{u.name}</div>
-                                            {chartMode === 'wireguard' && (
-                                                <div className="truncate text-[10px] text-slate-500" title={u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}>
-                                                    {u.interface_name || (u.flow || '').replace(/^wireguard:/i, '').trim() || 'Default'}
-                                                </div>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="shrink-0 text-right">
-                                        <div className="font-mono text-sm text-blue-400">{formatBytes(u.total)}</div>
-                                    </div>
-                                </button>
-                            )})
+                                    </button>
+                                )
+                            })
                         )}
                     </div>
-                </Card>
+                </section>
             </div>
-        </div >
+        </div>
     )
 }
