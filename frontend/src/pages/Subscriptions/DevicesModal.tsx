@@ -122,7 +122,8 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                     {devices.map(device => {
                         const migration = device.migration
                         const live = !!migration && liveStatuses.has(migration.status)
-                        const settled = !!migration && (migration.status === 'confirmed' || migration.status === 'failed')
+                        const moved = migration?.status === 'confirmed'
+        const failed = migration?.status === 'failed'
                         const title = [device.device_model, device.device_os].filter(Boolean).join(' · ') || 'Unknown device'
                         return (
                             <div key={device.hwid_hash} className="space-y-2 px-2 py-3">
@@ -136,7 +137,7 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2">
                                     {migration && migrationBadge(migration, nameOf(migration.target_sub_id))}
-                                    {live ? (
+                                    {moved ? null : live ? (
                                         <Button variant="ghost" size="sm" disabled={!canWrite || busy === device.hwid_hash} onClick={() => cancel(device)}>
                                             Cancel move
                                         </Button>
@@ -160,7 +161,7 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                                                 disabled={!canWrite || !targets[device.hwid_hash] || busy === device.hwid_hash}
                                                 onClick={() => move(device)}
                                             >
-                                                {settled ? 'Move again' : 'Move'}
+                                                {failed ? 'Retry' : 'Move'}
                                             </Button>
                                         </div>
                                     )}
