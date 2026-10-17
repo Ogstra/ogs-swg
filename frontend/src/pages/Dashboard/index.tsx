@@ -6,6 +6,8 @@ import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from 'recharts'
 import { Button } from '../../components/ui/Button'
 import { formatBytes } from '../../utils/traffic'
 import { useToast } from '../../context/ToastContext'
+import { useAuth } from '../../context/AuthContext'
+import { Link } from 'react-router-dom'
 
 type DashboardRange = '30m' | '1h' | '6h' | '24h' | '1w' | '1m' | 'custom'
 
@@ -325,8 +327,9 @@ const SERVICE_STATE = {
     unknown: { word: 'Unknown', dot: 'bg-slate-500', text: 'text-slate-500' },
 } as const
 
-function ServiceRow({ name, icon, running, upload, download, activeNames, activeCount }: {
+function ServiceRow({ name, to, icon, running, upload, download, activeNames, activeCount }: {
     name: string
+    to: string | null
     icon: React.ReactNode
     running: boolean | null
     upload: number
@@ -338,8 +341,9 @@ function ServiceRow({ name, icon, running, upload, download, activeNames, active
     // The backend sends these busiest/most-recent first.
     const shown = activeNames.slice(0, 8)
     const hidden = Math.max(0, activeNames.length - shown.length)
-    return (
-        <div className={`grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 md:grid-cols-[minmax(11rem,1.2fr)_repeat(3,minmax(5.5rem,1fr))_minmax(11rem,1.8fr)] md:items-center sm:px-5 ${running === false ? 'bg-red-500/5' : ''}`}>
+    const rowClass = `grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 md:grid-cols-[minmax(11rem,1.2fr)_repeat(3,minmax(5.5rem,1fr))_minmax(11rem,1.8fr)] md:items-center sm:px-5 ${running === false ? 'bg-red-500/5' : ''}`
+    const body = (
+        <>
             <div className="order-1 flex items-center gap-3 md:order-none">
                 <span className="text-slate-300">{icon}</span>
                 <div className="leading-tight">
@@ -388,12 +392,15 @@ function ServiceRow({ name, icon, running, upload, download, activeNames, active
                     </div>
                 )}
             </div>
-        </div>
+        </>
     )
+    if (!to) return <div className={rowClass}>{body}</div>
+    return <Link to={to} className={`${rowClass} transition-colors hover:bg-slate-800/40`}>{body}</Link>
 }
 
 export default function Dashboard() {
     const { success, error: toastError } = useToast()
+    const { permissions } = useAuth()
     const queryClient = useQueryClient()
     const [initialDashboardPrefs] = useState(() => readStoredDashboardPrefs())
     const [timeRange, setTimeRange] = useState<DashboardRange>(initialDashboardPrefs?.defaultRange || '24h')
@@ -751,6 +758,7 @@ export default function Dashboard() {
                 <div className="divide-y divide-slate-800">
                     <ServiceRow
                         name="sing-box"
+                        to={!permissions || permissions.can_read_users ? '/users' : null}
                         icon={<SingBoxIcon className="h-6 w-6" />}
                         running={status.singbox}
                         upload={statsCards.singbox.uplink}
@@ -760,6 +768,7 @@ export default function Dashboard() {
                     />
                     <ServiceRow
                         name="WireGuard"
+                        to={!permissions || permissions.can_read_wireguard ? '/wireguard' : null}
                         icon={<WireGuardIcon className="h-6 w-6" />}
                         running={status.wireguard}
                         upload={statsCards.wireguard.downlink}

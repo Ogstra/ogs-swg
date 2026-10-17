@@ -222,7 +222,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors"
                                 placeholder="e.g. 1.2.3.4 or other.domain.com"
                             />
-                            <p className="text-[11px] text-slate-400">
+                            <p className="text-xs text-slate-400">
                                 Overrides the generated share-link host while preserving the original public hostname as TLS SNI fallback.
                             </p>
                         </div>
@@ -238,7 +238,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                     <option value="enabled">Force allowInsecure=1</option>
                                     <option value="disabled">Force strict verification</option>
                                 </select>
-                                <p className="text-[11px] text-slate-400">
+                                <p className="text-xs text-slate-400">
                                     Controls whether generated share links include <code>allowInsecure=1</code>. Auto keeps the backend heuristic.
                                 </p>
                             </div>
@@ -251,7 +251,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                     <div className="flex items-center justify-between">
                         <h3 className="text-sm font-medium uppercase tracking-wider text-slate-400">TLS Configuration</h3>
                         {isHysteria2 ? (
-                            <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-emerald-300">
+                            <div className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium uppercase tracking-wide text-emerald-300">
                                 Required for Hysteria2
                             </div>
                         ) : (
@@ -296,7 +296,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                         className="w-full rounded border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-white transition-colors focus:border-blue-500 focus:outline-none"
                                         placeholder={isHysteria2 ? 'e.g. vpn.example.com' : 'Optional SNI/hostname for clients'}
                                     />
-                                    <p className="text-[11px] text-slate-400">
+                                    <p className="text-xs text-slate-400">
                                         Clients use this hostname for TLS verification. Hysteria2 usually needs it to match the public certificate name.
                                     </p>
                                 </div>
@@ -497,7 +497,7 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                         >
                                             {certLoading ? 'Generating...' : 'Generate Self-Signed'}
                                         </Button>
-                                        {certError && <span className="text-[10px] text-red-400">{certError}</span>}
+                                        {certError && <span className="text-xs text-red-400">{certError}</span>}
                                     </div>
                                 </div>
                             )}

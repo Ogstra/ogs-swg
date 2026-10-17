@@ -243,7 +243,7 @@ export function RawEditorPanel({
             {showDiff && (
                 <div className="bg-slate-950 border-b border-slate-800 p-4 text-xs font-mono overflow-auto max-h-48 custom-scrollbar">
                     <div className="flex items-center justify-between mb-2">
-                        <p className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">Unsaved Changes</p>
+                        <p className="text-slate-400 font-semibold uppercase tracking-wider text-xs">Unsaved Changes</p>
                         {diffLines.length === 0 && <span className="text-emerald-500">No changes detected</span>}
                     </div>
                     {diffLines.map(d => (

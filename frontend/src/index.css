@@ -54,7 +54,7 @@ button[disabled],
 button[aria-disabled='true'] {
     background-color: #2a2926 !important; /* slate-800 */
     border-color: #3b3935 !important; /* slate-700 */
-    color: #7a766a !important; /* slate-500 */
+    color: #8c887d !important; /* slate-500 */
     opacity: 0.6 !important;
     cursor: not-allowed !important;
     box-shadow: none !important;
@@ -139,7 +139,7 @@ select.select-field:focus {
 }
 
 .logs-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #7a766a;
+    background: #8c887d;
 }
 
 /* On touch devices the custom webkit scrollbar is unreliable for finger-grab.
@@ -213,7 +213,7 @@ select.select-field:focus {
     display: inline-flex;
     justify-content: flex-end;
     padding-right: var(--raw-editor-gutter-gap);
-    color: #7a766a;
+    color: #8c887d;
     user-select: none;
 }
 

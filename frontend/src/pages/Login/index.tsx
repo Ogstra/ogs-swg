@@ -98,7 +98,7 @@ export const Login: React.FC = () => {
                     </form>
                 </Card>
             </div>
-            <div className="pointer-events-none absolute bottom-3 right-4 text-[11px] text-slate-500 font-mono">
+            <div className="pointer-events-none absolute bottom-3 right-4 text-xs text-slate-500 font-mono">
                 {commitLabel}
             </div>
         </div>

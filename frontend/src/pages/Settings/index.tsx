@@ -1998,18 +1998,18 @@ function DatabaseTab({
                 >
                     <div className="grid grid-cols-3 gap-4 mb-6">
                         <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                            <p className="text-[10px] uppercase text-slate-500 font-bold">Total Rows</p>
+                            <p className="text-xs uppercase text-slate-500 font-bold">Total Rows</p>
                             <p className="text-xl font-mono text-white mt-1">{dbInfo.rows.toLocaleString()}</p>
                         </div>
                         <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                            <p className="text-[10px] uppercase text-slate-500 font-bold">Stats DB</p>
+                            <p className="text-xs uppercase text-slate-500 font-bold">Stats DB</p>
                             <p className="text-xl font-mono text-white mt-1">{dbInfo.sizeMB} MB</p>
                         </div>
                         <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg">
-                            <p className="text-[10px] uppercase text-slate-500 font-bold">Audit Log</p>
+                            <p className="text-xs uppercase text-slate-500 font-bold">Audit Log</p>
                             <p className="text-xl font-mono text-white mt-1">{dbInfo.auditSizeMB} MB</p>
                             {(features.audit_log_max_mb ?? 50) > 0 && (
-                                <p className="text-[10px] text-slate-500 mt-0.5">/ {features.audit_log_max_mb ?? 50} MB max</p>
+                                <p className="text-xs text-slate-500 mt-0.5">/ {features.audit_log_max_mb ?? 50} MB max</p>
                             )}
                         </div>
                     </div>
@@ -2147,7 +2147,7 @@ function DatabaseTab({
                                         void onClearSubscriptionRequestsBySubID(subId, label)
                                     }}
                                     disabled={subscriptionRequestHistory.length === 0}
-                                    className="rounded bg-slate-800 px-2 py-1 text-[10px] text-slate-400 hover:bg-slate-700 disabled:opacity-50"
+                                    className="rounded bg-slate-800 px-2 py-1 text-xs text-slate-400 hover:bg-slate-700 disabled:opacity-50"
                                 >
                                     Clear all
                                 </button>
@@ -2222,11 +2222,11 @@ function DatabaseTab({
                                             <div className="flex items-start justify-between gap-3">
                                                 <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
                                                     <div className="max-w-[9rem] truncate text-slate-200 text-xs font-medium sm:max-w-[14rem]" title={run.name}>{run.name}</div>
-                                                    <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded ${badge.className}`}>
+                                                    <span className={`shrink-0 text-xs px-1.5 py-0.5 rounded ${badge.className}`}>
                                                         {badge.label}
                                                     </span>
                                                     {isBlocked && blockedReason && (
-                                                        <span className="min-w-0 truncate text-[10px] text-red-400" title={blockedReason}>
+                                                        <span className="min-w-0 truncate text-xs text-red-400" title={blockedReason}>
                                                             {blockedReason}
                                                         </span>
                                                     )}
@@ -2253,21 +2253,21 @@ function DatabaseTab({
                                                 </div>
                                             </div>
                                             <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0 flex-1 truncate text-slate-500 text-[10px]" title={run.user_name || 'No users'}>
+                                                <div className="min-w-0 flex-1 truncate text-slate-500 text-xs" title={run.user_name || 'No users'}>
                                                     {run.user_name || 'No users'}
                                                 </div>
-                                                <div className="shrink-0 text-right text-slate-500 text-[10px]">{formatHistoryDateTime(run.requested_at)}</div>
+                                                <div className="shrink-0 text-right text-slate-500 text-xs">{formatHistoryDateTime(run.requested_at)}</div>
                                             </div>
                                             <div className="flex items-center justify-between gap-2">
-                                                <div className="min-w-0 truncate text-slate-400 text-[10px]" title={formatClientLabel(run)}>
+                                                <div className="min-w-0 truncate text-slate-400 text-xs" title={formatClientLabel(run)}>
                                                     {formatClientLabel(run)}
                                                 </div>
                                                 {Boolean(run.via_worker) && (
-                                                    <span className="shrink-0 text-[9px] px-1 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">Worker</span>
+                                                    <span className="shrink-0 text-xs px-1 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">Worker</span>
                                                 )}
                                             </div>
                                             {extraDetails && (
-                                                <div className="truncate text-slate-500 text-[10px]" title={extraDetails}>
+                                                <div className="truncate text-slate-500 text-xs" title={extraDetails}>
                                                     {extraDetails}
                                                 </div>
                                             )}
@@ -2282,7 +2282,7 @@ function DatabaseTab({
                                 </div>
                             )}
                             {!subscriptionHistoryHasMore && subscriptionRequestHistory.length > 0 && (
-                                <div className="py-3 text-center text-[10px] text-slate-600">End of history</div>
+                                <div className="py-3 text-center text-xs text-slate-600">End of history</div>
                             )}
                         </div>
                     </div>
@@ -2332,15 +2332,15 @@ function DatabaseTab({
                                         <div className="min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <div className="text-slate-300 text-xs">{formatHistoryTime(run.timestamp ?? run.ts)}</div>
-                                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
+                                                <span className={`text-xs px-1.5 py-0.5 rounded ${run.source === 'wireguard' ? 'bg-orange-900/20 text-orange-400 border border-orange-900/30' : 'bg-blue-900/20 text-blue-400 border border-blue-900/30'}`}>
                                                     {run.source === 'wireguard' ? 'WG' : 'Proxy'}
                                                 </span>
                                             </div>
-                                            {run.error && <div className="text-red-400 text-[10px] truncate max-w-[150px]">{run.error}</div>}
+                                            {run.error && <div className="text-red-400 text-xs truncate max-w-[150px]">{run.error}</div>}
                                         </div>
                                         <div className="shrink-0 text-right">
                                             <div className="font-mono text-emerald-400 text-xs">+{run.inserted} rows</div>
-                                            <div className="text-slate-500 text-[10px]">{run.duration_ms}ms</div>
+                                            <div className="text-slate-500 text-xs">{run.duration_ms}ms</div>
                                         </div>
                                     </div>
                                 ))
@@ -2352,7 +2352,7 @@ function DatabaseTab({
                                 </div>
                             )}
                             {!samplerHistoryHasMore && samplerHistory.length > 0 && (
-                                <div className="py-3 text-center text-[10px] text-slate-600">End of history</div>
+                                <div className="py-3 text-center text-xs text-slate-600">End of history</div>
                             )}
                         </div>
                     </div>
@@ -2443,15 +2443,15 @@ function DatabaseTab({
                                             <p className="text-xs text-white font-medium leading-snug min-w-0 flex-1">
                                                 {formatAuditDescription(entry)}
                                             </p>
-                                            <span className="shrink-0 text-[10px] text-slate-500 whitespace-nowrap">
+                                            <span className="shrink-0 text-xs text-slate-500 whitespace-nowrap">
                                                 {formatHistoryDateTime(entry.ts)}
                                             </span>
                                         </div>
                                         <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                            <span className="text-xs px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
                                                 {entry.domain}
                                             </span>
-                                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                                            <span className={`text-xs px-1.5 py-0.5 rounded border ${
                                                 entry.action === 'delete' || entry.action === 'stop' ? 'bg-red-900/20 text-red-400 border-red-900/30' :
                                                 entry.action === 'create' ? 'bg-emerald-900/20 text-emerald-400 border-emerald-900/30' :
                                                 entry.action === 'update' ? 'bg-blue-900/20 text-blue-400 border-blue-900/30' :
@@ -2460,7 +2460,7 @@ function DatabaseTab({
                                             }`}>
                                                 {entry.action}
                                             </span>
-                                            <span className="text-[10px] text-slate-500">by {entry.actor}</span>
+                                            <span className="text-xs text-slate-500">by {entry.actor}</span>
                                         </div>
                                     </div>
                                 ))
@@ -2472,7 +2472,7 @@ function DatabaseTab({
                                 </div>
                             )}
                             {!auditLogHasMore && auditLogItems.length > 0 && (
-                                <div className="py-3 text-center text-[10px] text-slate-600">End of log</div>
+                                <div className="py-3 text-center text-xs text-slate-600">End of log</div>
                             )}
                         </div>
                     </div>

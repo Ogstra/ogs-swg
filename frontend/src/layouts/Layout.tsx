@@ -216,7 +216,7 @@ export const Layout: React.FC = () => {
                         );
                     })}
                 </nav>
-                <div className="pb-2 pr-2 text-right text-[10px] text-slate-500">
+                <div className="pb-2 pr-2 text-right text-xs text-slate-500">
                     {commitLabel}
                 </div>
                 <div className="p-4 border-t border-slate-800">
