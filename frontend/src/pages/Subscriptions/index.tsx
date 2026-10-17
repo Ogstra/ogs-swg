@@ -10,9 +10,10 @@ import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ActionMenu } from '../../components/ui/ActionMenu'
+import { DevicesModal } from './DevicesModal'
 import { SearchInput } from '../../components/ui/SearchInput'
 import { matchesSearch } from '../../lib/search'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical, Smartphone } from 'lucide-react'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical, Smartphone, MonitorSmartphone } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
 import {
@@ -267,6 +268,7 @@ export default function Subscriptions() {
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
     const [confirmRegenerate, setConfirmRegenerate] = useState<Subscription | null>(null)
+    const [devicesSub, setDevicesSub] = useState<Subscription | null>(null)
     const [defaultsModalOpen, setDefaultsModalOpen] = useState(false)
     const [happConfigOpen, setHappConfigOpen] = useState(false)
 
@@ -896,7 +898,7 @@ export default function Subscriptions() {
                                 <th className="w-[230px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('quota')}>
                                     Quota {renderSortIcon('quota')}
                                 </th>
-                                <th className="w-[210px] px-4 py-3 text-right font-medium">Actions</th>
+                                <th className="w-[250px] px-4 py-3 text-right font-medium">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -938,6 +940,7 @@ export default function Subscriptions() {
                                                     <ActionIconButton onClick={() => openQr(sub)} title="QR code" disabled={!canWriteUsers}><QrCodeIcon size={16} /></ActionIconButton>
                                                 </>
                                             )}
+                                            <ActionIconButton onClick={() => setDevicesSub(sub)} title="Devices"><MonitorSmartphone size={16} /></ActionIconButton>
                                             <ActionIconButton onClick={() => openEdit(sub)} title="Edit" tone="primary" disabled={!canWriteUsers}><Edit size={16} /></ActionIconButton>
                                             <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate token" className="text-yellow-400 hover:bg-yellow-500/10 hover:text-yellow-300" disabled={!canWriteUsers}><RefreshCw size={16} /></ActionIconButton>
                                             <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" tone="danger" disabled={!canWriteUsers}><Trash2 size={16} /></ActionIconButton>
@@ -978,6 +981,7 @@ export default function Subscriptions() {
                                                 { label: 'Copy link', icon: <Copy size={16} />, onClick: () => copyLink(sub.token!), disabled: !canWriteUsers },
                                                 { label: 'QR code', icon: <QrCodeIcon size={16} />, onClick: () => openQr(sub), disabled: !canWriteUsers },
                                             ] : []),
+                                            { label: 'Devices', icon: <MonitorSmartphone size={16} />, onClick: () => setDevicesSub(sub) },
                                             { label: 'Regenerate token', icon: <RefreshCw size={16} />, onClick: () => setConfirmRegenerate(sub), disabled: !canWriteUsers },
                                             { label: 'Delete', icon: <Trash2 size={16} />, onClick: () => setConfirmDelete(sub), disabled: !canWriteUsers, tone: 'danger' as const },
                                         ]}
@@ -1418,6 +1422,8 @@ export default function Subscriptions() {
                 onClose={() => setConfirmDelete(null)}
                 confirmTone="danger"
             />
+
+            <DevicesModal sub={devicesSub} subs={subs} canWrite={canWriteUsers} onClose={() => setDevicesSub(null)} />
 
             <ConfirmModal
                 isOpen={!!confirmRegenerate}

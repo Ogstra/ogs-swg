@@ -365,6 +365,30 @@ export interface Subscription {
     updated_at: number;
 }
 
+export type HWIDMigrationStatus = 'pending' | 'delivered' | 'confirmed' | 'failed' | 'cancelled';
+
+export interface HWIDMigration {
+    source_sub_id: number;
+    hwid_hash: string;
+    target_sub_id: number;
+    status: HWIDMigrationStatus;
+    attempts: number;
+    created_at: number;
+    delivered_at: number;
+    confirmed_at: number;
+}
+
+export interface SubscriptionDevice {
+    hwid_hash: string;
+    hwid_prefix: string;
+    device_model: string;
+    device_os: string;
+    country: string;
+    first_seen_at: number;
+    last_seen_at: number;
+    migration: HWIDMigration | null;
+}
+
 export interface SubscriptionMember {
     username: string;
     alias: string;
@@ -957,6 +981,14 @@ export const api = {
     clearSubscriptionRequestsBySubID: async (subId: number): Promise<void> =>
         request(`/api/subscription-requests?sub_id=${subId}`, { method: 'DELETE', parse: 'none', errorMode: 'status', errorMsg: 'Failed to clear' }),
 
+    getSubscriptionDevices: async (id: number): Promise<SubscriptionDevice[]> =>
+        request<SubscriptionDevice[]>(`/api/subscriptions/${id}/devices`, { errorMsg: 'Failed to fetch devices' }),
+    createHWIDMigration: async (id: number, data: { hwid_hash: string; target_sub_id: number }): Promise<HWIDMigration> =>
+        request<HWIDMigration>(`/api/subscriptions/${id}/hwid-migrations`, { method: 'POST', json: data, errorMsg: 'Failed to move device' }),
+    cancelHWIDMigration: async (id: number, hwidHash: string): Promise<void> =>
+        request(`/api/subscriptions/${id}/hwid-migrations/${encodeURIComponent(hwidHash)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to cancel move' }),
+    cancelAllHWIDMigrations: async (): Promise<{ cancelled: number }> =>
+        request<{ cancelled: number }>('/api/subscriptions/hwid-migrations/cancel-all', { method: 'POST', errorMsg: 'Failed to cancel moves' }),
     regenerateSubscriptionToken: async (id: number): Promise<{ token: string }> =>
         request(`/api/subscriptions/${id}/regenerate`, { method: 'POST', errorMsg: 'Failed to regenerate token' }),
     getSubscriptionDomain: async (): Promise<string> => {
