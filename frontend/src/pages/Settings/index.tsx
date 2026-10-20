@@ -1876,7 +1876,11 @@ function DatabaseTab({
             }
         }
 
-        const osVersion = verboseOS.osVersion || parsed.deviceOSVersion
+        let osVersion = verboseOS.osVersion || parsed.deviceOSVersion
+        // Some clients send the version with the system name in front ("Android 16"); it is shown after the name already.
+        if (osName && osVersion.toLowerCase().startsWith(`${osName.toLowerCase()} `)) {
+            osVersion = osVersion.slice(osName.length).trim()
+        }
         // On Windows, device_model may be "HOSTNAME" or "HOSTNAME/user" — extract both parts
         let windowsHostname = ''
         let windowsUser = ''
