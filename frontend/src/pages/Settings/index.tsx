@@ -2264,7 +2264,7 @@ function DatabaseTab({
                                                 </div>
                                                 <div className="flex shrink-0 items-center gap-1.5">
                                                     {Boolean(run.via_migration) && (
-                                                        <span className="text-xs px-1 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium" title="Sent while moving this device to this subscription">Moved</span>
+                                                        <span className="text-xs px-1 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium" title={run.migrated_from_name ? `Requested via ${run.migrated_from_name}, sent this subscription's profiles` : "Sent while moving this device to this subscription"}>Moved{run.migrated_from_name ? ` from ${run.migrated_from_name}` : ''}</span>
                                                     )}
                                                     {Boolean(run.via_worker) && (
                                                         <span className="text-xs px-1 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">Worker</span>

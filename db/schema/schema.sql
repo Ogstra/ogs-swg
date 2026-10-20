@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS subscription_requests (
 	block_reason TEXT NOT NULL DEFAULT '',
 	via_worker INTEGER NOT NULL DEFAULT 0,
 	via_migration INTEGER NOT NULL DEFAULT 0,
+	migrated_from_sub_id INTEGER NOT NULL DEFAULT 0,
 	FOREIGN KEY (sub_id) REFERENCES subscriptions(id) ON DELETE CASCADE
 );
 

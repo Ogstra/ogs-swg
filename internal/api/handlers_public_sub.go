@@ -160,13 +160,13 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	contentSub, contentToken, contentMemberRows := sub, token, memberRows
 	// The request history records what was actually sent, so a migration
 	// response is logged against the target sub and its users.
-	recordSubID, recordUsers, viaMigration := sub.ID, users, false
+	recordSubID, recordUsers, migratedFromSubID := sub.ID, users, int64(0)
 	migrationNewURL := ""
 	if migration := s.pendingHWIDMigration(r, sub); migration != nil {
 		migrationNewURL = migration.NewURL
 		if targetRows, err := s.store.Queries.GetSubscriptionMembers(r.Context(), migration.Target.ID); err == nil && len(targetRows) > 0 {
 			contentSub, contentToken, contentMemberRows = migration.Target, migration.Target.Token, targetRows
-			recordSubID, viaMigration = migration.Target.ID, true
+			recordSubID, migratedFromSubID = migration.Target.ID, sub.ID
 			recordUsers = make([]string, 0, len(targetRows))
 			for _, member := range targetRows {
 				recordUsers = append(recordUsers, member.UserName)
@@ -240,7 +240,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
-			s.recordSubscriptionRequest(r, recordSubID, recordUsers, true, viaMigration)
+			s.recordSubscriptionRequest(r, recordSubID, recordUsers, true, migratedFromSubID)
 			s.observeHWIDMigrationArrival(r, sub)
 			s.observeSubscriptionHWID(r, sub, users)
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
@@ -284,7 +284,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
-	s.recordSubscriptionRequest(r, recordSubID, recordUsers, false, viaMigration)
+	s.recordSubscriptionRequest(r, recordSubID, recordUsers, false, migratedFromSubID)
 	s.observeHWIDMigrationArrival(r, sub)
 	s.observeSubscriptionHWID(r, sub, users)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
@@ -407,28 +407,29 @@ func happSubscriptionBodyLine(param happSubscriptionParam) string {
 	return "#" + param.Key + ": " + param.Value
 }
 
-func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache, viaMigration bool) {
+func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool, migratedFromSubID int64) {
 	meta := extractSubscriptionRequestMetadata(r)
 	if err := s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
-		SubID:           subID,
-		UserName:        strings.Join(users, ", "),
-		RequestIp:       resolveSubscriptionRequestIP(r),
-		RequestHost:     meta.requestHost,
-		RequestPath:     meta.requestPath,
-		UserAgent:       meta.userAgent,
-		DeviceModel:     meta.deviceModel,
-		DeviceOs:        meta.deviceOS,
-		DeviceOsVersion: meta.deviceOSVersion,
-		AppVersion:      meta.appVersion,
-		Country:         meta.country,
-		HwidHash:        meta.hwidHash,
-		HwidPrefix:      meta.hwidPrefix,
-		RequestedAt:     s.now().Unix(),
-		ServedFromCache: servedFromCacheToInt64(servedFromCache),
-		Blocked:         0,
-		BlockReason:     "",
-		ViaWorker:       viaWorkerToInt64(r),
-		ViaMigration:    servedFromCacheToInt64(viaMigration),
+		SubID:             subID,
+		UserName:          strings.Join(users, ", "),
+		RequestIp:         resolveSubscriptionRequestIP(r),
+		RequestHost:       meta.requestHost,
+		RequestPath:       meta.requestPath,
+		UserAgent:         meta.userAgent,
+		DeviceModel:       meta.deviceModel,
+		DeviceOs:          meta.deviceOS,
+		DeviceOsVersion:   meta.deviceOSVersion,
+		AppVersion:        meta.appVersion,
+		Country:           meta.country,
+		HwidHash:          meta.hwidHash,
+		HwidPrefix:        meta.hwidPrefix,
+		RequestedAt:       s.now().Unix(),
+		ServedFromCache:   servedFromCacheToInt64(servedFromCache),
+		Blocked:           0,
+		BlockReason:       "",
+		ViaWorker:         viaWorkerToInt64(r),
+		ViaMigration:      servedFromCacheToInt64(migratedFromSubID != 0),
+		MigratedFromSubID: migratedFromSubID,
 	}); err == nil {
 		s.invalidateSubscriptionHistoryCache()
 	}

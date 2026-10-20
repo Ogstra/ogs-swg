@@ -188,6 +188,9 @@ func TestPublicSub_HistoryRecordsWhatWasSent(t *testing.T) {
 			if row.SubID != f.dstID {
 				t.Fatalf("migration request logged against sub %d; want target %d", row.SubID, f.dstID)
 			}
+			if row.MigratedFromName == "" {
+				t.Fatal("migration request lost the name of the sub it was requested through")
+			}
 		case row.SubID == f.srcID:
 			plain++
 		}

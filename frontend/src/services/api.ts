@@ -241,6 +241,7 @@ export interface SubscriptionRequestHistoryEntry {
     block_reason: string;
     via_worker: number;
     via_migration?: number;
+    migrated_from_name?: string;
 }
 
 export interface SubscriptionRequestHistoryPage {
