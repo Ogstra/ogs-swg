@@ -42,6 +42,8 @@ func (s *Server) handleListSubscriptionDevices(w http.ResponseWriter, r *http.Re
 	}
 	out := make([]subscriptionDeviceResponse, 0, len(devices))
 	for _, d := range devices {
+		// Rows are stored as the client sent them; names are resolved on read like the request history does.
+		d.DeviceModel = resolveSubscriptionDeviceModel(d.DeviceModel)
 		out = append(out, subscriptionDeviceResponse{SubscriptionDevice: d, Migration: latest[d.HWIDHash]})
 	}
 	writeJSON(w, http.StatusOK, out)

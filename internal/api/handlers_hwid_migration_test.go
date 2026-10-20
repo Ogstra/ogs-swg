@@ -244,3 +244,20 @@ func TestAdminDeleteSubscriptionDeviceOnlyWhenMoved(t *testing.T) {
 		t.Fatal("removed device is still known on the source sub")
 	}
 }
+
+func TestAdminListSubscriptionDevicesResolvesStoredModelNames(t *testing.T) {
+	f := newMigrationAdminFixture(t)
+	path := map[string]string{"id": strconv.FormatInt(f.srcID, 10)}
+	hitSub(t, f.server, migrationTestSrcToken, migrationTestHWID)
+	if _, err := f.server.store.DB().Exec(`UPDATE subscription_requests SET device_model = 'v2raytun on samsung SM-F956B'`); err != nil {
+		t.Fatal(err)
+	}
+	rec := adminCall(f.server.handleListSubscriptionDevices, http.MethodGet, "", path)
+	var out []subscriptionDeviceResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out) != 1 {
+		t.Fatalf("body = %q err=%v", rec.Body.String(), err)
+	}
+	if out[0].DeviceModel != "Galaxy Z Fold6" {
+		t.Fatalf("device_model = %q, want Galaxy Z Fold6", out[0].DeviceModel)
+	}
+}
