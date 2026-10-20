@@ -492,8 +492,10 @@ INSERT INTO subscription_requests (
 	requested_at,
 	served_from_cache,
 	blocked,
-	block_reason
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+	block_reason,
+	via_worker,
+	via_migration
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetSubscriptionRequestHistory :many
 SELECT
@@ -515,7 +517,9 @@ SELECT
 	sr.requested_at,
 	sr.served_from_cache,
 	sr.blocked,
-	sr.block_reason
+	sr.block_reason,
+	sr.via_worker,
+	sr.via_migration
 FROM subscription_requests sr
 LEFT JOIN subscriptions s ON s.id = sr.sub_id
 WHERE (? = 0 OR sr.sub_id = ?)

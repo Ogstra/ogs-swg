@@ -1380,7 +1380,8 @@ SELECT
 	sr.served_from_cache,
 	sr.blocked,
 	sr.block_reason,
-	sr.via_worker
+	sr.via_worker,
+	sr.via_migration
 FROM subscription_requests sr
 LEFT JOIN subscriptions s ON s.id = sr.sub_id
 WHERE (? = 0 OR sr.sub_id = ?)
@@ -1416,6 +1417,7 @@ type GetSubscriptionRequestHistoryRow struct {
 	Blocked         int64  `json:"blocked"`
 	BlockReason     string `json:"block_reason"`
 	ViaWorker       int64  `json:"via_worker"`
+	ViaMigration    int64  `json:"via_migration"`
 }
 
 func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, arg GetSubscriptionRequestHistoryParams) ([]GetSubscriptionRequestHistoryRow, error) {
@@ -1453,6 +1455,7 @@ func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, arg GetSubs
 			&i.Blocked,
 			&i.BlockReason,
 			&i.ViaWorker,
+			&i.ViaMigration,
 		); err != nil {
 			return nil, err
 		}
@@ -1921,8 +1924,9 @@ INSERT INTO subscription_requests (
 	served_from_cache,
 	blocked,
 	block_reason,
-	via_worker
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	via_worker,
+	via_migration
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSubscriptionRequestParams struct {
@@ -1944,6 +1948,7 @@ type InsertSubscriptionRequestParams struct {
 	Blocked         int64  `json:"blocked"`
 	BlockReason     string `json:"block_reason"`
 	ViaWorker       int64  `json:"via_worker"`
+	ViaMigration    int64  `json:"via_migration"`
 }
 
 // Subscription Requests Queries --
@@ -1967,6 +1972,7 @@ func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubsc
 		arg.Blocked,
 		arg.BlockReason,
 		arg.ViaWorker,
+		arg.ViaMigration,
 	)
 	return err
 }

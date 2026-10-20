@@ -158,11 +158,19 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	// cache: the cache is keyed per token, not per device, so it must never end
 	// up in a cached payload.
 	contentSub, contentToken, contentMemberRows := sub, token, memberRows
+	// The request history records what was actually sent, so a migration
+	// response is logged against the target sub and its users.
+	recordSubID, recordUsers, viaMigration := sub.ID, users, false
 	migrationNewURL := ""
 	if migration := s.pendingHWIDMigration(r, sub); migration != nil {
 		migrationNewURL = migration.NewURL
 		if targetRows, err := s.store.Queries.GetSubscriptionMembers(r.Context(), migration.Target.ID); err == nil && len(targetRows) > 0 {
 			contentSub, contentToken, contentMemberRows = migration.Target, migration.Target.Token, targetRows
+			recordSubID, viaMigration = migration.Target.ID, true
+			recordUsers = make([]string, 0, len(targetRows))
+			for _, member := range targetRows {
+				recordUsers = append(recordUsers, member.UserName)
+			}
 		}
 	}
 
@@ -232,7 +240,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
-			s.recordSubscriptionRequest(r, sub.ID, users, true)
+			s.recordSubscriptionRequest(r, recordSubID, recordUsers, true, viaMigration)
 			s.observeHWIDMigrationArrival(r, sub)
 			s.observeSubscriptionHWID(r, sub, users)
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
@@ -276,7 +284,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
-	s.recordSubscriptionRequest(r, sub.ID, users, false)
+	s.recordSubscriptionRequest(r, recordSubID, recordUsers, false, viaMigration)
 	s.observeHWIDMigrationArrival(r, sub)
 	s.observeSubscriptionHWID(r, sub, users)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
@@ -399,7 +407,7 @@ func happSubscriptionBodyLine(param happSubscriptionParam) string {
 	return "#" + param.Key + ": " + param.Value
 }
 
-func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool) {
+func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache, viaMigration bool) {
 	meta := extractSubscriptionRequestMetadata(r)
 	if err := s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
 		SubID:           subID,
@@ -420,6 +428,7 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 		Blocked:         0,
 		BlockReason:     "",
 		ViaWorker:       viaWorkerToInt64(r),
+		ViaMigration:    servedFromCacheToInt64(viaMigration),
 	}); err == nil {
 		s.invalidateSubscriptionHistoryCache()
 	}

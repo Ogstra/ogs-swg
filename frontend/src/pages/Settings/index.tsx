@@ -2262,9 +2262,14 @@ function DatabaseTab({
                                                 <div className="min-w-0 truncate text-slate-400 text-xs" title={formatClientLabel(run)}>
                                                     {formatClientLabel(run)}
                                                 </div>
-                                                {Boolean(run.via_worker) && (
-                                                    <span className="shrink-0 text-xs px-1 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">Worker</span>
-                                                )}
+                                                <div className="flex shrink-0 items-center gap-1.5">
+                                                    {Boolean(run.via_migration) && (
+                                                        <span className="text-xs px-1 py-0.5 rounded bg-blue-500/15 text-blue-400 font-medium" title="Sent while moving this device to this subscription">Moved</span>
+                                                    )}
+                                                    {Boolean(run.via_worker) && (
+                                                        <span className="text-xs px-1 py-0.5 rounded bg-orange-500/15 text-orange-400 font-medium">Worker</span>
+                                                    )}
+                                                </div>
                                             </div>
                                             {extraDetails && (
                                                 <div className="truncate text-slate-500 text-xs" title={extraDetails}>

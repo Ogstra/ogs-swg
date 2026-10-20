@@ -240,6 +240,7 @@ export interface SubscriptionRequestHistoryEntry {
     blocked: number;
     block_reason: string;
     via_worker: number;
+    via_migration?: number;
 }
 
 export interface SubscriptionRequestHistoryPage {

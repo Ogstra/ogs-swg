@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
+	"github.com/Ogstra/ogs-swg/internal/core/store"
 )
 
 const (
@@ -164,5 +165,34 @@ func TestPublicSub_MigratingDeviceGetsTargetProfilesInSameResponse(t *testing.T)
 	// Everyone else on the source sub still gets the source's profiles.
 	if source.Header().Get("new-url") != "" {
 		t.Fatal("unrelated device got new-url")
+	}
+}
+
+func TestPublicSub_HistoryRecordsWhatWasSent(t *testing.T) {
+	f := newMigrationFixture(t, nil)
+
+	hitSub(t, f.server, migrationTestSrcToken, migrationTestHWID)
+	hitSub(t, f.server, migrationTestSrcToken, "hwid-someone-else")
+
+	rows, err := f.store.Queries.GetSubscriptionRequestHistory(context.Background(), store.GetSubscriptionRequestHistoryParams{
+		Column1: 0, SubID: 0, Limit: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var moved, plain int
+	for _, row := range rows {
+		switch {
+		case row.ViaMigration == 1:
+			moved++
+			if row.SubID != f.dstID {
+				t.Fatalf("migration request logged against sub %d; want target %d", row.SubID, f.dstID)
+			}
+		case row.SubID == f.srcID:
+			plain++
+		}
+	}
+	if moved != 1 || plain != 1 {
+		t.Fatalf("history rows: moved=%d plain=%d; want 1 and 1", moved, plain)
 	}
 }
