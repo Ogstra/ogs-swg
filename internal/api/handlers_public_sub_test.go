@@ -2217,3 +2217,14 @@ func TestResolveSubscriptionDeviceModel_SamsungRegionalVariantFallsBackToItsFami
 		t.Fatalf("resolveSubscriptionDeviceModel(%q)=%q want the family name", variant, got)
 	}
 }
+
+func TestResolveSubscriptionDeviceModel_SamsungCodeWithMakerPrefix(t *testing.T) {
+	for in, want := range map[string]string{
+		"samsung SM-F956B": "Galaxy Z Fold6",
+		"Samsung sm-f956u1": "Galaxy Z Fold6",
+	} {
+		if got := resolveSubscriptionDeviceModel(in); got != want {
+			t.Errorf("resolveSubscriptionDeviceModel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

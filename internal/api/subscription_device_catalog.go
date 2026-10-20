@@ -3,6 +3,7 @@ package api
 import (
 	_ "embed"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,6 +108,8 @@ func samsungFamilyNames(samsung map[string]string) map[string]string {
 	return family
 }
 
+var samsungCodeInModelRE = regexp.MustCompile(`(?i)\bSM-[A-Z0-9]+\b`)
+
 func resolveSamsungModel(catalog *deviceCatalog, model string) string {
 	code := strings.ToUpper(model)
 	name, ok := catalog.samsung[code]
@@ -135,6 +138,10 @@ func resolveSubscriptionDeviceModel(model string) string {
 
 	if strings.HasPrefix(strings.ToUpper(trimmed), "SM-") {
 		return resolveSamsungModel(catalog, trimmed)
+	}
+	// Some clients send the maker in front ("samsung SM-F956B").
+	if code := samsungCodeInModelRE.FindString(trimmed); code != "" {
+		return resolveSamsungModel(catalog, code)
 	}
 
 	return trimmed
