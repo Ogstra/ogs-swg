@@ -36,13 +36,13 @@ Web panel for managing **Sing-box** and **WireGuard** servers. Go backend, React
 
 The panel runs either directly on the host (`local`, the default) or in a container on the same host (`docker_local`).
 
-**Local.** Build, then run:
+**Local.** Build, then run. The script runs the tests, builds the frontend and writes the binary to `build/`; the panel serves the frontend from `build/frontend`.
 
 ```bash
 git clone https://github.com/Ogstra/ogs-swg && cd ogs-swg
 cp config.json.example config.json
 ./scripts/build_all.sh
-./ogs-swg -config config.json
+./build/ogs-swg-linux-amd64 -config config.json
 ```
 
 **Docker.** The panel container runs commands on the host through `systemd-run`, so the compose file mounts the host's systemd, dbus and journal sockets, plus `/etc/sing-box` and `/etc/wireguard`:
@@ -57,18 +57,11 @@ See [`docker/docker-local/docker-compose.yml`](docker/docker-local/docker-compos
 *   If Sing-box logs somewhere else, set `OGS_ACCESS_LOG_HOST_DIR` to that directory and point `OGS_ACCESS_LOG_PATH` at the file under `/app/access-logs`.
 *   For External Profiles with dynamic IP files, set `OGS_EXTERNAL_PROFILE_IP_HOST_DIR` to the host directory and use the container path in the UI, e.g. `/app/external-profile-ip/sing-box` for a file named `sing-box`.
 
-For blue/green slots use host networking and a per-slot port:
-
-```yaml
-network_mode: host
-environment:
-  - OGS_DOCKER_LOCAL_HOST_NETWORK=true
-  - OGS_LISTEN_ADDR=:18080   # blue; green uses :18081
-```
+Blue/green slot compose files are in [`docker/bluegreen`](docker/bluegreen).
 
 ### First admin
 
-If no admin exists on first start, set `OGS_ADMIN_USER` and `OGS_ADMIN_PASSWORD`. Use your own values and remove them afterwards.
+If no admin exists on first start, set `OGS_ADMIN_USER` and `OGS_ADMIN_PASSWORD` to create one.
 
 ## Configuration
 
@@ -100,7 +93,7 @@ Add tags to `managed_inbounds` and `stats_inbounds` to manage several inbounds. 
 | `with_utls` | uTLS fingerprinting for Reality |
 | `badlinkname` | Required for Go 1.24+ compatibility |
 
-To build Sing-box yourself:
+To build Sing-box yourself, run this in the Sing-box source tree:
 
 ```bash
 go build -v -tags "with_clash_api,with_v2ray_api,with_gvisor,with_quic,with_utls,badlinkname" \
