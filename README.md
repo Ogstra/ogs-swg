@@ -134,7 +134,7 @@ go test ./...
 cd frontend && npm run build
 ```
 
-Both must pass before committing; see [AGENTS.md](AGENTS.md).
+Both must pass before committing.
 
 ## License
 
