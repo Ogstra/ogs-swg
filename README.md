@@ -1,23 +1,14 @@
-# OGS-SWG Panel
+# OGS-SWG
 
-Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.26** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
+Web panel for managing **Sing-box** and **WireGuard** servers. Go backend, React frontend, SQLite storage, shipped as a single binary.
 
 <img alt="OGS-SWG dashboard" src="docs/images/dashboard.png" width="100%" />
 
-[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://swg-demo.ogstra.com/)
+[Live demo](https://swg-demo.ogstra.com/) (no login required)
 
-## Live Demo
+## Stack
 
-A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstra.com/)** — no login required.
-
-## Tech Stack
-*   **Runtime**: Go 1.26
-*   **Frontend**: React 19 + TypeScript (Vite)
-*   **DB**: SQLite + [sqlc](https://sqlc.dev/) (Type-safe SQL)
-*   **Cache**: [Ristretto](https://github.com/dgraph-io/ristretto)
-*   **Concurrency**: [Pond](https://github.com/alitto/pond) (Goroutine worker pools)
-*   **Config**: [Cleanenv](https://github.com/ilyakaznacheev/cleanenv) (`.env` + JSON)
-*   **Validation**: [Validator v10](https://github.com/go-playground/validator)
+Go 1.26, React 19 + TypeScript (Vite), SQLite with [sqlc](https://sqlc.dev/), [Ristretto](https://github.com/dgraph-io/ristretto) cache, [Pond](https://github.com/alitto/pond) worker pools, [Cleanenv](https://github.com/ilyakaznacheev/cleanenv) config.
 
 ## Features
 
@@ -32,25 +23,12 @@ A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstr
 | Naive       | — | ✓ | — | ✓ | — | — | — | — | ✓ |
 | WireGuard   | — | — | — | — | — | — | — | — | ✓ |
 
-*   **Inbound Management**: create and edit managed Sing-box inbounds from the UI, including Reality, WebSocket, and protocol-specific field validation.
-*   **User Management**: create, edit, and delete Sing-box users per inbound; supports multiple inbound assignments, traffic limits, expiry dates, and password/key-based users for Hysteria2, Shadowsocks, AnyTLS, and Naive.
-*   **Traffic Monitoring**: per-user download/upload stats for Sing-box inbounds; per-peer rx/tx stats across all WireGuard interfaces.
-*   **WireGuard Interfaces**: create, configure, enable/disable, and delete WireGuard interfaces; raw `.conf` editing per interface.
-*   **Subscriptions**: create tokenized subscription bundles with per-member aliases, quota limits, refresh policies, request history, and supported QR variants for Direct, Happ, and Shadowrocket.
-*   **Service Control**: restart/stop Sing-box and WireGuard services and reload configurations without leaving the UI.
-*   **Logs**: tail and filter Sing-box access logs in real time.
-*   **Sysctl**: view and update whitelisted kernel parameters (e.g. `net.ipv4.ip_forward`) directly from the panel.
-*   **Raw Configuration**: full JSON editor for the Sing-box config file (Experimental).
-*   **Notifications**: push alerts via [ntfy](https://ntfy.sh) (self-hosted or ntfy.sh) for service down/recovery, high traffic thresholds, and Sing-box config apply failures — configurable per-event toggles, Settings-managed (no restart), with a test-notification button.
-
-### Subscriptions
-
-*   Per-member aliases control the display name emitted in generated subscription links.
-*   Subscription quotas can be set independently of individual user quotas.
-*   Refresh behavior supports `profile-update-interval` and `update-always` headers.
-*   Panel-scoped defaults can prefill refresh policy and destination settings for new subscriptions.
-*   Request history records subscription activity, cache hits, detected client/device metadata, and blocked requests.
-*   Protection rules support token/IP blocking, allowlisting, basic rate limiting, and optional browser/social-fetcher filtering.
+*   **Inbounds and users**: create and edit Sing-box inbounds and their users, with traffic limits and expiry dates.
+*   **WireGuard**: manage interfaces and peers, or edit the raw `.conf`.
+*   **Traffic**: per-user stats for Sing-box, per-peer stats for WireGuard.
+*   **Subscriptions**: tokenized bundles with per-member aliases, quotas, refresh headers, request history, QR codes (Direct, Happ, Shadowrocket) and protection rules (token/IP block, allowlist, rate limit, browser filtering). Devices are tracked by HWID and can be moved to another subscription.
+*   **Services**: restart or reload Sing-box and WireGuard, tail logs, edit whitelisted sysctl values and the raw Sing-box config.
+*   **Notifications**: [ntfy](https://ntfy.sh) alerts for service down, high traffic, config apply failures and new or moved devices.
 
 ## Execution Modes
 
@@ -71,7 +49,7 @@ No extra config. Run the binary directly on the host:
 
 ### Docker Local
 
-Panel runs as a Docker container on the same host as singbox and wg-quick (systemd). File operations use bind mounts; service/log/sysctl/wg commands run through `systemd-run` using host runtime sockets.
+The panel runs in a container on the same host as sing-box and wg-quick (systemd). Files are bind-mounted; service, log, sysctl and wg commands go through `systemd-run`.
 
 Required mounts:
 
@@ -90,11 +68,11 @@ volumes:
   - /run/log/journal:/run/log/journal:ro
 ```
 
-Ready-to-use compose at [`docker/docker-local/docker-compose.yml`](docker/docker-local/docker-compose.yml).
+Compose file: [`docker/docker-local/docker-compose.yml`](docker/docker-local/docker-compose.yml).
 
-If sing-box writes to another host log path, mount its containing directory with `OGS_ACCESS_LOG_HOST_DIR` and point `OGS_ACCESS_LOG_PATH` at the file inside `/app/access-logs`.
+If sing-box logs elsewhere, set `OGS_ACCESS_LOG_HOST_DIR` to that directory and point `OGS_ACCESS_LOG_PATH` at the file under `/app/access-logs`.
 
-For External Profiles with dynamic IP files, set `OGS_EXTERNAL_PROFILE_IP_HOST_DIR` to the host directory that contains those files and use the fixed container path in the UI. For a host file named `sing-box` inside that directory, use `/app/external-profile-ip/sing-box` in the IPv6 File Path field.
+For External Profiles with dynamic IP files, set `OGS_EXTERNAL_PROFILE_IP_HOST_DIR` to the host directory and use the container path in the UI, e.g. `/app/external-profile-ip/sing-box` for a file named `sing-box`.
 
 For blue/green local slots, use:
 
@@ -136,9 +114,7 @@ environment:
 
 ## Configuration
 
-Parameters are merged from `config.json`, `.env`, and environment variables.
-
-This is a representative subset covering the most commonly tuned fields — see [`internal/core/config.go`](internal/core/config.go) for the full list (demo mode, backup scheduling, log retention, subscription domain/protection, etc.) and their `OGS_*` env var mappings.
+Settings come from `config.json`, `.env` and environment variables. This is a subset; the full list and the `OGS_*` variable names are in [`internal/core/config.go`](internal/core/config.go).
 
 ```json
 {
@@ -179,34 +155,24 @@ This is a representative subset covering the most commonly tuned fields — see 
 }
 ```
 
-Add more tags to `managed_inbounds`/`stats_inbounds` if you manage multiple inbounds (e.g. `["in-reality", "in-reality-2"]`).
+Add more tags to `managed_inbounds` and `stats_inbounds` to manage several inbounds.
 
-## CI/CD
+## Deploy
 
-Production-ready **Blue/Green deployment** via GitHub Actions: dual-slot topology (blue/green) managed by a watchdog, atomic Nginx reload on promotion, configurable baking window, and automatic rollback on health degradation.
+Blue/green deployment through GitHub Actions, with a watchdog, health checks and automatic rollback. See [DEPLOY_GITHUB_ACTIONS.md](DEPLOY_GITHUB_ACTIONS.md). The public demo deploys separately via `deploy-demo.yml`.
 
-**[Full setup guide → DEPLOY_GITHUB_ACTIONS.md](DEPLOY_GITHUB_ACTIONS.md)**
-
-A separate `deploy-demo.yml` workflow deploys the public [demo instance](https://swg-demo.ogstra.com/) independently of the blue/green production pipeline.
-
-## Testing
+## Development
 
 ```bash
 go test ./...
 cd frontend && npm run build
 ```
 
-Both must pass before committing — see [AGENTS.md](AGENTS.md) for the full set of commit/validation rules for this repo.
-
-## Dev Scripts
-
-`scripts/` contains local build/run helpers: `build_all.sh`, `build_and_run.sh`, `build_linux.sh` (prefers local toolchains under `.tools/`), and `run_server_test_mode.sh`.
+Both must pass before committing; see [AGENTS.md](AGENTS.md). Build and run helpers are in `scripts/`.
 
 ## Sing-box Build Requirements
 
-OGS-SWG requires sing-box to be built with specific tags for full functionality.
-
-### Required Build Tags
+The panel needs sing-box built with these tags.
 
 | Tag | Purpose |
 |-----|---------|
@@ -217,20 +183,18 @@ OGS-SWG requires sing-box to be built with specific tags for full functionality.
 | `with_utls` | uTLS fingerprinting for Reality |
 | `badlinkname` | Required for Go 1.24+ compatibility |
 
-### Building from Source
+To build from source:
 
 ```bash
 go build -v -tags "with_clash_api,with_v2ray_api,with_gvisor,with_quic,with_utls,badlinkname" \
     ./cmd/sing-box
 ```
 
-### Official Binaries
+The [official binaries](https://sing-box.sagernet.org/) already include all of them.
 
-The official sing-box pre-built binaries from [sing-box.sagernet.org](https://sing-box.sagernet.org/) include all required tags. Operators using official binaries do not need to build from source.
+### Clash API
 
-### Clash API Configuration
-
-Add a `clash_api` block to your sing-box `config.json` under `experimental`:
+Add a `clash_api` block under `experimental` in the sing-box config:
 
 ```json
 "experimental": {
@@ -240,11 +204,9 @@ Add a `clash_api` block to your sing-box `config.json` under `experimental`:
 }
 ```
 
-When the panel detects `clash_api.external_controller` in the sing-box config, it uses the Clash API `PUT /configs` endpoint for zero-downtime reloads instead of restarting the service.
+With `external_controller` set, the panel reloads config through `PUT /configs` instead of restarting the service. If `secret` is set, the panel sends it as a Bearer token.
 
-If `secret` is set in the Clash API config, the panel includes the `Authorization: Bearer <secret>` header automatically.
-
-> **Docker Local mode:** When sing-box and the panel run in separate containers, `127.0.0.1` inside the panel container refers to the container's own loopback, not the host. Bind `external_controller` to the Docker bridge IP (typically `172.17.0.1:9090`) or `0.0.0.0:9090` so the panel can reach the Clash API.
+> **Docker Local:** inside the panel container `127.0.0.1` is the container itself. Bind `external_controller` to the Docker bridge IP (usually `172.17.0.1:9090`) or `0.0.0.0:9090`.
 
 ## License
 
