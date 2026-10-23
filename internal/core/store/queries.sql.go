@@ -1380,9 +1380,12 @@ SELECT
 	sr.served_from_cache,
 	sr.blocked,
 	sr.block_reason,
-	sr.via_worker
+	sr.via_worker,
+	sr.via_migration,
+	COALESCE(ms.name, '') AS migrated_from_name
 FROM subscription_requests sr
 LEFT JOIN subscriptions s ON s.id = sr.sub_id
+LEFT JOIN subscriptions ms ON ms.id = sr.migrated_from_sub_id AND sr.migrated_from_sub_id != 0
 WHERE (? = 0 OR sr.sub_id = ?)
 ORDER BY sr.requested_at DESC, sr.id DESC
 LIMIT ? OFFSET ?
@@ -1396,26 +1399,28 @@ type GetSubscriptionRequestHistoryParams struct {
 }
 
 type GetSubscriptionRequestHistoryRow struct {
-	ID              int64  `json:"id"`
-	SubID           int64  `json:"sub_id"`
-	Name            string `json:"name"`
-	UserName        string `json:"user_name"`
-	RequestIp       string `json:"request_ip"`
-	RequestHost     string `json:"request_host"`
-	RequestPath     string `json:"request_path"`
-	UserAgent       string `json:"user_agent"`
-	DeviceModel     string `json:"device_model"`
-	DeviceOs        string `json:"device_os"`
-	DeviceOsVersion string `json:"device_os_version"`
-	AppVersion      string `json:"app_version"`
-	Country         string `json:"country"`
-	HwidHash        string `json:"hwid_hash"`
-	HwidPrefix      string `json:"hwid_prefix"`
-	RequestedAt     int64  `json:"requested_at"`
-	ServedFromCache int64  `json:"served_from_cache"`
-	Blocked         int64  `json:"blocked"`
-	BlockReason     string `json:"block_reason"`
-	ViaWorker       int64  `json:"via_worker"`
+	ID               int64  `json:"id"`
+	SubID            int64  `json:"sub_id"`
+	Name             string `json:"name"`
+	UserName         string `json:"user_name"`
+	RequestIp        string `json:"request_ip"`
+	RequestHost      string `json:"request_host"`
+	RequestPath      string `json:"request_path"`
+	UserAgent        string `json:"user_agent"`
+	DeviceModel      string `json:"device_model"`
+	DeviceOs         string `json:"device_os"`
+	DeviceOsVersion  string `json:"device_os_version"`
+	AppVersion       string `json:"app_version"`
+	Country          string `json:"country"`
+	HwidHash         string `json:"hwid_hash"`
+	HwidPrefix       string `json:"hwid_prefix"`
+	RequestedAt      int64  `json:"requested_at"`
+	ServedFromCache  int64  `json:"served_from_cache"`
+	Blocked          int64  `json:"blocked"`
+	BlockReason      string `json:"block_reason"`
+	ViaWorker        int64  `json:"via_worker"`
+	ViaMigration     int64  `json:"via_migration"`
+	MigratedFromName string `json:"migrated_from_name"`
 }
 
 func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, arg GetSubscriptionRequestHistoryParams) ([]GetSubscriptionRequestHistoryRow, error) {
@@ -1453,6 +1458,8 @@ func (q *Queries) GetSubscriptionRequestHistory(ctx context.Context, arg GetSubs
 			&i.Blocked,
 			&i.BlockReason,
 			&i.ViaWorker,
+			&i.ViaMigration,
+			&i.MigratedFromName,
 		); err != nil {
 			return nil, err
 		}
@@ -1921,29 +1928,33 @@ INSERT INTO subscription_requests (
 	served_from_cache,
 	blocked,
 	block_reason,
-	via_worker
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	via_worker,
+	via_migration,
+	migrated_from_sub_id
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type InsertSubscriptionRequestParams struct {
-	SubID           int64  `json:"sub_id"`
-	UserName        string `json:"user_name"`
-	RequestIp       string `json:"request_ip"`
-	RequestHost     string `json:"request_host"`
-	RequestPath     string `json:"request_path"`
-	UserAgent       string `json:"user_agent"`
-	DeviceModel     string `json:"device_model"`
-	DeviceOs        string `json:"device_os"`
-	DeviceOsVersion string `json:"device_os_version"`
-	AppVersion      string `json:"app_version"`
-	Country         string `json:"country"`
-	HwidHash        string `json:"hwid_hash"`
-	HwidPrefix      string `json:"hwid_prefix"`
-	RequestedAt     int64  `json:"requested_at"`
-	ServedFromCache int64  `json:"served_from_cache"`
-	Blocked         int64  `json:"blocked"`
-	BlockReason     string `json:"block_reason"`
-	ViaWorker       int64  `json:"via_worker"`
+	SubID             int64  `json:"sub_id"`
+	UserName          string `json:"user_name"`
+	RequestIp         string `json:"request_ip"`
+	RequestHost       string `json:"request_host"`
+	RequestPath       string `json:"request_path"`
+	UserAgent         string `json:"user_agent"`
+	DeviceModel       string `json:"device_model"`
+	DeviceOs          string `json:"device_os"`
+	DeviceOsVersion   string `json:"device_os_version"`
+	AppVersion        string `json:"app_version"`
+	Country           string `json:"country"`
+	HwidHash          string `json:"hwid_hash"`
+	HwidPrefix        string `json:"hwid_prefix"`
+	RequestedAt       int64  `json:"requested_at"`
+	ServedFromCache   int64  `json:"served_from_cache"`
+	Blocked           int64  `json:"blocked"`
+	BlockReason       string `json:"block_reason"`
+	ViaWorker         int64  `json:"via_worker"`
+	ViaMigration      int64  `json:"via_migration"`
+	MigratedFromSubID int64  `json:"migrated_from_sub_id"`
 }
 
 // Subscription Requests Queries --
@@ -1967,6 +1978,8 @@ func (q *Queries) InsertSubscriptionRequest(ctx context.Context, arg InsertSubsc
 		arg.Blocked,
 		arg.BlockReason,
 		arg.ViaWorker,
+		arg.ViaMigration,
+		arg.MigratedFromSubID,
 	)
 	return err
 }

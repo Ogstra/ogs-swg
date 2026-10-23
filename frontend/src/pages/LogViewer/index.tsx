@@ -127,7 +127,7 @@ function LogTerminal({
                     <Terminal size={14} className="text-emerald-400" />
                     <span>Console Output</span>
                 </div>
-                <div className="flex items-center gap-4 text-[10px] text-slate-500 font-medium uppercase tracking-wider">
+                <div className="flex items-center gap-4 text-xs text-slate-400 font-medium">
                     <span>{lines.length} lines</span>
                     {viewMode === 'search' && searchStatus && <span className="text-slate-400 normal-case tracking-normal">{searchStatus}</span>}
                     <label className="flex items-center gap-1.5 cursor-pointer hover:text-slate-300 transition-colors">

@@ -45,6 +45,10 @@ type Consumer struct {
 	Interface  string `json:"interface_name,omitempty"`
 	QuotaLimit int64  `json:"quota_limit"` // 0 if none
 	Key        string `json:"key"`         // For linking/identification
+	// Upload/Download are from the client's point of view. The store's Rx/Tx
+	// mean opposite things for sing-box and WireGuard, so they are mapped here.
+	Upload   int64 `json:"upload"`
+	Download int64 `json:"download"`
 }
 
 type DashboardConsumerChartData struct {
@@ -433,6 +437,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 					Flow:       wireGuardFlowLabel(iface),
 					Interface:  iface,
 					QuotaLimit: 0,
+					Upload:     t.Rx,
+					Download:   t.Tx,
 				})
 			}
 		}
@@ -469,6 +475,8 @@ func (s *Server) handleGetDashboardData(w http.ResponseWriter, r *http.Request) 
 					Flow:       "Proxy",
 					QuotaLimit: meta.QuotaLimit,
 					Key:        t.Key,
+					Upload:     t.Tx,
+					Download:   t.Rx,
 				})
 			}
 		}
@@ -610,13 +618,20 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 			}
 			// Fetch active users list (previously we only fetched count)
 			// We use the same threshold mechanism
-			if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, s.config.ActiveThresholdBytes); err == nil {
+			// Both lookups return the busiest users first; a threshold of 1 byte
+			// means "any traffic" but keeps that traffic ordering (the
+			// no-threshold path would list users alphabetically).
+			threshold := s.config.ActiveThresholdBytes
+			if threshold < 1 {
+				threshold = 1
+			}
+			if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, threshold); err == nil {
 				activeUsersSBList = users
 				activeUsersSB = int64(len(users))
 			}
 			// Fallback: if threshold-based result is empty, show sessions with any traffic.
 			if activeUsersSB == 0 {
-				if users, err := s.store.GetActiveUsers(activeUsersWindow); err == nil {
+				if users, err := s.store.GetActiveUsersWithThreshold(activeUsersWindow, 1); err == nil {
 					activeUsersSBList = users
 					activeUsersSB = int64(len(users))
 				}
@@ -650,6 +665,11 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 				stats, err = core.GetWireGuardStats()
 			}
 			threshold := time.Now().Add(-3 * time.Minute).Unix()
+			type activePeer struct {
+				name      string
+				handshake int64
+			}
+			var activePeers []activePeer
 			if err == nil {
 				for _, peer := range stats {
 					if peer.LatestHandshake >= threshold {
@@ -665,9 +685,19 @@ func (s *Server) collectSystemStatus(ctx context.Context, activeUsersWindow time
 								name = peer.PublicKey
 							}
 						}
-						activeUsersWGList = append(activeUsersWGList, name)
+						activePeers = append(activePeers, activePeer{name: name, handshake: peer.LatestHandshake})
 					}
 				}
+			}
+			// stats is a map, so sort to keep the list stable: most recent handshake first.
+			sort.Slice(activePeers, func(i, j int) bool {
+				if activePeers[i].handshake != activePeers[j].handshake {
+					return activePeers[i].handshake > activePeers[j].handshake
+				}
+				return activePeers[i].name < activePeers[j].name
+			})
+			for _, p := range activePeers {
+				activeUsersWGList = append(activeUsersWGList, p.name)
 			}
 			if s.config.DemoMode {
 				preferred := make(map[string]string, len(storedPeers))

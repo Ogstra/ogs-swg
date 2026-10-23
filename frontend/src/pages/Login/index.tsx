@@ -36,7 +36,7 @@ export const Login: React.FC = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-900 px-4 relative">
+        <div className="min-h-screen flex items-center justify-center bg-slate-950 px-4 relative">
             <div className="w-full max-w-md">
                 <div className="text-center mb-8">
                     <h1 className="text-3xl font-bold text-white mb-2">OGS-SWG</h1>
@@ -51,14 +51,14 @@ export const Login: React.FC = () => {
                         )}
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-2">Username</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-2">Username</label>
                             <div className="relative">
-                                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                                 <input
                                     type="text"
                                     value={username}
                                     onChange={(e) => setUsername(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                                     placeholder="Enter username"
                                     required
                                 />
@@ -66,21 +66,21 @@ export const Login: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-400 mb-2">Password</label>
+                            <label className="block text-sm font-medium text-slate-400 mb-2">Password</label>
                             <div className="relative">
-                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                                 <input
                                     type={showPassword ? 'text' : 'password'}
                                     value={password}
                                     onChange={(e) => setPassword(e.target.value)}
-                                    className="w-full bg-gray-900 border border-gray-700 rounded-lg py-2.5 pl-10 pr-11 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-10 pr-11 text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                                     placeholder="Enter password"
                                     required
                                 />
                                 <button
                                     type="button"
                                     onClick={() => setShowPassword((value) => !value)}
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-gray-400 transition-colors hover:bg-gray-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-slate-400 transition-colors hover:bg-slate-800 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                                     aria-label={showPassword ? 'Hide password' : 'Show password'}
                                 >
                                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -98,7 +98,7 @@ export const Login: React.FC = () => {
                     </form>
                 </Card>
             </div>
-            <div className="pointer-events-none absolute bottom-3 right-4 text-[11px] text-slate-500 font-mono">
+            <div className="pointer-events-none absolute bottom-3 right-4 text-xs text-slate-500 font-mono">
                 {commitLabel}
             </div>
         </div>

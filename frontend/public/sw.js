@@ -22,16 +22,6 @@ self.addEventListener('activate', event => {
   )
 })
 
-const cacheFirst = async (request, cacheName) => {
-  const cache = await caches.open(cacheName)
-  const cached = await cache.match(request)
-  if (cached) return cached
-
-  const response = await fetch(request)
-  if (response.ok) cache.put(request, response.clone())
-  return response
-}
-
 const staleWhileRevalidate = async (request, cacheName) => {
   const cache = await caches.open(cacheName)
   const cached = await cache.match(request)
@@ -58,7 +48,11 @@ self.addEventListener('fetch', event => {
   }
 
   if (url.pathname.startsWith('/assets/')) {
-    event.respondWith(cacheFirst(request, ASSET_CACHE))
+    // staleWhileRevalidate, not cacheFirst: hashed filenames make cached
+    // assets immutable in practice, but cacheFirst would serve a corrupted
+    // cache entry (e.g. from an interrupted fetch) forever with no way to
+    // self-heal. This always revalidates in the background.
+    event.respondWith(staleWhileRevalidate(request, ASSET_CACHE))
     return
   }
 

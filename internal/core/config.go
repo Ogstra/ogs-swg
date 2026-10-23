@@ -58,6 +58,7 @@ type Config struct {
 	APIKey                   string   `json:"api_key" env:"OGS_API_KEY"`
 	APIKeyReadOnly           bool     `json:"api_key_read_only" env:"OGS_API_KEY_READ_ONLY" env-default:"false"`
 	DemoMode                 bool     `json:"demo_mode" env:"OGS_DEMO_MODE" env-default:"false"`
+	DeviceCatalogAutoUpdate  bool     `json:"device_catalog_auto_update" env:"OGS_DEVICE_CATALOG_AUTO_UPDATE" env-default:"true"`
 	DisablePasswordLogin     bool     `json:"disable_password_login" env:"OGS_DISABLE_PASSWORD_LOGIN" env-default:"false"`
 
 	// Execution mode: "local" (default/bare metal), "docker_local" (Docker on same host).
@@ -1178,8 +1179,11 @@ func (c *Config) ApplySingboxChanges() error {
 			return nil
 		} else {
 			// A configured Clash API that rejects/fails the reload is a genuine
-			// apply failure (NTFY-03); "no Clash API configured" is not (D-15).
-			clashErr = err
+			// apply failure; "no Clash API configured" or an API without a
+			// /restart endpoint just means a systemd restart is needed.
+			if !errors.Is(err, errClashRestartUnsupported) {
+				clashErr = err
+			}
 		}
 	}
 

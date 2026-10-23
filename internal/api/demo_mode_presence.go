@@ -106,9 +106,13 @@ func demoSelectActiveKeys(scope string, keys []string, now time.Time, minCount, 
 		idx := (start + k*step) % len(keys)
 		active[keys[idx]] = struct{}{}
 	}
-	for len(active) < target {
-		idx := len(active) % len(keys)
-		active[keys[idx]] = struct{}{}
+	// The strided walk can revisit the same keys when step shares a factor with
+	// len(keys); fill the remainder from keys not selected yet.
+	for _, key := range keys {
+		if len(active) >= target {
+			break
+		}
+		active[key] = struct{}{}
 	}
 	return active
 }

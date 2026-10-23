@@ -23,6 +23,7 @@ type ntfySettingsRequest struct {
 	EnableWireguardDown   bool   `json:"enable_wireguard_down"`
 	EnableHighTraffic     bool   `json:"enable_high_traffic"`
 	EnableConfigErrors    bool   `json:"enable_config_errors"`
+	EnableNewHwid         bool   `json:"enable_new_hwid"`
 	TrafficThresholdBytes int64  `json:"traffic_threshold_bytes"`
 }
 
@@ -40,6 +41,7 @@ type ntfySettingsResponse struct {
 	EnableWireguardDown   bool   `json:"enable_wireguard_down"`
 	EnableHighTraffic     bool   `json:"enable_high_traffic"`
 	EnableConfigErrors    bool   `json:"enable_config_errors"`
+	EnableNewHwid         bool   `json:"enable_new_hwid"`
 	TrafficThresholdBytes int64  `json:"traffic_threshold_bytes"`
 }
 
@@ -55,6 +57,7 @@ func ntfySettingsToResponse(s core.NtfySettings) ntfySettingsResponse {
 		EnableWireguardDown:   s.EnableWireguardDown,
 		EnableHighTraffic:     s.EnableHighTraffic,
 		EnableConfigErrors:    s.EnableConfigErrors,
+		EnableNewHwid:         s.EnableNewHwid,
 		TrafficThresholdBytes: s.TrafficThresholdBytes,
 	}
 }
@@ -81,6 +84,7 @@ func (s *Server) mergeNtfySecrets(ctx context.Context, req ntfySettingsRequest) 
 		EnableWireguardDown:   req.EnableWireguardDown,
 		EnableHighTraffic:     req.EnableHighTraffic,
 		EnableConfigErrors:    req.EnableConfigErrors,
+		EnableNewHwid:         req.EnableNewHwid,
 		TrafficThresholdBytes: req.TrafficThresholdBytes,
 	}
 
@@ -153,7 +157,9 @@ func (s *Server) handleTestNtfyNotification(w http.ResponseWriter, r *http.Reque
 	// internal/core/ntfy.go's PublishNtfy is documented (see its
 	// "SECURITY:" comment) to never embed s.BearerToken/s.BasicPass into a
 	// returned error. If that contract ever changes, this must change too.
-	if err := core.PublishNtfy(ctx, settings, core.NtfyTestMessage()); err != nil {
+	msg := core.NtfyTestMessage()
+	msg.Icon = s.ntfyNotifier.IconURL()
+	if err := core.PublishNtfy(ctx, settings, msg); err != nil {
 		// Not http.StatusBadGateway: Cloudflare (and other CDN proxies in front
 		// of this panel) intercept 502/503/504 from the origin and substitute
 		// their own branded error page, hiding this JSON body from the user.

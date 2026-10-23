@@ -53,6 +53,7 @@ func TestNtfySettingsHandlersRoundTrip(t *testing.T) {
 	}
 	if fresh.AuthMode != "none" || fresh.ServerURL != "" || fresh.Topic != "" ||
 		fresh.EnableSingboxDown || fresh.EnableWireguardDown || fresh.EnableHighTraffic || fresh.EnableConfigErrors ||
+		fresh.EnableNewHwid ||
 		fresh.TrafficThresholdBytes != 0 || fresh.HasBearerToken || fresh.HasBasicPass {
 		t.Fatalf("unexpected fresh defaults: %+v", fresh)
 	}
@@ -138,6 +139,83 @@ func TestNtfySettingsHandlersRoundTrip(t *testing.T) {
 	}
 	if afterNeg.TrafficThresholdBytes != 0 {
 		t.Fatalf("expected threshold clamped to 0, got %d", afterNeg.TrafficThresholdBytes)
+	}
+}
+
+// TestNtfyNewHwidToggleRoundTrip covers NTFY-08: PUT enable_new_hwid=true
+// persists and reads back through GET, all other toggles preserved, and an
+// empty bearer_token under auth_mode "bearer" still keeps the stored token
+// (the new field does not disturb mergeNtfySecrets' secret preservation).
+func TestNtfyNewHwidToggleRoundTrip(t *testing.T) {
+	server, store, authReq := newNtfyTestServer(t)
+
+	putBody := `{
+		"server_url":"https://ntfy.example.test",
+		"topic":"panel-alerts",
+		"auth_mode":"bearer",
+		"bearer_token":"test-token-placeholder",
+		"enable_singbox_down":true,
+		"enable_new_hwid":true,
+		"traffic_threshold_bytes":1048576
+	}`
+	putReq := authReq(httptest.NewRequest(http.MethodPut, "/api/settings/ntfy", strings.NewReader(putBody)))
+	putReq.Header.Set("Content-Type", "application/json")
+	putRec := httptest.NewRecorder()
+	server.handleUpdateNtfySettings(putRec, putReq)
+	if putRec.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%q", putRec.Code, putRec.Body.String())
+	}
+
+	getReq := authReq(httptest.NewRequest(http.MethodGet, "/api/settings/ntfy", nil))
+	getRec := httptest.NewRecorder()
+	server.handleGetNtfySettings(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%q", getRec.Code, getRec.Body.String())
+	}
+	bodyStr := getRec.Body.String()
+	if strings.Contains(bodyStr, `"bearer_token"`) || strings.Contains(bodyStr, `"basic_pass"`) {
+		t.Fatalf("GET response leaks a secret key: %s", bodyStr)
+	}
+
+	var saved ntfySettingsResponse
+	if err := json.NewDecoder(strings.NewReader(bodyStr)).Decode(&saved); err != nil {
+		t.Fatalf("decode saved: %v", err)
+	}
+	if !saved.EnableNewHwid {
+		t.Fatalf("expected enable_new_hwid=true, got %+v", saved)
+	}
+	if !saved.EnableSingboxDown {
+		t.Fatalf("expected other toggle preserved: %+v", saved)
+	}
+	if !saved.HasBearerToken {
+		t.Fatalf("expected bearer token still stored, got %+v", saved)
+	}
+
+	// PUT again with enable_new_hwid=true and an empty bearer_token — the
+	// stored token must survive (mergeNtfySecrets untouched by the new field).
+	putReq2 := authReq(httptest.NewRequest(http.MethodPut, "/api/settings/ntfy", strings.NewReader(`{
+		"server_url":"https://ntfy.example.test",
+		"topic":"panel-alerts",
+		"auth_mode":"bearer",
+		"bearer_token":"",
+		"enable_new_hwid":true
+	}`)))
+	putReq2.Header.Set("Content-Type", "application/json")
+	putRec2 := httptest.NewRecorder()
+	server.handleUpdateNtfySettings(putRec2, putReq2)
+	if putRec2.Code != http.StatusOK {
+		t.Fatalf("second PUT status=%d body=%q", putRec2.Code, putRec2.Body.String())
+	}
+
+	stored, err := store.GetNtfySettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetNtfySettings: %v", err)
+	}
+	if stored.BearerToken != "test-token-placeholder" {
+		t.Fatalf("expected bearer token preserved, got %q", stored.BearerToken)
+	}
+	if !stored.EnableNewHwid {
+		t.Fatalf("expected EnableNewHwid persisted true")
 	}
 }
 

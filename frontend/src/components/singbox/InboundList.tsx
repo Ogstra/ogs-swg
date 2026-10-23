@@ -117,7 +117,7 @@ export default function InboundList() {
                         <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-4 group shadow-sm hover:border-slate-700 hover:shadow-md transition-all">
                             <div className="space-y-2">
                                 <div className="flex items-center justify-between">
-                                    <Badge variant="neutral" className="font-mono text-[10px] uppercase tracking-wider px-2 py-1 bg-slate-800 text-slate-200">
+                                    <Badge variant="neutral" className="font-mono text-xs uppercase tracking-wider px-2 py-1 bg-slate-800 text-slate-200">
                                         {inbound.type?.toUpperCase()}
                                     </Badge>
                                     <div className="flex gap-2">

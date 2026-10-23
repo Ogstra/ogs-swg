@@ -3,16 +3,16 @@
 @tailwind utilities;
 
 :root {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
   color-scheme: dark;
-  background-color: #0f172a; /* slate-900 */
+  background-color: #161513; /* graphite, between slate-900 and slate-950 */
 }
 
 body {
-    background-color: #0f172a;
-    color: #f8fafc;
+    background-color: #161513;
+    color: #f6f4f0;
     overscroll-behavior-y: none;
 }
 
@@ -52,9 +52,9 @@ body {
 button:disabled,
 button[disabled],
 button[aria-disabled='true'] {
-    background-color: #1e293b !important; /* slate-800 */
-    border-color: #334155 !important; /* slate-700 */
-    color: #64748b !important; /* slate-500 */
+    background-color: #2a2926 !important; /* slate-800 */
+    border-color: #3b3935 !important; /* slate-700 */
+    color: #8c887d !important; /* slate-500 */
     opacity: 0.6 !important;
     cursor: not-allowed !important;
     box-shadow: none !important;
@@ -119,7 +119,7 @@ select.select-field:focus {
 
 .logs-scrollbar {
     scrollbar-width: thin;
-    scrollbar-color: #475569 #0f172a;
+    scrollbar-color: #504d45 #161513;
     overscroll-behavior: contain;
 }
 
@@ -129,17 +129,17 @@ select.select-field:focus {
 }
 
 .logs-scrollbar::-webkit-scrollbar-track {
-    background: #0f172a;
+    background: #161513;
 }
 
 .logs-scrollbar::-webkit-scrollbar-thumb {
-    background: #475569;
+    background: #504d45;
     border-radius: 9999px;
-    border: 2px solid #0f172a;
+    border: 2px solid #161513;
 }
 
 .logs-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: #64748b;
+    background: #8c887d;
 }
 
 /* On touch devices the custom webkit scrollbar is unreliable for finger-grab.
@@ -164,7 +164,7 @@ select.select-field:focus {
     height: 100%;
     min-height: 100%;
     width: 100%;
-    color: #e2e8f0;
+    color: #ebe8e1;
     background: transparent;
     line-height: 1.4;
     padding: 0 !important;
@@ -184,14 +184,14 @@ select.select-field:focus {
     font-size: 14px;
     line-height: 1.5;
     min-height: 100%;
-    color: #e2e8f0;
-    background: #0f172a !important;
+    color: #ebe8e1;
+    background: #161513 !important;
 }
 
 .raw-editor textarea {
     outline: none;
-    color: #e2e8f0;
-    caret-color: #3b82f6;
+    color: #ebe8e1;
+    caret-color: #e58f4e;
     min-height: 100% !important;
     padding-left: calc(var(--raw-editor-gutter-width) + var(--raw-editor-gutter-gap)) !important;
 }
@@ -213,7 +213,7 @@ select.select-field:focus {
     display: inline-flex;
     justify-content: flex-end;
     padding-right: var(--raw-editor-gutter-gap);
-    color: #64748b;
+    color: #8c887d;
     user-select: none;
 }
 

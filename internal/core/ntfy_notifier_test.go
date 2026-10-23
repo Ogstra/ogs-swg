@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -324,6 +325,47 @@ func TestNtfyNotifierCrashAfterReloadWindow(t *testing.T) {
 	}
 }
 
+// TestNtfyNotifierOperatorRestartSuppressesCrashAndDownRecovered reproduces
+// the reported false positive: clicking "Apply changes" (a successful config
+// apply that requires a restart) followed by the panel's own Restart action
+// must NOT fire "crash after reload", "service down", or "service recovered"
+// for the resulting down->up blip, since the operator caused it deliberately.
+func TestNtfyNotifierOperatorRestartSuppressesCrashAndDownRecovered(t *testing.T) {
+	n, recorded, _ := newTestNotifier(t, baseSettings())
+	ctx := context.Background()
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cur := base
+	n.SetNow(func() time.Time { return cur })
+
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed up
+	n.NotifyConfigApplySucceeded()                        // "Apply changes" succeeds (Clash API hot-reload)
+
+	cur = base.Add(1 * time.Second)
+	n.NotifyServiceRestarting(NtfyServiceSingbox) // operator clicks Restart right after
+
+	cur = base.Add(2 * time.Second)
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false) // restart takes the process down briefly
+
+	cur = base.Add(5 * time.Second)
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // restart completes, back up
+
+	if len(*recorded) != 0 {
+		t.Fatalf("operator-initiated restart fired %d notification(s); want 0: %+v", len(*recorded), *recorded)
+	}
+
+	// After the grace window elapses, a genuine unrelated crash must still
+	// be detected normally.
+	cur = base.Add(1 * time.Second + n.crashWindow + time.Second)
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false)
+	if len(*recorded) != 1 {
+		t.Fatalf("post-grace down transition did not fire; got %d messages", len(*recorded))
+	}
+	if !slices.Equal((*recorded)[0].Message.Tags, []string{"rotating_light", "warning"}) {
+		t.Fatalf("post-grace transition should be a generic down, got tags %q", (*recorded)[0].Message.Tags)
+	}
+}
+
 func TestNtfyNotifierCrashRequiresConfigErrorsToggle(t *testing.T) {
 	s := baseSettings()
 	s.EnableConfigErrors = false
@@ -360,6 +402,85 @@ func TestNtfyNotifierConfigApplyFailedAlwaysSends(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// New-HWID observation (NTFY-09)
+// ---------------------------------------------------------------------------
+
+func TestObserveSubscriptionHWID(t *testing.T) {
+	sampleInfo := NtfyNewHWIDInfo{
+		SubscriptionName: "family-plan",
+		Username:         "alice",
+		HWIDPrefix:       "abc123",
+	}
+
+	t.Run("enabled_and_configured_publishes_once", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = true
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 1 {
+			t.Fatalf("published %d messages; want 1", len(*recorded))
+		}
+		if !strings.HasPrefix((*recorded)[0].Message.Title, "New device on subscription:") {
+			t.Fatalf("Title = %q, want prefix %q", (*recorded)[0].Message.Title, "New device on subscription:")
+		}
+	})
+
+	t.Run("toggle_off_publishes_nothing", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = false
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 0 {
+			t.Fatalf("published %d messages; want 0 (toggle off)", len(*recorded))
+		}
+	})
+
+	t.Run("not_configured_publishes_nothing", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = true
+		s.ServerURL = ""
+		s.Topic = ""
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 0 {
+			t.Fatalf("published %d messages; want 0 (not configured)", len(*recorded))
+		}
+	})
+
+	t.Run("settings_load_error_publishes_nothing_and_does_not_panic", func(t *testing.T) {
+		publishFn := func(ctx context.Context, s NtfySettings, m NtfyMessage) error {
+			t.Fatal("publish should not be called when settings fail to load")
+			return nil
+		}
+		settingsFn := func(ctx context.Context) (NtfySettings, error) {
+			return NtfySettings{}, errors.New("settings load failed")
+		}
+		n := NewNtfyNotifier(settingsFn, publishFn)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+	})
+
+	t.Run("no_dedupe_two_identical_calls_publish_twice", func(t *testing.T) {
+		s := baseSettings()
+		s.EnableNewHwid = true
+		n, recorded, _ := newTestNotifier(t, s)
+
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+		n.ObserveSubscriptionHWID(context.Background(), sampleInfo)
+
+		if len(*recorded) != 2 {
+			t.Fatalf("published %d messages; want 2 (notifier does not dedupe)", len(*recorded))
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Publish error resilience
 // ---------------------------------------------------------------------------
 
@@ -381,5 +502,46 @@ func TestNtfyNotifierPublishErrorDoesNotBlockState(t *testing.T) {
 
 	if calls != 1 {
 		t.Fatalf("publish attempted %d times; want 1 (state must advance despite publish error)", calls)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Icon/Click link wiring (SetBaseURL)
+// ---------------------------------------------------------------------------
+
+func TestNtfyNotifierIconAndClickUseBaseURL(t *testing.T) {
+	n, recorded, _ := newTestNotifier(t, baseSettings())
+	n.SetBaseURL(func() string { return "https://panel.example.test" })
+	ctx := context.Background()
+
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false)
+
+	if len(*recorded) != 1 {
+		t.Fatalf("got %d messages; want 1", len(*recorded))
+	}
+	msg := (*recorded)[0].Message
+	if msg.Icon != "https://panel.example.test/sing-box-icon.png" {
+		t.Errorf("Icon = %q, want the panel logo URL", msg.Icon)
+	}
+	if msg.Click != "https://panel.example.test/" {
+		t.Errorf("Click = %q, want base URL + ClickPath", msg.Click)
+	}
+}
+
+func TestNtfyNotifierNoBaseURLOmitsIconAndClick(t *testing.T) {
+	n, recorded, _ := newTestNotifier(t, baseSettings())
+	// No SetBaseURL call — must default to no icon/click, not panic or send "/".
+	ctx := context.Background()
+
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false)
+
+	if len(*recorded) != 1 {
+		t.Fatalf("got %d messages; want 1", len(*recorded))
+	}
+	msg := (*recorded)[0].Message
+	if msg.Icon != "" || msg.Click != "" {
+		t.Errorf("Icon/Click = %q/%q, want both empty with no base URL configured", msg.Icon, msg.Click)
 	}
 }

@@ -8,6 +8,8 @@ import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
+import { SearchInput } from '../../components/ui/SearchInput'
+import { matchesSearch } from '../../lib/search'
 import { formatBytes, formatTimeAgo } from '../../utils/traffic'
 import { WG_INTERFACE_DEFAULTS, normalizeWireGuardInterfaceEditInput, validateWireGuardInterfaceEdit } from '../../utils/wireguardForms'
 
@@ -61,6 +63,7 @@ export default function WireGuard() {
     // Interface Edit State
     const [editInterface, setEditInterface] = useState<WireGuardInterface | null>(null)
     const [sortKey, setSortKey] = useState<'alias' | 'ip' | 'endpoint' | 'traffic' | 'handshake'>('alias')
+    const [search, setSearch] = useState('')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
 
     // Config modal state
@@ -321,7 +324,14 @@ export default function WireGuard() {
 
     const sortedPeers = useMemo(() => {
         const dir = sortDir === 'asc' ? 1 : -1
-        return [...peers].sort((a, b) => {
+        return peers.filter(peer => matchesSearch(search, [
+            peer.alias,
+            peer.name,
+            peer.public_key,
+            peer.allowed_ips,
+            peer.endpoint,
+            peer.stats?.endpoint,
+        ])).sort((a, b) => {
             switch (sortKey) {
                 case 'endpoint': {
                     const ea = (a.stats?.endpoint || a.endpoint || '').toLowerCase()
@@ -352,7 +362,7 @@ export default function WireGuard() {
                 }
             }
         })
-    }, [peers, sortDir, sortKey])
+    }, [peers, search, sortDir, sortKey])
 
     const toggleSort = (key: typeof sortKey) => {
         if (sortKey === key) {
@@ -390,6 +400,12 @@ export default function WireGuard() {
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-0 sm:gap-4">
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search peers..."
+                    className="lg:mr-auto lg:w-64"
+                />
 
                 {pendingRestart && (
                     <div className="flex items-center gap-3 bg-amber-500/10 border border-amber-500/20 text-amber-200 px-4 py-2 rounded-lg">
@@ -465,66 +481,37 @@ export default function WireGuard() {
                 </div>
             )}
 
-            {/* Interface Info Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                <div className="col-span-2 md:col-span-1 bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 shrink-0 bg-slate-950 border border-slate-800 rounded-lg text-slate-400 flex items-center justify-center">
-                            <Shield size={20} />
-                        </div>
-                        <div className="flex flex-col justify-center min-w-0">
-                            <p className="text-sm font-medium text-slate-400 leading-tight">Interface Address</p>
-                            <p className="text-xl text-white font-bold font-mono tracking-tight leading-tight mt-1 truncate">{interfaceConfig?.address || '-'}</p>
-                            {interfaceConfig?.bind_address && <p className="text-xs text-slate-500 mt-1 font-mono truncate">Bind: {interfaceConfig.bind_address}</p>}
-                        </div>
-                    </div>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 shrink-0 bg-slate-950 border border-slate-800 rounded-lg text-slate-400 flex items-center justify-center">
-                            <Settings size={20} />
-                        </div>
-                        <div className="flex flex-col justify-center">
-                            <p className="text-sm font-medium text-slate-400 leading-tight">Port</p>
-                            <p className="text-xl text-white font-bold font-mono tracking-tight leading-tight mt-1">{interfaceConfig?.listen_port || 51820}</p>
-                        </div>
-                    </div>
-                </div>
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-                    <div className="flex items-center gap-3">
-                        <div className="w-11 h-11 shrink-0 bg-slate-950 border border-slate-800 rounded-lg text-slate-400 flex items-center justify-center">
-                            <ArrowUpDown size={20} />
-                        </div>
-                        <div className="flex flex-col justify-center">
-                            <p className="text-sm font-medium text-slate-400 leading-tight">MTU</p>
-                            <p className="text-xl text-white font-bold font-mono tracking-tight leading-tight mt-1">{interfaceConfig?.mtu || 1420}</p>
-                        </div>
-                    </div>
-                </div>
+            {/* Interface summary */}
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 rounded-lg border border-slate-800 bg-slate-900/60 px-4 py-3 font-mono text-sm text-slate-100">
+                {activeInterface && <span className="font-semibold">{activeInterface}</span>}
+                <span><span className="mr-1.5 text-xs text-slate-400">Address</span>{interfaceConfig?.address || '-'}</span>
+                <span><span className="mr-1.5 text-xs text-slate-400">Port</span>{interfaceConfig?.listen_port || 51820}</span>
+                <span><span className="mr-1.5 text-xs text-slate-400">MTU</span>{interfaceConfig?.mtu || 1420}</span>
+                {interfaceConfig?.bind_address && <span><span className="mr-1.5 text-xs text-slate-400">Bind</span>{interfaceConfig.bind_address}</span>}
             </div>
 
             {/* Peers Table */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto hidden md:block">
-                    <table className="w-full min-w-[960px] text-left border-collapse table-fixed">
+                    <table className="w-full min-w-[860px] text-left border-collapse table-fixed">
                         <thead>
-                            <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('handshake')}>
-                                    Last Seen {renderSortIcon('handshake')}
+                            <tr className="border-b border-slate-800 bg-slate-950/50 text-xs text-slate-400">
+                                <th className="w-[130px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('handshake')}>
+                                    Last seen {renderSortIcon('handshake')}
                                 </th>
-                                <th className="p-4 w-48 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('alias')}>
-                                    Name/Alias {renderSortIcon('alias')}
+                                <th className="cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('alias')}>
+                                    Name {renderSortIcon('alias')}
                                 </th>
-                                <th className="p-4 w-56 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('ip')}>
+                                <th className="w-[150px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('ip')}>
                                     Allowed IPs {renderSortIcon('ip')}
                                 </th>
-                                <th className="p-4 w-56 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('endpoint')}>
+                                <th className="w-[190px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('endpoint')}>
                                     Endpoint {renderSortIcon('endpoint')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('traffic')}>
-                                    Data Usage {renderSortIcon('traffic')}
+                                <th className="w-[130px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('traffic')}>
+                                    Data usage {renderSortIcon('traffic')}
                                 </th>
-                                <th className="p-4 font-semibold text-right">Actions</th>
+                                <th className="w-[130px] px-4 py-3 text-right font-medium">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -532,39 +519,39 @@ export default function WireGuard() {
                                 const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 180 // 3 mins
                                 return (
                                     <tr key={peer.public_key} className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`w-2.5 h-2.5 rounded-full ring-2 ring-slate-900 ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-slate-700'}`}></div>
-                                                <span className={`text-xs font-medium ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                        <td className="px-4 py-3">
+                                            <div className="flex items-center gap-2.5">
+                                                <div className={`h-2 w-2 shrink-0 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-slate-700'}`}></div>
+                                                <span className={`whitespace-nowrap text-xs font-medium ${isOnline ? 'text-emerald-400' : 'text-slate-400'}`}>
                                                     {peer.stats?.latest_handshake ? formatTimeAgo(peer.stats.latest_handshake) : 'Never'}
                                                 </span>
                                             </div>
                                         </td>
-                                        <td className="w-48 p-4">
-                                            <div className="max-w-48 truncate font-semibold text-slate-200" title={peer.alias || peer.name || '-'}>
+                                        <td className="px-4 py-3">
+                                            <div className="truncate font-semibold text-slate-100" title={peer.alias || peer.name || '-'}>
                                                 {peer.alias || peer.name || '-'}
                                             </div>
                                         </td>
-                                        <td className="p-4 font-mono text-slate-400 text-xs break-all whitespace-normal">
+                                        <td className="whitespace-normal break-all px-4 py-3 font-mono text-xs text-slate-300">
                                             {peer.allowed_ips}
                                         </td>
-                                        <td className="p-4 font-mono text-slate-400 text-xs break-all whitespace-normal">
+                                        <td className="whitespace-normal break-all px-4 py-3 font-mono text-xs text-slate-300">
                                             {peer.stats?.endpoint || peer.endpoint || '-'}
                                         </td>
-                                        <td className="p-4">
-                                            <div className="flex flex-col gap-1 text-[11px] font-mono">
-                                                <div className="flex items-center gap-1.5 text-emerald-400">
-                                                    <ArrowUp size={12} strokeWidth={3} />
-                                                    {formatBytes(peer.stats?.transfer_tx || 0)}
-                                                </div>
-                                                <div className="flex items-center gap-1.5 text-blue-400">
-                                                    <ArrowDown size={12} strokeWidth={3} />
+                                        <td className="px-4 py-3">
+                                            <div className="flex flex-col gap-1 font-mono text-xs tabular-nums">
+                                                <div className="flex items-center gap-1.5 whitespace-nowrap text-slate-300" title="Upload">
+                                                    <ArrowUp size={12} className="shrink-0 text-slate-500" />
                                                     {formatBytes(peer.stats?.transfer_rx || 0)}
+                                                </div>
+                                                <div className="flex items-center gap-1.5 whitespace-nowrap text-blue-400" title="Download">
+                                                    <ArrowDown size={12} className="shrink-0" />
+                                                    {formatBytes(peer.stats?.transfer_tx || 0)}
                                                 </div>
                                             </div>
                                         </td>
-                                        <td className="p-4 text-right">
-                                            <div className="flex items-center justify-end gap-2">
+                                        <td className="px-4 py-3 text-right">
+                                            <div className="flex items-center justify-end gap-1.5">
                                                 <ActionIconButton
                                                     onClick={() => {
                                                         if (!canWriteWireguard) return
@@ -621,13 +608,13 @@ export default function WireGuard() {
                     {(sortedPeers || []).map(peer => {
                         const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 180
                         return (
-                            <div key={peer.public_key} className="p-4 space-y-4">
-                                <div className="flex items-start justify-between">
-                                    <div className="space-y-1">
-                                        <div className="font-bold text-slate-200">{peer.alias || peer.name || 'Unnamed Peer'}</div>
+                            <div key={peer.public_key} className="space-y-3 px-4 py-3">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 space-y-1">
+                                        <div className="truncate font-semibold text-slate-100">{peer.alias || peer.name || 'Unnamed Peer'}</div>
                                         <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-slate-700'}`}></div>
-                                            <span className="text-xs text-slate-500">
+                                            <div className={`h-2 w-2 rounded-full ${isOnline ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]' : 'bg-slate-700'}`}></div>
+                                            <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-400'}`}>
                                                 {peer.stats?.latest_handshake ? formatTimeAgo(peer.stats.latest_handshake) : 'Never'}
                                             </span>
                                         </div>
@@ -663,23 +650,23 @@ export default function WireGuard() {
 
                                 <div className="grid grid-cols-2 gap-4 text-xs">
                                     <div>
-                                        <p className="text-slate-500 mb-1">Allowed IPs</p>
-                                        <p className="font-mono text-slate-300 break-all">{peer.allowed_ips}</p>
+                                        <p className="mb-0.5 text-slate-400">Allowed IPs</p>
+                                        <p className="break-all font-mono text-slate-200">{peer.allowed_ips}</p>
                                     </div>
                                     <div>
-                                        <p className="text-slate-500 mb-1">Endpoint</p>
-                                        <p className="font-mono text-slate-300 break-all">{peer.stats?.endpoint || peer.endpoint || '-'}</p>
+                                        <p className="mb-0.5 text-slate-400">Endpoint</p>
+                                        <p className="break-all font-mono text-slate-200">{peer.stats?.endpoint || peer.endpoint || '-'}</p>
                                     </div>
                                 </div>
 
-                                <div className="bg-slate-950/50 rounded-lg p-3 grid grid-cols-2 gap-2">
-                                    <div className="flex items-center gap-2 text-emerald-400 text-xs font-mono">
-                                        <ArrowUp size={14} />
-                                        {formatBytes(peer.stats?.transfer_tx || 0)}
-                                    </div>
-                                    <div className="flex items-center gap-2 text-blue-400 text-xs font-mono">
-                                        <ArrowDown size={14} />
+                                <div className="flex items-center gap-5 font-mono text-xs tabular-nums">
+                                    <div className="flex items-center gap-1.5 text-slate-300" title="Upload">
+                                        <ArrowUp size={12} className="text-slate-500" />
                                         {formatBytes(peer.stats?.transfer_rx || 0)}
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-blue-400" title="Download">
+                                        <ArrowDown size={12} />
+                                        {formatBytes(peer.stats?.transfer_tx || 0)}
                                     </div>
                                 </div>
                             </div>

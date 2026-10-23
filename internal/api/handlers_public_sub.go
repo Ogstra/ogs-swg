@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -149,6 +150,30 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 
 	// Load global Happ config once; reuse for routing profile, direct sites, and shadowrocket flag.
+	// A device being moved gets the TARGET sub's profiles in this same response:
+	// the client replaces its saved link but does not refetch it right away, so
+	// serving the source's profiles would leave it showing stale ones. Protection
+	// checks, request recording and device tracking above/below stay on the
+	// source sub. The new-url is resolved per request and applied after the
+	// cache: the cache is keyed per token, not per device, so it must never end
+	// up in a cached payload.
+	contentSub, contentToken, contentMemberRows := sub, token, memberRows
+	// The request history records what was actually sent, so a migration
+	// response is logged against the target sub and its users.
+	recordSubID, recordUsers, migratedFromSubID := sub.ID, users, int64(0)
+	migrationNewURL := ""
+	if migration := s.pendingHWIDMigration(r, sub); migration != nil {
+		migrationNewURL = migration.NewURL
+		if targetRows, err := s.store.Queries.GetSubscriptionMembers(r.Context(), migration.Target.ID); err == nil && len(targetRows) > 0 {
+			contentSub, contentToken, contentMemberRows = migration.Target, migration.Target.Token, targetRows
+			recordSubID, migratedFromSubID = migration.Target.ID, sub.ID
+			recordUsers = make([]string, 0, len(targetRows))
+			for _, member := range targetRows {
+				recordUsers = append(recordUsers, member.UserName)
+			}
+		}
+	}
+
 	var globalHappCfg core.SubscriptionHappConfig
 	var globalHappCfgLoaded bool
 	loadGlobalHappCfg := func() core.SubscriptionHappConfig {
@@ -161,7 +186,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return globalHappCfg
 	}
 
-	happParams, happFlag := s.happSubscriptionParamsForRequest(r, token, sub.HappColorProfile)
+	happParams, happFlag := s.happSubscriptionParamsForRequest(r, contentToken, contentSub.HappColorProfile)
 	profileFlag := happFlag
 	if profileFlag == "" && isShadowrocketRequest(r) {
 		profileFlag = loadGlobalHappCfg().ProfileFlag
@@ -169,8 +194,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	routingProfileJSON := ""
 	if happParams != nil {
-		if sub.HappRoutingProfile != "" {
-			routingProfileJSON = sub.HappRoutingProfile
+		if contentSub.HappRoutingProfile != "" {
+			routingProfileJSON = contentSub.HappRoutingProfile
 		} else {
 			routingProfileJSON = loadGlobalHappCfg().RoutingProfile
 		}
@@ -194,18 +219,18 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		}
 		globalCfg := loadGlobalHappCfg()
 		addSites(strings.Join(globalCfg.DirectSites, "\n"))
-		addSites(sub.HappDirectSites)
+		addSites(contentSub.HappDirectSites)
 	}
 
-	cacheKey := "sub:" + token
+	cacheKey := "sub:" + contentToken
 	if happParams != nil {
 		cacheKey += ":happ:" + happSubscriptionParamsCacheKey(happParams)
 	}
 	if routingProfileJSON != "" {
 		cacheKey += ":r:" + routingProfileJSON
 	}
-	if sub.HappColorProfile != "" {
-		cacheKey += ":cp:" + sub.HappColorProfile
+	if contentSub.HappColorProfile != "" {
+		cacheKey += ":cp:" + contentSub.HappColorProfile
 	}
 	if profileFlag != "" {
 		cacheKey += ":flag:" + profileFlag
@@ -215,14 +240,16 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	}
 	if val, found := s.cache.Get(cacheKey); found {
 		if c, ok := val.(cachedSub); ok {
-			s.recordSubscriptionRequest(r, sub.ID, users, true)
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
+			s.recordSubscriptionRequest(r, recordSubID, recordUsers, true, migratedFromSubID)
+			s.observeHWIDMigrationArrival(r, sub)
+			s.observeSubscriptionHWID(r, sub, users)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 			return
 		}
 	}
 
-	members := make([]subscriptionMember, 0, len(memberRows))
-	for _, member := range memberRows {
+	members := make([]subscriptionMember, 0, len(contentMemberRows))
+	for _, member := range contentMemberRows {
 		members = append(members, subscriptionMember{UserName: member.UserName, Alias: member.Alias})
 	}
 
@@ -241,15 +268,15 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	c := buildSubscription(buildSubscriptionInput{
 		Members:               members,
-		DisplayTitle:          subscriptionDisplayName(sub.Name, sub.Alias),
+		DisplayTitle:          subscriptionDisplayName(contentSub.Name, contentSub.Alias),
 		Host:                  s.resolvePublicHost(r),
 		ProfileFlag:           profileFlag,
 		HappParams:            happParams,
 		RoutingProfileJSON:    routingProfileJSON,
 		MergedDirectSites:     mergedDirectSites,
-		SubQuotaLimit:         sub.QuotaLimit.Int64,
-		ProfileUpdateInterval: nullableInt64Ptr(sub.ProfileUpdateIntervalHours),
-		UpdateAlways:          int64ToBool(sub.UpdateAlways),
+		SubQuotaLimit:         contentSub.QuotaLimit.Int64,
+		ProfileUpdateInterval: nullableInt64Ptr(contentSub.ProfileUpdateIntervalHours),
+		UpdateAlways:          int64ToBool(contentSub.UpdateAlways),
 		Now:                   s.now(),
 		Users:                 subUsers,
 		Inbounds:              subInbounds,
@@ -257,8 +284,10 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	s.cache.SetWithTTL(cacheKey, c, 1, 2*time.Minute)
 
-	s.recordSubscriptionRequest(r, sub.ID, users, false)
-	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams)
+	s.recordSubscriptionRequest(r, recordSubID, recordUsers, false, migratedFromSubID)
+	s.observeHWIDMigrationArrival(r, sub)
+	s.observeSubscriptionHWID(r, sub, users)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 }
 
 func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string, subColorProfile string) ([]happSubscriptionParam, string) {
@@ -378,30 +407,79 @@ func happSubscriptionBodyLine(param happSubscriptionParam) string {
 	return "#" + param.Key + ": " + param.Value
 }
 
-func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool) {
+func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool, migratedFromSubID int64) {
 	meta := extractSubscriptionRequestMetadata(r)
 	if err := s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
-		SubID:           subID,
-		UserName:        strings.Join(users, ", "),
-		RequestIp:       resolveSubscriptionRequestIP(r),
-		RequestHost:     meta.requestHost,
-		RequestPath:     meta.requestPath,
-		UserAgent:       meta.userAgent,
-		DeviceModel:     meta.deviceModel,
-		DeviceOs:        meta.deviceOS,
-		DeviceOsVersion: meta.deviceOSVersion,
-		AppVersion:      meta.appVersion,
-		Country:         meta.country,
-		HwidHash:        meta.hwidHash,
-		HwidPrefix:      meta.hwidPrefix,
-		RequestedAt:     s.now().Unix(),
-		ServedFromCache: servedFromCacheToInt64(servedFromCache),
-		Blocked:         0,
-		BlockReason:     "",
-		ViaWorker:       viaWorkerToInt64(r),
+		SubID:             subID,
+		UserName:          strings.Join(users, ", "),
+		RequestIp:         resolveSubscriptionRequestIP(r),
+		RequestHost:       meta.requestHost,
+		RequestPath:       meta.requestPath,
+		UserAgent:         meta.userAgent,
+		DeviceModel:       meta.deviceModel,
+		DeviceOs:          meta.deviceOS,
+		DeviceOsVersion:   meta.deviceOSVersion,
+		AppVersion:        meta.appVersion,
+		Country:           meta.country,
+		HwidHash:          meta.hwidHash,
+		HwidPrefix:        meta.hwidPrefix,
+		RequestedAt:       s.now().Unix(),
+		ServedFromCache:   servedFromCacheToInt64(servedFromCache),
+		Blocked:           0,
+		BlockReason:       "",
+		ViaWorker:         viaWorkerToInt64(r),
+		ViaMigration:      servedFromCacheToInt64(migratedFromSubID != 0),
+		MigratedFromSubID: migratedFromSubID,
 	}); err == nil {
 		s.invalidateSubscriptionHistoryCache()
 	}
+}
+
+// observeSubscriptionHWID records the requesting device as known for this
+// subscription and, the first time a given HWID is seen for it, fires a
+// new-device notification (NTFY-08).
+//
+// CONTRACT: this is side-effect only. It takes no http.ResponseWriter, never
+// writes a response, never returns an error to the caller, and its failures
+// are swallowed after logging — the subscription must be served identically
+// whether this succeeds, fails, or is disabled (NTFY-10/NTFY-11, D-02).
+//
+// The store call is a single indexed INSERT OR IGNORE and runs synchronously
+// so two concurrent requests with the same new HWID can never both be judged
+// "new" (Store.RecordSubscriptionHWIDFirstSeen decides atomically via
+// RowsAffected). The notification publish itself is already off the request
+// path via newNtfyAsyncPublisher, so no outbound HTTP happens inline.
+func (s *Server) observeSubscriptionHWID(r *http.Request, sub store.GetSubscriptionByTokenRow, users []string) {
+	if s.store == nil || s.ntfyNotifier == nil {
+		return
+	}
+	meta := extractSubscriptionRequestMetadata(r)
+	if meta.hwidHash == "" {
+		return
+	}
+	isNew, err := s.store.RecordSubscriptionHWIDFirstSeen(r.Context(), sub.ID, meta.hwidHash, s.now().Unix())
+	if err != nil {
+		log.Printf("observeSubscriptionHWID: record hwid for sub %d: %v", sub.ID, err)
+		return
+	}
+	if !isNew {
+		return
+	}
+	s.ntfyNotifier.ObserveSubscriptionHWID(r.Context(), core.NtfyNewHWIDInfo{
+		// sub.Name (not sub.Alias) — the alias is the client-facing display
+		// name; this notification is for the operator, who identifies
+		// subscriptions by their real internal name.
+		SubscriptionName: sub.Name,
+		Username:         strings.Join(users, ", "),
+		HWIDPrefix:       meta.hwidPrefix,
+		DeviceModel:      meta.deviceModel,
+		DeviceOS:         meta.deviceOS,
+		DeviceOSVersion:  meta.deviceOSVersion,
+		AppVersion:       meta.appVersion,
+		Country:          meta.country,
+		ClientIP:         resolveSubscriptionRequestIP(r),
+		RequestedAt:      s.now(),
+	})
 }
 
 // blockedRecordDedupTTL is the window within which a duplicate blocked-request
@@ -845,7 +923,7 @@ func servedFromCacheToInt64(v bool) int64 {
 	return 0
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool, happParams []happSubscriptionParam) {
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool, happParams []happSubscriptionParam, migrationNewURL string) {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
 	parts = append(parts, fmt.Sprintf("download=%d", down))
@@ -864,6 +942,12 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 	}
 	for _, param := range happParams {
 		w.Header().Set(param.Key, param.Value)
+	}
+	if migrationNewURL != "" {
+		// fallback-url would otherwise send the device back to the source sub.
+		w.Header().Set("new-url", migrationNewURL)
+		w.Header().Set("fallback-url", migrationNewURL)
+		w.Header().Del("new-domain")
 	}
 	w.Header().Set("Subscription-Userinfo", strings.Join(parts, "; "))
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

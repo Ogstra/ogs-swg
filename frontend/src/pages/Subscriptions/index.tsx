@@ -9,7 +9,11 @@ import { Badge } from '../../components/ui/Badge'
 import { Modal } from '../../components/ui/Modal'
 import { ConfirmModal } from '../../components/ui/ConfirmModal'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
-import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical, Smartphone } from 'lucide-react'
+import { ActionMenu } from '../../components/ui/ActionMenu'
+import { DevicesModal } from './DevicesModal'
+import { SearchInput } from '../../components/ui/SearchInput'
+import { matchesSearch } from '../../lib/search'
+import { Link as LinkIcon, Plus, Copy, Trash2, Edit, RefreshCw, QrCode as QrCodeIcon, Settings2, Tag, ArrowUp, ArrowDown, ArrowUpDown, GripVertical, Smartphone, MonitorSmartphone } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { formatTimeAgo } from '../../utils/traffic'
 import {
@@ -264,6 +268,7 @@ export default function Subscriptions() {
     const [modalState, setModalState] = useState<{ type: 'create' | 'edit' | 'qr' | null, data?: Subscription }>({ type: null })
     const [confirmDelete, setConfirmDelete] = useState<Subscription | null>(null)
     const [confirmRegenerate, setConfirmRegenerate] = useState<Subscription | null>(null)
+    const [devicesSub, setDevicesSub] = useState<Subscription | null>(null)
     const [defaultsModalOpen, setDefaultsModalOpen] = useState(false)
     const [happConfigOpen, setHappConfigOpen] = useState(false)
 
@@ -282,6 +287,7 @@ export default function Subscriptions() {
     const [draggedProfile, setDraggedProfile] = useState<string | null>(null)
     const [sortKey, setSortKey] = useState<'name' | 'last_request' | 'users' | 'quota'>('name')
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+    const [search, setSearch] = useState('')
     const [happProviderId, setHappProviderId] = useState('')
     const [happHideSettings, setHappHideSettings] = useState<'' | '0' | '1'>('')
     const [happAlwaysHwid, setHappAlwaysHwid] = useState<'' | '0' | '1'>('')
@@ -348,7 +354,13 @@ export default function Subscriptions() {
     const subscriptionDefaults = defaultsQuery.data || EMPTY_SUBSCRIPTION_DEFAULTS
     const happConfig = happConfigQuery.data || EMPTY_HAPP_CONFIG
 
-    const sortedSubs = [...subs].sort((a, b) => {
+    const sortedSubs = subs.filter(sub => matchesSearch(search, [
+        sub.name,
+        sub.alias,
+        sub.token,
+        ...(sub.users || []),
+        ...(sub.members || []).map(member => member.alias),
+    ])).sort((a, b) => {
         const dir = sortDir === 'asc' ? 1 : -1
         switch (sortKey) {
             case 'last_request':
@@ -675,35 +687,24 @@ export default function Subscriptions() {
     const getQuotaPill = (sub: Subscription) => {
         const used = sub.used_bytes || 0
         const limit = sub.quota_limit || 0
-        if (limit === 0) {
-            return (
-                <div className="flex flex-col gap-1 min-w-[120px]">
-                    <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                        <span className="truncate whitespace-nowrap text-slate-300">{formatBytes(used)}</span>
-                        <span className="text-center text-slate-300"></span>
-                        <span className="text-right text-xl leading-none whitespace-nowrap">∞</span>
-                    </div>
-                    <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
-                        <div className="h-full w-full rounded-full bg-slate-700/50" />
-                    </div>
-                </div>
-            )
-        }
-        const rawRatio = used / limit
+        const rawRatio = limit > 0 ? used / limit : 0
         const pct = Math.min(100, Math.round(rawRatio * 100))
-        const over = used >= limit
-        const barColor = over ? 'bg-red-500' : pct > 80 ? 'bg-yellow-500' : 'bg-emerald-500'
+        const over = limit > 0 && used >= limit
+        const barColor = limit === 0 ? 'bg-slate-700/50' : over ? 'bg-red-500' : pct > 80 ? 'bg-amber-500' : 'bg-emerald-500'
         return (
-            <div className="flex flex-col gap-1 min-w-[120px]">
-                <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center text-[10px] mb-1 px-1.5 font-mono text-slate-400">
-                    <span className={`truncate whitespace-nowrap ${over ? 'text-red-400 font-semibold' : 'text-slate-300'}`}>
+            <div className="min-w-0">
+                <div className="mb-1.5 flex items-baseline justify-between gap-2 font-mono text-xs tabular-nums text-slate-200">
+                    <span className={`truncate whitespace-nowrap ${over ? 'text-red-400' : ''}`}>
                         {formatBytes(used)}
+                        <span className="text-slate-500"> / {limit > 0 ? formatBytes(limit) : '∞'}</span>
                     </span>
-                    <span className="px-2 text-center text-slate-300 whitespace-nowrap">{pct}%</span>
-                    <span className="truncate whitespace-nowrap text-right">{formatBytes(limit)}</span>
+                    {limit > 0 && <span className="shrink-0 text-slate-400">{pct}%</span>}
                 </div>
-                <div className="h-2.5 rounded-full bg-slate-800 overflow-hidden">
-                    <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${Math.min(rawRatio * 100, 100)}%` }} />
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-800">
+                    <div
+                        className={`h-full rounded-full ${barColor} transition-all duration-500`}
+                        style={{ width: `${limit > 0 ? Math.min(rawRatio * 100, 100) : 100}%` }}
+                    />
                 </div>
             </div>
         )
@@ -850,6 +851,12 @@ export default function Subscriptions() {
     return (
         <div className="space-y-4 sm:space-y-6 pb-4 sm:pb-0">
             <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
+                <SearchInput
+                    value={search}
+                    onChange={setSearch}
+                    placeholder="Search subscriptions..."
+                    className="lg:mr-auto lg:w-64"
+                />
                 <div className="flex items-center justify-end gap-2">
                     <ActionIconButton
                         onClick={openHappConfig}
@@ -876,22 +883,22 @@ export default function Subscriptions() {
             {/* Desktop table */}
             <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[980px] text-left border-collapse table-fixed">
+                    <table className="w-full min-w-[860px] text-left border-collapse table-fixed">
                         <thead>
-                            <tr className="bg-slate-950/50 border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wider">
-                                <th className="w-[260px] p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('name')}>
+                            <tr className="border-b border-slate-800 bg-slate-950/50 text-xs text-slate-400">
+                                <th className="cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('name')}>
                                     Name {renderSortIcon('name')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('last_request')}>
-                                    Last Request {renderSortIcon('last_request')}
+                                <th className="w-[150px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('last_request')}>
+                                    Last request {renderSortIcon('last_request')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('users')}>
+                                <th className="w-[100px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('users')}>
                                     Users {renderSortIcon('users')}
                                 </th>
-                                <th className="p-4 font-semibold cursor-pointer select-none hover:text-slate-200 transition-colors" onClick={() => toggleSort('quota')}>
+                                <th className="w-[230px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('quota')}>
                                     Quota {renderSortIcon('quota')}
                                 </th>
-                                <th className="p-4 font-semibold text-right">Actions</th>
+                                <th className="w-[250px] px-4 py-3 text-right font-medium">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -903,39 +910,40 @@ export default function Subscriptions() {
                                     </td>
                                 </tr>
                             ) : sortedSubs.map(sub => (
-                                <tr key={sub.id} className="border-b last:border-0 border-slate-800/50 hover:bg-slate-800/20 transition-colors">
-                                    <td className="w-[260px] p-4">
-                                        <div className="max-w-[260px] truncate text-white font-medium" title={sub.name}>{sub.name}</div>
+                                <tr key={sub.id} className="border-b border-slate-800/50 transition-colors last:border-0 hover:bg-slate-800/20">
+                                    <td className="px-4 py-3">
+                                        <div className="truncate font-medium text-slate-100" title={sub.name}>{sub.name}</div>
                                         {sub.alias?.trim() ? (
-                                            <div className="max-w-[260px] truncate text-xs text-slate-500" title={sub.alias}>{sub.alias}</div>
+                                            <div className="truncate text-xs text-slate-400" title={sub.alias}>{sub.alias}</div>
                                         ) : null}
                                     </td>
-                                    <td className="p-4">
+                                    <td className="px-4 py-3">
                                         {(() => {
                                             const lastRequest = getLastRequestMeta(sub)
                                             return (
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`w-2 h-2 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                                    <span className={`text-xs ${lastRequest.textClass}`}>{lastRequest.text}</span>
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className={`h-2 w-2 shrink-0 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                                    <span className={`whitespace-nowrap text-xs ${lastRequest.textClass}`}>{lastRequest.text}</span>
                                                 </div>
                                             )
                                         })()}
                                     </td>
-                                    <td className="p-4">
-                                        <div className="text-slate-400 text-sm">{sub.users?.length || 0} users</div>
+                                    <td className="px-4 py-3">
+                                        <div className="text-sm text-slate-300">{sub.users?.length || 0} users</div>
                                     </td>
-                                    <td className="p-4">{getQuotaPill(sub)}</td>
-                                    <td className="p-4">
-                                        <div className="flex items-center justify-end gap-2">
+                                    <td className="px-4 py-3 align-middle">{getQuotaPill(sub)}</td>
+                                    <td className="px-4 py-3">
+                                        <div className="flex items-center justify-end gap-1.5">
                                             {sub.token && (
                                                 <>
-                                                    <ActionIconButton onClick={() => openQr(sub)} title="Show QR Code" className="text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10" disabled={!canWriteUsers}><QrCodeIcon size={16} /></ActionIconButton>
-                                                    <ActionIconButton onClick={() => copyLink(sub.token!)} title="Copy Link" className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10" disabled={!canWriteUsers}><Copy size={16} /></ActionIconButton>
+                                                    <ActionIconButton onClick={() => copyLink(sub.token!)} title="Copy link" disabled={!canWriteUsers}><Copy size={16} /></ActionIconButton>
+                                                    <ActionIconButton onClick={() => openQr(sub)} title="QR code" disabled={!canWriteUsers}><QrCodeIcon size={16} /></ActionIconButton>
                                                 </>
                                             )}
-                                            <ActionIconButton onClick={() => openEdit(sub)} title="Edit" disabled={!canWriteUsers}><Edit size={16} /></ActionIconButton>
-                                            <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10" disabled={!canWriteUsers}><RefreshCw size={16} /></ActionIconButton>
-                                            <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" className="text-red-400 hover:text-red-300 hover:bg-red-500/10" disabled={!canWriteUsers}><Trash2 size={16} /></ActionIconButton>
+                                            <ActionIconButton onClick={() => setDevicesSub(sub)} title="Devices"><MonitorSmartphone size={16} /></ActionIconButton>
+                                            <ActionIconButton onClick={() => openEdit(sub)} title="Edit" tone="primary" disabled={!canWriteUsers}><Edit size={16} /></ActionIconButton>
+                                            <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate token" className="text-yellow-400 hover:bg-yellow-500/10 hover:text-yellow-300" disabled={!canWriteUsers}><RefreshCw size={16} /></ActionIconButton>
+                                            <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" tone="danger" disabled={!canWriteUsers}><Trash2 size={16} /></ActionIconButton>
                                         </div>
                                     </td>
                                 </tr>
@@ -952,53 +960,47 @@ export default function Subscriptions() {
                         <LinkIcon size={48} className="mx-auto mb-4 opacity-20" />
                         <p>No subscriptions found.</p>
                     </div>
-                ) : sortedSubs.map(sub => (
-                    <div key={sub.id} className="bg-slate-900 border border-slate-800 rounded-xl">
-                        {(() => {
-                            const lastRequest = getLastRequestMeta(sub)
-                            return (
-                                <div className="p-4 space-y-3">
-                                    <div className="flex items-center justify-between gap-3">
-                                        <div className="min-w-0 flex-1">
-                                            <p className="text-white font-semibold truncate">{sub.name}</p>
-                                            {sub.alias?.trim() ? (
-                                                <p className="text-xs text-slate-500 truncate">{sub.alias}</p>
-                                            ) : null}
-                                        </div>
-                                        <div className="flex gap-2 shrink-0">
-                                            {sub.token && (
-                                                <ActionIconButton onClick={() => openQr(sub)} title="QR Code" disabled={!canWriteUsers}>
-                                                    <QrCodeIcon size={16} />
-                                                </ActionIconButton>
-                                            )}
-                                            <ActionIconButton onClick={() => openEdit(sub)} title="Edit" tone="primary" disabled={!canWriteUsers}>
-                                                <Edit size={16} />
-                                            </ActionIconButton>
-                                            <ActionIconButton onClick={() => setConfirmRegenerate(sub)} title="Regenerate Token" className="text-yellow-400 hover:text-yellow-300 hover:bg-yellow-500/10" disabled={!canWriteUsers}>
-                                                <RefreshCw size={16} />
-                                            </ActionIconButton>
-                                            <ActionIconButton onClick={() => setConfirmDelete(sub)} title="Delete" tone="danger" disabled={!canWriteUsers}>
-                                                <Trash2 size={16} />
-                                            </ActionIconButton>
-                                        </div>
-                                    </div>
-
-                                    <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-2 rounded-full shrink-0 ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
-                                            <span className={`text-xs ${lastRequest.textClass}`}>{lastRequest.text}</span>
-                                        </div>
-                                        <div className="text-xs text-slate-400 shrink-0">{sub.users?.length || 0} users</div>
-                                    </div>
-
-                                    <div className="bg-slate-950/50 rounded-lg p-3">
-                                        {getQuotaPill(sub)}
-                                    </div>
+                ) : sortedSubs.map(sub => {
+                    const lastRequest = getLastRequestMeta(sub)
+                    return (
+                        <div key={sub.id} className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                    <p className="truncate font-semibold text-slate-100" title={sub.name}>{sub.name}</p>
+                                    {sub.alias?.trim() ? (
+                                        <p className="truncate text-xs text-slate-400">{sub.alias}</p>
+                                    ) : null}
                                 </div>
-                            )
-                        })()}
-                    </div>
-                ))}
+                                <div className="flex shrink-0 items-center gap-1.5">
+                                    <ActionIconButton onClick={() => openEdit(sub)} title="Edit" aria-label="Edit" tone="primary" disabled={!canWriteUsers}>
+                                        <Edit size={16} />
+                                    </ActionIconButton>
+                                    <ActionMenu
+                                        items={[
+                                            ...(sub.token ? [
+                                                { label: 'Copy link', icon: <Copy size={16} />, onClick: () => copyLink(sub.token!), disabled: !canWriteUsers },
+                                                { label: 'QR code', icon: <QrCodeIcon size={16} />, onClick: () => openQr(sub), disabled: !canWriteUsers },
+                                            ] : []),
+                                            { label: 'Devices', icon: <MonitorSmartphone size={16} />, onClick: () => setDevicesSub(sub) },
+                                            { label: 'Regenerate token', icon: <RefreshCw size={16} />, onClick: () => setConfirmRegenerate(sub), disabled: !canWriteUsers },
+                                            { label: 'Delete', icon: <Trash2 size={16} />, onClick: () => setConfirmDelete(sub), disabled: !canWriteUsers, tone: 'danger' as const },
+                                        ]}
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="mt-2 flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                    <div className={`h-2 w-2 shrink-0 rounded-full ${lastRequest.dotClass} ${lastRequest.isRecent ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
+                                    <span className={`text-xs ${lastRequest.textClass}`}>{lastRequest.text}</span>
+                                </div>
+                                <div className="shrink-0 text-xs text-slate-400">{sub.users?.length || 0} users</div>
+                            </div>
+
+                            <div className="mt-3">{getQuotaPill(sub)}</div>
+                        </div>
+                    )
+                })}
             </div>
 
             {/* Create / Edit Modal */}
@@ -1420,6 +1422,8 @@ export default function Subscriptions() {
                 onClose={() => setConfirmDelete(null)}
                 confirmTone="danger"
             />
+
+            <DevicesModal sub={devicesSub} subs={subs} canWrite={canWriteUsers} onClose={() => setDevicesSub(null)} />
 
             <ConfirmModal
                 isOpen={!!confirmRegenerate}

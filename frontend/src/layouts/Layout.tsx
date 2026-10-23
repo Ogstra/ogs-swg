@@ -216,7 +216,7 @@ export const Layout: React.FC = () => {
                         );
                     })}
                 </nav>
-                <div className="pb-2 pr-2 text-right text-[10px] text-slate-500">
+                <div className="pb-2 pr-2 text-right text-xs text-slate-500">
                     {commitLabel}
                 </div>
                 <div className="p-4 border-t border-slate-800">
@@ -242,7 +242,7 @@ export const Layout: React.FC = () => {
                         <Menu size={24} />
                     </button>
                     <span className="font-bold text-lg">{activeLabel}</span>
-                    <div className="w-8"></div>
+                    <div id="page-search-slot" className="relative flex h-10 w-10 items-center justify-end"></div>
                 </header>
 
                 <main className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-8 scroll-smooth">

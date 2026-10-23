@@ -1,8 +1,8 @@
 # OGS-SWG Panel
 
-Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.25** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
+Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.26** and **React** (Vite/TS). Distributed as a single binary with two execution modes: bare metal and Docker on the same host. Designed for zero-downtime deployments via **Blue-Green pipelines** with health-checked watchdogs and atomic rollbacks.
 
-<img max-width="3024" max-height="1714" alt="image" src="https://github.com/user-attachments/assets/2f80f4c3-20fe-49a3-901c-f84586301cde" />
+<img alt="OGS-SWG dashboard" src="docs/images/dashboard.png" width="100%" />
 
 [![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://swg-demo.ogstra.com/)
 
@@ -11,7 +11,7 @@ Unified control plane for **Sing-box** and **WireGuard** built with **Go 1.25** 
 A public instance is available at **[swg-demo.ogstra.com](https://swg-demo.ogstra.com/)** — no login required.
 
 ## Tech Stack
-*   **Runtime**: Go 1.25
+*   **Runtime**: Go 1.26
 *   **Frontend**: React 19 + TypeScript (Vite)
 *   **DB**: SQLite + [sqlc](https://sqlc.dev/) (Type-safe SQL)
 *   **Cache**: [Ristretto](https://github.com/dgraph-io/ristretto)
