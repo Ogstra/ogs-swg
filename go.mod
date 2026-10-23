@@ -2,7 +2,7 @@ module github.com/Ogstra/ogs-swg
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 require (
 	github.com/alitto/pond v1.9.2
