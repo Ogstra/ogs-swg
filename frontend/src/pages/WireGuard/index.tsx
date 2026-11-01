@@ -492,7 +492,7 @@ export default function WireGuard() {
 
             {/* Peers Table */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
-                <div className="overflow-x-auto hidden md:block">
+                <div className="overflow-x-auto hidden min-[900px]:block lg:hidden xl:block">
                     <table className="w-full min-w-[860px] text-left border-collapse table-fixed">
                         <thead>
                             <tr className="border-b border-slate-800 bg-slate-950/50 text-xs text-slate-400">
@@ -604,7 +604,7 @@ export default function WireGuard() {
                 </div>
 
                 {/* Mobile Cards */}
-                <div className="md:hidden divide-y divide-slate-800">
+                <div className="min-[900px]:hidden lg:block xl:hidden divide-y divide-slate-800">
                     {(sortedPeers || []).map(peer => {
                         const isOnline = peer.stats && (Date.now() / 1000 - peer.stats.latest_handshake) < 180
                         return (

@@ -210,7 +210,7 @@ export function RoutingRulesPanel({ canWrite, refreshKey, onOutbounds }: Props) 
                                 >
                                     {isOpen ? <ChevronDown size={16} className="shrink-0 text-slate-400" /> : <ChevronRight size={16} className="shrink-0 text-slate-400" />}
                                     <span className="w-6 shrink-0 text-xs text-slate-500">{index + 1}</span>
-                                    <span className="truncate text-sm text-slate-100" title={summary}>{summary}</span>
+                                    <span className="break-words text-sm text-slate-100 sm:truncate" title={summary}>{summary}</span>
                                 </button>
                                 <div className="flex shrink-0 items-center gap-1.5">
                                     {item.kind === 'raw' && <Badge variant="neutral">custom</Badge>}

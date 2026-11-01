@@ -264,7 +264,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                     </div>
                 ) : (
                     <>
-                        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+                        <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-slate-400">Max Requests</label>
                                 <input
@@ -389,7 +389,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                     </div>
                 ) : (
                     <>
-                        <div className="space-y-3 md:hidden">
+                        <div className="space-y-3 min-[900px]:hidden lg:block xl:hidden">
                             {rules.map(rule => (
                                 <div key={rule.id} className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-3">
                                     <div className="flex items-start justify-between gap-3">
@@ -428,7 +428,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                             ))}
                         </div>
 
-                        <div className="hidden overflow-x-auto md:block">
+                        <div className="hidden overflow-x-auto min-[900px]:block lg:hidden xl:block">
                             <table className="w-full text-sm">
                                 <thead className="text-left text-slate-400">
                                     <tr className="border-b border-slate-800">
@@ -486,7 +486,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                     </div>
                 ) : (
                     <>
-	                        <div className="space-y-3 md:hidden">
+	                        <div className="space-y-3 min-[900px]:hidden lg:block xl:hidden">
 	                            {blockedRows.map((entry: BlockedSubscriptionRequestEntry) => (
 	                                <div key={entry.id} className="rounded-xl border border-slate-800 bg-slate-950 p-4 space-y-3">
 	                                    <div className="flex items-start justify-between gap-3">
@@ -520,7 +520,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                             ))}
                         </div>
 
-                        <div className="hidden overflow-x-auto md:block">
+                        <div className="hidden overflow-x-auto min-[900px]:block lg:hidden xl:block">
                             <table className="w-full text-sm">
                                 <thead className="text-left text-slate-400">
                                     <tr className="border-b border-slate-800">

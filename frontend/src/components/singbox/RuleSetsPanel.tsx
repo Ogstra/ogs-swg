@@ -147,7 +147,7 @@ export function RuleSetsPanel({ canWrite, outbounds, onChanged }: Props) {
                 <select
                     value={presetKind}
                     onChange={e => setPresetKind(e.target.value as RuleSetPreset)}
-                    className={`select-field w-auto ${inputClass}`}
+                    className={`select-field ${inputClass.replace('w-full', 'w-28')}`}
                     aria-label="Rule set source"
                     disabled={!canWrite}
                 >
@@ -159,7 +159,7 @@ export function RuleSetsPanel({ canWrite, outbounds, onChanged }: Props) {
                     onChange={e => setPresetName(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') addPreset() }}
                     placeholder={presetKind === 'geosite' ? 'netflix, category-ads-all…' : 'cn, us…'}
-                    className={`${inputClass} w-56`}
+                    className={`${inputClass.replace('w-full', 'min-w-[10rem] flex-1 sm:max-w-xs')}`}
                     disabled={!canWrite}
                 />
                 <Button variant="ghost" size="sm" onClick={addPreset} disabled={!canWrite || !presetName.trim()}>Quick add</Button>

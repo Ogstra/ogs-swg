@@ -897,7 +897,7 @@ export default function Subscriptions() {
             </div>
 
             {/* Desktop table */}
-            <div className="hidden sm:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
+            <div className="hidden min-[900px]:block lg:hidden xl:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto">
                     <table className="w-full min-w-[860px] text-left border-collapse table-fixed">
                         <thead>
@@ -971,7 +971,7 @@ export default function Subscriptions() {
             </div>
 
             {/* Mobile cards */}
-            <div className="sm:hidden space-y-3">
+            <div className="min-[900px]:hidden lg:block xl:hidden space-y-3">
                 {sortedSubs.length === 0 ? (
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500">
                         <LinkIcon size={48} className="mx-auto mb-4 opacity-20" />

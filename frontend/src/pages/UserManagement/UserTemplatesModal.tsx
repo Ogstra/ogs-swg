@@ -143,7 +143,7 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
                                     return (
                                         <label
                                             key={tag.id}
-                                            className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-blue-500/60 bg-blue-500/10 text-white' : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700'}`}
+                                            className={`flex min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-blue-500/60 bg-blue-500/10 text-white' : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700'}`}
                                         >
                                             <input
                                                 type="checkbox"
@@ -157,7 +157,7 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
                                                         : draft.route_tag_ids.filter(id => id !== tag.id),
                                                 })}
                                             />
-                                            <span className="truncate">{tag.name}</span>
+                                            <span className="min-w-0 break-words">{tag.name}</span>
                                         </label>
                                     )
                                 })}

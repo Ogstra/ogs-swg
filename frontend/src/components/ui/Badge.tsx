@@ -5,9 +5,11 @@ interface BadgeProps {
     variant?: 'success' | 'warning' | 'error' | 'info' | 'neutral'
     className?: string
     title?: string
+    // wrap lets a long label break onto several lines instead of being cut with an ellipsis.
+    wrap?: boolean
 }
 
-export function Badge({ children, variant = 'neutral', className = '', title }: BadgeProps) {
+export function Badge({ children, variant = 'neutral', className = '', title, wrap = false }: BadgeProps) {
     const variants = {
         success: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
         warning: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
@@ -17,8 +19,8 @@ export function Badge({ children, variant = 'neutral', className = '', title }: 
     }
 
     return (
-        <span title={title} className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${variants[variant]} ${className}`}>
-            <span className="inline-flex min-w-0 items-center gap-1.5 truncate align-middle">
+        <span title={title} className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 ${wrap ? 'rounded-xl' : 'rounded-full'} text-xs font-medium border ${variants[variant]} ${className}`}>
+            <span className={`inline-flex min-w-0 items-center gap-1.5 align-middle ${wrap ? 'whitespace-normal break-words' : 'truncate'}`}>
                 {children}
             </span>
         </span>

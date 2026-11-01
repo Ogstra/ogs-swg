@@ -159,31 +159,31 @@ export default function SingboxConfigEditor() {
             {/* Editor Container */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex-1 min-h-0 flex flex-col">
                 {/* Tabs */}
-                <div className="flex border-b border-slate-800 bg-slate-950/50">
+                <div className="flex overflow-x-auto border-b border-slate-800 bg-slate-950/50 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     <button
                         onClick={() => setActiveTab('inbounds')}
-                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'inbounds' ? 'border-blue-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                        className={`px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 flex shrink-0 items-center gap-2 whitespace-nowrap ${activeTab === 'inbounds' ? 'border-blue-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
                     >
                         <List size={16} />
                         Inbounds
                     </button>
                     <button
                         onClick={() => setActiveTab('outbounds')}
-                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'outbounds' ? 'border-fuchsia-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                        className={`px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 flex shrink-0 items-center gap-2 whitespace-nowrap ${activeTab === 'outbounds' ? 'border-fuchsia-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
                     >
                         <Waypoints size={16} />
                         Outbounds
                     </button>
                     <button
                         onClick={() => setActiveTab('rules')}
-                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'rules' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                        className={`px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 flex shrink-0 items-center gap-2 whitespace-nowrap ${activeTab === 'rules' ? 'border-emerald-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
                     >
                         <GitBranch size={16} />
                         Rules
                     </button>
                     <button
                         onClick={() => setActiveTab('raw')}
-                        className={`px-6 py-3 text-sm font-medium transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'raw' ? 'border-amber-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
+                        className={`px-4 sm:px-6 py-3 text-sm font-medium transition-colors border-b-2 flex shrink-0 items-center gap-2 whitespace-nowrap ${activeTab === 'raw' ? 'border-amber-500 text-white bg-slate-900' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/50'}`}
                     >
                         <FileJson size={16} />
                         Raw Config (JSON)
@@ -338,10 +338,10 @@ function OutboundsTab({
 
     return (
         <div className="space-y-4">
-            <div className="flex justify-end mb-4 gap-2">
+            <div className="flex flex-wrap justify-end mb-4 gap-2">
                 <button
                     onClick={reload}
-                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
+                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60 whitespace-nowrap"
                     disabled={loading}
                 >
                     {loading ? 'Refreshing...' : 'Refresh'}
@@ -349,14 +349,14 @@ function OutboundsTab({
                 <button
                     onClick={() => setEditor({ tag: null })}
                     disabled={!canWrite}
-                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
+                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60 whitespace-nowrap"
                 >
                     Add outbound
                 </button>
                 <button
                     onClick={save}
                     disabled={!canWrite || saving}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${!canWrite || saving
+                    className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${!canWrite || saving
                         ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-500 text-white'
                         }`}

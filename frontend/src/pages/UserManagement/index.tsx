@@ -476,7 +476,8 @@ export default function UserManagement() {
                 <Badge
                     key={tag.id}
                     variant={tag.broken ? 'error' : 'info'}
-                    className="max-w-[180px] truncate"
+                    className="max-w-full"
+                    wrap
                     title={tag.broken_reason || tag.name}
                 >
                     {tag.name}{tag.broken ? (tag.broken_reason === 'inbound_mismatch' ? ' (inbound mismatch)' : ' (needs relink)') : ''}
@@ -978,7 +979,7 @@ export default function UserManagement() {
                             placeholder="Search users..."
                             className="lg:flex-1 lg:min-w-[7rem] lg:max-w-64"
                         />
-                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto order-2 lg:order-none lg:max-w-[9rem] lg:shrink-0">
+                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto order-first md:order-2 lg:order-none lg:max-w-[9rem] lg:shrink-0">
                         <select
                             value={filterInbound}
                             onChange={(e) => setFilterInbound(e.target.value)}
@@ -990,7 +991,7 @@ export default function UserManagement() {
                             ))}
                         </select>
                     </div>
-                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto order-2 lg:order-none lg:max-w-[9rem] lg:shrink-0">
+                        <div className="flex bg-slate-800 rounded-lg p-1 border border-slate-700 w-full md:w-auto order-first md:order-2 lg:order-none lg:max-w-[9rem] lg:shrink-0">
                         <select
                             value={routeTagFilter}
                             onChange={(e) => setRouteTagFilter(e.target.value)}
@@ -1036,7 +1037,7 @@ export default function UserManagement() {
                         icon={<Plus size={16} />}
                         variant="primary"
                         disabled={!canWriteUsers}
-                        className="w-full md:w-auto justify-center"
+                        className="w-full md:w-auto justify-center whitespace-nowrap"
                     >
                         Create User
                     </Button>
@@ -1044,7 +1045,7 @@ export default function UserManagement() {
                         onClick={() => setModalState({ type: 'templates' })}
                         variant="secondary"
                         icon={<LayoutTemplate size={16} />}
-                        className="w-full md:w-auto justify-center"
+                        className="w-full md:w-auto justify-center whitespace-nowrap"
                     >
                         Templates
                     </Button>
@@ -1053,7 +1054,7 @@ export default function UserManagement() {
                         variant="secondary"
                         icon={<Users size={16} />}
                         disabled={!canWriteUsers}
-                        className="w-full md:w-auto justify-center"
+                        className="w-full md:w-auto justify-center whitespace-nowrap"
                     >
                         Bulk Create
                     </Button>
@@ -1061,7 +1062,7 @@ export default function UserManagement() {
                         onClick={() => setModalState({ type: 'usage' })}
                         variant="secondary"
                         icon={<RefreshCw size={16} />}
-                        className="w-full md:w-auto justify-center"
+                        className="w-full md:w-auto justify-center whitespace-nowrap"
                     >
                         Usage Report
                     </Button>
@@ -1070,7 +1071,7 @@ export default function UserManagement() {
                         variant="secondary"
                         icon={<Tags size={16} />}
                         disabled={!canWriteConfig}
-                        className="w-full md:w-auto justify-center"
+                        className="col-span-2 md:col-span-1 w-full md:w-auto justify-center whitespace-nowrap"
                     >
                         Route Tags
                     </Button>
@@ -1080,7 +1081,7 @@ export default function UserManagement() {
             </div>
 
             {/* Users Table Container */}
-            <div className="hidden md:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
+            <div className="hidden min-[900px]:block lg:hidden xl:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto">
                     <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[860px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
                         <thead>
@@ -1091,14 +1092,14 @@ export default function UserManagement() {
                                 <th className="cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('user')}>
                                     Name {renderSortIcon('user')}
                                 </th>
-                                <th className="w-[210px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('quota')}>
+                                <th className="w-[200px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('quota')}>
                                     Quota {renderSortIcon('quota')}
                                 </th>
                                 <th className="w-[130px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('usage')}>
                                     Data usage {renderSortIcon('usage')}
                                 </th>
-                                <th className="w-[170px] px-4 py-3 text-left font-medium">Inbound</th>
-                                <th className="w-[150px] px-4 py-3 text-right font-medium">Actions</th>
+                                <th className="w-[210px] px-4 py-3 text-left font-medium">Inbound</th>
+                                <th className="w-[140px] px-4 py-3 text-right font-medium">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -1203,12 +1204,12 @@ export default function UserManagement() {
                                                 <div className="flex max-w-full flex-wrap gap-1.5">
                                                     {visibleUserTags(user).length > 0 ? (
                                                         visibleUserTags(user).map(tag => (
-                                                            <Badge key={tag} variant="info" className="max-w-[150px] truncate" title={tag}>
+                                                            <Badge key={tag} variant="info" className="max-w-full" wrap title={tag}>
                                                                 {tag}
                                                             </Badge>
                                                         ))
                                                     ) : (
-                                                        <Badge variant="neutral" className="max-w-[150px] truncate">All</Badge>
+                                                        <Badge variant="neutral" className="max-w-full">All</Badge>
                                                     )}
                                                 </div>
                                                 {user.route_tags && user.route_tags.length > 0 && (
@@ -1262,7 +1263,7 @@ export default function UserManagement() {
             </div>
 
             {/* Mobile List */}
-            <div className="md:hidden space-y-3">
+            <div className="min-[900px]:hidden lg:block xl:hidden space-y-3">
                     {(sortedUsers || []).map(user => {
                         const isExceeded = user.quota_limit ? user.total > user.quota_limit : false
                         const quotaRatio = user.quota_limit ? (user.total / user.quota_limit) : 0
