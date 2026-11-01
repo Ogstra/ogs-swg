@@ -1048,6 +1048,21 @@ export default function Subscriptions() {
                                 placeholder="0 = unlimited"
                             />
                         </div>
+                        <div>
+                            <label className="block text-sm font-medium text-slate-300 mb-1">
+                                Device limit
+                            </label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={subDeviceLimit}
+                                onChange={e => setSubDeviceLimit(e.target.value)}
+                                className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                                placeholder="0 = panel default"
+                                title="Most devices (HWID) this subscription serves. A new device over the limit is refused; known devices keep working."
+                            />
+                        </div>
                     </div>
                     {renderRefreshPolicyFields(
                         profileUpdateIntervalEnabled,
@@ -1205,17 +1220,6 @@ export default function Subscriptions() {
                             />
                         )}
                         <p className="mt-1 text-xs text-slate-500">Overrides the global routing profile for this subscription. Use Off to send <code>happ://routing/off</code> and actively disable routing on the client.</p>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium text-slate-300 mb-1">Device limit</label>
-                        <input
-                            type="number"
-                            min={0}
-                            value={subDeviceLimit}
-                            onChange={e => setSubDeviceLimit(e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                        />
-                        <p className="mt-1 text-xs text-slate-500">Most devices (HWID) this subscription serves. A new device over the limit is refused; devices already known keep working. 0 uses the panel default.</p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Direct Sites Override</label>
