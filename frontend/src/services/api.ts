@@ -108,6 +108,7 @@ export interface UserTemplate {
     flow: string;
     quota_limit: number;
     quota_period: string;
+    route_tag_ids: number[];
     created_at?: number;
 }
 

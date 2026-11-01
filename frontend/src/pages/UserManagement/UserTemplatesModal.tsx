@@ -16,7 +16,7 @@ const toBytes = (gb: string) => {
     return Number.isFinite(value) && value > 0 ? Math.round(value * BYTES_PER_GB) : 0
 }
 
-const emptyDraft = (): UserTemplateInput => ({ name: '', inbound_tag: '', flow: '', quota_limit: 0, quota_period: 'monthly' })
+const emptyDraft = (): UserTemplateInput => ({ name: '', inbound_tag: '', flow: '', quota_limit: 0, quota_period: 'monthly', route_tag_ids: [] })
 
 const inputClass = 'w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5 text-white outline-none transition-colors focus:border-blue-500/50'
 
@@ -24,7 +24,8 @@ export function describeTemplate(template: UserTemplateInput): string {
     const quota = template.quota_limit > 0
         ? `${toGb(template.quota_limit)} GB ${template.quota_period === 'total' ? 'total' : 'per month'}`
         : 'No quota'
-    return [template.inbound_tag || 'No inbound', quota].join(' · ')
+    const tagCount = template.route_tag_ids?.length ?? 0
+    return [template.inbound_tag || 'No inbound', quota, ...(tagCount > 0 ? [`${tagCount} tag${tagCount > 1 ? 's' : ''}`] : [])].join(' · ')
 }
 
 interface Props {
@@ -37,6 +38,8 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
     const { success, error } = useToast()
     const queryClient = useQueryClient()
     const templatesQuery = useQuery({ queryKey: ['user-templates'], queryFn: () => api.getUserTemplates() })
+    const routeTagsQuery = useQuery({ queryKey: ['user-route-tags'], queryFn: () => api.getUserRouteTags() })
+    const routeTags = routeTagsQuery.data || []
     const [editingId, setEditingId] = useState<number | null>(null)
     const [draft, setDraft] = useState<UserTemplateInput>(emptyDraft())
     const [quotaInput, setQuotaInput] = useState('')
@@ -70,7 +73,7 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
 
     const startEdit = (template: UserTemplate) => {
         setEditingId(template.id)
-        setDraft({ name: template.name, inbound_tag: template.inbound_tag, flow: template.flow, quota_limit: template.quota_limit, quota_period: template.quota_period })
+        setDraft({ name: template.name, inbound_tag: template.inbound_tag, flow: template.flow, quota_limit: template.quota_limit, quota_period: template.quota_period, route_tag_ids: template.route_tag_ids || [] })
         setQuotaInput(toGb(template.quota_limit))
     }
 
@@ -131,6 +134,36 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
                             </select>
                         </div>
                     </div>
+                    {routeTags.length > 0 && (
+                        <div className="space-y-1">
+                            <label className="text-sm font-medium text-slate-400">Route tags</label>
+                            <div className="flex flex-wrap gap-2">
+                                {routeTags.map(tag => {
+                                    const selected = draft.route_tag_ids.includes(tag.id)
+                                    return (
+                                        <label
+                                            key={tag.id}
+                                            className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors ${selected ? 'border-blue-500/60 bg-blue-500/10 text-white' : 'border-slate-800 bg-slate-950 text-slate-300 hover:border-slate-700'}`}
+                                        >
+                                            <input
+                                                type="checkbox"
+                                                className="h-4 w-4 rounded border-slate-700 bg-slate-900"
+                                                checked={selected}
+                                                disabled={!canWrite}
+                                                onChange={event => setDraft({
+                                                    ...draft,
+                                                    route_tag_ids: event.target.checked
+                                                        ? [...draft.route_tag_ids, tag.id]
+                                                        : draft.route_tag_ids.filter(id => id !== tag.id),
+                                                })}
+                                            />
+                                            <span className="truncate">{tag.name}</span>
+                                        </label>
+                                    )
+                                })}
+                            </div>
+                        </div>
+                    )}
                     <div className="flex gap-2">
                         <Button variant="primary" onClick={() => save.mutate()} disabled={!canWrite || !draft.name.trim() || save.isPending}>
                             {editingId === null ? 'Add template' : 'Save changes'}

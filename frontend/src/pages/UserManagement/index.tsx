@@ -250,6 +250,9 @@ export default function UserManagement() {
         enabled: canReadUsers,
     })
     const userTemplates = templatesQuery.data || []
+    // Route tags of the template last applied to the create or bulk form; they are
+    // assigned to the new users once those exist.
+    const [templateRouteTagIds, setTemplateRouteTagIds] = useState<number[]>([])
 
     const applyTemplateToCreateForm = (template: UserTemplate) => {
         const type = getInboundType(template.inbound_tag) as UserType | undefined
@@ -265,6 +268,7 @@ export default function UserManagement() {
             inbound_tag: template.inbound_tag || prev.inbound_tag,
         }))
         setQuotaInput(bytesToGbString(template.quota_limit))
+        setTemplateRouteTagIds(template.route_tag_ids || [])
     }
 
     const applyTemplateToBulkForm = (template: UserTemplate) => {
@@ -276,7 +280,30 @@ export default function UserManagement() {
             quota_period: template.quota_period === 'total' ? 'none' : template.quota_period,
         }))
         setBulkQuotaInput(bytesToGbString(template.quota_limit))
+        setTemplateRouteTagIds(template.route_tag_ids || [])
     }
+
+    // assignTemplateRouteTags gives each new user the template's route tags. A
+    // failure is reported but never undoes the users that were created.
+    const assignTemplateRouteTags = async (names: string[]) => {
+        if (templateRouteTagIds.length === 0 || names.length === 0) return
+        const failed: string[] = []
+        for (const name of names) {
+            try {
+                await api.updateUserRouteTags(name, templateRouteTagIds)
+            } catch {
+                failed.push(name)
+            }
+        }
+        if (failed.length > 0) {
+            toastError(`Route tags were not applied to ${failed.length === 1 ? failed[0] : `${failed.length} users`}. Check that the tags fit the user's inbound.`)
+        }
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['users'] }),
+            queryClient.invalidateQueries({ queryKey: ['user-route-tags'] }),
+        ])
+    }
+
 
     const routeTagsQuery = useQuery({
         queryKey: ['user-route-tags'],
@@ -284,6 +311,10 @@ export default function UserManagement() {
         enabled: canReadUsers,
         placeholderData: previousData => previousData,
     })
+
+    const templateTagNames = (routeTagsQuery.data || [])
+        .filter(tag => templateRouteTagIds.includes(tag.id))
+        .map(tag => tag.name)
 
     const compatibleRulesQuery = useQuery({
         queryKey: ['user-route-tags-compatible-rules'],
@@ -790,6 +821,7 @@ export default function UserManagement() {
                 if (!payload.uuid) payload.uuid = await generateCredentialForType(userType, inboundTag)
                 await api.createUser(payload)
                 success(`User created successfully`)
+                await assignTemplateRouteTags([payload.name])
             }
             setModalState({ type: null }) // Close modal
             // Reset form
@@ -867,6 +899,7 @@ export default function UserManagement() {
 
             await api.bulkCreateUsers(usersToCreate)
             success(`Bulk created ${usersToCreate.length} users successfully`)
+            await assignTemplateRouteTags(usersToCreate.map(user => user.name))
             setModalState({ type: null })
             await refreshUsersData()
         } catch (err) {
@@ -997,6 +1030,7 @@ export default function UserManagement() {
                                 inbound_tag: getFirstInboundTagForType(getDefaultUserType())
                             })
                             setQuotaInput('')
+                            setTemplateRouteTagIds([])
                             setModalState({ type: 'create' })
                         }}
                         icon={<Plus size={16} />}
@@ -1015,7 +1049,7 @@ export default function UserManagement() {
                         Templates
                     </Button>
                     <Button
-                        onClick={() => canWriteUsers && setModalState({ type: 'bulk' })}
+                        onClick={() => { if (!canWriteUsers) return; setTemplateRouteTagIds([]); setModalState({ type: 'bulk' }) }}
                         variant="secondary"
                         icon={<Users size={16} />}
                         disabled={!canWriteUsers}
@@ -1370,6 +1404,9 @@ export default function UserManagement() {
                                     <option key={template.id} value={template.id}>{template.name} · {describeTemplate(template)}</option>
                                 ))}
                             </select>
+                            {templateTagNames.length > 0 && (
+                                <p className="mt-1 text-xs text-slate-400">Route tags: {templateTagNames.join(', ')}</p>
+                            )}
                         </div>
                     )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1837,6 +1874,9 @@ export default function UserManagement() {
                                     <option key={template.id} value={template.id}>{template.name} · {describeTemplate(template)}</option>
                                 ))}
                             </select>
+                            {templateTagNames.length > 0 && (
+                                <p className="mt-1 text-xs text-slate-400">Route tags: {templateTagNames.join(', ')}</p>
+                            )}
                         </div>
                     )}
                     <div className="grid grid-cols-2 sm:grid-cols-2 gap-4">
