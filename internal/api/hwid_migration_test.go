@@ -307,3 +307,48 @@ func TestPublicSub_DeviceLimitHoldsUnderConcurrentFirstRequests(t *testing.T) {
 		t.Fatalf("%d devices were served under a limit of 3", served)
 	}
 }
+
+func TestPublicSub_WorkerReportedBlockIsLoggedAndNeverServed(t *testing.T) {
+	server, st := newSubscriptionGoldenServer(t)
+	ctx := context.Background()
+
+	send := func(token, reason, ua string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/s/"+token, nil)
+		req.SetPathValue("token", token)
+		req.Header.Set("User-Agent", ua)
+		req.Header.Set("X-CF-Client-IP", "203.0.113.50")
+		req.Header.Set("X-OGS-Worker-Block", reason)
+		rec := httptest.NewRecorder()
+		server.handlePublicSubscription(rec, req)
+		return rec
+	}
+
+	// Even a perfectly normal client User-Agent gets no content with the marker.
+	rec := send(migrationTestSrcToken, "ua_browser", "Happ/2.7.1")
+	if rec.Code != http.StatusForbidden || rec.Body.Len() > len("Forbidden\n") {
+		t.Fatalf("status=%d body=%q; want a bare 403", rec.Code, rec.Body.String())
+	}
+	if rec := send(migrationTestSrcToken, "something-made-up", "Mozilla/5.0"); rec.Code != http.StatusForbidden {
+		t.Fatalf("unknown reason status=%d; want 403", rec.Code)
+	}
+	if rec := send("no-such-token", "ua_browser", "Mozilla/5.0"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown token status=%d; want 404", rec.Code)
+	}
+
+	rows, err := st.Queries.GetSubscriptionRequestHistory(ctx, store.GetSubscriptionRequestHistoryParams{Column1: 0, SubID: 0, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasons := map[string]int{}
+	for _, row := range rows {
+		if row.Blocked == 1 {
+			reasons[row.BlockReason]++
+			if row.ViaWorker != 1 {
+				t.Fatalf("a worker-reported block was not marked as coming through the worker: %+v", row)
+			}
+		}
+	}
+	if reasons["ua_browser"] != 1 {
+		t.Fatalf("blocked reasons = %v; want one ua_browser", reasons)
+	}
+}

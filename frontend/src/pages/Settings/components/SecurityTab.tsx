@@ -50,6 +50,7 @@ const reasonVariant = (reason: string) => {
             return 'error'
         case 'rate_limit':
         case 'device_limit':
+        case 'worker_block':
             return 'warning'
         case 'ua_browser':
         case 'ua_social_fetcher':
@@ -75,6 +76,8 @@ const formatReasonLabel = (reason: string) => {
             return 'Social/Chat Fetcher'
         case 'device_limit':
             return 'Device limit'
+        case 'worker_block':
+            return 'Blocked by Worker'
         default:
             return reason || 'Unknown'
     }

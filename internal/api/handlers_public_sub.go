@@ -88,6 +88,9 @@ var (
 	happSubscriptionParamKeyRE                   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 )
 
+// workerBlockHeader marks a request the Cloudflare Worker already refused.
+const workerBlockHeader = "X-OGS-Worker-Block"
+
 func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
 	if token == "" {
@@ -109,6 +112,19 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	users := make([]string, 0, len(memberRows))
 	for _, member := range memberRows {
 		users = append(users, member.UserName)
+	}
+
+	// The Cloudflare Worker refuses browsers and link fetchers itself, before
+	// they reach the panel. It reports each refusal here so the panel's blocked
+	// log shows it. A request carrying this header only gets recorded and
+	// answered with 403; it never receives content, whoever sends it.
+	if reason := strings.TrimSpace(r.Header.Get(workerBlockHeader)); reason != "" {
+		if reason != "ua_browser" && reason != "ua_social_fetcher" {
+			reason = "worker_block"
+		}
+		s.recordBlockedSubscriptionRequest(r, sub.ID, users, reason)
+		writeErr(w, http.StatusForbidden, "Forbidden")
+		return
 	}
 
 	clientIP := resolveSubscriptionRequestIP(r)
@@ -555,6 +571,7 @@ func (s *Server) recordBlockedSubscriptionRequest(r *http.Request, subID int64, 
 		ServedFromCache: 0,
 		Blocked:         1,
 		BlockReason:     blockReason,
+		ViaWorker:       viaWorkerToInt64(r),
 	}); err == nil {
 		s.invalidateSubscriptionHistoryCache()
 	}

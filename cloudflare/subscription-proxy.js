@@ -62,8 +62,29 @@ function isBrowserUA(ua) {
   return markers.some(m => ua.includes(m))
 }
 
+/**
+ * Tells the panel that the Worker refused a request, so it shows up in the
+ * panel's blocked-request log. The panel only records it and answers 403; it
+ * never serves content for a request carrying this header.
+ */
+function reportBlocked(request, origin, reason) {
+  const url = new URL(request.url)
+  const match = url.pathname.match(/^\/(?:s\/)?([A-Za-z0-9_-]{8,128})\/?$/)
+  if (!match) return null
+  const headers = new Headers()
+  for (const [key, value] of request.headers.entries()) {
+    if (key.toLowerCase() === 'host') continue
+    headers.set(key, value)
+  }
+  const clientIP = request.headers.get('CF-Connecting-IP')
+  if (clientIP) headers.set('X-CF-Client-IP', clientIP)
+  headers.set('X-OGS-Worker-Block', reason)
+  return fetch(new Request(origin + '/s/' + match[1], { method: 'GET', headers, redirect: 'manual' }))
+    .catch(() => {})
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const origin = (env && env.PANEL_URL) ? env.PANEL_URL.replace(/\/$/, '') : TARGET_ORIGIN.replace(/\/$/, '')
 
     // UA-based authorization: block browsers and social crawlers unconditionally.
@@ -71,7 +92,10 @@ export default {
     // Worker so that no auth cookie or other request state can cause the Worker to
     // relay a non-403 response to an unauthorized UA.
     const incomingUA = request.headers.get('user-agent') || ''
-    if (isSocialFetcherUA(incomingUA) || isBrowserUA(incomingUA)) {
+    const blockReason = isSocialFetcherUA(incomingUA) ? 'ua_social_fetcher' : isBrowserUA(incomingUA) ? 'ua_browser' : ''
+    if (blockReason) {
+      const report = reportBlocked(request, origin, blockReason)
+      if (report && ctx && ctx.waitUntil) ctx.waitUntil(report)
       return new Response('Forbidden', { status: 403 })
     }
 
