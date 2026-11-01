@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import QRCode from 'react-qr-code'
 import { api } from '../services/api'
 import { useToast } from '../context/ToastContext'
+import { useAuth } from '../context/AuthContext'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 
@@ -11,6 +12,7 @@ const inputClass = 'w-full rounded-lg border border-slate-700 bg-slate-950 px-3 
 
 export function TwoFactorModal({ onClose }: { onClose: () => void }) {
     const { success, error } = useToast()
+    const { logout } = useAuth()
     const [stage, setStage] = useState<Stage>('loading')
     const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null)
     const [code, setCode] = useState('')
@@ -52,6 +54,19 @@ export function TwoFactorModal({ onClose }: { onClose: () => void }) {
         setStage('codes')
     })
 
+    const newCodes = () => run(async () => {
+        const result = await api.newRecoveryCodes(password, code)
+        setRecovery(result.recovery_codes)
+        setPassword('')
+        setCode('')
+        setStage('codes')
+    })
+
+    const signOutEverywhere = () => run(async () => {
+        await api.signOutEverywhere()
+        logout()
+    })
+
     const disable = () => run(async () => {
         await api.disableTwoFactor(password, code)
         success('Two-factor authentication disabled')
@@ -61,13 +76,13 @@ export function TwoFactorModal({ onClose }: { onClose: () => void }) {
     })
 
     return (
-        <Modal isOpen onClose={onClose} title="Two-factor authentication" size="md" footer={<Button variant="secondary" onClick={onClose}>Close</Button>}>
+        <Modal isOpen onClose={onClose} title="Security" size="md" footer={<div className="flex w-full items-center justify-between"><Button variant="ghost" onClick={signOutEverywhere} disabled={busy || stage === 'loading'}>Sign out everywhere</Button><Button variant="secondary" onClick={onClose}>Close</Button></div>}>
             {stage === 'loading' && <p className="py-6 text-center text-sm text-slate-400">Loading…</p>}
 
             {stage === 'off' && (
                 <div className="space-y-4">
                     <p className="text-sm text-slate-300">
-                        Ask for a code from an authenticator app (Google Authenticator, Aegis, 1Password…) at every sign-in.
+                        Two-factor authentication: ask for a code from an authenticator app (Google Authenticator, Aegis, 1Password…) at every sign-in.
                     </p>
                     <Button variant="primary" onClick={startSetup} disabled={busy}>Set up</Button>
                 </div>
@@ -106,7 +121,7 @@ export function TwoFactorModal({ onClose }: { onClose: () => void }) {
 
             {stage === 'on' && (
                 <div className="space-y-4">
-                    <p className="text-sm text-slate-300">Two-factor authentication is on. To turn it off, enter your password and a current code.</p>
+                    <p className="text-sm text-slate-300">Two-factor authentication is on. Enter your password and a current code to turn it off or to get new recovery codes.</p>
                     <input className={inputClass} type="password" autoComplete="current-password" placeholder="Password" value={password} onChange={event => setPassword(event.target.value)} />
                     <input
                         className={`${inputClass} font-mono tracking-widest`}
@@ -116,7 +131,10 @@ export function TwoFactorModal({ onClose }: { onClose: () => void }) {
                         value={code}
                         onChange={event => setCode(event.target.value)}
                     />
-                    <Button variant="danger" onClick={disable} disabled={busy || !password || code.trim().length < 6}>Turn off</Button>
+                    <div className="flex gap-2">
+                        <Button variant="secondary" onClick={newCodes} disabled={busy || !password || code.trim().length < 6}>New recovery codes</Button>
+                        <Button variant="danger" onClick={disable} disabled={busy || !password || code.trim().length < 6}>Turn off</Button>
+                    </div>
                 </div>
             )}
         </Modal>

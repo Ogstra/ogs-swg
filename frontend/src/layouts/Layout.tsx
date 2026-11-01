@@ -229,7 +229,7 @@ export const Layout: React.FC = () => {
                             className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition-colors"
                         >
                             <ShieldCheck size={18} />
-                            Two-factor
+                            Security
                         </button>
                     )}
                     <button

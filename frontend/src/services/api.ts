@@ -964,6 +964,10 @@ export const api = {
         request<{ recovery_codes: string[] }>('/api/auth/2fa/enable', { method: 'POST', json: { code }, errorMsg: 'Failed to enable two-factor authentication' }),
     disableTwoFactor: async (currentPassword: string, code: string): Promise<void> =>
         request('/api/auth/2fa/disable', { method: 'POST', json: { current_password: currentPassword, code }, parse: 'none', errorMsg: 'Failed to disable two-factor authentication' }),
+    newRecoveryCodes: async (currentPassword: string, code: string): Promise<{ recovery_codes: string[] }> =>
+        request<{ recovery_codes: string[] }>('/api/auth/2fa/recovery-codes', { method: 'POST', json: { current_password: currentPassword, code }, errorMsg: 'Failed to create recovery codes' }),
+    signOutEverywhere: async (): Promise<void> =>
+        request('/api/auth/sign-out-everywhere', { method: 'POST', parse: 'none', errorMsg: 'Failed to end sessions' }),
     deletePanelUser: async (username: string): Promise<void> =>
         request(`/api/panel-users?username=${encodeURIComponent(username)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete panel user' }),
 

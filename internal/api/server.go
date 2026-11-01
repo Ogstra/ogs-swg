@@ -276,6 +276,8 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("POST /api/auth/2fa/setup", s.secure(s.handleTwoFactorSetup))
 	protected.HandleFunc("POST /api/auth/2fa/enable", s.secure(s.handleTwoFactorEnable))
 	protected.HandleFunc("POST /api/auth/2fa/disable", s.secure(s.handleTwoFactorDisable))
+	protected.HandleFunc("POST /api/auth/2fa/recovery-codes", s.secure(s.handleTwoFactorNewRecoveryCodes))
+	protected.HandleFunc("POST /api/auth/sign-out-everywhere", s.secure(s.handleSignOutEverywhere))
 	protected.HandleFunc("PUT /api/auth/username", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateUsername)))
 
 	protected.HandleFunc("GET /api/settings/subscription-protection", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionProtection)))

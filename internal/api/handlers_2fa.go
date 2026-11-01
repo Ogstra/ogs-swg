@@ -244,6 +244,74 @@ func (s *Server) handleTwoFactorDisable(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleTwoFactorNewRecoveryCodes replaces the recovery codes. Like turning
+// two-factor off, it needs the password and a current code.
+func (s *Server) handleTwoFactorNewRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	username, ok := currentPanelUsername(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req twoFactorDisableRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	perms, err := s.store.VerifyPanelUser(username, req.CurrentPassword)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "Verification error")
+		return
+	}
+	if perms == nil {
+		writeErr(w, http.StatusForbidden, "Invalid current password")
+		return
+	}
+	state, err := s.store.GetPanelUserTOTP(username)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to read two-factor state")
+		return
+	}
+	if !state.Enabled {
+		writeErr(w, http.StatusConflict, "Two-factor authentication is not enabled")
+		return
+	}
+	step, valid := core.VerifyTOTP(state.Secret, req.Code, time.Now())
+	if !valid {
+		writeErr(w, http.StatusBadRequest, "Invalid code")
+		return
+	}
+	if fresh, err := s.store.ConsumePanelUserTOTPStep(username, step); err != nil || !fresh {
+		writeErr(w, http.StatusBadRequest, "Invalid code")
+		return
+	}
+	codes, hashes, err := newRecoveryCodes()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to generate recovery codes")
+		return
+	}
+	if err := s.store.ReplacePanelUserRecoveryCodes(username, hashes); err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to store recovery codes")
+		return
+	}
+	s.insertAuditEntry(r, "auth", "2fa_recovery_codes", username, "")
+	writeJSON(w, http.StatusOK, twoFactorEnableResponse{RecoveryCodes: codes})
+}
+
+// handleSignOutEverywhere ends every session of the caller, this one included.
+func (s *Server) handleSignOutEverywhere(w http.ResponseWriter, r *http.Request) {
+	username, ok := currentPanelUsername(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	if err := s.store.RevokePanelUserSessions(username); err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to end sessions")
+		return
+	}
+	s.insertAuditEntry(r, "auth", "sign_out_everywhere", username, "")
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleResetPanelUserTwoFactor lets an admin clear another user's second
 // factor, which is the way back in after a lost device and lost recovery codes.
 func (s *Server) handleResetPanelUserTwoFactor(w http.ResponseWriter, r *http.Request) {

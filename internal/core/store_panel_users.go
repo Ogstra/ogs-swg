@@ -585,3 +585,21 @@ func (s *Store) ConsumePanelUserRecoveryCode(username, codeHash string) (bool, e
 	}
 	return true, tx.Commit()
 }
+
+// ReplacePanelUserRecoveryCodes swaps the stored recovery code hashes for a new set.
+func (s *Store) ReplacePanelUserRecoveryCodes(username string, hashes []string) error {
+	raw, err := json.Marshal(hashes)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(context.Background(),
+		`UPDATE panel_users SET totp_recovery_json = ? WHERE username = ?`, string(raw), username)
+	return err
+}
+
+// RevokePanelUserSessions invalidates every token issued to username so far.
+func (s *Store) RevokePanelUserSessions(username string) error {
+	_, err := s.db.ExecContext(context.Background(),
+		`UPDATE panel_users SET tokens_valid_after = ? WHERE username = ?`, time.Now().Unix()+1, username)
+	return err
+}

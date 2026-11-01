@@ -144,3 +144,51 @@ func TestTwoFactor_AdminReset(t *testing.T) {
 		t.Fatalf("login after an admin reset status=%d", rec.Code)
 	}
 }
+
+func TestTwoFactor_NewRecoveryCodesReplaceTheOldOnes(t *testing.T) {
+	srv, st := newNtfyTestServerWithStore(t)
+	srv.config.JWTSecret = "test-secret"
+	if err := st.CreatePanelUser("june", "pw-june-123", core.PanelUserPermissions{CanReadUsers: true}); err != nil {
+		t.Fatal(err)
+	}
+	secret, oldCodes := enableTwoFactorForTest(t, srv, "june")
+
+	next, _ := core.TOTPCodeAt(secret, time.Now().Add(30*time.Second))
+	rec := twoFactorRequest(t, srv, srv.handleTwoFactorNewRecoveryCodes, http.MethodPost, "/api/auth/2fa/recovery-codes", "june",
+		twoFactorDisableRequest{CurrentPassword: "pw-june-123", Code: next})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	var fresh twoFactorEnableResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.RecoveryCodes) != recoveryCodeCount {
+		t.Fatalf("got %d codes", len(fresh.RecoveryCodes))
+	}
+	if rec := loginWithOTP(srv, "june", "pw-june-123", oldCodes[0]); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("old recovery code status=%d; want 401", rec.Code)
+	}
+	if rec := loginWithOTP(srv, "june", "pw-june-123", fresh.RecoveryCodes[0]); rec.Code != http.StatusOK {
+		t.Fatalf("new recovery code status=%d; want 200", rec.Code)
+	}
+}
+
+func TestSignOutEverywhere_RevokesExistingTokens(t *testing.T) {
+	srv, st := newNtfyTestServerWithStore(t)
+	srv.config.JWTSecret = "test-secret"
+	if err := st.CreatePanelUser("kira", "pw-kira-123", core.PanelUserPermissions{CanReadUsers: true}); err != nil {
+		t.Fatal(err)
+	}
+	old := mintTokenAt(t, srv, "kira", time.Now().Add(-time.Minute))
+	if rec := probeWithToken(srv, old); rec.Code != http.StatusOK {
+		t.Fatalf("token before sign-out status=%d", rec.Code)
+	}
+	rec := twoFactorRequest(t, srv, srv.handleSignOutEverywhere, http.MethodPost, "/api/auth/sign-out-everywhere", "kira", nil)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("sign-out status=%d", rec.Code)
+	}
+	if rec := probeWithToken(srv, old); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("token after sign-out status=%d; want 401", rec.Code)
+	}
+}
