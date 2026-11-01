@@ -101,6 +101,18 @@ export interface CreateUserRequest {
     inbound_tag?: string;
 }
 
+export interface UserTemplate {
+    id: number;
+    name: string;
+    inbound_tag: string;
+    flow: string;
+    quota_limit: number;
+    quota_period: string;
+    created_at?: number;
+}
+
+export type UserTemplateInput = Omit<UserTemplate, 'id' | 'created_at'>;
+
 export interface FeatureFlags {
     enable_singbox: boolean;
     enable_wireguard: boolean;
@@ -965,6 +977,14 @@ export const api = {
         request<{ recovery_codes: string[] }>('/api/auth/2fa/enable', { method: 'POST', json: { code }, errorMsg: 'Failed to enable two-factor authentication' }),
     disableTwoFactor: async (currentPassword: string, code: string): Promise<void> =>
         request('/api/auth/2fa/disable', { method: 'POST', json: { current_password: currentPassword, code }, parse: 'none', errorMsg: 'Failed to disable two-factor authentication' }),
+    getUserTemplates: async (): Promise<UserTemplate[]> =>
+        request<UserTemplate[]>('/api/user-templates', { errorMsg: 'Failed to load templates' }),
+    createUserTemplate: async (template: UserTemplateInput): Promise<UserTemplate> =>
+        request<UserTemplate>('/api/user-templates', { method: 'POST', json: template, errorMsg: 'Failed to create template' }),
+    updateUserTemplate: async (id: number, template: UserTemplateInput): Promise<UserTemplate> =>
+        request<UserTemplate>(`/api/user-templates/${id}`, { method: 'PUT', json: template, errorMsg: 'Failed to update template' }),
+    deleteUserTemplate: async (id: number): Promise<void> =>
+        request(`/api/user-templates/${id}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete template' }),
     newRecoveryCodes: async (currentPassword: string, code: string): Promise<{ recovery_codes: string[] }> =>
         request<{ recovery_codes: string[] }>('/api/auth/2fa/recovery-codes', { method: 'POST', json: { current_password: currentPassword, code }, errorMsg: 'Failed to create recovery codes' }),
     signOutEverywhere: async (): Promise<void> =>

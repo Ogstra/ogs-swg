@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, UserStatus, CreateUserRequest, UserRouteTag } from '../../services/api'
-import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags } from 'lucide-react'
+import { api, UserStatus, CreateUserRequest, UserRouteTag, type UserTemplate } from '../../services/api'
+import { UserTemplatesModal, describeTemplate } from './UserTemplatesModal'
+import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags, LayoutTemplate } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { useToast } from '../../context/ToastContext'
 import { useAuth } from '../../context/AuthContext'
@@ -106,7 +107,7 @@ export default function UserManagement() {
     const [userType, setUserType] = useState<UserType>('vless')
     // Modals state
     const [modalState, setModalState] = useState<{
-        type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | 'route_tags' | 'manage_route_tags' | null,
+        type: 'create' | 'bulk' | 'qr' | 'usage' | 'select_inbounds' | 'route_tags' | 'manage_route_tags' | 'templates' | null,
         data?: any
     }>({ type: null })
     const [selectedInboundsToRemove, setSelectedInboundsToRemove] = useState<Set<string>>(new Set())
@@ -242,6 +243,40 @@ export default function UserManagement() {
         enabled: canReadConfig,
         placeholderData: previousData => previousData,
     })
+
+    const templatesQuery = useQuery({
+        queryKey: ['user-templates'],
+        queryFn: () => api.getUserTemplates(),
+        enabled: canReadUsers,
+    })
+    const userTemplates = templatesQuery.data || []
+
+    const applyTemplateToCreateForm = (template: UserTemplate) => {
+        const type = getInboundType(template.inbound_tag) as UserType | undefined
+        if (type) {
+            setUserType(type)
+            setInboundRows(normalizeInboundRowsForType([{ tag: template.inbound_tag, flow: type === 'vless' ? (template.flow || '') : '' }], type))
+        }
+        setNewUser(prev => ({
+            ...prev,
+            flow: template.flow,
+            quota_limit: template.quota_limit,
+            quota_period: template.quota_period,
+            inbound_tag: template.inbound_tag || prev.inbound_tag,
+        }))
+        setQuotaInput(bytesToGbString(template.quota_limit))
+    }
+
+    const applyTemplateToBulkForm = (template: UserTemplate) => {
+        setBulkConfig(prev => ({
+            ...prev,
+            inbound_tag: template.inbound_tag || prev.inbound_tag,
+            flow: canShowBulkFlow(template.inbound_tag) ? (template.flow || prev.flow) : '',
+            quota_limit: template.quota_limit,
+            quota_period: template.quota_period === 'total' ? 'none' : template.quota_period,
+        }))
+        setBulkQuotaInput(bytesToGbString(template.quota_limit))
+    }
 
     const routeTagsQuery = useQuery({
         queryKey: ['user-route-tags'],
@@ -972,6 +1007,14 @@ export default function UserManagement() {
                         Create User
                     </Button>
                     <Button
+                        onClick={() => setModalState({ type: 'templates' })}
+                        variant="secondary"
+                        icon={<LayoutTemplate size={16} />}
+                        className="w-full md:w-auto justify-center"
+                    >
+                        Templates
+                    </Button>
+                    <Button
                         onClick={() => canWriteUsers && setModalState({ type: 'bulk' })}
                         variant="secondary"
                         icon={<Users size={16} />}
@@ -1311,6 +1354,24 @@ export default function UserManagement() {
                 }
             >
                 <div className="space-y-6 modal-form-uniform">
+                    {!isEditing && userTemplates.length > 0 && (
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Template</label>
+                            <select
+                                value=""
+                                onChange={e => {
+                                    const template = userTemplates.find(item => String(item.id) === e.target.value)
+                                    if (template) applyTemplateToCreateForm(template)
+                                }}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors"
+                            >
+                                <option value="">Fill from a template…</option>
+                                {userTemplates.map(template => (
+                                    <option key={template.id} value={template.id}>{template.name} · {describeTemplate(template)}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Username</label>
@@ -1743,6 +1804,10 @@ export default function UserManagement() {
             />
 
 
+            {modalState.type === 'templates' && (
+                <UserTemplatesModal inbounds={inbounds} canWrite={canWriteUsers} onClose={() => setModalState({ type: null })} />
+            )}
+
             {/* Bulk Create Modal */}
             <Modal
                 isOpen={modalState.type === 'bulk'}
@@ -1756,6 +1821,24 @@ export default function UserManagement() {
                 }
             >
                 <div className="space-y-4 modal-form-uniform">
+                    {userTemplates.length > 0 && (
+                        <div>
+                            <label className="block text-sm font-medium text-slate-400 mb-1">Template</label>
+                            <select
+                                value=""
+                                onChange={e => {
+                                    const template = userTemplates.find(item => String(item.id) === e.target.value)
+                                    if (template) applyTemplateToBulkForm(template)
+                                }}
+                                className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
+                            >
+                                <option value="">Fill from a template…</option>
+                                {userTemplates.map(template => (
+                                    <option key={template.id} value={template.id}>{template.name} · {describeTemplate(template)}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                     <div className="grid grid-cols-2 sm:grid-cols-2 gap-4">
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Inbound (Required)</label>
