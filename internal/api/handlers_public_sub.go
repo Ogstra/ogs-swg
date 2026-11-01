@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -419,9 +420,20 @@ func happSubscriptionBodyLine(param happSubscriptionParam) string {
 	return "#" + param.Key + ": " + param.Value
 }
 
+// insertSubscriptionRequest writes one history row. The write is not tied to
+// the client's connection, so a client that hangs up cannot drop its own row,
+// and a failure is logged instead of silently losing the request.
+func (s *Server) insertSubscriptionRequest(r *http.Request, params store.InsertSubscriptionRequestParams) error {
+	err := s.store.Queries.InsertSubscriptionRequest(context.WithoutCancel(r.Context()), params)
+	if err != nil {
+		log.Printf("subscription history: could not record request for sub %d: %v", params.SubID, err)
+	}
+	return err
+}
+
 func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users []string, servedFromCache bool, migratedFromSubID int64) {
 	meta := extractSubscriptionRequestMetadata(r)
-	if err := s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
+	if err := s.insertSubscriptionRequest(r, store.InsertSubscriptionRequestParams{
 		SubID:             subID,
 		UserName:          strings.Join(users, ", "),
 		RequestIp:         resolveSubscriptionRequestIP(r),
@@ -525,7 +537,7 @@ func (s *Server) recordBlockedSubscriptionRequest(r *http.Request, subID int64, 
 	s.blockedRecordDedupMu.Unlock()
 
 	meta := extractSubscriptionRequestMetadata(r)
-	if err := s.store.Queries.InsertSubscriptionRequest(r.Context(), store.InsertSubscriptionRequestParams{
+	if err := s.insertSubscriptionRequest(r, store.InsertSubscriptionRequestParams{
 		SubID:           subID,
 		UserName:        strings.Join(users, ", "),
 		RequestIp:       resolveSubscriptionRequestIP(r),
