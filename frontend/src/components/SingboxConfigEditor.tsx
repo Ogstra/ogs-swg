@@ -3,6 +3,7 @@ import { FileJson, List, GitBranch, Waypoints } from 'lucide-react'
 import { api } from '../services/api'
 import type { SingboxOutboundDomainStrategyUpdate, SingboxOutboundView } from '../services/api'
 import InboundList from './singbox/InboundList'
+import { RuleSetsPanel } from './singbox/RuleSetsPanel'
 import { Card } from './ui/Card'
 import { RawEditorPanel } from './raw/RawEditorPanel'
 import { useAuth } from '../context/AuthContext'
@@ -456,6 +457,11 @@ export default function SingboxConfigEditor() {
                     ) : (
                         <div className="flex-1 overflow-auto custom-scrollbar p-6">
                             {activeTab === 'inbounds' && <InboundList />}
+                            {activeTab === 'rules' && (
+                                <div className="mb-6">
+                                    <RuleSetsPanel canWrite={canWriteConfig} outbounds={availableOutbounds} onChanged={loadRules} />
+                                </div>
+                            )}
                             {activeTab === 'rules' && (
                                 <RulesTab
                                     rules={rules}
