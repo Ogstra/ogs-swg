@@ -13,6 +13,13 @@ import (
 	"github.com/o1egl/paseto"
 )
 
+const (
+	sessionLifetime = 24 * time.Hour
+	// twoFactorSessionLifetime is longer because the sign-in was backed by a
+	// second factor. It is long, not unlimited: a stolen token should not work forever.
+	twoFactorSessionLifetime = 30 * 24 * time.Hour
+)
+
 type LoginRequest struct {
 	Username string `json:"username" validate:"required"`
 	Password string `json:"password" validate:"required"`
@@ -86,8 +93,14 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	perms.Normalize()
 
-	if !s.checkSecondFactor(w, req.Username, req.OTP, userKey, ipKey) {
+	secondFactorOK, secondFactorUsed := s.checkSecondFactor(w, req.Username, req.OTP, userKey, ipKey)
+	if !secondFactorOK {
 		return
+	}
+
+	lifetime := sessionLifetime
+	if secondFactorUsed {
+		lifetime = twoFactorSessionLifetime
 	}
 
 	// Generate PASETO token with permissions embedded
@@ -96,7 +109,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	jsonToken := paseto.JSONToken{
 		Subject:    req.Username,
 		IssuedAt:   now,
-		Expiration: now.Add(24 * time.Hour),
+		Expiration: now.Add(lifetime),
 	}
 	permsJSON, _ := json.Marshal(perms)
 	jsonToken.Set("perms", string(permsJSON))
@@ -287,13 +300,19 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 		// Permissions come from the database, not the token, so a permission
 		// change, rename or deletion applies at once, and a password change
 		// revokes tokens issued before it.
-		livePerms, validAfter, exists, err := s.store.GetPanelUserAuthState(jsonToken.Subject)
+		livePerms, validAfter, twoFactor, exists, err := s.store.GetPanelUserAuthState(jsonToken.Subject)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "Authentication error")
 			return
 		}
 		if !exists || jsonToken.IssuedAt.Unix() < validAfter {
 			writeErr(w, http.StatusUnauthorized, "Invalid token")
+			return
+		}
+		// A long session is only honoured while two-factor stays on, so turning
+		// it off ends the long sessions it allowed.
+		if !twoFactor && time.Now().After(jsonToken.IssuedAt.Add(sessionLifetime)) {
+			writeErr(w, http.StatusUnauthorized, "Token expired")
 			return
 		}
 		perms := *livePerms

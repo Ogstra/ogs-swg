@@ -246,3 +246,58 @@ func TestAuthMiddleware_WrongAPIKeysAreRateLimited(t *testing.T) {
 		t.Fatalf("correct key after the limit status=%d; want 401 while blocked", got)
 	}
 }
+
+func TestAuthMiddleware_LongSessionsNeedTwoFactor(t *testing.T) {
+	srv, st := newNtfyTestServerWithStore(t)
+	srv.config.JWTSecret = "test-secret"
+	if err := st.CreatePanelUser("hana", "pw-hana-123", core.PanelUserPermissions{CanReadUsers: true}); err != nil {
+		t.Fatal(err)
+	}
+	issued := time.Now().Add(-10 * 24 * time.Hour)
+	token, err := paseto.NewV2().Encrypt(getPasetoKey(srv.config.JWTSecret),
+		paseto.JSONToken{Subject: "hana", IssuedAt: issued, Expiration: issued.Add(twoFactorSessionLifetime)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := probeWithToken(srv, token); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("10-day-old token without two-factor status=%d; want 401", rec.Code)
+	}
+
+	enableTwoFactorForTest(t, srv, "hana")
+	if rec := probeWithToken(srv, token); rec.Code != http.StatusOK {
+		t.Fatalf("10-day-old token with two-factor status=%d; want 200", rec.Code)
+	}
+}
+
+func TestLogin_TwoFactorSessionsLastLonger(t *testing.T) {
+	srv, st := newNtfyTestServerWithStore(t)
+	srv.config.JWTSecret = "test-secret"
+	if err := st.CreatePanelUser("ivan", "pw-ivan-123", core.PanelUserPermissions{CanReadUsers: true}); err != nil {
+		t.Fatal(err)
+	}
+	expiry := func(token string) time.Duration {
+		var parsed paseto.JSONToken
+		if err := paseto.NewV2().Decrypt(token, getPasetoKey(srv.config.JWTSecret), &parsed, nil); err != nil {
+			t.Fatal(err)
+		}
+		return parsed.Expiration.Sub(parsed.IssuedAt)
+	}
+
+	if got := expiry(loginToken(t, srv, "ivan", "pw-ivan-123")); got != sessionLifetime {
+		t.Fatalf("session without two-factor lasts %v; want %v", got, sessionLifetime)
+	}
+	secret, _ := enableTwoFactorForTest(t, srv, "ivan")
+	next, _ := core.TOTPCodeAt(secret, time.Now().Add(30*time.Second))
+	rec := loginWithOTP(srv, "ivan", "pw-ivan-123", next)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("login status=%d", rec.Code)
+	}
+	var out LoginResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := expiry(out.Token); got != twoFactorSessionLifetime {
+		t.Fatalf("session with two-factor lasts %v; want %v", got, twoFactorSessionLifetime)
+	}
+}

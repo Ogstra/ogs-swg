@@ -44,20 +44,21 @@ func newRecoveryCodes() (codes []string, hashes []string, err error) {
 }
 
 // checkSecondFactor enforces TOTP for users that enabled it. It writes the
-// response and returns false when login must stop.
-func (s *Server) checkSecondFactor(w http.ResponseWriter, username, otp, userKey, ipKey string) bool {
+// response and returns ok=false when login must stop; used reports that a
+// second factor was checked.
+func (s *Server) checkSecondFactor(w http.ResponseWriter, username, otp, userKey, ipKey string) (ok bool, used bool) {
 	state, err := s.store.GetPanelUserTOTP(username)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "Authentication error")
-		return false
+		return false, false
 	}
 	if !state.Enabled {
-		return true
+		return true, false
 	}
 	if strings.TrimSpace(otp) == "" {
 		w.Header().Set(otpRequiredHeader, "true")
 		writeErr(w, http.StatusUnauthorized, "Two-factor code required")
-		return false
+		return false, false
 	}
 
 	accepted := false
@@ -65,14 +66,14 @@ func (s *Server) checkSecondFactor(w http.ResponseWriter, username, otp, userKey
 		fresh, err := s.store.ConsumePanelUserTOTPStep(username, step)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "Authentication error")
-			return false
+			return false, false
 		}
 		accepted = fresh
 	} else if strings.Contains(otp, "-") {
 		used, err := s.store.ConsumePanelUserRecoveryCode(username, hashRecoveryCode(otp))
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "Authentication error")
-			return false
+			return false, false
 		}
 		accepted = used
 	}
@@ -81,9 +82,9 @@ func (s *Server) checkSecondFactor(w http.ResponseWriter, username, otp, userKey
 		s.loginLimiter.recordFailure(ipKey)
 		w.Header().Set(otpRequiredHeader, "true")
 		writeErr(w, http.StatusUnauthorized, "Invalid two-factor code")
-		return false
+		return false, false
 	}
-	return true
+	return true, true
 }
 
 type twoFactorStatusResponse struct {

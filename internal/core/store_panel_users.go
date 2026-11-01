@@ -289,11 +289,12 @@ func (s *Store) UpdatePanelUserPassword(username, newPassword string) error {
 }
 
 // GetPanelUserAuthState returns a panel user's current permissions and the
-// unix time before which issued tokens are revoked. exists is false when the
-// user is gone.
-func (s *Store) GetPanelUserAuthState(username string) (perms *PanelUserPermissions, validAfter int64, exists bool, err error) {
+// unix time before which issued tokens are revoked, and whether two-factor is on.
+// exists is false when the user is gone.
+func (s *Store) GetPanelUserAuthState(username string) (perms *PanelUserPermissions, validAfter int64, twoFactor bool, exists bool, err error) {
 	var p PanelUserPermissions
 	var flags [12]int64
+	var totpEnabled int64
 	err = s.db.QueryRowContext(context.Background(), `
 		SELECT
 			COALESCE(can_read_users, 0),
@@ -308,15 +309,16 @@ func (s *Store) GetPanelUserAuthState(username string) (perms *PanelUserPermissi
 			COALESCE(can_write_panel_users, 0),
 			COALESCE(can_read_logs, 0),
 			COALESCE(can_read_logs_censored, 0),
-			COALESCE(tokens_valid_after, 0)
+			COALESCE(tokens_valid_after, 0),
+			COALESCE(totp_enabled, 0)
 		FROM panel_users WHERE username = ?`, username).Scan(
 		&flags[0], &flags[1], &flags[2], &flags[3], &flags[4], &flags[5],
-		&flags[6], &flags[7], &flags[8], &flags[9], &flags[10], &flags[11], &validAfter)
+		&flags[6], &flags[7], &flags[8], &flags[9], &flags[10], &flags[11], &validAfter, &totpEnabled)
 	if err == sql.ErrNoRows {
-		return nil, 0, false, nil
+		return nil, 0, false, false, nil
 	}
 	if err != nil {
-		return nil, 0, false, err
+		return nil, 0, false, false, err
 	}
 	p.CanReadUsers, p.CanWriteUsers = flags[0] != 0, flags[1] != 0
 	p.CanReadWireguard, p.CanWriteWireguard = flags[2] != 0, flags[3] != 0
@@ -324,7 +326,7 @@ func (s *Store) GetPanelUserAuthState(username string) (perms *PanelUserPermissi
 	p.CanReadSettings, p.CanWriteSettings = flags[6] != 0, flags[7] != 0
 	p.CanReadPanelUsers, p.CanWritePanelUsers = flags[8] != 0, flags[9] != 0
 	p.CanReadLogs, p.CanReadLogsCensored = flags[10] != 0, flags[11] != 0
-	return &p, validAfter, true, nil
+	return &p, validAfter, totpEnabled != 0, true, nil
 }
 
 func (s *Store) UpdatePanelUserPermissions(username string, perms PanelUserPermissions) error {
