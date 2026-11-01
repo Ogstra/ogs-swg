@@ -49,6 +49,7 @@ const reasonVariant = (reason: string) => {
         case 'token_block':
             return 'error'
         case 'rate_limit':
+        case 'device_limit':
             return 'warning'
         case 'ua_browser':
         case 'ua_social_fetcher':
@@ -72,6 +73,8 @@ const formatReasonLabel = (reason: string) => {
             return 'Browser UA'
         case 'ua_social_fetcher':
             return 'Social/Chat Fetcher'
+        case 'device_limit':
+            return 'Device limit'
         default:
             return reason || 'Unknown'
     }
@@ -84,6 +87,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
     const [windowSeconds, setWindowSeconds] = useState(60)
     const [uaFilterEnabled, setUAFilterEnabled] = useState(false)
     const [socialFetchersBlockEnabled, setSocialFetchersBlockEnabled] = useState(false)
+    const [defaultDeviceLimit, setDefaultDeviceLimit] = useState(0)
     const [newRule, setNewRule] = useState<CreateProtectionRuleRequest>({
         rule_type: 'ip_block',
         value: '',
@@ -126,6 +130,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
         setWindowSeconds(Math.max(1, settingsQuery.data.window_seconds || 60))
         setUAFilterEnabled(!!settingsQuery.data.ua_filter_enabled)
         setSocialFetchersBlockEnabled(!!settingsQuery.data.social_fetchers_block_enabled)
+        setDefaultDeviceLimit(Math.max(0, settingsQuery.data.default_device_limit || 0))
     }, [settingsQuery.data])
 
     const handleSaveCFWorkerURL = async () => {
@@ -148,6 +153,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
             window_seconds: Math.max(1, Number(windowSeconds) || 1),
             ua_filter_enabled: uaFilterEnabled,
             social_fetchers_block_enabled: socialFetchersBlockEnabled,
+            default_device_limit: Math.max(0, Math.floor(Number(defaultDeviceLimit) || 0)),
         }),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ['subscription-protection'] })
@@ -278,6 +284,18 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                     value={windowSeconds}
                                     disabled={!canWriteSettings}
                                     onChange={e => setWindowSeconds(Number(e.target.value) || 1)}
+                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors disabled:opacity-60"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Default device limit</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    value={defaultDeviceLimit}
+                                    disabled={!canWriteSettings}
+                                    onChange={e => setDefaultDeviceLimit(Math.max(0, Number(e.target.value) || 0))}
+                                    title="Most devices (HWID) a subscription serves unless it sets its own limit. 0 is unlimited."
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors disabled:opacity-60"
                                 />
                             </div>

@@ -301,6 +301,7 @@ export default function Subscriptions() {
     const [subHappRoutingPresetId, setSubHappRoutingPresetId] = useState('')
     const [subHappThemeId, setSubHappThemeId] = useState('')
     const [subHappDirectSites, setSubHappDirectSites] = useState('')
+    const [subDeviceLimit, setSubDeviceLimit] = useState('0')
     const [happDirectSites, setHappDirectSites] = useState('')
     const [subRoutingProfileOpen, setSubRoutingProfileOpen] = useState(false)
     const [happQrLinks, setHappQrLinks] = useState<Record<string, HappQrLinkState>>({})
@@ -405,6 +406,7 @@ export default function Subscriptions() {
         setSubHappRoutingPresetId('')
         setSubHappThemeId(happThemeId)
         setSubHappDirectSites('')
+        setSubDeviceLimit('0')
         setModalState({ type: 'create' })
     }
 
@@ -437,6 +439,7 @@ export default function Subscriptions() {
         const subColorProfile = sub.happ_color_profile || ''
         setSubHappThemeId(subColorProfile ? resolveHappThemeId(subColorProfile) : happThemeId)
         setSubHappDirectSites(sub.happ_direct_sites ?? '')
+        setSubDeviceLimit(String(sub.device_limit ?? 0))
         setModalState({ type: 'edit', data: sub })
     }
 
@@ -496,6 +499,7 @@ export default function Subscriptions() {
             happ_routing_profile: subHappRoutingPresetId === 'custom' ? subHappRoutingProfile.trim() : routingProfileForSubscriptionName(subHappRoutingPresetId, aliasInput.trim() || nameInput.trim()),
             happ_color_profile: subHappThemeId !== happThemeId ? (HAPP_THEME_PRESETS.find(t => t.id === subHappThemeId)?.value || '') : '',
             happ_direct_sites: subHappDirectSites.trim(),
+            device_limit: Math.max(0, Math.floor(Number(subDeviceLimit) || 0)),
         }
 
         try {
@@ -1199,6 +1203,17 @@ export default function Subscriptions() {
                             />
                         )}
                         <p className="mt-1 text-xs text-slate-500">Overrides the global routing profile for this subscription. Use Off to send <code>happ://routing/off</code> and actively disable routing on the client.</p>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-medium text-slate-300 mb-1">Device limit</label>
+                        <input
+                            type="number"
+                            min={0}
+                            value={subDeviceLimit}
+                            onChange={e => setSubDeviceLimit(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Most devices (HWID) this subscription serves. A new device over the limit is refused; devices already known keep working. 0 uses the panel default.</p>
                     </div>
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-1">Direct Sites Override</label>

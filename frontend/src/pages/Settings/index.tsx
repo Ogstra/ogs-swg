@@ -1972,6 +1972,8 @@ function DatabaseTab({
                 return 'Browser UA'
             case 'ua_social_fetcher':
                 return 'Social/Chat Fetcher'
+            case 'device_limit':
+                return 'Device limit'
             default:
                 return (reason || '').trim()
         }
