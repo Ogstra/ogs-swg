@@ -16,6 +16,7 @@ import (
 type LoginRequest struct {
 	Username string `json:"username" validate:"required"`
 	Password string `json:"password" validate:"required"`
+	OTP      string `json:"otp"`
 }
 
 type LoginResponse struct {
@@ -84,6 +85,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	perms.Normalize()
+
+	if !s.checkSecondFactor(w, req.Username, req.OTP, userKey, ipKey) {
+		return
+	}
 
 	// Generate PASETO token with permissions embedded
 	v2 := paseto.NewV2()

@@ -271,6 +271,9 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Auth: any authenticated user can change their own password/username
 	protected.HandleFunc("PUT /api/auth/password", s.secure(s.AuditLogger("auth", "update", s.handleUpdatePassword)))
+	protected.HandleFunc("POST /api/auth/2fa/setup", s.secure(s.handleTwoFactorSetup))
+	protected.HandleFunc("POST /api/auth/2fa/enable", s.secure(s.handleTwoFactorEnable))
+	protected.HandleFunc("POST /api/auth/2fa/disable", s.secure(s.handleTwoFactorDisable))
 	protected.HandleFunc("PUT /api/auth/username", s.secure(s.requirePerm(canWriteSettings, s.handleUpdateUsername)))
 
 	protected.HandleFunc("GET /api/settings/subscription-protection", s.secure(s.requirePerm(canReadSettings, s.handleGetSubscriptionProtection)))
@@ -414,6 +417,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/panel-users/permissions", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "update", s.handleUpdatePanelUserPermissions))))
 	protected.HandleFunc("PUT /api/panel-users/username", s.secure(s.requirePerm(canWritePanelUsers, s.handleUpdatePanelUserUsername)))
 	protected.HandleFunc("PUT /api/panel-users/password", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "update", s.handleUpdatePanelUserPassword))))
+	protected.HandleFunc("DELETE /api/panel-users/2fa", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "2fa_reset", s.handleResetPanelUserTwoFactor))))
 	protected.HandleFunc("DELETE /api/panel-users", s.secure(s.requirePerm(canWritePanelUsers, s.AuditLogger("panel_user", "delete", s.handleDeletePanelUser))))
 
 	// Subscriptions

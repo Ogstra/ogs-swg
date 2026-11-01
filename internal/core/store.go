@@ -416,6 +416,10 @@ func (s *Store) initSchema() error {
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs_censored INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN tokens_valid_after INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT '';")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN totp_last_step INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN totp_recovery_json TEXT NOT NULL DEFAULT '[]';")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_update_always INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]';")

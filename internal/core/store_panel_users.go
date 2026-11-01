@@ -35,6 +35,7 @@ type PanelUserInfo struct {
 	Username    string               `json:"username"`
 	Permissions PanelUserPermissions `json:"permissions"`
 	CreatedAt   int64                `json:"created_at"`
+	TwoFactor   bool                 `json:"two_factor_enabled"`
 }
 
 type SubscriptionDefaults struct {
@@ -194,7 +195,8 @@ func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
 			COALESCE(can_write_panel_users, 0),
 			COALESCE(can_read_logs, 0),
 			COALESCE(can_read_logs_censored, 0),
-			COALESCE(created_at, 0)
+			COALESCE(created_at, 0),
+			COALESCE(totp_enabled, 0)
 		FROM panel_users
 		ORDER BY username ASC
 	`)
@@ -220,6 +222,7 @@ func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
 			canReadLogs         int64
 			canReadLogsCensored int64
 			createdAt           int64
+			totpEnabled         int64
 		)
 		if err := rows.Scan(
 			&username,
@@ -236,6 +239,7 @@ func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
 			&canReadLogs,
 			&canReadLogsCensored,
 			&createdAt,
+			&totpEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -259,6 +263,7 @@ func (s *Store) GetAllPanelUsers() ([]PanelUserInfo, error) {
 			Username:    username,
 			Permissions: perms,
 			CreatedAt:   createdAt,
+			TwoFactor:   totpEnabled != 0,
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -478,4 +483,103 @@ func (s *Store) EnsureDefaultPanelUser() error {
 		return s.CreatePanelUser(username, password, allPerms)
 	}
 	return nil
+}
+
+// PanelUserTOTP is a panel user's two-factor state.
+type PanelUserTOTP struct {
+	Enabled bool
+	Secret  string
+}
+
+func (s *Store) GetPanelUserTOTP(username string) (PanelUserTOTP, error) {
+	var out PanelUserTOTP
+	var enabled int64
+	err := s.db.QueryRowContext(context.Background(),
+		`SELECT COALESCE(totp_secret, ''), COALESCE(totp_enabled, 0) FROM panel_users WHERE username = ?`, username).
+		Scan(&out.Secret, &enabled)
+	if err == sql.ErrNoRows {
+		return PanelUserTOTP{}, nil
+	}
+	out.Enabled = enabled != 0
+	return out, err
+}
+
+// SetPanelUserTOTPPending stores a new secret that is not enforced until
+// EnablePanelUserTOTP confirms the user can produce a code from it.
+func (s *Store) SetPanelUserTOTPPending(username, secret string) error {
+	_, err := s.db.ExecContext(context.Background(),
+		`UPDATE panel_users SET totp_secret = ?, totp_enabled = 0, totp_last_step = 0, totp_recovery_json = '[]' WHERE username = ?`,
+		secret, username)
+	return err
+}
+
+// EnablePanelUserTOTP turns two-factor on and records the hashed recovery codes.
+func (s *Store) EnablePanelUserTOTP(username string, recoveryHashes []string, usedStep int64) error {
+	raw, err := json.Marshal(recoveryHashes)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(context.Background(),
+		`UPDATE panel_users SET totp_enabled = 1, totp_last_step = ?, totp_recovery_json = ? WHERE username = ?`,
+		usedStep, string(raw), username)
+	return err
+}
+
+func (s *Store) DisablePanelUserTOTP(username string) error {
+	_, err := s.db.ExecContext(context.Background(),
+		`UPDATE panel_users SET totp_enabled = 0, totp_secret = '', totp_last_step = 0, totp_recovery_json = '[]' WHERE username = ?`,
+		username)
+	return err
+}
+
+// ConsumePanelUserTOTPStep records step as used. It reports false when that
+// step (or a later one) was already accepted, which blocks replaying a code.
+func (s *Store) ConsumePanelUserTOTPStep(username string, step int64) (bool, error) {
+	res, err := s.db.ExecContext(context.Background(),
+		`UPDATE panel_users SET totp_last_step = ? WHERE username = ? AND totp_last_step < ?`, step, username, step)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
+}
+
+// ConsumePanelUserRecoveryCode removes codeHash from the user's recovery codes
+// and reports whether it was present.
+func (s *Store) ConsumePanelUserRecoveryCode(username, codeHash string) (bool, error) {
+	tx, err := s.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var raw string
+	if err := tx.QueryRow(`SELECT COALESCE(totp_recovery_json, '[]') FROM panel_users WHERE username = ?`, username).Scan(&raw); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	var hashes []string
+	if err := json.Unmarshal([]byte(raw), &hashes); err != nil {
+		return false, nil
+	}
+	idx := -1
+	for i, h := range hashes {
+		if h == codeHash {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false, nil
+	}
+	hashes = append(hashes[:idx], hashes[idx+1:]...)
+	updated, err := json.Marshal(hashes)
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`UPDATE panel_users SET totp_recovery_json = ? WHERE username = ?`, string(updated), username); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
