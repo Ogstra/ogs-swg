@@ -1248,6 +1248,7 @@ export default function Subscriptions() {
                             className="w-full bg-slate-950 border border-slate-800 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
                             placeholder="providerid"
                         />
+                        <p className="mt-1 text-xs text-slate-400">Happ ties this ID to the subscription domain. Moving devices needs it (non-standard <code className="font-mono">new-url</code>).</p>
                     </div>
 
                     <div>

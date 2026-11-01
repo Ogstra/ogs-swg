@@ -144,7 +144,7 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                         const migration = device.migration
                         const live = !!migration && liveStatuses.has(migration.status)
                         const moved = migration?.status === 'confirmed'
-        const failed = migration?.status === 'failed'
+                        const failed = migration?.status === 'failed'
                         const title = [device.device_model, device.device_os].filter(Boolean).join(' · ') || 'Unknown device'
                         return (
                             <div key={device.hwid_hash} className="space-y-2 px-2 py-3">
@@ -192,7 +192,7 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                                                 disabled={!canWrite || !targets[device.hwid_hash] || busy === device.hwid_hash}
                                                 onClick={() => move(device)}
                                             >
-                                                {failed ? 'Retry' : 'Move'}
+                                                {failed ? 'Retry' : 'Move*'}
                                             </Button>
                                         </div>
                                     )}
@@ -200,6 +200,9 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                             </div>
                         )
                     })}
+                    <p className="px-2 pt-3 text-xs text-slate-400">
+                        * Relies on Happ's non-standard <code className="font-mono">new-url</code> header. Other clients ignore it and keep the old subscription.
+                    </p>
                 </div>
             )}
         </Modal>

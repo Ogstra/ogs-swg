@@ -28,9 +28,11 @@ Web panel for managing **Sing-box** and **WireGuard** servers. Go backend, React
 *   **Inbounds and users**: create and edit Sing-box inbounds and their users, with traffic limits and expiry dates.
 *   **WireGuard**: manage interfaces and peers, or edit the raw `.conf`.
 *   **Traffic**: per-user stats for Sing-box, per-peer stats for WireGuard.
-*   **Subscriptions**: one link per user bundle for clients such as Happ and Shadowrocket, with per-member aliases, quotas, refresh headers, request history, QR codes and protection rules (token/IP block, allowlist, rate limit, browser filtering). Each device is tracked by its HWID and can be moved to another subscription.
+*   **Subscriptions**: one link per user bundle for clients such as Happ and Shadowrocket, with per-member aliases, quotas, refresh headers, request history, QR codes and protection rules (token/IP block, allowlist, rate limit, browser filtering). Each device is tracked by its HWID and can be moved to another subscription*.
 *   **Services**: restart or reload Sing-box and WireGuard, tail logs, edit whitelisted sysctl values and the raw Sing-box config.
 *   **Notifications**: [ntfy](https://ntfy.sh) alerts for service down, high traffic, config apply failures and new or moved devices.
+
+\* Moving a device uses Happ's non-standard `new-url` header, so it only works with Happ. Other clients keep the old subscription. Happ's Provider ID, routing profile and encrypted links are Happ-specific as well.
 
 ## Install
 
