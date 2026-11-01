@@ -415,6 +415,7 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add can_read_logs_censored to existing panel_users tables.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs_censored INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE panel_users ADD COLUMN tokens_valid_after INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_profile_update_interval_hours INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_update_always INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN subscription_default_destinations_json TEXT NOT NULL DEFAULT '[]';")
@@ -877,10 +878,54 @@ func (s *Store) UpdatePanelUserPassword(username, newPassword string) error {
 	if err != nil {
 		return err
 	}
-	return s.Queries.UpdatePanelUserPassword(context.Background(), sqlcStore.UpdatePanelUserPasswordParams{
+	if err := s.Queries.UpdatePanelUserPassword(context.Background(), sqlcStore.UpdatePanelUserPasswordParams{
 		PasswordHash: string(hash),
 		Username:     username,
-	})
+	}); err != nil {
+		return err
+	}
+	// Sessions issued before the change stop working.
+	_, err = s.db.Exec("UPDATE panel_users SET tokens_valid_after = ? WHERE username = ?", time.Now().Unix(), username)
+	return err
+}
+
+// GetPanelUserAuthState returns a panel user's current permissions and the
+// unix time before which issued tokens are revoked. exists is false when the
+// user is gone.
+func (s *Store) GetPanelUserAuthState(username string) (perms *PanelUserPermissions, validAfter int64, exists bool, err error) {
+	var p PanelUserPermissions
+	var flags [12]int64
+	err = s.db.QueryRowContext(context.Background(), `
+		SELECT
+			COALESCE(can_read_users, 0),
+			COALESCE(can_write_users, 0),
+			COALESCE(can_read_wireguard, 0),
+			COALESCE(can_write_wireguard, 0),
+			COALESCE(can_read_config, 0),
+			COALESCE(can_write_config, 0),
+			COALESCE(can_read_settings, 0),
+			COALESCE(can_write_settings, 0),
+			COALESCE(can_read_panel_users, 0),
+			COALESCE(can_write_panel_users, 0),
+			COALESCE(can_read_logs, 0),
+			COALESCE(can_read_logs_censored, 0),
+			COALESCE(tokens_valid_after, 0)
+		FROM panel_users WHERE username = ?`, username).Scan(
+		&flags[0], &flags[1], &flags[2], &flags[3], &flags[4], &flags[5],
+		&flags[6], &flags[7], &flags[8], &flags[9], &flags[10], &flags[11], &validAfter)
+	if err == sql.ErrNoRows {
+		return nil, 0, false, nil
+	}
+	if err != nil {
+		return nil, 0, false, err
+	}
+	p.CanReadUsers, p.CanWriteUsers = flags[0] != 0, flags[1] != 0
+	p.CanReadWireguard, p.CanWriteWireguard = flags[2] != 0, flags[3] != 0
+	p.CanReadConfig, p.CanWriteConfig = flags[4] != 0, flags[5] != 0
+	p.CanReadSettings, p.CanWriteSettings = flags[6] != 0, flags[7] != 0
+	p.CanReadPanelUsers, p.CanWritePanelUsers = flags[8] != 0, flags[9] != 0
+	p.CanReadLogs, p.CanReadLogsCensored = flags[10] != 0, flags[11] != 0
+	return &p, validAfter, true, nil
 }
 
 func (s *Store) UpdatePanelUserPermissions(username string, perms PanelUserPermissions) error {

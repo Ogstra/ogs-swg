@@ -57,7 +57,16 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if blocked, retryAfter := s.loginLimiter.isBlocked(req.Username); blocked {
+	// Failures are keyed by username+IP so a stranger cannot lock the real user
+	// out from another address, and by IP alone to slow username spraying.
+	clientIP := requestAuditIP(r)
+	userKey := "user\x00" + req.Username + "\x00" + clientIP
+	ipKey := "ip\x00" + clientIP
+	blocked, retryAfter := s.loginLimiter.isBlocked(userKey, loginMaxFailures)
+	if ipBlocked, ipRetry := s.loginLimiter.isBlocked(ipKey, loginMaxFailuresPerIP); ipBlocked && (!blocked || ipRetry > retryAfter) {
+		blocked, retryAfter = true, ipRetry
+	}
+	if blocked {
 		w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
 		writeErr(w, http.StatusTooManyRequests, "Too many failed login attempts, try again later")
 		return
@@ -69,7 +78,8 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if perms == nil {
-		s.loginLimiter.recordFailure(req.Username)
+		s.loginLimiter.recordFailure(userKey)
+		s.loginLimiter.recordFailure(ipKey)
 		writeErr(w, http.StatusUnauthorized, "Invalid credentials")
 		return
 	}
@@ -269,11 +279,19 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Extract permissions from token
-		var perms core.PanelUserPermissions
-		if permsStr := jsonToken.Get("perms"); permsStr != "" {
-			json.Unmarshal([]byte(permsStr), &perms)
+		// Permissions come from the database, not the token, so a permission
+		// change, rename or deletion applies at once, and a password change
+		// revokes tokens issued before it.
+		livePerms, validAfter, exists, err := s.store.GetPanelUserAuthState(jsonToken.Subject)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "Authentication error")
+			return
 		}
+		if !exists || jsonToken.IssuedAt.Unix() < validAfter {
+			writeErr(w, http.StatusUnauthorized, "Invalid token")
+			return
+		}
+		perms := *livePerms
 		perms.Normalize()
 
 		ctx := r.Context()
@@ -284,7 +302,19 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) permissionsFromAPIKey(r *http.Request) (*core.PanelUserPermissions, bool) {
-	if s.config.APIKey == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-API-Key")), []byte(s.config.APIKey)) != 1 {
+	if s.config.APIKey == "" {
+		return nil, false
+	}
+	supplied := r.Header.Get("X-API-Key")
+	if supplied == "" {
+		return nil, false
+	}
+	ipKey := "apikey\x00" + requestAuditIP(r)
+	if blocked, _ := s.loginLimiter.isBlocked(ipKey, loginMaxFailuresPerIP); blocked {
+		return nil, false
+	}
+	if subtle.ConstantTimeCompare([]byte(supplied), []byte(s.config.APIKey)) != 1 {
+		s.loginLimiter.recordFailure(ipKey)
 		return nil, false
 	}
 

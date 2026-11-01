@@ -7,7 +7,9 @@ import (
 
 const (
 	loginMaxFailures = 10
-	loginWindow      = 15 * time.Minute
+	// loginMaxFailuresPerIP is higher so a shared NAT does not lock everyone out.
+	loginMaxFailuresPerIP = 30
+	loginWindow           = 15 * time.Minute
 	// loginLimiterSweepSize is the map size that triggers a sweep of expired entries.
 	loginLimiterSweepSize = 1000
 )
@@ -39,7 +41,7 @@ func (l *loginLimiter) recordFailure(username string) {
 }
 
 // isBlocked returns true and the remaining backoff duration if the username is rate-limited.
-func (l *loginLimiter) isBlocked(username string) (bool, time.Duration) {
+func (l *loginLimiter) isBlocked(username string, maxFailures int) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := time.Now()
@@ -57,7 +59,7 @@ func (l *loginLimiter) isBlocked(username string) (bool, time.Duration) {
 	}
 	l.failures[username] = times
 
-	if len(times) >= loginMaxFailures {
+	if len(times) >= maxFailures {
 		retryAfter := times[0].Add(loginWindow).Sub(now)
 		return true, retryAfter
 	}
