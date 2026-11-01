@@ -344,4 +344,3 @@ func truncateRecentLogMatches(lines []string, limit int) ([]string, bool) {
 func (s *Server) compileLogQuery(raw string) compiledLogQuery {
 	return compileLogQuery(raw)
 }
-

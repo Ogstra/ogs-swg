@@ -86,8 +86,8 @@ func (s *dashboardExecutorStub) WriteConfig(context.Context, string, []byte, os.
 func (s *dashboardExecutorStub) ReadConfig(_ context.Context, path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
-func (s *dashboardExecutorStub) ApplySysctl(context.Context, string, string) error { return nil }
-func (s *dashboardExecutorStub) GetSysctl(context.Context, string) (string, error) { return "", nil }
+func (s *dashboardExecutorStub) ApplySysctl(context.Context, string, string) error   { return nil }
+func (s *dashboardExecutorStub) GetSysctl(context.Context, string) (string, error)   { return "", nil }
 func (s *dashboardExecutorStub) SyncWireGuard(context.Context, string, []byte) error { return nil }
 func (s *dashboardExecutorStub) RestartWireGuard(context.Context, string) error      { return nil }
 func (s *dashboardExecutorStub) ListWireGuardInterfaces(context.Context) ([]string, error) {

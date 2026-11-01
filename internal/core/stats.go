@@ -54,5 +54,3 @@ func (s *SystemStats) GetHistory(duration time.Duration) []TrafficPoint {
 	}
 	return result
 }
-
-

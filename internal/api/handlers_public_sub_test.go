@@ -2220,7 +2220,7 @@ func TestResolveSubscriptionDeviceModel_SamsungRegionalVariantFallsBackToItsFami
 
 func TestResolveSubscriptionDeviceModel_SamsungCodeWithMakerPrefix(t *testing.T) {
 	for in, want := range map[string]string{
-		"samsung SM-F956B": "Galaxy Z Fold6",
+		"samsung SM-F956B":  "Galaxy Z Fold6",
 		"Samsung sm-f956u1": "Galaxy Z Fold6",
 	} {
 		if got := resolveSubscriptionDeviceModel(in); got != want {

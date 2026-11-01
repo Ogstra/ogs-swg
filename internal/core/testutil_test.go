@@ -37,8 +37,8 @@ func (s *stubExecutor) StopService(_ context.Context, _ string) error           
 func (s *stubExecutor) IsServiceActive(_ context.Context, _ string) (bool, error) {
 	return false, nil
 }
-func (s *stubExecutor) ApplySysctl(_ context.Context, _, _ string) error      { return nil }
-func (s *stubExecutor) GetSysctl(_ context.Context, _ string) (string, error) { return "", nil }
+func (s *stubExecutor) ApplySysctl(_ context.Context, _, _ string) error          { return nil }
+func (s *stubExecutor) GetSysctl(_ context.Context, _ string) (string, error)     { return "", nil }
 func (s *stubExecutor) SyncWireGuard(_ context.Context, _ string, _ []byte) error { return nil }
 func (s *stubExecutor) RestartWireGuard(_ context.Context, _ string) error        { return nil }
 func (s *stubExecutor) ListWireGuardInterfaces(_ context.Context) ([]string, error) {

@@ -180,7 +180,7 @@ func TestNtfyNotifierToggleSuppressesEventButKeepsState(t *testing.T) {
 
 	settings.EnableSingboxDown = false
 
-	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true)  // seed
 	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false) // suppressed, but state advances
 	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true)  // suppressed, state advances
 
@@ -356,7 +356,7 @@ func TestNtfyNotifierOperatorRestartSuppressesCrashAndDownRecovered(t *testing.T
 
 	// After the grace window elapses, a genuine unrelated crash must still
 	// be detected normally.
-	cur = base.Add(1 * time.Second + n.crashWindow + time.Second)
+	cur = base.Add(1*time.Second + n.crashWindow + time.Second)
 	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false)
 	if len(*recorded) != 1 {
 		t.Fatalf("post-grace down transition did not fire; got %d messages", len(*recorded))
@@ -496,7 +496,7 @@ func TestNtfyNotifierPublishErrorDoesNotBlockState(t *testing.T) {
 	n := NewNtfyNotifier(settingsFn, publishFn)
 	ctx := context.Background()
 
-	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true) // seed
+	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, true)  // seed
 	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false) // publish attempt (fails)
 	n.ObserveServiceStatus(ctx, NtfyServiceSingbox, false) // no transition; must not re-attempt publish
 

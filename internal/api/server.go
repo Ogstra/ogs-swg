@@ -872,19 +872,19 @@ type SubQuotaInfo struct {
 }
 
 type UserStatus struct {
-	Name              string               `json:"name"`
-	UUID              string               `json:"uuid"`
-	Flow              string               `json:"flow"`
-	VmessSecurity     string               `json:"vmess_security,omitempty"`
-	VmessAlterID      int                  `json:"vmess_alter_id,omitempty"`
-	Uplink            int64                `json:"uplink"`
-	Downlink          int64                `json:"downlink"`
-	Total             int64                `json:"total"`
-	QuotaLimit        int64                `json:"quota_limit"`
-	QuotaPeriod       string               `json:"quota_period"`
-	ResetDay          int                  `json:"reset_day"`
-	Enabled           bool                 `json:"enabled"`
-	LastSeen          int64                `json:"last_seen"`
+	Name              string                 `json:"name"`
+	UUID              string                 `json:"uuid"`
+	Flow              string                 `json:"flow"`
+	VmessSecurity     string                 `json:"vmess_security,omitempty"`
+	VmessAlterID      int                    `json:"vmess_alter_id,omitempty"`
+	Uplink            int64                  `json:"uplink"`
+	Downlink          int64                  `json:"downlink"`
+	Total             int64                  `json:"total"`
+	QuotaLimit        int64                  `json:"quota_limit"`
+	QuotaPeriod       string                 `json:"quota_period"`
+	ResetDay          int                    `json:"reset_day"`
+	Enabled           bool                   `json:"enabled"`
+	LastSeen          int64                  `json:"last_seen"`
 	InboundTags       []string               `json:"inbound_tags"`
 	RouteTags         []UserRouteTagStatus   `json:"route_tags"`
 	ExternalProfiles  []core.ExternalProfile `json:"external_profiles,omitempty"`

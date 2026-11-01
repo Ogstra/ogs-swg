@@ -707,7 +707,6 @@ func TestHandleSearchLogs_BracketLiteralWithoutMatchesDoesNotCrash(t *testing.T)
 	}
 }
 
-
 func TestHandleSearchLogs_TimeRangeFiltersEmbeddedTimestamp(t *testing.T) {
 	// Build a server with a LogStore populated with three lines at distinct timestamps.
 	// Time-range filtering now happens via normalizeSearchLine (extractLogTimestamp)

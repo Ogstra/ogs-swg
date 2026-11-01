@@ -97,8 +97,8 @@ func newNtfyTestServerWithStore(t *testing.T) (*Server, *core.Store) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	cfg := &core.Config{
-		EnableSingbox:    true,
-		EnableWireGuard:  true,
+		EnableSingbox:      true,
+		EnableWireGuard:    true,
 		SamplerIntervalSec: 120,
 	}
 	exec := newNtfyPollExecutorStub()
