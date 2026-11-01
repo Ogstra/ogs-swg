@@ -394,6 +394,16 @@ func (s *Store) initSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_hwid_migrations_target
 		ON subscription_hwid_migrations(target_sub_id, hwid_hash);
+
+	CREATE TABLE IF NOT EXISTS user_templates (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		inbound_tag TEXT NOT NULL DEFAULT '',
+		flow TEXT NOT NULL DEFAULT '',
+		quota_limit INTEGER NOT NULL DEFAULT 0,
+		quota_period TEXT NOT NULL DEFAULT 'monthly',
+		created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+	);
 	`
 	if _, err := s.db.Exec(query); err != nil {
 		return err
