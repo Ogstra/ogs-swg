@@ -72,6 +72,7 @@ type Server struct {
 	logIngester        *core.LogIngester
 	ntfyNotifier       *core.NtfyNotifier
 	deviceLimitNotices deviceLimitNotices
+	deviceLimitMu      sync.Mutex
 }
 
 func (s *Server) invalidateSamplerHistoryCache() {

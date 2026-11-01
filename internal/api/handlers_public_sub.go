@@ -147,7 +147,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	if s.deviceLimitReached(r, sub) {
+	deviceBlocked, deviceAdmitted := s.checkDeviceLimit(r, sub)
+	if deviceBlocked {
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "device_limit")
 		s.notifyDeviceLimit(r, sub, users)
 		writeErr(w, http.StatusForbidden, "Device limit reached")
@@ -250,7 +251,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		if c, ok := val.(cachedSub); ok {
 			s.recordSubscriptionRequest(r, recordSubID, recordUsers, true, migratedFromSubID)
 			s.observeHWIDMigrationArrival(r, sub)
-			s.observeSubscriptionHWID(r, sub, users)
+			s.observeSubscriptionHWID(r, sub, users, deviceAdmitted)
 			c.Body = applySubscriptionFormat(w, r, c)
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 			return
@@ -295,7 +296,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 
 	s.recordSubscriptionRequest(r, recordSubID, recordUsers, false, migratedFromSubID)
 	s.observeHWIDMigrationArrival(r, sub)
-	s.observeSubscriptionHWID(r, sub, users)
+	s.observeSubscriptionHWID(r, sub, users, deviceAdmitted)
 	c.Body = applySubscriptionFormat(w, r, c)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 }
@@ -469,7 +470,7 @@ func (s *Server) recordSubscriptionRequest(r *http.Request, subID int64, users [
 // "new" (Store.RecordSubscriptionHWIDFirstSeen decides atomically via
 // RowsAffected). The notification publish itself is already off the request
 // path via newNtfyAsyncPublisher, so no outbound HTTP happens inline.
-func (s *Server) observeSubscriptionHWID(r *http.Request, sub store.GetSubscriptionByTokenRow, users []string) {
+func (s *Server) observeSubscriptionHWID(r *http.Request, sub store.GetSubscriptionByTokenRow, users []string, alreadyRecorded bool) {
 	if s.store == nil || s.ntfyNotifier == nil {
 		return
 	}
@@ -477,10 +478,16 @@ func (s *Server) observeSubscriptionHWID(r *http.Request, sub store.GetSubscript
 	if meta.hwidHash == "" {
 		return
 	}
-	isNew, err := s.store.RecordSubscriptionHWIDFirstSeen(r.Context(), sub.ID, meta.hwidHash, s.now().Unix())
-	if err != nil {
-		log.Printf("observeSubscriptionHWID: record hwid for sub %d: %v", sub.ID, err)
-		return
+	// The device limit check records a newly admitted device itself, under a
+	// lock, so the limit cannot be overshot by simultaneous first requests.
+	isNew := alreadyRecorded
+	if !alreadyRecorded {
+		var err error
+		isNew, err = s.store.RecordSubscriptionHWIDFirstSeen(r.Context(), sub.ID, meta.hwidHash, s.now().Unix())
+		if err != nil {
+			log.Printf("observeSubscriptionHWID: record hwid for sub %d: %v", sub.ID, err)
+			return
+		}
 	}
 	if !isNew {
 		return

@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/Ogstra/ogs-swg/internal/core"
@@ -276,5 +278,32 @@ func TestPublicSub_DeviceLimitLetsAMovingDeviceIn(t *testing.T) {
 	}
 	if rec := hitSubStatus(f.server, migrationTestDstToken, migrationTestHWID); rec.Code != http.StatusOK {
 		t.Fatalf("device being moved here status=%d; want 200", rec.Code)
+	}
+}
+
+func TestPublicSub_DeviceLimitHoldsUnderConcurrentFirstRequests(t *testing.T) {
+	server, _ := newSubscriptionGoldenServer(t)
+	server.config.SubscriptionProtection.DefaultDeviceLimit = 3
+	server.config.SubscriptionProtection.MaxRequests = 1000
+
+	const devices = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	served := 0
+	for i := 0; i < devices; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rec := hitSubStatus(server, migrationTestSrcToken, fmt.Sprintf("concurrent-device-%d", i))
+			if rec.Code == http.StatusOK {
+				mu.Lock()
+				served++
+				mu.Unlock()
+			}
+		}(i)
+	}
+	wg.Wait()
+	if served != 3 {
+		t.Fatalf("%d devices were served under a limit of 3", served)
 	}
 }

@@ -41,31 +41,40 @@ func (s *Server) effectiveDeviceLimit(ctx context.Context, sub store.GetSubscrip
 	return int64(s.config.SubscriptionProtection.DefaultDeviceLimit)
 }
 
-// deviceLimitReached reports whether this request comes from a new device and
-// the subscription already serves as many devices as it may. Devices that are
-// already known, requests without an HWID and devices being moved here are
-// never refused.
-func (s *Server) deviceLimitReached(r *http.Request, sub store.GetSubscriptionByTokenRow) bool {
+// checkDeviceLimit decides whether this request may be served. A device that
+// is known, has no HWID or is being moved here is never refused. A new device
+// is refused once the subscription holds as many as it may; otherwise it is
+// recorded right away, under a lock, and admitted reports that so the caller
+// does not record it twice.
+func (s *Server) checkDeviceLimit(r *http.Request, sub store.GetSubscriptionByTokenRow) (blocked, admitted bool) {
 	limit := s.effectiveDeviceLimit(r.Context(), sub)
 	if limit <= 0 {
-		return false
+		return false, false
 	}
 	meta := extractSubscriptionRequestMetadata(r)
 	if meta.hwidHash == "" {
-		return false
+		return false, false
 	}
+
+	s.deviceLimitMu.Lock()
+	defer s.deviceLimitMu.Unlock()
+
 	known, err := s.store.HasSubscriptionKnownHWID(r.Context(), sub.ID, meta.hwidHash)
 	if err != nil || known {
-		return false
+		return false, false
 	}
 	if incoming, err := s.store.HasIncomingHWIDMigration(r.Context(), sub.ID, meta.hwidHash); err != nil || incoming {
-		return false
+		return false, false
 	}
 	count, err := s.store.CountSubscriptionKnownHWIDs(r.Context(), sub.ID)
 	if err != nil {
-		return false
+		return false, false
 	}
-	return count >= limit
+	if count >= limit {
+		return true, false
+	}
+	isNew, err := s.store.RecordSubscriptionHWIDFirstSeen(r.Context(), sub.ID, meta.hwidHash, s.now().Unix())
+	return false, err == nil && isNew
 }
 
 func (s *Server) notifyDeviceLimit(r *http.Request, sub store.GetSubscriptionByTokenRow, users []string) {
