@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -347,4 +348,86 @@ func TestApplySingboxChangesNotifiesOnGenuineFailureOnly(t *testing.T) {
 			t.Fatalf("messages=%d, want 1 (genuine Clash API failure must notify)", got)
 		}
 	})
+}
+
+func init() {
+	ntfyDownRecheckDelay = time.Millisecond
+}
+
+// scriptedServiceExecutor answers IsServiceActive for sing-box from a queue of
+// results, then keeps repeating the last one.
+type scriptedServiceExecutor struct {
+	*ntfyPollExecutorStub
+	mu      sync.Mutex
+	results []serviceCheckResult
+}
+
+type serviceCheckResult struct {
+	active bool
+	err    error
+}
+
+func (e *scriptedServiceExecutor) IsServiceActive(ctx context.Context, name string) (bool, error) {
+	if name != "sing-box" {
+		return e.ntfyPollExecutorStub.IsServiceActive(ctx, name)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	result := e.results[0]
+	if len(e.results) > 1 {
+		e.results = e.results[1:]
+	}
+	return result.active, result.err
+}
+
+func newScriptedPollServer(t *testing.T, results ...serviceCheckResult) (*Server, *recordingNtfyPublisher) {
+	t.Helper()
+	server, store := newNtfyTestServerWithStore(t)
+	server.config.EnableWireGuard = false
+	seedFullyEnabledNtfySettings(t, store, 0)
+	rec := &recordingNtfyPublisher{}
+	server.ntfyNotifier = core.NewNtfyNotifier(
+		func(ctx context.Context) (core.NtfySettings, error) { return store.GetNtfySettings(ctx) },
+		rec.publish,
+	)
+	server.executor = &scriptedServiceExecutor{ntfyPollExecutorStub: newNtfyPollExecutorStub(), results: results}
+	return server, rec
+}
+
+func TestNtfyStatusPoller_IgnoresAFailedCheck(t *testing.T) {
+	up := serviceCheckResult{active: true}
+	failed := serviceCheckResult{err: errors.New("D-Bus connect: transient")}
+	server, rec := newScriptedPollServer(t, up, failed, failed, failed, up)
+	ctx := context.Background()
+
+	server.pollNtfyServiceStatusOnce(ctx) // seeds "up"
+	server.pollNtfyServiceStatusOnce(ctx) // check fails: no verdict
+	server.pollNtfyServiceStatusOnce(ctx)
+	if got := rec.count(); got != 0 {
+		t.Fatalf("a failed status check raised %d notification(s); want none", got)
+	}
+}
+
+func TestNtfyStatusPoller_ConfirmsDownBeforeAlerting(t *testing.T) {
+	up := serviceCheckResult{active: true}
+	down := serviceCheckResult{active: false}
+
+	// One bad reading that the re-check contradicts is not an outage.
+	server, rec := newScriptedPollServer(t, up, down, up)
+	ctx := context.Background()
+	server.pollNtfyServiceStatusOnce(ctx)
+	server.pollNtfyServiceStatusOnce(ctx)
+	server.pollNtfyServiceStatusOnce(ctx)
+	if got := rec.count(); got != 0 {
+		t.Fatalf("a single down reading raised %d notification(s); want none", got)
+	}
+
+	// A service that stays down is reported once.
+	server, rec = newScriptedPollServer(t, up, down)
+	server.pollNtfyServiceStatusOnce(ctx)
+	server.pollNtfyServiceStatusOnce(ctx)
+	server.pollNtfyServiceStatusOnce(ctx)
+	if got := rec.count(); got != 1 {
+		t.Fatalf("a confirmed outage raised %d notification(s); want 1", got)
+	}
 }

@@ -119,10 +119,21 @@ func (e *LocalExecutor) IsServiceActive(ctx context.Context, name string) (bool,
 	unit := resolveUnitName(name)
 	prop, err := conn.GetUnitPropertyContext(ctx, unit, "ActiveState")
 	if err != nil {
-		return false, nil // unit not found or not loaded
+		if strings.Contains(err.Error(), "NoSuchUnit") || strings.Contains(err.Error(), "not loaded") {
+			return false, nil // the unit does not exist
+		}
+		// Anything else (timeout, bus error) says nothing about the service.
+		return false, fmt.Errorf("read ActiveState of %s: %w", unit, err)
 	}
 	state, _ := prop.Value.Value().(string)
-	return state == "active", nil
+	switch state {
+	case "active", "reloading":
+		return true, nil
+	case "activating", "deactivating":
+		// Mid start, stop or auto-restart: neither up nor confirmed down.
+		return false, fmt.Errorf("%s is %s", unit, state)
+	}
+	return false, nil
 }
 
 func (e *LocalExecutor) WriteConfig(_ context.Context, path string, content []byte, fileMode os.FileMode) error {

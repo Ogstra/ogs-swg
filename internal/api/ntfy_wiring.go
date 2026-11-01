@@ -15,6 +15,18 @@ import (
 // dashboard polling can never cause duplicate or missed notifications.
 const ntfyStatusPollInterval = 60 * time.Second
 
+// ntfyPollTimeout bounds one poll, including the re-checks of a service that
+// looked down.
+const ntfyPollTimeout = 45 * time.Second
+
+// A service that looks down is checked again this many times, ntfyDownRecheckDelay
+// apart, before it is reported. One failed or unlucky check (a service
+// mid-restart, a busy systemd) would otherwise raise a "down" alert and a
+// "recovered" one a poll later while nothing was wrong.
+const ntfyDownRechecks = 2
+
+var ntfyDownRecheckDelay = 3 * time.Second
+
 // newNtfyAsyncPublisher returns a publisher that hands the HTTP POST to a
 // goroutine so no request handler, poller, or sampler pass ever waits on ntfy.
 func newNtfyAsyncPublisher() core.NtfyPublishFunc {
@@ -69,7 +81,7 @@ func (s *Server) startNtfyNotifier() {
 		ticker := time.NewTicker(ntfyStatusPollInterval)
 		defer ticker.Stop()
 		for range ticker.C {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), ntfyPollTimeout)
 			s.pollNtfyServiceStatusOnce(ctx)
 			cancel()
 		}
@@ -86,11 +98,32 @@ func (s *Server) startNtfyNotifier() {
 // triggers notifications (research Pitfall 1).
 func (s *Server) pollNtfyServiceStatusOnce(ctx context.Context) {
 	if s.config.EnableSingbox {
-		s.ntfyNotifier.ObserveServiceStatus(ctx, core.NtfyServiceSingbox, s.checkService(ctx, "sing-box"))
+		s.observeServiceForNtfy(ctx, core.NtfyServiceSingbox, "sing-box")
 	}
 	if s.config.EnableWireGuard {
-		s.ntfyNotifier.ObserveServiceStatus(ctx, core.NtfyServiceWireGuard, s.checkService(ctx, "wireguard"))
+		s.observeServiceForNtfy(ctx, core.NtfyServiceWireGuard, "wireguard")
 	}
+}
+
+// observeServiceForNtfy feeds one confirmed observation to the notifier. A
+// failed check is skipped, and "down" is only reported if it holds on re-check.
+func (s *Server) observeServiceForNtfy(ctx context.Context, notifierService, unit string) {
+	active, known := s.serviceActive(ctx, unit)
+	if !known {
+		return
+	}
+	for i := 0; !active && i < ntfyDownRechecks; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(ntfyDownRecheckDelay):
+		}
+		active, known = s.serviceActive(ctx, unit)
+		if !known {
+			return
+		}
+	}
+	s.ntfyNotifier.ObserveServiceStatus(ctx, notifierService, active)
 }
 
 // checkNtfyTrafficThreshold computes total panel traffic over the trailing

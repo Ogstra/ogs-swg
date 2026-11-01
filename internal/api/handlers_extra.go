@@ -457,8 +457,16 @@ func (s *Server) handleGetSystemStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) checkService(ctx context.Context, service string) bool {
+	active, _ := s.serviceActive(ctx, service)
+	return active
+}
+
+// serviceActive reports whether the service is active. known is false when the
+// check itself failed (timeout, D-Bus or systemd-run error): that says nothing
+// about the service, so callers that raise alerts must not read it as "down".
+func (s *Server) serviceActive(ctx context.Context, service string) (active, known bool) {
 	if s.executor == nil {
-		return false
+		return false, false
 	}
 
 	// Detach service checks from request cancellation so transient client/network
@@ -470,12 +478,12 @@ func (s *Server) checkService(ctx context.Context, service string) bool {
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			log.Printf("checkService: timeout/canceled checking %s: %v", service, err)
-			return false
+			return false, false
 		}
 		log.Printf("checkService: failed to check %s: %v", service, err)
-		return false
+		return false, false
 	}
-	return active
+	return active, true
 }
 
 func (s *Server) requireAnyService(w http.ResponseWriter) bool {
