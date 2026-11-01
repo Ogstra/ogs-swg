@@ -607,13 +607,13 @@ export default function Subscriptions() {
         }
     }
 
-    const copyLink = async (token: string) => {
+    const copyLink = async (token: string, format?: 'clash' | 'singbox') => {
         if (!canWriteUsers) {
             toastError('No write permission for subscriptions')
             return
         }
         try {
-            const link = subLink(token)
+            const link = format ? `${subLink(token)}?format=${format}` : subLink(token)
             if (navigator.clipboard?.writeText) {
                 await navigator.clipboard.writeText(link)
             } else {
@@ -627,7 +627,7 @@ export default function Subscriptions() {
                 document.execCommand('copy')
                 document.body.removeChild(textarea)
             }
-            success('Link copied to clipboard')
+            success(format ? `${format === 'clash' ? 'Clash' : 'sing-box'} link copied to clipboard` : 'Link copied to clipboard')
         } catch {
             toastError('Failed to copy link')
         }
@@ -983,6 +983,8 @@ export default function Subscriptions() {
                                         items={[
                                             ...(sub.token ? [
                                                 { label: 'Copy link', icon: <Copy size={16} />, onClick: () => copyLink(sub.token!), disabled: !canWriteUsers },
+                                                { label: 'Copy Clash link', icon: <Copy size={16} />, onClick: () => copyLink(sub.token!, 'clash'), disabled: !canWriteUsers },
+                                                { label: 'Copy sing-box link', icon: <Copy size={16} />, onClick: () => copyLink(sub.token!, 'singbox'), disabled: !canWriteUsers },
                                                 { label: 'QR code', icon: <QrCodeIcon size={16} />, onClick: () => openQr(sub), disabled: !canWriteUsers },
                                             ] : []),
                                             { label: 'Devices', icon: <MonitorSmartphone size={16} />, onClick: () => setDevicesSub(sub) },
