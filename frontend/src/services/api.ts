@@ -359,6 +359,7 @@ export interface Subscription {
     happ_direct_sites?: string;
     device_limit?: number;
     device_count?: number;
+    effective_device_limit?: number;
     quota_limit: number;
     quota_period: string;
     used_bytes: number;

@@ -108,7 +108,7 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
         <Modal
             isOpen
             onClose={onClose}
-            title={`Devices · ${sub.name}${sub.device_limit ? ` (${devices.length}/${sub.device_limit})` : ''}`}
+            title={`Devices · ${sub.name}${sub.effective_device_limit ? ` (${devices.length}/${sub.effective_device_limit})` : ''}`}
             size="lg"
             footer={
                 <div className="flex w-full items-center justify-between gap-3">

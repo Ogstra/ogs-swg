@@ -753,6 +753,17 @@ export default function Subscriptions() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
+    const deviceCountLabel = (sub: Subscription) => {
+        const limit = sub.effective_device_limit ?? 0
+        if (limit <= 0) return null
+        const count = sub.device_count ?? 0
+        return (
+            <div className={`text-xs ${count >= limit ? 'text-amber-400' : 'text-slate-400'}`}>
+                {count}/{limit} devices
+            </div>
+        )
+    }
+
     const displaySubName = (sub: Subscription) => (sub.alias?.trim() ? sub.alias.trim() : sub.name)
 
     const subLink = (token: string) => {
@@ -921,6 +932,7 @@ export default function Subscriptions() {
                                         {sub.alias?.trim() ? (
                                             <div className="truncate text-xs text-slate-400" title={sub.alias}>{sub.alias}</div>
                                         ) : null}
+                                        {deviceCountLabel(sub)}
                                     </td>
                                     <td className="px-4 py-3">
                                         {(() => {
@@ -975,6 +987,7 @@ export default function Subscriptions() {
                                     {sub.alias?.trim() ? (
                                         <p className="truncate text-xs text-slate-400">{sub.alias}</p>
                                     ) : null}
+                                    {deviceCountLabel(sub)}
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1.5">
                                     <ActionIconButton onClick={() => openEdit(sub)} title="Edit" aria-label="Edit" tone="primary" disabled={!canWriteUsers}>

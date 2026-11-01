@@ -45,6 +45,7 @@ type SubscriptionResponse struct {
 	HappDirectSites            string                       `json:"happ_direct_sites"`
 	DeviceLimit                int64                        `json:"device_limit"`
 	DeviceCount                int64                        `json:"device_count"`
+	EffectiveDeviceLimit       int64                        `json:"effective_device_limit"`
 	LastRequestAt              *int64                       `json:"last_request_at"`
 	CreatedAt                  int64                        `json:"created_at"`
 	UpdatedAt                  int64                        `json:"updated_at"`
@@ -439,6 +440,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			HappColorProfile:           sub.HappColorProfile,
 			HappDirectSites:            sub.HappDirectSites,
 			DeviceLimit:                deviceLimits[sub.ID],
+			EffectiveDeviceLimit:       s.limitOrDefault(deviceLimits[sub.ID]),
 			DeviceCount:                deviceCounts[sub.ID],
 			LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
@@ -630,6 +632,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		HappColorProfile:           sub.HappColorProfile,
 		HappDirectSites:            sub.HappDirectSites,
 		DeviceLimit:                deviceLimit,
+		EffectiveDeviceLimit:       s.limitOrDefault(deviceLimit),
 		DeviceCount:                deviceCount,
 		LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,

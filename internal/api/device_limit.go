@@ -33,12 +33,18 @@ func (n *deviceLimitNotices) shouldNotify(key string, now time.Time) bool {
 	return true
 }
 
-// effectiveDeviceLimit is the subscription's own limit, else the panel default.
-func (s *Server) effectiveDeviceLimit(ctx context.Context, sub store.GetSubscriptionByTokenRow) int64 {
-	if limit, err := s.store.GetSubscriptionDeviceLimit(ctx, sub.ID); err == nil && limit > 0 {
-		return limit
+// limitOrDefault returns own when set, else the panel default.
+func (s *Server) limitOrDefault(own int64) int64 {
+	if own > 0 {
+		return own
 	}
 	return int64(s.config.SubscriptionProtection.DefaultDeviceLimit)
+}
+
+// effectiveDeviceLimit is the subscription's own limit, else the panel default.
+func (s *Server) effectiveDeviceLimit(ctx context.Context, sub store.GetSubscriptionByTokenRow) int64 {
+	own, _ := s.store.GetSubscriptionDeviceLimit(ctx, sub.ID)
+	return s.limitOrDefault(own)
 }
 
 // checkDeviceLimit decides whether this request may be served. A device that
