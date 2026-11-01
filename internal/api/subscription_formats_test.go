@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
 func sampleShareLinks() []string {
@@ -48,7 +51,7 @@ func TestParseShareLink_RoundTripsEverySupportedScheme(t *testing.T) {
 }
 
 func TestBuildClashConfig_MapsProtocolsAndSkipsNaive(t *testing.T) {
-	out := string(buildClashConfig(sampleShareLinks()))
+	out := string(buildClashConfig(sampleShareLinks(), nil))
 	for _, want := range []string{
 		`"type":"vless"`, `"reality-opts":{"public-key":"PUBKEY","short-id":"ab12"}`, `"flow":"xtls-rprx-vision"`,
 		`"type":"vmess"`, `"ws-opts"`, `"grpc-service-name":"svc"`, `"type":"hysteria2"`, `"obfs-password":"obfs-pass"`,
@@ -68,7 +71,7 @@ func TestBuildSingboxConfig_IsValidJSONWithOutbounds(t *testing.T) {
 		Outbounds []map[string]interface{} `json:"outbounds"`
 		Route     map[string]interface{}   `json:"route"`
 	}
-	if err := json.Unmarshal(buildSingboxConfig(sampleShareLinks()), &cfg); err != nil {
+	if err := json.Unmarshal(buildSingboxConfig(sampleShareLinks(), nil), &cfg); err != nil {
 		t.Fatal(err)
 	}
 	types := map[string]int{}
@@ -93,7 +96,7 @@ func TestBuildFormats_DuplicateNamesStayUnique(t *testing.T) {
 	var cfg struct {
 		Outbounds []map[string]interface{} `json:"outbounds"`
 	}
-	if err := json.Unmarshal(buildSingboxConfig([]string{link, link}), &cfg); err != nil {
+	if err := json.Unmarshal(buildSingboxConfig([]string{link, link}, nil), &cfg); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
@@ -134,5 +137,54 @@ func TestPublicSub_FormatParameterSwitchesTheBody(t *testing.T) {
 	}
 	if unknown := get("?format=nonsense"); unknown.Body.String() != plain.Body.String() {
 		t.Fatal("an unknown format must fall back to the default body")
+	}
+}
+
+func TestDirectSites_BecomeRulesInBothFormats(t *testing.T) {
+	sites := []string{"panel.example.test", "domain:bank.example.test", "full:exact.example.test", "10.0.0.0/8", "192.0.2.7", "geosite:cn", "*.wild.example.test"}
+
+	clash := string(buildClashConfig(sampleShareLinks(), sites))
+	for _, want := range []string{
+		"- DOMAIN-SUFFIX,panel.example.test,DIRECT", "- DOMAIN-SUFFIX,bank.example.test,DIRECT", "- DOMAIN,exact.example.test,DIRECT",
+		"- IP-CIDR,10.0.0.0/8,DIRECT,no-resolve", "- IP-CIDR,192.0.2.7/32,DIRECT,no-resolve", "- GEOSITE,cn,DIRECT", "- DOMAIN-SUFFIX,wild.example.test,DIRECT",
+	} {
+		if !strings.Contains(clash, want) {
+			t.Fatalf("clash rules miss %q:\n%s", want, clash)
+		}
+	}
+	if strings.Index(clash, "DOMAIN-SUFFIX,panel.example.test") > strings.Index(clash, "MATCH,Proxy") {
+		t.Fatal("direct rules must come before the catch-all")
+	}
+
+	var cfg struct {
+		Route struct {
+			Rules []map[string]interface{} `json:"rules"`
+		} `json:"route"`
+	}
+	if err := json.Unmarshal(buildSingboxConfig(sampleShareLinks(), sites), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Route.Rules) != 3 {
+		t.Fatalf("sing-box rules = %v; want domain, domain_suffix and ip_cidr rules (geosite skipped)", cfg.Route.Rules)
+	}
+	for _, rule := range cfg.Route.Rules {
+		if rule["outbound"] != "direct" {
+			t.Fatalf("rule %v does not go direct", rule)
+		}
+	}
+}
+
+func TestPublicSub_FormatsCarryDirectSitesForNonHappClients(t *testing.T) {
+	server, st := newSubscriptionGoldenServer(t)
+	if err := st.UpdateSubscriptionHappConfig(context.Background(), core.SubscriptionHappConfig{DirectSites: []string{"panel.example.test"}}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/s/"+migrationTestSrcToken+"?format=clash", nil)
+	req.SetPathValue("token", migrationTestSrcToken)
+	req.Header.Set("User-Agent", "ClashMeta/1.18")
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	if !strings.Contains(rec.Body.String(), "DOMAIN-SUFFIX,panel.example.test,DIRECT") {
+		t.Fatalf("clash body has no direct rule:\n%s", rec.Body.String())
 	}
 }

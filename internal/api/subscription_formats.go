@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -353,7 +354,7 @@ func firstNonEmpty(values ...string) string {
 
 // buildClashConfig renders a mihomo-compatible profile. Entries are JSON flow
 // mappings, which are valid YAML and need no YAML dependency.
-func buildClashConfig(links []string) []byte {
+func buildClashConfig(links []string, directSites []string) []byte {
 	var sb strings.Builder
 	sb.WriteString("mixed-port: 7890\nallow-lan: false\nmode: rule\nlog-level: info\nproxies:\n")
 	var names []string
@@ -373,9 +374,21 @@ func buildClashConfig(links []string) []byte {
 		sb.WriteString("proxy-groups: []\nrules:\n  - MATCH,DIRECT\n")
 		return []byte(sb.String())
 	}
+	var rules []string
+	for _, entry := range directSites {
+		if rule, ok := parseDirectSite(entry); ok {
+			if line, ok := rule.clash(); ok {
+				rules = append(rules, line)
+			}
+		}
+	}
 	selectGroup, _ := json.Marshal(kv{"name": "Proxy", "type": "select", "proxies": append([]string{"Auto"}, append(names, "DIRECT")...)})
 	autoGroup, _ := json.Marshal(kv{"name": "Auto", "type": "url-test", "proxies": names, "url": "https://www.gstatic.com/generate_204", "interval": 300})
-	sb.WriteString("proxy-groups:\n  - " + string(selectGroup) + "\n  - " + string(autoGroup) + "\nrules:\n  - MATCH,Proxy\n")
+	sb.WriteString("proxy-groups:\n  - " + string(selectGroup) + "\n  - " + string(autoGroup) + "\nrules:\n")
+	for _, line := range rules {
+		sb.WriteString("  - " + line + "\n")
+	}
+	sb.WriteString("  - MATCH,Proxy\n")
 	return []byte(sb.String())
 }
 
@@ -468,7 +481,7 @@ func singboxOutbound(n proxyNode) (kv, bool) {
 	return o, true
 }
 
-func buildSingboxConfig(links []string) []byte {
+func buildSingboxConfig(links []string, directSites []string) []byte {
 	outbounds := []kv{}
 	var tags []string
 	for _, node := range uniqueNodeNames(parseShareLinks(links)) {
@@ -490,22 +503,155 @@ func buildSingboxConfig(links []string) []byte {
 	if len(tags) > 0 {
 		final = "proxy"
 	}
+	route := kv{"final": final}
+	if len(tags) > 0 {
+		if rules := singboxDirectRules(directSites); len(rules) > 0 {
+			route["rules"] = rules
+		}
+	}
 	raw, _ := json.MarshalIndent(kv{
 		"log":       kv{"level": "info"},
 		"outbounds": all,
-		"route":     kv{"final": final},
+		"route":     route,
 	}, "", "  ")
 	return raw
 }
 
 // formattedSubscriptionBody returns the converted body and its content type
 // for an explicit ?format=, or ok=false to keep the default response.
-func formattedSubscriptionBody(format string, links []string) (body []byte, contentType string, ok bool) {
+func formattedSubscriptionBody(format string, links []string, directSites []string) (body []byte, contentType string, ok bool) {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case subFormatClash:
-		return buildClashConfig(links), "text/yaml; charset=utf-8", true
+		return buildClashConfig(links, directSites), "text/yaml; charset=utf-8", true
 	case subFormatSingbox:
-		return buildSingboxConfig(links), "application/json; charset=utf-8", true
+		return buildSingboxConfig(links, directSites), "application/json; charset=utf-8", true
 	}
 	return nil, "", false
+}
+
+func isSubscriptionFormat(format string) bool {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case subFormatClash, subFormatSingbox:
+		return true
+	}
+	return false
+}
+
+// mergeDirectSiteLists flattens newline or comma separated lists into one
+// de-duplicated list, keeping first-seen order.
+func mergeDirectSiteLists(raws ...string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, raw := range raws {
+		for _, entry := range strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' || r == ',' }) {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			if _, ok := seen[entry]; ok {
+				continue
+			}
+			seen[entry] = struct{}{}
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
+type directSiteKind int
+
+const (
+	directSuffix directSiteKind = iota
+	directFull
+	directCIDR
+	directGeosite
+	directGeoip
+)
+
+type directSite struct {
+	kind  directSiteKind
+	value string
+}
+
+// parseDirectSite reads a direct-site entry: a bare domain (matches subdomains
+// too), domain:/full:/geosite:/geoip: prefixes, or an IP / CIDR.
+func parseDirectSite(entry string) (directSite, bool) {
+	e := strings.ToLower(strings.TrimSpace(entry))
+	switch {
+	case e == "":
+		return directSite{}, false
+	case strings.HasPrefix(e, "geosite:"):
+		return directSite{directGeosite, strings.TrimPrefix(e, "geosite:")}, true
+	case strings.HasPrefix(e, "geoip:"):
+		return directSite{directGeoip, strings.TrimPrefix(e, "geoip:")}, true
+	case strings.HasPrefix(e, "full:"):
+		return directSite{directFull, strings.TrimPrefix(e, "full:")}, true
+	case strings.HasPrefix(e, "domain:"):
+		e = strings.TrimPrefix(e, "domain:")
+	}
+	if _, network, err := net.ParseCIDR(e); err == nil {
+		return directSite{directCIDR, network.String()}, true
+	}
+	if ip := net.ParseIP(e); ip != nil {
+		if ip.To4() != nil {
+			return directSite{directCIDR, e + "/32"}, true
+		}
+		return directSite{directCIDR, e + "/128"}, true
+	}
+	e = strings.TrimPrefix(e, "*.")
+	e = strings.TrimPrefix(e, ".")
+	if e == "" {
+		return directSite{}, false
+	}
+	return directSite{directSuffix, e}, true
+}
+
+func (d directSite) clash() (string, bool) {
+	switch d.kind {
+	case directSuffix:
+		return "DOMAIN-SUFFIX," + d.value + ",DIRECT", true
+	case directFull:
+		return "DOMAIN," + d.value + ",DIRECT", true
+	case directCIDR:
+		if strings.Contains(d.value, ":") {
+			return "IP-CIDR6," + d.value + ",DIRECT,no-resolve", true
+		}
+		return "IP-CIDR," + d.value + ",DIRECT,no-resolve", true
+	case directGeosite:
+		return "GEOSITE," + d.value + ",DIRECT", true
+	case directGeoip:
+		return "GEOIP," + d.value + ",DIRECT", true
+	}
+	return "", false
+}
+
+// singboxDirectRules groups the entries by match type. geosite/geoip need rule
+// sets in current sing-box, so they are left out.
+func singboxDirectRules(entries []string) []kv {
+	var suffixes, domains, cidrs []string
+	for _, entry := range entries {
+		site, ok := parseDirectSite(entry)
+		if !ok {
+			continue
+		}
+		switch site.kind {
+		case directSuffix:
+			suffixes = append(suffixes, site.value)
+		case directFull:
+			domains = append(domains, site.value)
+		case directCIDR:
+			cidrs = append(cidrs, site.value)
+		}
+	}
+	var rules []kv
+	if len(domains) > 0 {
+		rules = append(rules, kv{"domain": domains, "outbound": "direct"})
+	}
+	if len(suffixes) > 0 {
+		rules = append(rules, kv{"domain_suffix": suffixes, "outbound": "direct"})
+	}
+	if len(cidrs) > 0 {
+		rules = append(rules, kv{"ip_cidr": cidrs, "outbound": "direct"})
+	}
+	return rules
 }

@@ -213,22 +213,13 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	// Collect DirectSites from global config and per-sub field.
 	var mergedDirectSites []string
 	if happParams != nil && strings.TrimSpace(routingProfileJSON) != happRoutingOffLink {
-		seen := make(map[string]struct{})
-		addSites := func(raw string) {
-			for _, s := range strings.FieldsFunc(raw, func(r rune) bool { return r == '\n' || r == ',' }) {
-				s = strings.TrimSpace(s)
-				if s == "" {
-					continue
-				}
-				if _, ok := seen[s]; !ok {
-					seen[s] = struct{}{}
-					mergedDirectSites = append(mergedDirectSites, s)
-				}
-			}
-		}
-		globalCfg := loadGlobalHappCfg()
-		addSites(strings.Join(globalCfg.DirectSites, "\n"))
-		addSites(contentSub.HappDirectSites)
+		mergedDirectSites = mergeDirectSiteLists(strings.Join(loadGlobalHappCfg().DirectSites, "\n"), contentSub.HappDirectSites)
+	}
+	// Clash and sing-box responses carry the same direct sites as rules, for
+	// any client rather than only Happ.
+	var formatDirectSites []string
+	if isSubscriptionFormat(r.URL.Query().Get("format")) {
+		formatDirectSites = mergeDirectSiteLists(strings.Join(loadGlobalHappCfg().DirectSites, "\n"), contentSub.HappDirectSites)
 	}
 
 	cacheKey := "sub:" + contentToken
@@ -252,7 +243,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			s.recordSubscriptionRequest(r, recordSubID, recordUsers, true, migratedFromSubID)
 			s.observeHWIDMigrationArrival(r, sub)
 			s.observeSubscriptionHWID(r, sub, users, deviceAdmitted)
-			c.Body = applySubscriptionFormat(w, r, c)
+			c.Body = applySubscriptionFormat(w, r, c, formatDirectSites)
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 			return
 		}
@@ -297,14 +288,14 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	s.recordSubscriptionRequest(r, recordSubID, recordUsers, false, migratedFromSubID)
 	s.observeHWIDMigrationArrival(r, sub)
 	s.observeSubscriptionHWID(r, sub, users, deviceAdmitted)
-	c.Body = applySubscriptionFormat(w, r, c)
+	c.Body = applySubscriptionFormat(w, r, c, formatDirectSites)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 }
 
 // applySubscriptionFormat swaps the body for the ?format= conversion when one
 // is requested. The cached entry stays in the default format.
-func applySubscriptionFormat(w http.ResponseWriter, r *http.Request, c cachedSub) []byte {
-	if body, contentType, ok := formattedSubscriptionBody(r.URL.Query().Get("format"), c.Links); ok {
+func applySubscriptionFormat(w http.ResponseWriter, r *http.Request, c cachedSub, directSites []string) []byte {
+	if body, contentType, ok := formattedSubscriptionBody(r.URL.Query().Get("format"), c.Links, directSites); ok {
 		w.Header().Set("Content-Type", contentType)
 		return body
 	}
