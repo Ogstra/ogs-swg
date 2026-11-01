@@ -402,6 +402,7 @@ func (s *Store) initSchema() error {
 		flow TEXT NOT NULL DEFAULT '',
 		quota_limit INTEGER NOT NULL DEFAULT 0,
 		quota_period TEXT NOT NULL DEFAULT 'monthly',
+		route_tag_ids_json TEXT NOT NULL DEFAULT '[]',
 		created_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 	);
 	`
@@ -425,6 +426,7 @@ func (s *Store) initSchema() error {
 	// Upgrade path: add can_read_logs_censored to existing panel_users tables.
 	// Silently ignored if column already exists (SQLite returns "duplicate column name" error).
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN can_read_logs_censored INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE user_templates ADD COLUMN route_tag_ids_json TEXT NOT NULL DEFAULT '[]';")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN tokens_valid_after INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN totp_secret TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0;")
@@ -824,7 +826,11 @@ func (s *Store) UpdateUserRouteTag(tag UserRouteTag) error {
 }
 
 func (s *Store) DeleteUserRouteTag(id int64) error {
-	return s.Queries.DeleteUserRouteTag(context.Background(), id)
+	if err := s.Queries.DeleteUserRouteTag(context.Background(), id); err != nil {
+		return err
+	}
+	// A deleted tag must not linger in the user templates that listed it.
+	return s.removeRouteTagFromTemplates(context.Background(), id)
 }
 
 func (s *Store) GetUserRouteTag(id int64) (*UserRouteTag, error) {

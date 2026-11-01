@@ -46,8 +46,24 @@ func decodeUserTemplate(r *http.Request) (core.UserTemplate, string) {
 	return t, ""
 }
 
+// checkTemplateRouteTags rejects ids that are not existing route tags.
+func (s *Server) checkTemplateRouteTags(t *core.UserTemplate) string {
+	if t.RouteTagIDs == nil {
+		t.RouteTagIDs = []int64{}
+	}
+	for _, id := range t.RouteTagIDs {
+		if _, err := s.store.GetUserRouteTag(id); err != nil {
+			return "Unknown route tag " + strconv.FormatInt(id, 10)
+		}
+	}
+	return ""
+}
+
 func (s *Server) handleCreateUserTemplate(w http.ResponseWriter, r *http.Request) {
 	t, problem := decodeUserTemplate(r)
+	if problem == "" {
+		problem = s.checkTemplateRouteTags(&t)
+	}
 	if problem != "" {
 		writeErr(w, http.StatusBadRequest, problem)
 		return
@@ -72,6 +88,9 @@ func (s *Server) handleUpdateUserTemplate(w http.ResponseWriter, r *http.Request
 		return
 	}
 	t, problem := decodeUserTemplate(r)
+	if problem == "" {
+		problem = s.checkTemplateRouteTags(&t)
+	}
 	if problem != "" {
 		writeErr(w, http.StatusBadRequest, problem)
 		return

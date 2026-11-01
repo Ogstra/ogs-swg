@@ -858,9 +858,9 @@ export default function Subscriptions() {
                     onChange={e => setUpdateAlwaysValue(e.target.checked)}
                     className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0"
                 />
-                <div className="flex-1 text-sm font-medium text-slate-200"><span title="Not a standard header. Clients such as Happ and v2RayTun honor it; others ignore it.">update-always*</span></div>
+                <div className="flex-1 text-sm font-medium text-slate-200"><span title="Not a standard header.">update-always*</span></div>
             </label>
-            <p className="text-xs text-slate-400">* Not a standard header. Clients such as Happ and v2RayTun honor it; others ignore it.</p>
+            <p className="text-xs text-slate-400">* Not a standard header.</p>
         </div>
     )
 
