@@ -180,3 +180,77 @@ test('moveItem reorders without mutating and ignores bad indexes', () => {
 test('pasted list text is split on commas, spaces and new lines', () => {
     assert.deepEqual(m.splitListInput('a.test, b.test\nc.test  d.test,,'), ['a.test', 'b.test', 'c.test', 'd.test'])
 })
+
+// ---- outbounds ----
+
+const outboundOut = join(outDir, 'outboundModel.mjs')
+execFileSync(join(root, 'node_modules', '.bin', 'esbuild'), [
+    join(root, 'src/components/singbox/outboundModel.ts'),
+    '--bundle', '--format=esm', '--platform=node', `--outfile=${outboundOut}`, '--log-level=error',
+])
+const o = await import(pathToFileURL(outboundOut).href)
+
+test('groups serialize and read back', () => {
+    const selector = { type: 'selector', tag: 'pick', outbounds: ['a', 'b'], default: 'b' }
+    const draft = o.parseOutbound(selector)
+    assert.equal(draft.kind, 'selector')
+    assert.deepEqual(o.serializeOutbound(draft), selector)
+
+    const urltest = { type: 'urltest', tag: 'auto', outbounds: ['a'], url: 'https://example.test/204', interval: '3m', tolerance: 50 }
+    assert.deepEqual(o.serializeOutbound(o.parseOutbound(urltest)), urltest)
+})
+
+test('proxy outbounds serialize with numeric ports and optional auth', () => {
+    const entry = { type: 'socks', tag: 'upstream', server: 'proxy.example.test', server_port: 1080, username: 'u', password: 'p' }
+    assert.deepEqual(o.serializeOutbound(o.parseOutbound(entry)), entry)
+    const draft = { ...o.emptyOutboundDraft('http'), tag: 'h', server: 'proxy.example.test', port: '8080' }
+    assert.deepEqual(o.serializeOutbound(draft), { type: 'http', tag: 'h', server: 'proxy.example.test', server_port: 8080 })
+})
+
+test('a converted link keeps its fields and takes the chosen tag', () => {
+    const draft = { ...o.emptyOutboundDraft('link'), tag: 'my-vless', converted: { type: 'vless', tag: 'from-link', server: 's.example.test', server_port: 443, uuid: 'x' } }
+    assert.deepEqual(o.serializeOutbound(draft), { type: 'vless', tag: 'my-vless', server: 's.example.test', server_port: 443, uuid: 'x' })
+})
+
+test('types the editor does not manage are not parsed', () => {
+    for (const entry of [{ type: 'direct', tag: 'direct' }, { type: 'vless', tag: 'x', server: 's', server_port: 1 }, { type: 'selector', tag: 'g', outbounds: [1] }, null, 'x']) {
+        assert.equal(o.parseOutbound(entry), null)
+    }
+})
+
+test('outbound validation', () => {
+    const group = (patch = {}) => ({ ...o.emptyOutboundDraft('selector'), tag: 'g', members: ['a'], ...patch })
+    assert.equal(o.validateOutbound(group(), ['a']), '')
+    assert.match(o.validateOutbound(group({ tag: '' }), []), /Tag is required/)
+    assert.match(o.validateOutbound(group({ tag: 'has space' }), []), /spaces/)
+    assert.match(o.validateOutbound(group(), ['g']), /already uses/)
+    assert.match(o.validateOutbound(group({ members: [] }), []), /at least one/)
+    assert.match(o.validateOutbound(group({ members: ['g'] }), []), /itself/)
+    assert.match(o.validateOutbound(group({ defaultMember: 'zzz' }), []), /default/)
+    assert.match(o.validateOutbound({ ...group({ kind: 'urltest' }), interval: 'soon' }, []), /Interval/)
+    assert.match(o.validateOutbound({ ...group({ kind: 'urltest' }), tolerance: 'x' }, []), /Tolerance/)
+    assert.match(o.validateOutbound({ ...o.emptyOutboundDraft('socks'), tag: 's' }, []), /Server is required/)
+    assert.match(o.validateOutbound({ ...o.emptyOutboundDraft('socks'), tag: 's', server: 'h', port: '70000' }, []), /Port/)
+    assert.match(o.validateOutbound({ ...o.emptyOutboundDraft('link'), tag: 'l' }, []), /convert/)
+})
+
+test('references show everything that still points at an outbound', () => {
+    const config = {
+        outbounds: [
+            { type: 'direct', tag: 'direct' },
+            { type: 'selector', tag: 'pick', outbounds: ['direct', 'up'] },
+            { type: 'vless', tag: 'chained', detour: 'up' },
+            { type: 'socks', tag: 'up', server: 's', server_port: 1 },
+        ],
+        route: { final: 'up', rules: [{ domain: ['a'], outbound: 'direct' }, { domain: ['b'], outbound: 'up' }], rule_set: [{ tag: 'rs', download_detour: 'up' }] },
+    }
+    const wheres = o.outboundReferences(config, 'up').map(ref => ref.where)
+    assert.deepEqual(wheres, ['the default route (final)', 'the group "pick"', 'the outbound "chained" (detour)', 'rule 2', 'the rule set "rs" (download)'])
+    assert.deepEqual(o.outboundReferences(config, 'unused'), [])
+})
+
+test('unique tags get a numeric suffix', () => {
+    assert.equal(o.uniqueTag('new', ['a']), 'new')
+    assert.equal(o.uniqueTag('a', ['a', 'a-2']), 'a-3')
+    assert.equal(o.uniqueTag('  ', []), 'outbound')
+})

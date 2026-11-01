@@ -5,6 +5,8 @@ import type { SingboxOutboundDomainStrategyUpdate, SingboxOutboundView } from '.
 import InboundList from './singbox/InboundList'
 import { RuleSetsPanel } from './singbox/RuleSetsPanel'
 import { RoutingRulesPanel } from './singbox/RoutingRulesPanel'
+import { OutboundEditorModal } from './singbox/OutboundEditorModal'
+import { outboundReferences } from './singbox/outboundModel'
 import { Card } from './ui/Card'
 import { RawEditorPanel } from './raw/RawEditorPanel'
 import { useAuth } from '../context/AuthContext'
@@ -232,6 +234,7 @@ export default function SingboxConfigEditor() {
                                     canWrite={canWriteConfig}
                                     reload={loadOutbounds}
                                     save={saveOutbounds}
+                                    onChanged={() => { void loadOutbounds(); setRoutingRefresh(value => value + 1) }}
                                 />
                             )}
                         </div>
@@ -259,6 +262,7 @@ function OutboundsTab({
     canWrite,
     reload,
     save,
+    onChanged,
 }: {
     outbounds: SingboxOutboundView[]
     setOutbounds: React.Dispatch<React.SetStateAction<SingboxOutboundView[]>>
@@ -267,7 +271,42 @@ function OutboundsTab({
     canWrite: boolean
     reload: () => void
     save: () => void
+    onChanged: () => void
 }) {
+    const { success, error: toastError } = useToast()
+    const [editor, setEditor] = useState<{ tag: string | null } | null>(null)
+    const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+    const MANAGED_TYPES = ['selector', 'urltest', 'socks', 'http']
+
+    const requestDelete = async (tag: string) => {
+        try {
+            const parsed = JSON.parse(await api.getSingboxConfig())
+            const refs = outboundReferences(parsed, tag)
+            if (refs.length > 0) {
+                toastError(`"${tag}" is still used by ${refs.slice(0, 3).map(ref => ref.where).join(', ')}${refs.length > 3 ? ` and ${refs.length - 3} more` : ''}.`)
+                return
+            }
+            setDeleteTarget(tag)
+        } catch {
+            toastError('Failed to check where this outbound is used')
+        }
+    }
+
+    const confirmDelete = async () => {
+        const tag = deleteTarget
+        if (!tag) return
+        try {
+            const parsed = JSON.parse(await api.getSingboxConfig())
+            parsed.outbounds = (Array.isArray(parsed.outbounds) ? parsed.outbounds : []).filter((entry: { tag?: unknown }) => entry?.tag !== tag)
+            await api.updateSingboxConfig(JSON.stringify(parsed, null, 2))
+            success('Outbound deleted')
+            setDeleteTarget(null)
+            onChanged()
+        } catch (err) {
+            toastError(err instanceof Error ? `Failed to delete: ${err.message}` : 'Failed to delete the outbound')
+        }
+    }
+
     const outboundTypeOptions = [
         'direct',
         'block',
@@ -306,6 +345,13 @@ function OutboundsTab({
                     disabled={loading}
                 >
                     {loading ? 'Refreshing...' : 'Refresh'}
+                </button>
+                <button
+                    onClick={() => setEditor({ tag: null })}
+                    disabled={!canWrite}
+                    className="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-sm font-medium disabled:opacity-60"
+                >
+                    Add outbound
                 </button>
                 <button
                     onClick={save}
@@ -388,9 +434,43 @@ function OutboundsTab({
                                 `domain_resolver` present: {outbound.domain_resolver}. Prefer this over `domain_strategy` in newer Sing-box configs.
                             </p>
                         )}
+                        {outbound.tag && (
+                            <div className="flex flex-wrap justify-end gap-2">
+                                {MANAGED_TYPES.includes(outbound.type || '') && (
+                                    <button
+                                        onClick={() => setEditor({ tag: outbound.tag })}
+                                        disabled={!canWrite}
+                                        className="px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 hover:text-white transition-colors text-xs font-medium disabled:opacity-60"
+                                    >
+                                        Edit
+                                    </button>
+                                )}
+                                {!['direct', 'block', 'dns'].includes(outbound.type || '') && (
+                                    <button
+                                        onClick={() => requestDelete(outbound.tag)}
+                                        disabled={!canWrite}
+                                        className="px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 hover:bg-red-500/20 transition-colors text-xs font-medium disabled:opacity-60"
+                                    >
+                                        Delete
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </Card>
                 ))}
             </div>
+            {editor && (
+                <OutboundEditorModal editTag={editor.tag} onClose={() => setEditor(null)} onSaved={onChanged} />
+            )}
+            <ConfirmModal
+                isOpen={deleteTarget !== null}
+                onClose={() => setDeleteTarget(null)}
+                onConfirm={confirmDelete}
+                title="Delete outbound?"
+                message={`"${deleteTarget ?? ''}" will be removed from the config. Nothing uses it.`}
+                confirmLabel="Delete"
+                confirmTone="danger"
+            />
         </div>
     )
 }

@@ -807,6 +807,8 @@ export const api = {
         request<any[]>('/api/singbox/route/rules', { errorMsg: 'Failed to fetch route rules' }),
     upsertSingboxRouteRules: async (rules: any[]): Promise<void> =>
         request('/api/singbox/route/rules/upsert', { method: 'POST', json: rules, parse: 'none', errorMsg: 'Failed to upsert route rules' }),
+    outboundFromLink: async (link: string): Promise<Record<string, unknown>> =>
+        request<Record<string, unknown>>('/api/singbox/outbounds/from-link', { method: 'POST', json: { link }, errorMsg: 'Failed to read the share link' }),
     getSingboxConfig: async (): Promise<string> =>
         request<string>('/api/singbox/config', { parse: 'text', errorMsg: 'Failed to fetch Sing-box config' }),
     updateSingboxConfig: async (config: string): Promise<void> => {
