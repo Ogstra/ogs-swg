@@ -271,6 +271,7 @@ func (s *Server) Routes() *http.ServeMux {
 
 	// Auth: any authenticated user can change their own password/username
 	protected.HandleFunc("PUT /api/auth/password", s.secure(s.AuditLogger("auth", "update", s.handleUpdatePassword)))
+	protected.HandleFunc("GET /api/auth/2fa", s.secure(s.handleTwoFactorStatus))
 	protected.HandleFunc("POST /api/auth/2fa/setup", s.secure(s.handleTwoFactorSetup))
 	protected.HandleFunc("POST /api/auth/2fa/enable", s.secure(s.handleTwoFactorEnable))
 	protected.HandleFunc("POST /api/auth/2fa/disable", s.secure(s.handleTwoFactorDisable))

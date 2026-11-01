@@ -4,6 +4,7 @@ export interface PanelUserInfo {
     username: string;
     permissions: PanelUserPermissions;
     created_at: number;
+    two_factor_enabled?: boolean;
 }
 
 export interface CreatePanelUserRequest {
@@ -950,6 +951,16 @@ export const api = {
         request('/api/panel-users/username', { method: 'PUT', json: { username, new_username }, parse: 'none', errorMsg: 'Failed to update username' }),
     updatePanelUserPassword: async (username: string, new_password: string): Promise<void> =>
         request('/api/panel-users/password', { method: 'PUT', json: { username, new_password }, parse: 'none', errorMsg: 'Failed to update password' }),
+    resetPanelUserTwoFactor: async (username: string): Promise<void> =>
+        request(`/api/panel-users/2fa?username=${encodeURIComponent(username)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to reset two-factor authentication' }),
+    getTwoFactorStatus: async (): Promise<{ enabled: boolean }> =>
+        request<{ enabled: boolean }>('/api/auth/2fa', { errorMsg: 'Failed to load two-factor status' }),
+    setupTwoFactor: async (): Promise<{ secret: string; uri: string }> =>
+        request<{ secret: string; uri: string }>('/api/auth/2fa/setup', { method: 'POST', errorMsg: 'Failed to start two-factor setup' }),
+    enableTwoFactor: async (code: string): Promise<{ recovery_codes: string[] }> =>
+        request<{ recovery_codes: string[] }>('/api/auth/2fa/enable', { method: 'POST', json: { code }, errorMsg: 'Failed to enable two-factor authentication' }),
+    disableTwoFactor: async (currentPassword: string, code: string): Promise<void> =>
+        request('/api/auth/2fa/disable', { method: 'POST', json: { current_password: currentPassword, code }, parse: 'none', errorMsg: 'Failed to disable two-factor authentication' }),
     deletePanelUser: async (username: string): Promise<void> =>
         request(`/api/panel-users?username=${encodeURIComponent(username)}`, { method: 'DELETE', parse: 'none', errorMsg: 'Failed to delete panel user' }),
 

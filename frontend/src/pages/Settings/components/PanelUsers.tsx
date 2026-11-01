@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api, type PanelUserInfo, type CreatePanelUserRequest } from '../../../services/api';
 import { useToast } from '../../../context/ToastContext';
 import { useAuth, type PanelUserPermissions } from '../../../context/AuthContext';
-import { Plus, Trash2, RefreshCw, Edit } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Edit, ShieldOff } from 'lucide-react';
 import { ActionIconButton } from '../../../components/ui/ActionIconButton';
 import { Modal } from '../../../components/ui/Modal';
 import { Button } from '../../../components/ui/Button';
@@ -125,6 +125,16 @@ const PanelUsers: React.FC = () => {
     const [savingEditor, setSavingEditor] = useState(false);
     const [deletingUser, setDeletingUser] = useState<string | null>(null);
     const [deleteConfirmUser, setDeleteConfirmUser] = useState<string | null>(null);
+
+    const handleResetTwoFactor = async (username: string) => {
+        try {
+            await api.resetPanelUserTwoFactor(username);
+            success(`Two-factor authentication reset for ${username}`);
+            await load();
+        } catch {
+            error('Failed to reset two-factor authentication');
+        }
+    };
 
     const load = async () => {
         setLoading(true);
@@ -281,7 +291,12 @@ const PanelUsers: React.FC = () => {
                     <div key={user.username} className="bg-slate-900 border border-slate-800 rounded-xl px-4 py-3">
                         <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                                <div className="text-white font-semibold text-base truncate">{user.username}</div>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-white font-semibold text-base truncate">{user.username}</span>
+                                    {user.two_factor_enabled && (
+                                        <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs font-medium text-emerald-400">2FA</span>
+                                    )}
+                                </div>
                                 {user.created_at > 0 && (
                                     <div className="text-xs text-slate-500">
                                         Created {new Date(user.created_at * 1000).toLocaleDateString()}
@@ -297,6 +312,16 @@ const PanelUsers: React.FC = () => {
                                 >
                                     <Edit size={16} />
                                 </ActionIconButton>
+                                {user.two_factor_enabled && (
+                                    <ActionIconButton
+                                        onClick={() => handleResetTwoFactor(user.username)}
+                                        disabled={!canWritePanelUsers}
+                                        tone="primary"
+                                        title="Reset two-factor authentication"
+                                    >
+                                        <ShieldOff size={16} />
+                                    </ActionIconButton>
+                                )}
                                 <ActionIconButton
                                     onClick={() => handleDelete(user.username)}
                                     disabled={!canWritePanelUsers || deletingUser === user.username}

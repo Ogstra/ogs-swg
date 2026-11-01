@@ -1,6 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { attemptReloadThrottled } from '../lib/reloadGuard';
 
+/** Thrown by login when the account needs a second factor (or the one sent was wrong). */
+export class OtpRequiredError extends Error {}
+
 export interface PanelUserPermissions {
     can_read_users: boolean;
     can_write_users: boolean;
@@ -20,7 +23,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     token: string | null;
     permissions: PanelUserPermissions | null;
-    login: (username: string, pass: string) => Promise<void>;
+    login: (username: string, pass: string, otp?: string) => Promise<void>;
     logout: () => void;
 }
 
@@ -133,14 +136,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
     }, []);
 
-    const login = async (username: string, pass: string) => {
+    const login = async (username: string, pass: string, otp?: string) => {
         const res = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username, password: pass }),
+            body: JSON.stringify({ username, password: pass, otp: otp || undefined }),
         });
 
         if (!res.ok) {
+            if (res.headers.get('X-OTP-Required') === 'true') {
+                throw new OtpRequiredError(otp ? 'Invalid two-factor code' : 'Two-factor code required');
+            }
             throw new Error('Login failed');
         }
 

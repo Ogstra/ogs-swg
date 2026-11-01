@@ -86,6 +86,24 @@ func (s *Server) checkSecondFactor(w http.ResponseWriter, username, otp, userKey
 	return true
 }
 
+type twoFactorStatusResponse struct {
+	Enabled bool `json:"enabled"`
+}
+
+func (s *Server) handleTwoFactorStatus(w http.ResponseWriter, r *http.Request) {
+	username, ok := currentPanelUsername(r)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	state, err := s.store.GetPanelUserTOTP(username)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to read two-factor state")
+		return
+	}
+	writeJSON(w, http.StatusOK, twoFactorStatusResponse{Enabled: state.Enabled})
+}
+
 type twoFactorSetupResponse struct {
 	Secret string `json:"secret"`
 	URI    string `json:"uri"`
@@ -194,7 +212,8 @@ func (s *Server) handleTwoFactorDisable(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if perms == nil {
-		writeErr(w, http.StatusUnauthorized, "Invalid current password")
+		// 403, not 401: the client treats 401 as an expired session and signs out.
+		writeErr(w, http.StatusForbidden, "Invalid current password")
 		return
 	}
 	state, err := s.store.GetPanelUserTOTP(username)

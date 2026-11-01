@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth, OtpRequiredError } from '../../context/AuthContext';
 import { Card } from '../../components/ui/Card';
-import { Eye, EyeOff, Lock, User } from 'lucide-react';
+import { Eye, EyeOff, Lock, ShieldCheck, User } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 export const Login: React.FC = () => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [otp, setOtp] = useState('');
+    const [needsOtp, setNeedsOtp] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const { login, isAuthenticated } = useAuth();
@@ -26,10 +28,16 @@ export const Login: React.FC = () => {
         setError('');
         setLoading(true);
         try {
-            await login(username, password);
+            await login(username, password, needsOtp ? otp : undefined);
             navigate('/');
         } catch (err: any) {
-            setError('Invalid credentials');
+            if (err instanceof OtpRequiredError) {
+                // First pass asks for the code; a wrong code keeps the field open.
+                if (needsOtp) setError(err.message);
+                setNeedsOtp(true);
+            } else {
+                setError('Invalid credentials');
+            }
         } finally {
             setLoading(false);
         }
@@ -87,6 +95,26 @@ export const Login: React.FC = () => {
                                 </button>
                             </div>
                         </div>
+
+                        {needsOtp && (
+                            <div>
+                                <label className="block text-sm font-medium text-slate-400 mb-2">Authentication code</label>
+                                <div className="relative">
+                                    <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        inputMode="text"
+                                        autoComplete="one-time-code"
+                                        autoFocus
+                                        value={otp}
+                                        onChange={(e) => setOtp(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg py-2.5 pl-10 pr-4 text-white font-mono tracking-widest focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                                        placeholder="6-digit code or recovery code"
+                                        required
+                                    />
+                                </div>
+                            </div>
+                        )}
 
                         <button
                             type="submit"

@@ -3,7 +3,8 @@ import { useLocation, Link, Outlet, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
-import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson, Link as LinkIcon, ChevronDown, ChevronRight, Server, Database, ShieldAlert, UserCog, HardDrive, Bell } from 'lucide-react';
+import { TwoFactorModal } from '../components/TwoFactorModal';
+import { LayoutDashboard, Users, Shield, Activity, Settings, Menu, LogOut, FileJson, Link as LinkIcon, ChevronDown, ChevronRight, Server, Database, ShieldAlert, UserCog, HardDrive, Bell, ShieldCheck } from 'lucide-react';
 
 export const Layout: React.FC = () => {
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -11,7 +12,9 @@ export const Layout: React.FC = () => {
     const location = useLocation();
     const [settingsOpen, setSettingsOpen] = useState(location.pathname === '/settings');
     const navigate = useNavigate();
-    const { logout, permissions } = useAuth();
+    const { logout, permissions, token } = useAuth();
+    const [twoFactorOpen, setTwoFactorOpen] = useState(false);
+    const demoMode = localStorage.getItem('demo_mode') === '1';
 
     const isActive = (path: string) => location.pathname === path;
     const wireGuardQueryIface = new URLSearchParams(location.search).get('iface') || '';
@@ -220,6 +223,15 @@ export const Layout: React.FC = () => {
                     {commitLabel}
                 </div>
                 <div className="p-4 border-t border-slate-800">
+                    {token && !demoMode && (
+                        <button
+                            onClick={() => setTwoFactorOpen(true)}
+                            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-slate-100 transition-colors"
+                        >
+                            <ShieldCheck size={18} />
+                            Two-factor
+                        </button>
+                    )}
                     <button
                         onClick={handleLogout}
                         className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-red-400 hover:bg-red-500/10 transition-colors"
@@ -251,6 +263,7 @@ export const Layout: React.FC = () => {
                     </div>
                 </main>
             </div>
+            {twoFactorOpen && <TwoFactorModal onClose={() => setTwoFactorOpen(false)} />}
         </div>
     );
 };

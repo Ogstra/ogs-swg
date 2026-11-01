@@ -112,7 +112,7 @@ func TestTwoFactor_DisableNeedsPasswordAndCode(t *testing.T) {
 	}
 
 	next, _ := core.TOTPCodeAt(secret, time.Now().Add(30*time.Second))
-	if got := disable("wrong", next); got != http.StatusUnauthorized {
+	if got := disable("wrong", next); got != http.StatusForbidden {
 		t.Fatalf("disable with a wrong password status=%d", got)
 	}
 	if got := disable("pw-frank-123", "000000"); got != http.StatusBadRequest {
