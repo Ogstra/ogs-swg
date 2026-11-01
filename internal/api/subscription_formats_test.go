@@ -188,3 +188,31 @@ func TestPublicSub_FormatsCarryDirectSitesForNonHappClients(t *testing.T) {
 		t.Fatalf("clash body has no direct rule:\n%s", rec.Body.String())
 	}
 }
+
+func TestOutboundFromShareLink(t *testing.T) {
+	links := sampleShareLinks()
+	want := map[int]string{0: "vless", 2: "vmess", 3: "trojan", 4: "hysteria2", 5: "shadowsocks", 6: "anytls"}
+	for index, outboundType := range want {
+		outbound, err := outboundFromShareLink("  " + links[index] + "\n")
+		if err != nil {
+			t.Fatalf("link %d: %v", index, err)
+		}
+		if outbound["type"] != outboundType || outbound["server"] == "" || outbound["tag"] == "" {
+			t.Fatalf("link %d produced %v", index, outbound)
+		}
+	}
+	reality, _ := outboundFromShareLink(links[0])
+	tls, _ := reality["tls"].(kv)
+	if tls == nil || tls["reality"] == nil {
+		t.Fatalf("reality link lost its tls block: %v", reality)
+	}
+
+	if _, err := outboundFromShareLink(links[7]); err == nil {
+		t.Fatal("a Naive link must be refused")
+	}
+	for _, bad := range []string{"", "not a link", "http://example.test", "vless://broken"} {
+		if _, err := outboundFromShareLink(bad); err == nil {
+			t.Fatalf("%q was accepted", bad)
+		}
+	}
+}

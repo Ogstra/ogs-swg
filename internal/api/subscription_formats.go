@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/url"
 	"strconv"
@@ -654,4 +655,19 @@ func singboxDirectRules(entries []string) []kv {
 		rules = append(rules, kv{"ip_cidr": cidrs, "outbound": "direct"})
 	}
 	return rules
+}
+
+// outboundFromShareLink turns a share link (vless://, vmess://, trojan://,
+// hysteria2://, ss://, anytls://) into a Sing-box client outbound, so another
+// server can be used as a route target without writing its config by hand.
+func outboundFromShareLink(link string) (map[string]interface{}, error) {
+	node, ok := parseShareLink(strings.TrimSpace(link))
+	if !ok {
+		return nil, fmt.Errorf("not a supported share link")
+	}
+	outbound, ok := singboxOutbound(uniqueNodeNames([]proxyNode{node})[0])
+	if !ok {
+		return nil, fmt.Errorf("%s links cannot be used as an outbound", node.Scheme)
+	}
+	return outbound, nil
 }

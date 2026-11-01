@@ -372,6 +372,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/singbox/dns", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxDNS)))
 	protected.HandleFunc("PUT /api/singbox/dns", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxDNS)))
 	protected.HandleFunc("GET /api/singbox/outbounds", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxOutbounds)))
+	protected.HandleFunc("POST /api/singbox/outbounds/from-link", s.secure(s.requirePerm(canWriteConfig, s.handleOutboundFromLink)))
 	protected.HandleFunc("PUT /api/singbox/outbounds/domain-strategy", s.secure(s.requirePerm(canWriteConfig, s.handleUpdateSingboxOutboundDomainStrategies)))
 	protected.HandleFunc("GET /api/singbox/inbounds", s.secure(s.requirePerm(canReadConfig, s.handleGetSingboxInbounds)))
 	protected.HandleFunc("POST /api/singbox/inbound", s.secure(s.requirePerm(canWriteConfig, s.AuditLogger("singbox", "create", s.handleAddSingboxInbound))))
