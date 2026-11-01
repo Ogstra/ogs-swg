@@ -28,6 +28,8 @@ type cachedSub struct {
 	HeaderProfileInterval *int64
 	HeaderUpdateAlways    bool
 	HeaderHappParams      []happSubscriptionParam
+	// Links are the raw share links behind Body, kept for ?format= conversions.
+	Links []string
 }
 
 type subscriptionRequestMetadata struct {
@@ -249,6 +251,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			s.recordSubscriptionRequest(r, recordSubID, recordUsers, true, migratedFromSubID)
 			s.observeHWIDMigrationArrival(r, sub)
 			s.observeSubscriptionHWID(r, sub, users)
+			c.Body = applySubscriptionFormat(w, r, c)
 			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 			return
 		}
@@ -293,7 +296,18 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	s.recordSubscriptionRequest(r, recordSubID, recordUsers, false, migratedFromSubID)
 	s.observeHWIDMigrationArrival(r, sub)
 	s.observeSubscriptionHWID(r, sub, users)
+	c.Body = applySubscriptionFormat(w, r, c)
 	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
+}
+
+// applySubscriptionFormat swaps the body for the ?format= conversion when one
+// is requested. The cached entry stays in the default format.
+func applySubscriptionFormat(w http.ResponseWriter, r *http.Request, c cachedSub) []byte {
+	if body, contentType, ok := formattedSubscriptionBody(r.URL.Query().Get("format"), c.Links); ok {
+		w.Header().Set("Content-Type", contentType)
+		return body
+	}
+	return c.Body
 }
 
 func (s *Server) happSubscriptionParamsForRequest(r *http.Request, token string, subColorProfile string) ([]happSubscriptionParam, string) {
@@ -956,7 +970,9 @@ func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up
 		w.Header().Del("new-domain")
 	}
 	w.Header().Set("Subscription-Userinfo", strings.Join(parts, "; "))
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	}
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)

@@ -298,5 +298,6 @@ func buildSubscription(in buildSubscriptionInput) cachedSub {
 		HeaderProfileInterval: in.ProfileUpdateInterval,
 		HeaderUpdateAlways:    in.UpdateAlways,
 		HeaderHappParams:      in.HappParams,
+		Links:                 links,
 	}
 }
