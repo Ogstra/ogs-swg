@@ -447,6 +447,103 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                 </>
                             )}
 
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-300">Certificate</label>
+                                <div className="flex gap-4 rounded border border-slate-800 bg-slate-950 px-3 py-2">
+                                    {[
+                                        { id: 'files', label: 'Files' },
+                                        { id: 'acme', label: 'Automatic (ACME)' },
+                                    ].map(option => (
+                                        <label key={option.id} className="flex items-center gap-2 text-sm text-white">
+                                            <input
+                                                type="radio"
+                                                name="certificate-source"
+                                                checked={(option.id === 'acme') === !!formData.tls?.acme}
+                                                onChange={() => updateForm((prev: any) => {
+                                                    const { acme: _acme, ...tls } = prev.tls || {}
+                                                    return {
+                                                        ...prev,
+                                                        tls: option.id === 'acme'
+                                                            ? { ...tls, certificate_path: '', key_path: '', acme: { domain: [tls.server_name || ''], email: '' } }
+                                                            : tls,
+                                                    }
+                                                })}
+                                            />
+                                            {option.label}
+                                        </label>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {formData.tls?.acme && (
+                                <div className="space-y-3 rounded border border-slate-700 bg-slate-900/50 p-3">
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">Domain</label>
+                                            <input
+                                                type="text"
+                                                value={formData.tls.acme.domain?.[0] || ''}
+                                                onChange={e => updateForm((prev: any) => ({
+                                                    ...prev,
+                                                    tls: { ...prev.tls, server_name: e.target.value || undefined, acme: { ...prev.tls.acme, domain: [e.target.value] } },
+                                                }))}
+                                                className="w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-white focus:border-blue-500 focus:outline-none"
+                                                placeholder="vpn.example.com"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">Email (optional)</label>
+                                            <input
+                                                type="text"
+                                                value={formData.tls.acme.email || ''}
+                                                onChange={e => updateForm((prev: any) => ({
+                                                    ...prev,
+                                                    tls: { ...prev.tls, acme: { ...prev.tls.acme, email: e.target.value } },
+                                                }))}
+                                                className="w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-white focus:border-blue-500 focus:outline-none"
+                                                placeholder="admin@example.com"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs font-medium text-slate-300">Challenge</label>
+                                        <select
+                                            value={formData.tls.acme.dns01_challenge ? 'cloudflare' : 'http'}
+                                            onChange={e => updateForm((prev: any) => {
+                                                const { dns01_challenge: _dns, ...acme } = prev.tls.acme
+                                                return {
+                                                    ...prev,
+                                                    tls: { ...prev.tls, acme: e.target.value === 'cloudflare' ? { ...acme, dns01_challenge: { provider: 'cloudflare', api_token: '' } } : acme },
+                                                }
+                                            })}
+                                            className="select-field w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-white focus:border-blue-500 focus:outline-none"
+                                        >
+                                            <option value="http">HTTP / TLS-ALPN (port 80 or 443 must be reachable)</option>
+                                            <option value="cloudflare">DNS · Cloudflare</option>
+                                        </select>
+                                    </div>
+                                    {formData.tls.acme.dns01_challenge && (
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-slate-300">Cloudflare API token</label>
+                                            <input
+                                                type="password"
+                                                autoComplete="off"
+                                                value={formData.tls.acme.dns01_challenge.api_token || ''}
+                                                onChange={e => updateForm((prev: any) => ({
+                                                    ...prev,
+                                                    tls: { ...prev.tls, acme: { ...prev.tls.acme, dns01_challenge: { provider: 'cloudflare', api_token: e.target.value } } },
+                                                }))}
+                                                className="w-full rounded border border-slate-800 bg-slate-950 px-2 py-1.5 font-mono text-xs text-white focus:border-blue-500 focus:outline-none"
+                                                placeholder="Token with Zone:DNS:Edit"
+                                            />
+                                            <p className="text-xs text-slate-400">Stored in the Sing-box config file, which Sing-box reads to renew the certificate.</p>
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-slate-400">Sing-box requests and renews the certificate itself. It needs a build with the <code className="font-mono">with_acme</code> tag.</p>
+                                </div>
+                            )}
+
+                            {!formData.tls?.acme && (
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1">
                                     <label className="text-xs font-medium text-slate-300">Certificate Path</label>
@@ -481,8 +578,9 @@ export default function InboundModal({ isOpen, onClose, initialData, onSave, can
                                     />
                                 </div>
                             </div>
+                            )}
 
-                            {!visibility.showRealitySection && (
+                            {!visibility.showRealitySection && !formData.tls?.acme && (
                                 <div className="space-y-3">
                                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                                         The self-signed helper writes PEM-encoded cert/key files next to the sing-box config. Most clients will still reject them unless that certificate is explicitly trusted.

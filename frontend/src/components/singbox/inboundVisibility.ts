@@ -784,9 +784,36 @@ export function buildInboundSubmission(formData: InboundLike) {
 
     const tlsEnabled = !!submission.tls?.enabled
     const realityEnabled = !!submission.tls?.reality?.enabled
+    let hasAcme = false
+    if (submission.tls && submission.tls.acme) {
+        const acme = submission.tls.acme
+        const domain = (Array.isArray(acme.domain) ? acme.domain : [acme.domain])
+            .map((value: unknown) => String(value || '').trim())
+            .filter(Boolean)
+        if (domain.length === 0) {
+            return { error: 'Automatic certificate needs a domain.' }
+        }
+        const cleaned: any = { domain }
+        const email = String(acme.email || '').trim()
+        if (email) cleaned.email = email
+        if (acme.dns01_challenge) {
+            const apiToken = String(acme.dns01_challenge.api_token || '').trim()
+            if (!apiToken) {
+                return { error: 'Cloudflare API token is required for the DNS challenge.' }
+            }
+            cleaned.dns01_challenge = { provider: 'cloudflare', api_token: apiToken }
+        }
+        submission.tls.acme = cleaned
+        delete submission.tls.certificate_path
+        delete submission.tls.key_path
+        if (!String(submission.tls.server_name || '').trim()) submission.tls.server_name = domain[0]
+        hasAcme = true
+    } else if (submission.tls) {
+        delete submission.tls.acme
+    }
     const hasCert = !!submission.tls?.certificate_path && !!submission.tls?.key_path
     const requiresCert = tlsEnabled && !(type === 'vless' && realityEnabled)
-    if (requiresCert && !hasCert) {
+    if (requiresCert && !hasCert && !hasAcme) {
         return { error: 'TLS is enabled but certificate/key paths are missing.' }
     }
 

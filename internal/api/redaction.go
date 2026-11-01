@@ -80,7 +80,7 @@ func redactJSONValue(v any) any {
 
 func isSensitiveJSONKey(k string) bool {
 	switch strings.ToLower(strings.TrimSpace(k)) {
-	case "private_key", "public_key", "uuid", "short_id", "password", "preshared_key":
+	case "private_key", "public_key", "uuid", "short_id", "password", "preshared_key", "api_token":
 		return true
 	default:
 		return false

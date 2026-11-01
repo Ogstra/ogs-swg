@@ -93,12 +93,13 @@ Add tags to `managed_inbounds` and `stats_inbounds` to manage several inbounds. 
 | `with_gvisor` | Network stack for tun mode |
 | `with_quic` | QUIC transport (required for Hysteria2) |
 | `with_utls` | uTLS fingerprinting for Reality |
+| `with_acme` | Automatic certificates (ACME) for TLS inbounds |
 | `badlinkname` | Required for Go 1.24+ compatibility |
 
 To build Sing-box yourself, run this in the Sing-box source tree:
 
 ```bash
-go build -v -tags "with_clash_api,with_v2ray_api,with_gvisor,with_quic,with_utls,badlinkname" \
+go build -v -tags "with_clash_api,with_v2ray_api,with_gvisor,with_quic,with_utls,with_acme,badlinkname" \
     ./cmd/sing-box
 ```
 
