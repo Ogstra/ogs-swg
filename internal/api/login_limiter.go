@@ -8,6 +8,8 @@ import (
 const (
 	loginMaxFailures = 10
 	loginWindow      = 15 * time.Minute
+	// loginLimiterSweepSize is the map size that triggers a sweep of expired entries.
+	loginLimiterSweepSize = 1000
 )
 
 type loginLimiter struct {
@@ -23,7 +25,17 @@ func newLoginLimiter() *loginLimiter {
 func (l *loginLimiter) recordFailure(username string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.failures[username] = append(l.failures[username], time.Now())
+	now := time.Now()
+	// Drop expired entries so usernames that never retry do not accumulate.
+	if len(l.failures) >= loginLimiterSweepSize {
+		cutoff := now.Add(-loginWindow)
+		for name, times := range l.failures {
+			if len(times) == 0 || times[len(times)-1].Before(cutoff) {
+				delete(l.failures, name)
+			}
+		}
+	}
+	l.failures[username] = append(l.failures[username], now)
 }
 
 // isBlocked returns true and the remaining backoff duration if the username is rate-limited.

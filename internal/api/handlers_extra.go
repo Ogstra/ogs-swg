@@ -1385,13 +1385,23 @@ func (s *Server) readNamedBackup(ctx context.Context, src, name string) ([]byte,
 	return os.ReadFile(fullPath)
 }
 
+// configCopyMode keeps backup copies private: configs hold WireGuard private
+// keys and proxy credentials. Restores overwrite live files, whose mode must
+// stay as the services expect.
+func configCopyMode(dst string) os.FileMode {
+	if strings.HasSuffix(dst, ".bak") {
+		return 0600
+	}
+	return 0644
+}
+
 func (s *Server) copyConfig(ctx context.Context, src, dst string) error {
 	if s.executor != nil {
 		content, err := s.executor.ReadConfig(ctx, src)
 		if err != nil {
 			return err
 		}
-		return s.executor.WriteConfig(ctx, dst, content, 0644)
+		return s.executor.WriteConfig(ctx, dst, content, configCopyMode(dst))
 	}
 	return copyFile(src, dst)
 }
@@ -1406,7 +1416,7 @@ func copyFile(src, dst string) error {
 	}
 	defer in.Close()
 
-	out, err := os.Create(dst)
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, configCopyMode(dst))
 	if err != nil {
 		return err
 	}

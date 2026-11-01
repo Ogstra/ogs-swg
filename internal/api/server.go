@@ -785,7 +785,14 @@ func StartServer(cfg *core.Config) *Server {
 
 	// Start server in goroutine so we can return the server instance
 	go func() {
-		if err := http.ListenAndServe(cfg.ListenAddr, router); err != nil {
+		// No Read/WriteTimeout: log and event streams are long-lived responses.
+		httpServer := &http.Server{
+			Addr:              cfg.ListenAddr,
+			Handler:           router,
+			ReadHeaderTimeout: 10 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+		}
+		if err := httpServer.ListenAndServe(); err != nil {
 			log.Printf("HTTP server error: %v", err)
 		}
 	}()

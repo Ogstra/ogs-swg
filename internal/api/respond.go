@@ -22,8 +22,11 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	http.Error(w, msg, status)
 }
 
+// maxJSONBodyBytes caps JSON request bodies; the largest legitimate one is a raw config.
+const maxJSONBodyBytes = 16 << 20
+
 // decodeJSON decodes the request body into v and returns any decode error.
 // It does NOT write a response — callers keep their existing error message and status.
 func decodeJSON(r *http.Request, v any) error {
-	return json.NewDecoder(r.Body).Decode(v)
+	return json.NewDecoder(http.MaxBytesReader(nil, r.Body, maxJSONBodyBytes)).Decode(v)
 }

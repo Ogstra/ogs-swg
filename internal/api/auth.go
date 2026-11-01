@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -283,7 +284,7 @@ func (s *Server) AuthMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) permissionsFromAPIKey(r *http.Request) (*core.PanelUserPermissions, bool) {
-	if s.config.APIKey == "" || r.Header.Get("X-API-Key") != s.config.APIKey {
+	if s.config.APIKey == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("X-API-Key")), []byte(s.config.APIKey)) != 1 {
 		return nil, false
 	}
 
