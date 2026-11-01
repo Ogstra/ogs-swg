@@ -89,6 +89,7 @@ func (s *Server) handleUpdateSubscriptionProtection(w http.ResponseWriter, r *ht
 		WindowSeconds              int  `json:"window_seconds"`
 		UAFilterEnabled            bool `json:"ua_filter_enabled"`
 		SocialFetchersBlockEnabled bool `json:"social_fetchers_block_enabled"`
+		DefaultDeviceLimit         int  `json:"default_device_limit"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid json")
@@ -99,6 +100,7 @@ func (s *Server) handleUpdateSubscriptionProtection(w http.ResponseWriter, r *ht
 	s.config.SubscriptionProtection.WindowSeconds = req.WindowSeconds
 	s.config.SubscriptionProtection.UAFilterEnabled = req.UAFilterEnabled
 	s.config.SubscriptionProtection.SocialFetchersBlockEnabled = req.SocialFetchersBlockEnabled
+	s.config.SubscriptionProtection.DefaultDeviceLimit = max(req.DefaultDeviceLimit, 0)
 	s.config.SubscriptionProtection.MaxRequests = max(s.config.SubscriptionProtection.MaxRequests, 1)
 	s.config.SubscriptionProtection.WindowSeconds = max(s.config.SubscriptionProtection.WindowSeconds, 1)
 

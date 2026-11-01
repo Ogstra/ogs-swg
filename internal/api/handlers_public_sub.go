@@ -145,6 +145,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
+	if s.deviceLimitReached(r, sub) {
+		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "device_limit")
+		s.notifyDeviceLimit(r, sub, users)
+		writeErr(w, http.StatusForbidden, "Device limit reached")
+		return
+	}
 	if !allowlisted {
 		s.subscriptionLimiter.record(token)
 	}

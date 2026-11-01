@@ -284,6 +284,14 @@ func (n *NtfyNotifier) ObserveHWIDMigration(ctx context.Context, info NtfyHWIDMi
 	})
 }
 
+// ObserveDeviceLimitBlocked publishes that a new device was refused because
+// the subscription is at its device limit. It shares the device-event toggle.
+func (n *NtfyNotifier) ObserveDeviceLimitBlocked(ctx context.Context, info NtfyDeviceLimitInfo) {
+	n.send(ctx, func(s NtfySettings) bool { return s.EnableNewHwid }, func() NtfyMessage {
+		return NtfyDeviceLimitMessage(info)
+	})
+}
+
 // NotifyConfigApplyFailed publishes a config-apply-failed notification every
 // time it is called (no dedupe — this represents a distinct operator-facing
 // action/error, not a poll result). Callers are responsible for not calling

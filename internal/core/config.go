@@ -87,6 +87,8 @@ type SubscriptionProtectionConfig struct {
 	WindowSeconds              int  `json:"window_seconds"`
 	UAFilterEnabled            bool `json:"ua_filter_enabled"`
 	SocialFetchersBlockEnabled bool `json:"social_fetchers_block_enabled"`
+	// DefaultDeviceLimit applies to subscriptions without their own limit; 0 is unlimited.
+	DefaultDeviceLimit int `json:"default_device_limit"`
 }
 
 type UserAccount struct {

@@ -67,10 +67,11 @@ type Server struct {
 	blockedRecordDedupMu sync.Mutex
 	// logSearchSem caps the number of concurrent log-search scans so that
 	// rapid or parallel search requests cannot saturate all CPU cores.
-	logSearchSem chan struct{}
-	logStore     *core.LogStore
-	logIngester  *core.LogIngester
-	ntfyNotifier *core.NtfyNotifier
+	logSearchSem       chan struct{}
+	logStore           *core.LogStore
+	logIngester        *core.LogIngester
+	ntfyNotifier       *core.NtfyNotifier
+	deviceLimitNotices deviceLimitNotices
 }
 
 func (s *Server) invalidateSamplerHistoryCache() {

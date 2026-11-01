@@ -199,3 +199,82 @@ func TestPublicSub_HistoryRecordsWhatWasSent(t *testing.T) {
 		t.Fatalf("history rows: moved=%d plain=%d; want 1 and 1", moved, plain)
 	}
 }
+
+func hitSubStatus(server *Server, token, hwid string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodGet, "/s/"+token, nil)
+	req.SetPathValue("token", token)
+	req.Header.Set("User-Agent", "Happ/2.7.1")
+	if hwid != "" {
+		req.Header.Set("X-Hwid", hwid)
+	}
+	rec := httptest.NewRecorder()
+	server.handlePublicSubscription(rec, req)
+	return rec
+}
+
+func TestPublicSub_DeviceLimitRefusesNewDevicesOnly(t *testing.T) {
+	server, st := newSubscriptionGoldenServer(t)
+	ctx := context.Background()
+	src, err := st.Queries.GetSubscriptionByToken(ctx, migrationTestSrcToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, hwid := range []string{"device-a", "device-b"} {
+		if rec := hitSubStatus(server, migrationTestSrcToken, hwid); rec.Code != http.StatusOK {
+			t.Fatalf("%s before any limit status=%d", hwid, rec.Code)
+		}
+	}
+
+	server.config.SubscriptionProtection.DefaultDeviceLimit = 2
+	if rec := hitSubStatus(server, migrationTestSrcToken, "device-c"); rec.Code != http.StatusForbidden {
+		t.Fatalf("third device under the default limit status=%d; want 403", rec.Code)
+	}
+	if rec := hitSubStatus(server, migrationTestSrcToken, "device-a"); rec.Code != http.StatusOK {
+		t.Fatalf("known device status=%d; want 200", rec.Code)
+	}
+	if rec := hitSubStatus(server, migrationTestSrcToken, ""); rec.Code != http.StatusOK {
+		t.Fatalf("request without HWID status=%d; want 200", rec.Code)
+	}
+
+	if err := st.SetSubscriptionDeviceLimit(ctx, src.ID, 3); err != nil {
+		t.Fatal(err)
+	}
+	if rec := hitSubStatus(server, migrationTestSrcToken, "device-c"); rec.Code != http.StatusOK {
+		t.Fatalf("third device under a per-sub limit of 3 status=%d; want 200", rec.Code)
+	}
+	if rec := hitSubStatus(server, migrationTestSrcToken, "device-d"); rec.Code != http.StatusForbidden {
+		t.Fatalf("fourth device status=%d; want 403", rec.Code)
+	}
+
+	rows, err := st.Queries.GetSubscriptionRequestHistory(ctx, store.GetSubscriptionRequestHistoryParams{Column1: 0, SubID: 0, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := 0
+	for _, row := range rows {
+		if row.Blocked == 1 && row.BlockReason == "device_limit" {
+			refused++
+		}
+	}
+	if refused == 0 {
+		t.Fatal("refused requests were not recorded with the device_limit reason")
+	}
+}
+
+func TestPublicSub_DeviceLimitLetsAMovingDeviceIn(t *testing.T) {
+	f := newMigrationFixture(t, nil)
+	ctx := context.Background()
+	// The target already holds one device and allows only one.
+	hitSub(t, f.server, migrationTestDstToken, "resident-device")
+	if err := f.store.SetSubscriptionDeviceLimit(ctx, f.dstID, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := hitSubStatus(f.server, migrationTestDstToken, "stranger-device"); rec.Code != http.StatusForbidden {
+		t.Fatalf("stranger on a full sub status=%d; want 403", rec.Code)
+	}
+	if rec := hitSubStatus(f.server, migrationTestDstToken, migrationTestHWID); rec.Code != http.StatusOK {
+		t.Fatalf("device being moved here status=%d; want 200", rec.Code)
+	}
+}

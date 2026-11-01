@@ -443,6 +443,7 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN reset_day INTEGER DEFAULT 1;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN profile_update_interval_hours INTEGER DEFAULT NULL;")
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN update_always INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN device_limit INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("UPDATE subscriptions SET update_always = 0 WHERE update_always IS NULL;")
 	s.db.Exec("ALTER TABLE subscription_users ADD COLUMN alias TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE subscription_users ADD COLUMN position INTEGER NOT NULL DEFAULT 0;")

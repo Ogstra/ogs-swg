@@ -43,6 +43,8 @@ type SubscriptionResponse struct {
 	HappRoutingProfile         string                       `json:"happ_routing_profile"`
 	HappColorProfile           string                       `json:"happ_color_profile"`
 	HappDirectSites            string                       `json:"happ_direct_sites"`
+	DeviceLimit                int64                        `json:"device_limit"`
+	DeviceCount                int64                        `json:"device_count"`
 	LastRequestAt              *int64                       `json:"last_request_at"`
 	CreatedAt                  int64                        `json:"created_at"`
 	UpdatedAt                  int64                        `json:"updated_at"`
@@ -404,6 +406,9 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 
 	now := s.now()
 
+	deviceLimits, _ := s.store.ListSubscriptionDeviceLimits(r.Context())
+	deviceCounts, _ := s.store.CountKnownHWIDsBySub(r.Context())
+
 	res := make([]SubscriptionResponse, 0, len(subs))
 	includeSecrets := canManageSubscriptionSecrets(r)
 	for _, sub := range subs {
@@ -433,6 +438,8 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			HappRoutingProfile:         sub.HappRoutingProfile,
 			HappColorProfile:           sub.HappColorProfile,
 			HappDirectSites:            sub.HappDirectSites,
+			DeviceLimit:                deviceLimits[sub.ID],
+			DeviceCount:                deviceCounts[sub.ID],
 			LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
 			UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -461,6 +468,7 @@ type CreateSubscriptionRequest struct {
 	HappRoutingProfile         string                      `json:"happ_routing_profile"`
 	HappColorProfile           string                      `json:"happ_color_profile"`
 	HappDirectSites            string                      `json:"happ_direct_sites"`
+	DeviceLimit                *int64                      `json:"device_limit"`
 }
 
 type SubscriptionMemberRequest struct {
@@ -567,6 +575,10 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 		})
 	}
 
+	if req.DeviceLimit != nil {
+		_ = s.store.SetSubscriptionDeviceLimit(r.Context(), id, *req.DeviceLimit)
+	}
+
 	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyAllSubscriptions)
 	writeJSON(w, http.StatusCreated, map[string]interface{}{"id": id, "token": token})
@@ -599,6 +611,8 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	if canManageSubscriptionSecrets(r) {
 		token = &sub.Token
 	}
+	deviceLimit, _ := s.store.GetSubscriptionDeviceLimit(r.Context(), id)
+	deviceCount, _ := s.store.CountSubscriptionKnownHWIDs(r.Context(), id)
 
 	writeJSON(w, http.StatusOK, SubscriptionResponse{
 		ID:                         sub.ID,
@@ -615,6 +629,8 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		HappRoutingProfile:         sub.HappRoutingProfile,
 		HappColorProfile:           sub.HappColorProfile,
 		HappDirectSites:            sub.HappDirectSites,
+		DeviceLimit:                deviceLimit,
+		DeviceCount:                deviceCount,
 		LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,
 		UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -679,6 +695,13 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 			Alias:    member.Alias,
 			Position: int64(position),
 		})
+	}
+
+	if req.DeviceLimit != nil {
+		if err := s.store.SetSubscriptionDeviceLimit(r.Context(), id, *req.DeviceLimit); err != nil {
+			writeErr(w, http.StatusInternalServerError, "Failed to update device limit")
+			return
+		}
 	}
 
 	// Re-evaluate quota state after update (quota may have been raised, triggering re-enable)
