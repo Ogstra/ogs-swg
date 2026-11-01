@@ -136,7 +136,7 @@ export function DevicesModal({ sub, subs, canWrite, onClose }: DevicesModalProps
                 <p className="py-8 text-center text-sm text-slate-400">Loading…</p>
             ) : devices.length === 0 ? (
                 <p className="py-8 text-center text-sm text-slate-400">
-                    No devices yet. A device shows up here after a Happ client requests this subscription.
+                    No devices yet. A device shows up here once a client that sends a device ID (HWID), such as Happ, requests this subscription.
                 </p>
             ) : (
                 <div className="-mx-2 divide-y divide-slate-800">

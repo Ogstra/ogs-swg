@@ -847,7 +847,7 @@ export default function Subscriptions() {
                     onChange={e => setUpdateAlwaysValue(e.target.checked)}
                     className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 shrink-0"
                 />
-                <div className="flex-1 text-sm font-medium text-slate-200">update-always</div>
+                <div className="flex-1 text-sm font-medium text-slate-200">update-always <span className="text-xs font-normal text-slate-400">(Happ only)</span></div>
             </label>
         </div>
     )
