@@ -342,7 +342,7 @@ export default function UserManagement() {
 
     const pendingChangesQuery = useQuery({
         queryKey: ['dashboard-pending-changes'],
-        queryFn: () => api.getDashboardData(),
+        queryFn: () => api.getSingboxPendingChanges(),
         refetchInterval: 10000,
         placeholderData: previousData => previousData,
     })

@@ -810,6 +810,8 @@ export const api = {
         request('/api/singbox/route/rules/upsert', { method: 'POST', json: rules, parse: 'none', errorMsg: 'Failed to upsert route rules' }),
     outboundFromLink: async (link: string): Promise<Record<string, unknown>> =>
         request<Record<string, unknown>>('/api/singbox/outbounds/from-link', { method: 'POST', json: { link }, errorMsg: 'Failed to read the share link' }),
+    getSingboxPendingChanges: async (): Promise<{ singbox_pending_changes: boolean }> =>
+        request<{ singbox_pending_changes: boolean }>('/api/singbox/pending-changes', { errorMsg: 'Failed to read pending changes' }),
     getSingboxConfig: async (): Promise<string> =>
         request<string>('/api/singbox/config', { parse: 'text', errorMsg: 'Failed to fetch Sing-box config' }),
     updateSingboxConfig: async (config: string): Promise<void> => {

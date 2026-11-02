@@ -81,7 +81,7 @@ export default function WireGuard() {
     const interfacesQuery = useQuery({
         queryKey: ['wireguard-interfaces'],
         queryFn: () => api.getWireGuardInterfaces(),
-        refetchInterval: 5000,
+        refetchInterval: 10000,
         placeholderData: previousData => previousData,
     })
     const interfaces = Array.isArray(interfacesQuery.data) ? (interfacesQuery.data as string[]) : []
@@ -118,7 +118,7 @@ export default function WireGuard() {
         queryKey: ['wireguard-peers', activeInterface],
         queryFn: () => api.getWireGuardPeers(activeInterface),
         enabled: !!activeInterface,
-        refetchInterval: 5000,
+        refetchInterval: 10000,
         placeholderData: previousData => previousData,
     })
     const peers = Array.isArray(peersQuery.data) ? (peersQuery.data as WireGuardPeer[]) : []
@@ -127,7 +127,7 @@ export default function WireGuard() {
         queryKey: ['wireguard-interface', activeInterface],
         queryFn: () => api.getWireGuardInterface(activeInterface),
         enabled: !!activeInterface,
-        refetchInterval: 5000,
+        refetchInterval: 10000,
         placeholderData: previousData => previousData,
     })
     const interfaceConfig = (interfaceQuery.data as WireGuardInterface | null) || null
@@ -135,7 +135,7 @@ export default function WireGuard() {
     const statusQuery = useQuery({
         queryKey: ['system-status-wireguard'],
         queryFn: () => api.getSystemStatus(),
-        refetchInterval: 5000,
+        refetchInterval: 10000,
         placeholderData: previousData => previousData,
     })
     const pendingRestart = !!statusQuery.data?.wireguard_pending_restart

@@ -322,6 +322,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("GET /api/logs/search", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogs)))
 	protected.HandleFunc("GET /api/logs/search/stream", s.secure(s.requirePerm(canReadLogs, s.handleSearchLogsStream)))
 	protected.HandleFunc("GET /api/dashboard", s.secure(s.handleGetDashboardData))
+	protected.HandleFunc("GET /api/singbox/pending-changes", s.secure(s.handleGetSingboxPendingChanges))
 	protected.HandleFunc("GET /api/dashboard/consumer-chart", s.secure(s.handleGetDashboardConsumerChart))
 	protected.HandleFunc("GET /api/stats", s.secure(s.handleGetStats))
 	protected.HandleFunc("GET /api/status", s.secure(s.handleGetSystemStatus))
@@ -837,6 +838,10 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 			return
 		}
 		w.Header().Set("Cache-Control", frontendAssetCacheControl)
+		relPath := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
+		if serveStaticGzip(w, r, filepath.Join(distDir, filepath.FromSlash(relPath))) {
+			return
+		}
 		http.StripPrefix("/", fs).ServeHTTP(w, r)
 	})
 
@@ -871,6 +876,9 @@ func registerFrontendRoutes(router *http.ServeMux, distDir string) {
 					setFrontendDocumentCacheHeaders(w)
 				case strings.EqualFold(filepath.Ext(fullPath), ".webmanifest"):
 					w.Header().Set("Cache-Control", "public, max-age=3600")
+				}
+				if serveStaticGzip(w, r, fullPath) {
+					return
 				}
 				http.ServeFile(w, r, fullPath)
 				return
