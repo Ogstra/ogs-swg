@@ -352,3 +352,37 @@ func TestPublicSub_WorkerReportedBlockIsLoggedAndNeverServed(t *testing.T) {
 		t.Fatalf("blocked reasons = %v; want one ua_browser", reasons)
 	}
 }
+
+func TestPublicSub_TokenLookupCacheNeverOutlivesAChange(t *testing.T) {
+	server, st := newSubscriptionGoldenServer(t)
+	ctx := context.Background()
+	sub, err := st.Queries.GetSubscriptionByToken(ctx, migrationTestSrcToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Warm the lookup cache, then regenerate the token through the handler.
+	if rec := hitSubStatus(server, migrationTestSrcToken, ""); rec.Code != http.StatusOK {
+		t.Fatalf("first request status=%d", rec.Code)
+	}
+	if rec := hitSubStatus(server, migrationTestSrcToken, ""); rec.Code != http.StatusOK {
+		t.Fatalf("cached request status=%d", rec.Code)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions/x/regenerate", nil)
+	req.SetPathValue("id", fmt.Sprint(sub.ID))
+	rec := httptest.NewRecorder()
+	server.handleRegenerateSubscriptionToken(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("regenerate status=%d body=%q", rec.Code, rec.Body.String())
+	}
+	if rec := hitSubStatus(server, migrationTestSrcToken, ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("old token after regenerate status=%d; want 404 at once", rec.Code)
+	}
+
+	// Unknown tokens are never cached as "found".
+	for i := 0; i < 2; i++ {
+		if rec := hitSubStatus(server, "never-existed", ""); rec.Code != http.StatusNotFound {
+			t.Fatalf("unknown token status=%d", rec.Code)
+		}
+	}
+}

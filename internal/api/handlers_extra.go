@@ -852,11 +852,11 @@ func (s *Server) handlePruneNow(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
-		"enable_singbox":                   s.config.EnableSingbox,
-		"enable_wireguard":                 s.config.EnableWireGuard,
-		"retention_enabled":                s.config.RetentionEnabled,
-		"retention_days":                   s.config.RetentionDays,
-		"wg_retention_days":                s.config.WGRetentionDays,
+		"enable_singbox":    s.config.EnableSingbox,
+		"enable_wireguard":  s.config.EnableWireGuard,
+		"retention_enabled": s.config.RetentionEnabled,
+		"retention_days":    s.config.RetentionDays,
+		"wg_retention_days": s.config.WGRetentionDays,
 
 		"subscription_history_retention_days": s.config.SubscriptionHistoryRetentionDays,
 

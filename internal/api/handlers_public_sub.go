@@ -88,6 +88,40 @@ var (
 	happSubscriptionParamKeyRE                   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 )
 
+// publicSubscriptionEntry is what the public endpoint needs to know about a
+// token before it decides anything: the subscription and its members.
+type publicSubscriptionEntry struct {
+	Sub     store.GetSubscriptionByTokenRow
+	Members []store.SubscriptionUser
+}
+
+// lookupPublicSubscription resolves a token to its subscription and members.
+// Only successful lookups are cached, in the same cache (and so with the same
+// invalidation) as the generated bodies: a changed or deleted subscription is
+// seen at once, and an unknown token always asks the database.
+func (s *Server) lookupPublicSubscription(ctx context.Context, token string) (store.GetSubscriptionByTokenRow, []store.SubscriptionUser, bool) {
+	key := "subentry:" + token
+	if s.cache != nil {
+		if cached, found := s.cache.Get(key); found {
+			if entry, ok := cached.(publicSubscriptionEntry); ok {
+				return entry.Sub, entry.Members, true
+			}
+		}
+	}
+	sub, err := s.store.Queries.GetSubscriptionByToken(ctx, token)
+	if err != nil {
+		return store.GetSubscriptionByTokenRow{}, nil, false
+	}
+	members, err := s.store.Queries.GetSubscriptionMembers(ctx, sub.ID)
+	if err != nil || len(members) == 0 {
+		return store.GetSubscriptionByTokenRow{}, nil, false
+	}
+	if s.cache != nil {
+		s.cache.SetWithTTL(key, publicSubscriptionEntry{Sub: sub, Members: members}, 1, 2*time.Minute)
+	}
+	return sub, members, true
+}
+
 // workerBlockHeader marks a request the Cloudflare Worker already refused.
 const workerBlockHeader = "X-OGS-Worker-Block"
 
@@ -98,14 +132,8 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sub, err := s.store.Queries.GetSubscriptionByToken(r.Context(), token)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-
-	memberRows, err := s.store.Queries.GetSubscriptionMembers(r.Context(), sub.ID)
-	if err != nil || len(memberRows) == 0 {
+	sub, memberRows, ok := s.lookupPublicSubscription(r.Context(), token)
+	if !ok {
 		http.NotFound(w, r)
 		return
 	}
