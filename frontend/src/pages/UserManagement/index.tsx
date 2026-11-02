@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UserStatus, CreateUserRequest, UserRouteTag, type UserTemplate } from '../../services/api'
 import { UserTemplatesModal, describeTemplate } from './UserTemplatesModal'
+import { BulkActionModal } from './BulkActionModal'
 import { ExpiryFields, describeExpiry, emptyExpiry, expiryDraftIsValid, expiryFromTemplate, expiryFromUser, expiryToRequest, type ExpiryDraft } from './expiry'
 import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags, LayoutTemplate } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
@@ -155,6 +156,8 @@ export default function UserManagement() {
     })
     const [quotaInput, setQuotaInput] = useState<string>('')
     const [expiry, setExpiry] = useState<ExpiryDraft>(emptyExpiry())
+    const [selectedNames, setSelectedNames] = useState<Set<string>>(new Set())
+    const [bulkActionNames, setBulkActionNames] = useState<string[] | null>(null)
     const [bulkExpiry, setBulkExpiry] = useState<ExpiryDraft>(emptyExpiry())
     const [inboundRows, setInboundRows] = useState<{ tag: string; flow: string }[]>([])
     const [originalInboundTags, setOriginalInboundTags] = useState<string[]>([])
@@ -475,11 +478,33 @@ export default function UserManagement() {
             : <ArrowDown size={12} className="inline ml-1 text-white" />
     }
 
+    const toggleSelected = (name: string) => setSelectedNames(prev => {
+        const next = new Set(prev)
+        if (next.has(name)) next.delete(name)
+        else next.add(name)
+        return next
+    })
+
+    const selectionCheckbox = (name: string) => (
+        <input
+            type="checkbox"
+            aria-label={`Select ${name}`}
+            checked={selectedNames.has(name)}
+            onChange={() => toggleSelected(name)}
+            disabled={!canWriteUsers}
+            className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-600 bg-slate-900"
+        />
+    )
+
+    const selectWhere = (predicate: (user: UserStatus) => boolean) => {
+        setSelectedNames(new Set(sortedUsers.filter(predicate).map(user => user.name)))
+    }
+
     const renderExpiryLabel = (user: UserStatus) => {
         const info = describeExpiry(user.expires_at, user.expire_after_days)
         if (!info) return null
         const tone = info.tone === 'expired' ? 'text-red-400' : info.tone === 'soon' ? 'text-amber-400' : 'text-slate-400'
-        return <div className={`truncate text-xs ${tone}`}>{info.text}</div>
+        return <div className={`truncate text-xs ${tone}`} title={info.text}>{info.text}</div>
     }
 
     const renderRouteTagBadges = (routeTags?: UserRouteTag[], className = "flex flex-wrap gap-1.5 max-w-full") => (
@@ -1102,6 +1127,38 @@ export default function UserManagement() {
             </div>
 
             {/* Users Table Container */}
+            {canWriteUsers && sortedUsers.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <select
+                        value=""
+                        onChange={e => {
+                            const choice = e.target.value
+                            if (choice === 'all') selectWhere(() => true)
+                            else if (choice === 'expired') selectWhere(user => describeExpiry(user.expires_at, user.expire_after_days)?.tone === 'expired')
+                            else if (choice === 'limited') selectWhere(user => user.quota_limit > 0 && user.total >= user.quota_limit)
+                            else if (choice === 'disabled') selectWhere(user => user.enabled === false)
+                            else if (choice === 'none') setSelectedNames(new Set())
+                        }}
+                        aria-label="Select users"
+                        className="select-field rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-300 outline-none"
+                    >
+                        <option value="">Select…</option>
+                        <option value="all">All shown</option>
+                        <option value="expired">Expired</option>
+                        <option value="limited">Over quota</option>
+                        <option value="disabled">Disabled</option>
+                        <option value="none">None</option>
+                    </select>
+                    {selectedNames.size > 0 && (
+                        <>
+                            <span className="text-slate-300">{selectedNames.size} selected</span>
+                            <Button variant="primary" size="sm" onClick={() => setBulkActionNames(Array.from(selectedNames))} className="whitespace-nowrap">Actions…</Button>
+                            <Button variant="ghost" size="sm" onClick={() => setSelectedNames(new Set())} className="whitespace-nowrap">Clear</Button>
+                        </>
+                    )}
+                </div>
+            )}
+
             <div className="hidden min-[900px]:block lg:hidden xl:block bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm min-h-[220px]">
                 <div className="overflow-x-auto">
                     <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[860px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
@@ -1185,8 +1242,13 @@ export default function UserManagement() {
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3">
-                                                <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
-                                                {renderExpiryLabel(user)}
+                                                <div className="flex items-center gap-2.5">
+                                                    {selectionCheckbox(user.name)}
+                                                    <div className="min-w-0">
+                                                        <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
+                                                        {renderExpiryLabel(user)}
+                                                    </div>
+                                                </div>
                                             </td>
                                             <td className="px-4 py-3 align-middle">
                                                 <div className="mb-1.5 flex items-baseline justify-between gap-2 font-mono text-xs tabular-nums text-slate-200">
@@ -1321,9 +1383,12 @@ export default function UserManagement() {
                         return (
                             <div key={user.name} className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
                                 <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0 flex-1">
-                                        <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
-                                        {renderExpiryLabel(user)}
+                                    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                                        {selectionCheckbox(user.name)}
+                                        <div className="min-w-0">
+                                            <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
+                                            {renderExpiryLabel(user)}
+                                        </div>
                                     </div>
                                     <div className="flex shrink-0 items-center gap-1.5">
                                         <ActionIconButton
@@ -1867,6 +1932,17 @@ export default function UserManagement() {
                 isLoading={routeTagDefinitionSaving}
             />
 
+
+            {bulkActionNames && (
+                <BulkActionModal
+                    names={bulkActionNames}
+                    onClose={() => setBulkActionNames(null)}
+                    onDone={() => {
+                        setSelectedNames(new Set())
+                        void refreshUsersData()
+                    }}
+                />
+            )}
 
             {modalState.type === 'templates' && (
                 <UserTemplatesModal inbounds={inbounds} canWrite={canWriteUsers} onClose={() => setModalState({ type: null })} />

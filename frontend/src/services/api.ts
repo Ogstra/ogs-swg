@@ -105,6 +105,20 @@ export interface CreateUserRequest {
     expire_after_days?: number;
 }
 
+export interface BulkUserActionRequest {
+    names: string[];
+    action: 'extend_days' | 'add_quota' | 'set_quota' | 'set_expiry' | 'delete';
+    days?: number;
+    quota_bytes?: number;
+    expires_at?: number;
+}
+
+export interface BulkUserActionResponse {
+    results: { name: string; ok: boolean; error?: string }[];
+    done: number;
+    failed: number;
+}
+
 export interface UserTemplate {
     id: number;
     name: string;
@@ -989,6 +1003,8 @@ export const api = {
         request<{ recovery_codes: string[] }>('/api/auth/2fa/enable', { method: 'POST', json: { code }, errorMsg: 'Failed to enable two-factor authentication' }),
     disableTwoFactor: async (currentPassword: string, code: string): Promise<void> =>
         request('/api/auth/2fa/disable', { method: 'POST', json: { current_password: currentPassword, code }, parse: 'none', errorMsg: 'Failed to disable two-factor authentication' }),
+    bulkUserAction: async (payload: BulkUserActionRequest): Promise<BulkUserActionResponse> =>
+        request<BulkUserActionResponse>('/api/users/bulk-action', { method: 'POST', json: payload, errorMsg: 'Failed to apply the action' }),
     getUserTemplates: async (): Promise<UserTemplate[]> =>
         request<UserTemplate[]>('/api/user-templates', { errorMsg: 'Failed to load templates' }),
     createUserTemplate: async (template: UserTemplateInput): Promise<UserTemplate> =>
