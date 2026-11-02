@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UserStatus, CreateUserRequest, UserRouteTag, type UserTemplate } from '../../services/api'
 import { UserTemplatesModal, describeTemplate } from './UserTemplatesModal'
+import { ExpiryFields, describeExpiry, emptyExpiry, expiryDraftIsValid, expiryFromTemplate, expiryFromUser, expiryToRequest, type ExpiryDraft } from './expiry'
 import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags, LayoutTemplate } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
 import { useToast } from '../../context/ToastContext'
@@ -153,6 +154,8 @@ export default function UserManagement() {
         inbound_tag: ''
     })
     const [quotaInput, setQuotaInput] = useState<string>('')
+    const [expiry, setExpiry] = useState<ExpiryDraft>(emptyExpiry())
+    const [bulkExpiry, setBulkExpiry] = useState<ExpiryDraft>(emptyExpiry())
     const [inboundRows, setInboundRows] = useState<{ tag: string; flow: string }[]>([])
     const [originalInboundTags, setOriginalInboundTags] = useState<string[]>([])
 
@@ -268,6 +271,7 @@ export default function UserManagement() {
             inbound_tag: template.inbound_tag || prev.inbound_tag,
         }))
         setQuotaInput(bytesToGbString(template.quota_limit))
+        setExpiry(expiryFromTemplate(template.expire_days, template.expire_on_first_use))
         setTemplateRouteTagIds(template.route_tag_ids || [])
     }
 
@@ -280,6 +284,7 @@ export default function UserManagement() {
             quota_period: template.quota_period === 'total' ? 'none' : template.quota_period,
         }))
         setBulkQuotaInput(bytesToGbString(template.quota_limit))
+        setBulkExpiry(expiryFromTemplate(template.expire_days, template.expire_on_first_use))
         setTemplateRouteTagIds(template.route_tag_ids || [])
     }
 
@@ -468,6 +473,13 @@ export default function UserManagement() {
         return sortDir === 'asc'
             ? <ArrowUp size={12} className="inline ml-1 text-white" />
             : <ArrowDown size={12} className="inline ml-1 text-white" />
+    }
+
+    const renderExpiryLabel = (user: UserStatus) => {
+        const info = describeExpiry(user.expires_at, user.expire_after_days)
+        if (!info) return null
+        const tone = info.tone === 'expired' ? 'text-red-400' : info.tone === 'soon' ? 'text-amber-400' : 'text-slate-400'
+        return <div className={`truncate text-xs ${tone}`}>{info.text}</div>
     }
 
     const renderRouteTagBadges = (routeTags?: UserRouteTag[], className = "flex flex-wrap gap-1.5 max-w-full") => (
@@ -680,6 +692,7 @@ export default function UserManagement() {
             )
         )
         setQuotaInput(bytesToGbString(user.quota_limit))
+        setExpiry(expiryFromUser(user.expires_at, user.expire_after_days))
         setOriginalName(user.name)
         setIsEditing(true)
         setModalState({ type: 'create' })
@@ -751,6 +764,10 @@ export default function UserManagement() {
             toastError('No write permission for sing-box users')
             return
         }
+        if (!expiryDraftIsValid(expiry)) {
+            toastError('Pick the last day, or how many days the user lasts.')
+            return
+        }
         try {
             const normalizedRows = inboundRows.slice(0, 1).map(row => ({
                 tag: row.tag.trim(),
@@ -783,6 +800,7 @@ export default function UserManagement() {
                     vmess_security: vmessSecurity,
                     vmess_alter_id: vmessAlterID,
                     reset_day: 1,
+                    ...expiryToRequest(expiry),
                 }
                 if (!payload.uuid) payload.uuid = await generateCredentialForType(userType, inboundTag)
 
@@ -818,6 +836,7 @@ export default function UserManagement() {
                     reset_day: 1,
                     inbound_tag: inboundTag,
                     flow: selectedFlow,
+                    ...expiryToRequest(expiry),
                 }
                 if (!payload.uuid) payload.uuid = await generateCredentialForType(userType, inboundTag)
                 await api.createUser(payload)
@@ -894,7 +913,8 @@ export default function UserManagement() {
                     quota_limit: bulkConfig.quota_limit,
                     quota_period: bulkConfig.quota_period,
                     reset_day: 1,
-                    inbound_tag: bulkConfig.inbound_tag
+                    inbound_tag: bulkConfig.inbound_tag,
+                    ...expiryToRequest(bulkExpiry),
                 })
             }
 
@@ -1031,6 +1051,7 @@ export default function UserManagement() {
                                 inbound_tag: getFirstInboundTagForType(getDefaultUserType())
                             })
                             setQuotaInput('')
+                            setExpiry(emptyExpiry())
                             setTemplateRouteTagIds([])
                             setModalState({ type: 'create' })
                         }}
@@ -1050,7 +1071,7 @@ export default function UserManagement() {
                         Templates
                     </Button>
                     <Button
-                        onClick={() => { if (!canWriteUsers) return; setTemplateRouteTagIds([]); setModalState({ type: 'bulk' }) }}
+                        onClick={() => { if (!canWriteUsers) return; setTemplateRouteTagIds([]); setBulkExpiry(emptyExpiry()); setModalState({ type: 'bulk' }) }}
                         variant="secondary"
                         icon={<Users size={16} />}
                         disabled={!canWriteUsers}
@@ -1165,6 +1186,7 @@ export default function UserManagement() {
                                             </td>
                                             <td className="px-4 py-3">
                                                 <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
+                                                {renderExpiryLabel(user)}
                                             </td>
                                             <td className="px-4 py-3 align-middle">
                                                 <div className="mb-1.5 flex items-baseline justify-between gap-2 font-mono text-xs tabular-nums text-slate-200">
@@ -1299,7 +1321,10 @@ export default function UserManagement() {
                         return (
                             <div key={user.name} className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
                                 <div className="flex items-center justify-between gap-3">
-                                    <div className="min-w-0 flex-1 truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
+                                    <div className="min-w-0 flex-1">
+                                        <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
+                                        {renderExpiryLabel(user)}
+                                    </div>
                                     <div className="flex shrink-0 items-center gap-1.5">
                                         <ActionIconButton
                                             onClick={() => handleEditClick(user)}
@@ -1603,6 +1628,7 @@ export default function UserManagement() {
                             </select>
                         </div>
                     </div>
+                    <ExpiryFields value={expiry} onChange={setExpiry} disabled={!canWriteUsers} />
                 </div>
             </Modal>
 
@@ -2007,6 +2033,7 @@ export default function UserManagement() {
                             </select>
                         </div>
                     </div>
+                    <ExpiryFields value={bulkExpiry} onChange={setBulkExpiry} disabled={!canWriteUsers} />
                 </div>
             </Modal >
 

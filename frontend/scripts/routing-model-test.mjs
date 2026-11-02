@@ -254,3 +254,57 @@ test('unique tags get a numeric suffix', () => {
     assert.equal(o.uniqueTag('a', ['a', 'a-2']), 'a-3')
     assert.equal(o.uniqueTag('  ', []), 'outbound')
 })
+
+// ---- user expiry (frontend helpers) ----
+
+const expiryOut = join(outDir, 'expiry.mjs')
+execFileSync(join(root, 'node_modules', '.bin', 'esbuild'), [
+    join(root, 'src/pages/UserManagement/expiry.tsx'),
+    '--bundle', '--format=esm', '--platform=node', '--jsx=automatic', `--outfile=${expiryOut}`, '--log-level=error',
+])
+const x = await import(pathToFileURL(expiryOut).href)
+
+test('a chosen day lasts through its last second, in local time', () => {
+    const ts = x.endOfLocalDay('2030-06-15')
+    const d = new Date(ts * 1000)
+    assert.equal(d.getFullYear(), 2030)
+    assert.equal(d.getMonth(), 5)
+    assert.equal(d.getDate(), 15)
+    assert.equal(d.getHours(), 23)
+    assert.equal(d.getMinutes(), 59)
+    assert.equal(x.toDateInput(ts), '2030-06-15')
+    assert.equal(x.endOfLocalDay(''), 0)
+})
+
+test('expiry drafts become request fields, always clearing the other mode', () => {
+    assert.deepEqual(x.expiryToRequest(x.emptyExpiry()), { expires_at: 0, expire_after_days: 0 })
+    assert.deepEqual(x.expiryToRequest({ mode: 'first_use', date: '2030-01-01', days: '14' }), { expires_at: 0, expire_after_days: 14 })
+    const dated = x.expiryToRequest({ mode: 'date', date: '2030-06-15', days: '14' })
+    assert.equal(dated.expire_after_days, 0)
+    assert.ok(dated.expires_at > 0)
+})
+
+test('drafts are validated and read back from a user', () => {
+    assert.equal(x.expiryDraftIsValid(x.emptyExpiry()), true)
+    assert.equal(x.expiryDraftIsValid({ mode: 'date', date: '', days: '30' }), false)
+    assert.equal(x.expiryDraftIsValid({ mode: 'first_use', date: '', days: '0' }), false)
+    assert.equal(x.expiryFromUser(0, 0).mode, 'never')
+    assert.equal(x.expiryFromUser(0, 10).mode, 'first_use')
+    assert.equal(x.expiryFromUser(1893456000, 10).mode, 'date')
+})
+
+test('templates give a date for fixed validity and days for first-use validity', () => {
+    assert.equal(x.expiryFromTemplate(0, false).mode, 'never')
+    assert.deepEqual(x.expiryFromTemplate(7, true), { mode: 'first_use', date: '', days: '7' })
+    assert.equal(x.expiryFromTemplate(7, false).mode, 'date')
+})
+
+test('list labels say how long is left', () => {
+    const now = 1_000_000
+    assert.equal(x.describeExpiry(0, 0, now), null)
+    assert.deepEqual(x.describeExpiry(now - 5, 0, now), { text: 'Expired', tone: 'expired' })
+    assert.deepEqual(x.describeExpiry(now + 86400 * 10, 0, now), { text: 'Expires in 10d', tone: 'ok' })
+    assert.deepEqual(x.describeExpiry(now + 86400 * 2, 0, now), { text: 'Expires in 2d', tone: 'soon' })
+    assert.deepEqual(x.describeExpiry(now + 3600, 0, now), { text: 'Expires today', tone: 'soon' })
+    assert.deepEqual(x.describeExpiry(0, 30, now), { text: '30d from first use', tone: 'pending' })
+})

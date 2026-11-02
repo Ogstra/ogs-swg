@@ -16,7 +16,7 @@ const toBytes = (gb: string) => {
     return Number.isFinite(value) && value > 0 ? Math.round(value * BYTES_PER_GB) : 0
 }
 
-const emptyDraft = (): UserTemplateInput => ({ name: '', inbound_tag: '', flow: '', quota_limit: 0, quota_period: 'monthly', route_tag_ids: [] })
+const emptyDraft = (): UserTemplateInput => ({ name: '', inbound_tag: '', flow: '', quota_limit: 0, quota_period: 'monthly', route_tag_ids: [], expire_days: 0, expire_on_first_use: false })
 
 const inputClass = 'w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5 text-white outline-none transition-colors focus:border-blue-500/50'
 
@@ -25,7 +25,8 @@ export function describeTemplate(template: UserTemplateInput): string {
         ? `${toGb(template.quota_limit)} GB ${template.quota_period === 'total' ? 'total' : 'per month'}`
         : 'No quota'
     const tagCount = template.route_tag_ids?.length ?? 0
-    return [template.inbound_tag || 'No inbound', quota, ...(tagCount > 0 ? [`${tagCount} tag${tagCount > 1 ? 's' : ''}`] : [])].join(' · ')
+    const validity = template.expire_days > 0 ? `${template.expire_days}d${template.expire_on_first_use ? ' from first use' : ''}` : ''
+    return [template.inbound_tag || 'No inbound', quota, ...(validity ? [validity] : []), ...(tagCount > 0 ? [`${tagCount} tag${tagCount > 1 ? 's' : ''}`] : [])].join(' · ')
 }
 
 interface Props {
@@ -73,7 +74,7 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
 
     const startEdit = (template: UserTemplate) => {
         setEditingId(template.id)
-        setDraft({ name: template.name, inbound_tag: template.inbound_tag, flow: template.flow, quota_limit: template.quota_limit, quota_period: template.quota_period, route_tag_ids: template.route_tag_ids || [] })
+        setDraft({ name: template.name, inbound_tag: template.inbound_tag, flow: template.flow, quota_limit: template.quota_limit, quota_period: template.quota_period, route_tag_ids: template.route_tag_ids || [], expire_days: template.expire_days || 0, expire_on_first_use: !!template.expire_on_first_use })
         setQuotaInput(toGb(template.quota_limit))
     }
 
@@ -133,6 +134,29 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
                                 <option value="total">Total (One-time)</option>
                             </select>
                         </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div>
+                            <label className="mb-1 block text-sm font-medium text-slate-400">Valid for (days)</label>
+                            <input
+                                className={inputClass}
+                                type="number"
+                                min={0}
+                                value={draft.expire_days || ''}
+                                onChange={e => setDraft({ ...draft, expire_days: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                                placeholder="0 for no expiry"
+                            />
+                        </div>
+                        <label className="flex items-end gap-2 pb-2.5 text-sm text-slate-300">
+                            <input
+                                type="checkbox"
+                                className="h-4 w-4 shrink-0 rounded border-slate-700 bg-slate-900"
+                                checked={draft.expire_on_first_use}
+                                disabled={draft.expire_days <= 0}
+                                onChange={e => setDraft({ ...draft, expire_on_first_use: e.target.checked })}
+                            />
+                            Start counting at first use
+                        </label>
                     </div>
                     {routeTags.length > 0 && (
                         <div className="space-y-1">

@@ -30,6 +30,8 @@ export interface UserStatus {
     inbound_tags?: string[];
     route_tags?: UserRouteTag[];
     external_profiles?: ExternalProfile[];
+    expires_at?: number;
+    expire_after_days?: number;
 }
 
 export interface UserRouteTag {
@@ -99,6 +101,8 @@ export interface CreateUserRequest {
     reset_day: number;
     enabled?: boolean;
     inbound_tag?: string;
+    expires_at?: number;
+    expire_after_days?: number;
 }
 
 export interface UserTemplate {
@@ -109,6 +113,8 @@ export interface UserTemplate {
     quota_limit: number;
     quota_period: string;
     route_tag_ids: number[];
+    expire_days: number;
+    expire_on_first_use: boolean;
     created_at?: number;
 }
 
