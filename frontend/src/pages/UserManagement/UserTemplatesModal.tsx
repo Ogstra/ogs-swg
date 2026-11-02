@@ -6,6 +6,7 @@ import { useToast } from '../../context/ToastContext'
 import { Modal } from '../../components/ui/Modal'
 import { Button } from '../../components/ui/Button'
 import { ActionIconButton } from '../../components/ui/ActionIconButton'
+import { QUOTA_PERIODS, normalizeQuotaPeriod, quotaPeriodLabel } from './quotaPeriods'
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const DEFAULT_FLOW = 'xtls-rprx-vision'
@@ -22,7 +23,7 @@ const inputClass = 'w-full rounded-lg border border-slate-800 bg-slate-950 p-2.5
 
 export function describeTemplate(template: UserTemplateInput): string {
     const quota = template.quota_limit > 0
-        ? `${toGb(template.quota_limit)} GB ${template.quota_period === 'total' ? 'total' : 'per month'}`
+        ? `${toGb(template.quota_limit)} GB · ${quotaPeriodLabel(template.quota_period).toLowerCase()}`
         : 'No quota'
     const tagCount = template.route_tag_ids?.length ?? 0
     const validity = template.expire_days > 0 ? `${template.expire_days}d${template.expire_on_first_use ? ' from first use' : ''}` : ''
@@ -129,9 +130,8 @@ export function UserTemplatesModal({ inbounds, canWrite, onClose }: Props) {
                         </div>
                         <div>
                             <label className="mb-1 block text-sm font-medium text-slate-400">Quota period</label>
-                            <select className={`select-field ${inputClass}`} value={draft.quota_period} onChange={e => setDraft({ ...draft, quota_period: e.target.value })}>
-                                <option value="monthly">Monthly</option>
-                                <option value="total">Total (One-time)</option>
+                            <select className={`select-field ${inputClass}`} value={normalizeQuotaPeriod(draft.quota_period)} onChange={e => setDraft({ ...draft, quota_period: e.target.value })}>
+                                {QUOTA_PERIODS.map(period => <option key={period.value} value={period.value}>{period.label}</option>)}
                             </select>
                         </div>
                     </div>

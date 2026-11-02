@@ -15,6 +15,7 @@ const ACTIONS: { id: Action; label: string }[] = [
     { id: 'add_quota', label: 'Add data to the quota' },
     { id: 'set_quota', label: 'Set the quota' },
     { id: 'set_expiry', label: 'Set the expiry date' },
+    { id: 'reset_usage', label: 'Reset usage (start counting from now)' },
     { id: 'delete', label: 'Delete users' },
 ]
 
@@ -58,6 +59,8 @@ export function BulkActionModal({ names, onClose, onDone }: Props) {
             }
             case 'set_expiry':
                 return { names, action, expires_at: date ? endOfLocalDay(date) : 0 }
+            case 'reset_usage':
+                return { names, action }
             default:
                 return { names, action: 'delete' }
         }
@@ -137,6 +140,9 @@ export function BulkActionModal({ names, onClose, onDone }: Props) {
                         <input className={inputClass} type="date" value={date} disabled={!!result} onChange={e => setDate(e.target.value)} />
                         <p className="text-xs text-slate-400">Leave it empty to remove the expiry.</p>
                     </div>
+                )}
+                {action === 'reset_usage' && (
+                    <p className="text-xs text-slate-400">Usage counts from now for the quota. The recorded traffic is kept. Users that were disabled for being over quota come back.</p>
                 )}
                 {deleting && (
                     <label className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">

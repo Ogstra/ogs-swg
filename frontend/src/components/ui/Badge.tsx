@@ -20,7 +20,7 @@ export function Badge({ children, variant = 'neutral', className = '', title, wr
 
     return (
         <span title={title} className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 ${wrap ? 'rounded-xl' : 'rounded-full'} text-xs font-medium border ${variants[variant]} ${className}`}>
-            <span className={`inline-flex min-w-0 items-center gap-1.5 align-middle ${wrap ? 'whitespace-normal break-words' : 'truncate'}`}>
+            <span className={`inline-flex min-w-0 items-center gap-1.5 align-middle ${wrap ? 'whitespace-normal [overflow-wrap:anywhere]' : 'truncate'}`}>
                 {children}
             </span>
         </span>

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, UserStatus, CreateUserRequest, UserRouteTag, type UserTemplate } from '../../services/api'
 import { UserTemplatesModal, describeTemplate } from './UserTemplatesModal'
 import { BulkActionModal } from './BulkActionModal'
+import { QUOTA_PERIODS, normalizeQuotaPeriod } from './quotaPeriods'
 import { ExpiryFields, describeExpiry, emptyExpiry, expiryDraftIsValid, expiryFromTemplate, expiryFromUser, expiryToRequest, type ExpiryDraft } from './expiry'
 import { Users, Plus, Trash2, RefreshCw, Edit, ArrowUp, ArrowDown, ArrowUpDown, QrCode as QrCodeIcon, Tags, LayoutTemplate } from 'lucide-react'
 import { QrLinkModal } from '../../components/ui/QrLinkModal'
@@ -284,7 +285,7 @@ export default function UserManagement() {
             inbound_tag: template.inbound_tag || prev.inbound_tag,
             flow: canShowBulkFlow(template.inbound_tag) ? (template.flow || prev.flow) : '',
             quota_limit: template.quota_limit,
-            quota_period: template.quota_period === 'total' ? 'none' : template.quota_period,
+            quota_period: normalizeQuotaPeriod(template.quota_period),
         }))
         setBulkQuotaInput(bytesToGbString(template.quota_limit))
         setBulkExpiry(expiryFromTemplate(template.expire_days, template.expire_on_first_use))
@@ -492,7 +493,21 @@ export default function UserManagement() {
             checked={selectedNames.has(name)}
             onChange={() => toggleSelected(name)}
             disabled={!canWriteUsers}
-            className="h-4 w-4 shrink-0 cursor-pointer rounded border-slate-600 bg-slate-900"
+            className="h-5 w-5 shrink-0 cursor-pointer rounded border-slate-600 bg-slate-900 md:h-4 md:w-4"
+        />
+    )
+
+    const allShownSelected = sortedUsers.length > 0 && sortedUsers.every(user => selectedNames.has(user.name))
+    const someShownSelected = sortedUsers.some(user => selectedNames.has(user.name))
+    const selectAllCheckbox = (
+        <input
+            type="checkbox"
+            aria-label="Select all shown users"
+            checked={allShownSelected}
+            ref={el => { if (el) el.indeterminate = someShownSelected && !allShownSelected }}
+            onChange={() => setSelectedNames(allShownSelected ? new Set() : new Set(sortedUsers.map(user => user.name)))}
+            disabled={!canWriteUsers || sortedUsers.length === 0}
+            className="h-5 w-5 shrink-0 cursor-pointer rounded border-slate-600 bg-slate-900 md:h-4 md:w-4"
         />
     )
 
@@ -1164,26 +1179,27 @@ export default function UserManagement() {
                     <table className={`w-full ${sortedUsers.length > 0 ? 'min-w-[860px]' : 'min-w-full'} text-left border-collapse table-fixed`}>
                         <thead>
                             <tr className="border-b border-slate-800 bg-slate-950/50 text-xs text-slate-400">
-                                <th className="w-[130px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('last_seen')}>
+                                <th className="w-12 py-3 pl-4 pr-0">{selectAllCheckbox}</th>
+                                <th className="w-[120px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('last_seen')}>
                                     Last seen {renderSortIcon('last_seen')}
                                 </th>
                                 <th className="cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('user')}>
                                     Name {renderSortIcon('user')}
                                 </th>
-                                <th className="w-[200px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('quota')}>
+                                <th className="w-[190px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('quota')}>
                                     Quota {renderSortIcon('quota')}
                                 </th>
-                                <th className="w-[130px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('usage')}>
+                                <th className="w-[120px] cursor-pointer select-none px-4 py-3 font-medium transition-colors hover:text-slate-200" onClick={() => toggleSort('usage')}>
                                     Data usage {renderSortIcon('usage')}
                                 </th>
-                                <th className="w-[210px] px-4 py-3 text-left font-medium">Inbound</th>
-                                <th className="w-[140px] px-4 py-3 text-right font-medium">Actions</th>
+                                <th className="w-[200px] px-4 py-3 text-left font-medium">Inbound</th>
+                                <th className="w-[130px] px-4 py-3 text-right font-medium">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {usersQuery.isSuccess && sortedUsers.length === 0 ? (
                                 <tr>
-                                    <td colSpan={6} className="p-12 text-center text-slate-500">
+                                    <td colSpan={7} className="p-12 text-center text-slate-500">
                                         <Users size={48} className="mx-auto mb-4 opacity-20" />
                                         <p>No users found.</p>
                                         <button
@@ -1231,8 +1247,9 @@ export default function UserManagement() {
                                     return (
                                         <tr
                                             key={user.name}
-                                            className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors"
+                                            className={`border-b border-slate-800 transition-colors ${selectedNames.has(user.name) ? 'bg-blue-500/5 hover:bg-blue-500/10' : 'hover:bg-slate-800/30'}`}
                                         >
+                                            <td className="w-12 py-3 pl-4 pr-0 align-middle">{selectionCheckbox(user.name)}</td>
                                             <td className="px-4 py-3">
                                                 <div className="flex items-center gap-2.5">
                                                     <div className={`h-2 w-2 shrink-0 rounded-full ${statusColor} ${isOnline ? 'shadow-[0_0_8px_rgba(16,185,129,0.4)]' : ''}`}></div>
@@ -1242,12 +1259,9 @@ export default function UserManagement() {
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3">
-                                                <div className="flex items-center gap-2.5">
-                                                    {selectionCheckbox(user.name)}
-                                                    <div className="min-w-0">
-                                                        <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
-                                                        {renderExpiryLabel(user)}
-                                                    </div>
+                                                <div className="min-w-0">
+                                                    <div className="truncate font-semibold text-slate-100" title={user.name}>{user.name}</div>
+                                                    {renderExpiryLabel(user)}
                                                 </div>
                                             </td>
                                             <td className="px-4 py-3 align-middle">
@@ -1381,7 +1395,7 @@ export default function UserManagement() {
                         }
 
                         return (
-                            <div key={user.name} className="rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
+                            <div key={user.name} className={`rounded-lg border px-4 py-3 transition-colors ${selectedNames.has(user.name) ? 'border-blue-500/50 bg-blue-500/5' : 'border-slate-800 bg-slate-900'}`}>
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="flex min-w-0 flex-1 items-center gap-2.5">
                                         {selectionCheckbox(user.name)}
@@ -1684,12 +1698,11 @@ export default function UserManagement() {
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Quota Period</label>
                             <select
-                                value={newUser.quota_period}
+                                value={normalizeQuotaPeriod(newUser.quota_period)}
                                 onChange={e => setNewUser({ ...newUser, quota_period: e.target.value })}
                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                             >
-                                <option value="monthly">Monthly</option>
-                                <option value="total">Total (One-time)</option>
+                                {QUOTA_PERIODS.map(period => <option key={period.value} value={period.value}>{period.label}</option>)}
                             </select>
                         </div>
                     </div>
@@ -2099,13 +2112,11 @@ export default function UserManagement() {
                         <div>
                             <label className="block text-sm font-medium text-slate-400 mb-1">Quota Period</label>
                             <select
-                                value={bulkConfig.quota_period}
-                                onChange={e => setBulkConfig({ ...bulkConfig, quota_period: e.target.value as 'monthly' | 'daily' | 'none' })}
+                                value={normalizeQuotaPeriod(bulkConfig.quota_period)}
+                                onChange={e => setBulkConfig({ ...bulkConfig, quota_period: e.target.value })}
                                 className="select-field w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white outline-none focus:border-blue-500/50"
                             >
-                                <option value="monthly">Monthly</option>
-                                <option value="daily">Daily</option>
-                                <option value="none">None</option>
+                                {QUOTA_PERIODS.map(period => <option key={period.value} value={period.value}>{period.label}</option>)}
                             </select>
                         </div>
                     </div>

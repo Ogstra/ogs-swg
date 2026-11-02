@@ -45,7 +45,7 @@ func TestUserTemplates_CRUD(t *testing.T) {
 	for name, tmpl := range map[string]core.UserTemplate{
 		"empty name":     {Name: "  "},
 		"negative quota": {Name: "x", QuotaLimit: -1},
-		"bad period":     {Name: "x", QuotaPeriod: "weekly"},
+		"bad period":     {Name: "x", QuotaPeriod: "fortnightly"},
 	} {
 		if rec := templateCall(srv, srv.handleCreateUserTemplate, http.MethodPost, "/api/user-templates", "", tmpl); rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s status=%d; want 400", name, rec.Code)

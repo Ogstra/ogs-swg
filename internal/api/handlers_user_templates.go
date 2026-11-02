@@ -10,6 +10,14 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
+func validQuotaPeriod(period string) bool {
+	switch period {
+	case "daily", "weekly", "monthly", "yearly", "total":
+		return true
+	}
+	return false
+}
+
 const (
 	maxUserTemplateNameLength = 64
 	maxUserTemplateExpireDays = 3650
@@ -43,8 +51,8 @@ func decodeUserTemplate(r *http.Request) (core.UserTemplate, string) {
 		return t, "Name is too long"
 	case t.QuotaLimit < 0:
 		return t, "quota_limit cannot be negative"
-	case t.QuotaPeriod != "monthly" && t.QuotaPeriod != "total":
-		return t, "quota_period must be monthly or total"
+	case !validQuotaPeriod(t.QuotaPeriod):
+		return t, "quota_period must be daily, weekly, monthly, yearly or total"
 	case t.ExpireDays < 0 || t.ExpireDays > maxUserTemplateExpireDays:
 		return t, "expire_days must be between 0 and 3650"
 	}

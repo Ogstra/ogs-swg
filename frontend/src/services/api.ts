@@ -32,6 +32,7 @@ export interface UserStatus {
     external_profiles?: ExternalProfile[];
     expires_at?: number;
     expire_after_days?: number;
+    usage_reset_at?: number;
 }
 
 export interface UserRouteTag {
@@ -107,7 +108,7 @@ export interface CreateUserRequest {
 
 export interface BulkUserActionRequest {
     names: string[];
-    action: 'extend_days' | 'add_quota' | 'set_quota' | 'set_expiry' | 'delete';
+    action: 'extend_days' | 'add_quota' | 'set_quota' | 'set_expiry' | 'reset_usage' | 'delete';
     days?: number;
     quota_bytes?: number;
     expires_at?: number;
