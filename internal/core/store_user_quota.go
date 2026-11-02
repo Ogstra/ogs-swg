@@ -34,8 +34,13 @@ func userQuotaUsage(meta *UserMetadata, now time.Time, store *Store) (int64, boo
 	if meta == nil {
 		return 0, false, nil
 	}
+	expiry, err := store.GetUserExpiry(meta.Email)
+	if err != nil {
+		return 0, false, err
+	}
+	expired := expiry.Expired(now)
 	if meta.QuotaLimit <= 0 {
-		return 0, false, nil
+		return 0, expired, nil
 	}
 
 	samples, err := store.GetCombinedReport(meta.Email, quotaWindowStart(meta.QuotaPeriod, now), now.Unix())
@@ -47,7 +52,7 @@ func userQuotaUsage(meta *UserMetadata, now time.Time, store *Store) (int64, boo
 	for _, sample := range samples {
 		used += sample.Uplink + sample.Downlink
 	}
-	return used, used >= meta.QuotaLimit, nil
+	return used, used >= meta.QuotaLimit || expired, nil
 }
 
 func credentialFromInbound(info UserInboundInfo) string {
@@ -163,6 +168,12 @@ func (s *Store) EnforceUserQuotas(cfg *Config) {
 		meta, err := s.GetUserMetadata(row.Email)
 		if err != nil || meta == nil {
 			continue
+		}
+
+		if started, err := s.activateExpiryOnFirstUse(meta.Email, now); err != nil {
+			log.Printf("EnforceUserQuotas: expiry start for %s: %v", meta.Email, err)
+		} else if started {
+			log.Printf("EnforceUserQuotas: %s used the service for the first time; the expiry countdown started", meta.Email)
 		}
 
 		used, overQuota, err := userQuotaUsage(meta, now, s)
