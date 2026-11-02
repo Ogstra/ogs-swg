@@ -924,6 +924,7 @@ type UserStatus struct {
 	SubscriptionQuota *SubQuotaInfo          `json:"subscription_quota,omitempty"`
 	ExpiresAt         int64                  `json:"expires_at"`
 	ExpireAfterDays   int64                  `json:"expire_after_days"`
+	UsageResetAt      int64                  `json:"usage_reset_at"`
 }
 
 func (s *Server) replaceUserInRouteRules(oldName, newName string) error {
@@ -1056,6 +1057,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userExpiries, _ := s.store.ListUserExpiries()
+	userAnchors, _ := s.store.ListUserQuotaAnchors()
 	result := []UserStatus{}
 	for name := range uniqueNames {
 		user, isActive := activeMap[name]
@@ -1160,7 +1162,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		// by quota period changes.
 		now := s.now()
 		startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
-		combinedSamples, err := s.store.GetCombinedReport(name, core.QuotaWindowStart(period, now), now.Unix())
+		combinedSamples, err := s.store.GetCombinedReport(name, core.QuotaUsageStart(period, userAnchors[name], now), now.Unix())
 		var up, down int64
 		lastSeen := int64(0)
 		if err == nil {
@@ -1246,6 +1248,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			SubscriptionQuota: subQuota,
 			ExpiresAt:         userExpiries[name].ExpiresAt,
 			ExpireAfterDays:   userExpiries[name].ExpireAfterDays,
+			UsageResetAt:      userAnchors[name],
 		})
 	}
 

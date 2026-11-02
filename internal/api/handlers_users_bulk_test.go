@@ -165,3 +165,32 @@ func TestBulkUserAction_DeleteAndValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestBulkUserAction_ResetUsageBringsAnOverQuotaUserBack(t *testing.T) {
+	s, st := newBulkActionServer(t)
+	now := time.Now()
+	if err := st.SaveUserMetadata(core.UserMetadata{
+		Email: "ann", QuotaLimit: 1000, QuotaPeriod: "monthly", Enabled: true,
+		Credential: "11111111-1111-1111-1111-111111111111", InboundTags: []string{"test-vless"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddSample(core.Sample{User: "ann", Timestamp: now.Add(-time.Minute).Unix(), Uplink: 900, Downlink: 900}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReconcileUserQuotaNow("ann", s.config); err != nil {
+		t.Fatal(err)
+	}
+	if m, _ := st.GetUserMetadata("ann"); m.Enabled {
+		t.Fatal("precondition: the user should be disabled for being over quota")
+	}
+
+	time.Sleep(1100 * time.Millisecond) // the reset time has one-second resolution
+	_, out := bulkCall(t, s, bulkUserActionRequest{Names: []string{"ann"}, Action: "reset_usage"})
+	if out.Done != 1 {
+		t.Fatalf("reset_usage: %+v", out)
+	}
+	if m, _ := st.GetUserMetadata("ann"); !m.Enabled {
+		t.Fatal("resetting the usage did not bring the user back")
+	}
+}

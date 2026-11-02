@@ -116,3 +116,54 @@ func TestUserExpiry_ListOnlyReturnsUsersWithAnExpiry(t *testing.T) {
 		t.Fatalf("expiries = %v", got)
 	}
 }
+
+func TestQuotaWindowStart_WeeklyAndYearly(t *testing.T) {
+	// Wednesday 2030-06-12 15:30 local.
+	now := time.Date(2030, time.June, 12, 15, 30, 0, 0, time.Local)
+	monday := time.Date(2030, time.June, 10, 0, 0, 0, 0, time.Local).Unix()
+	if got := QuotaWindowStart("weekly", now); got != monday {
+		t.Fatalf("weekly window starts %v; want Monday %v", time.Unix(got, 0), time.Unix(monday, 0))
+	}
+	sunday := time.Date(2030, time.June, 16, 23, 0, 0, 0, time.Local)
+	if got := QuotaWindowStart("weekly", sunday); got != monday {
+		t.Fatalf("Sunday belongs to the week that started Monday %v, got %v", time.Unix(monday, 0), time.Unix(got, 0))
+	}
+	if got := QuotaWindowStart("yearly", now); got != time.Date(2030, time.January, 1, 0, 0, 0, 0, time.Local).Unix() {
+		t.Fatalf("yearly window starts %v", time.Unix(got, 0))
+	}
+	if got := QuotaWindowStart("daily", now); got != time.Date(2030, time.June, 12, 0, 0, 0, 0, time.Local).Unix() {
+		t.Fatalf("daily window starts %v", time.Unix(got, 0))
+	}
+}
+
+func TestResetUserUsage_StartsCountingFromTheReset(t *testing.T) {
+	st := newExpiryStore(t)
+	now := time.Now()
+	meta := &UserMetadata{Email: "alice", QuotaLimit: 150, QuotaPeriod: "monthly", Enabled: true}
+	if err := st.AddSample(Sample{User: "alice", Timestamp: now.Add(-time.Minute).Unix(), Uplink: 100, Downlink: 100}); err != nil {
+		t.Fatal(err)
+	}
+	if used, over, _ := userQuotaUsage(meta, now, st); !over || used != 200 {
+		t.Fatalf("before the reset: used=%d over=%v", used, over)
+	}
+
+	if err := st.ResetUserUsage("alice", now); err != nil {
+		t.Fatal(err)
+	}
+	if used, over, _ := userQuotaUsage(meta, now.Add(time.Second), st); over || used != 0 {
+		t.Fatalf("after the reset: used=%d over=%v; the old traffic must not count", used, over)
+	}
+
+	// Traffic after the reset counts again.
+	if err := st.AddSample(Sample{User: "alice", Timestamp: now.Add(2 * time.Second).Unix(), Uplink: 60, Downlink: 0}); err != nil {
+		t.Fatal(err)
+	}
+	if used, _, _ := userQuotaUsage(meta, now.Add(5*time.Second), st); used != 60 {
+		t.Fatalf("used after the reset = %d; want 60", used)
+	}
+
+	anchors, err := st.ListUserQuotaAnchors()
+	if err != nil || anchors["alice"] != now.Unix() {
+		t.Fatalf("anchors = %v err=%v", anchors, err)
+	}
+}

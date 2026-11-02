@@ -16,7 +16,7 @@ const (
 
 type bulkUserActionRequest struct {
 	Names  []string `json:"names"`
-	Action string   `json:"action"` // extend_days, add_quota, set_quota, set_expiry, delete
+	Action string   `json:"action"` // extend_days, add_quota, set_quota, set_expiry, reset_usage, delete
 	// Days is added to the expiry (negative removes days).
 	Days int64 `json:"days"`
 	// QuotaBytes is added to (add_quota) or becomes (set_quota) the quota.
@@ -113,7 +113,7 @@ func (s *Server) handleBulkUserAction(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "expires_at is required (0 clears it)")
 			return
 		}
-	case "delete":
+	case "reset_usage", "delete":
 	default:
 		writeErr(w, http.StatusBadRequest, "Unknown action")
 		return
@@ -167,6 +167,10 @@ func (s *Server) applyBulkUserAction(name string, req bulkUserActionRequest, now
 		meta.QuotaLimit = req.QuotaBytes
 	case "set_expiry":
 		expiry = core.UserExpiry{ExpiresAt: *req.ExpiresAt}
+	case "reset_usage":
+		if err := s.store.ResetUserUsage(name, now); err != nil {
+			return err
+		}
 	}
 
 	if err := s.store.SaveUserMetadata(*meta); err != nil {

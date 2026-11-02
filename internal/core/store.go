@@ -441,6 +441,7 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE user_templates ADD COLUMN route_tag_ids_json TEXT NOT NULL DEFAULT '[]';")
 	s.db.Exec("ALTER TABLE user_templates ADD COLUMN expire_days INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE user_templates ADD COLUMN expire_on_first_use INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE users ADD COLUMN quota_anchor INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE users ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE users ADD COLUMN expire_after_days INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE panel_users ADD COLUMN tokens_valid_after INTEGER NOT NULL DEFAULT 0;")

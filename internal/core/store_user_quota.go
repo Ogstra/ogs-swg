@@ -21,6 +21,12 @@ func quotaWindowStart(period string, now time.Time) int64 {
 	switch strings.ToLower(strings.TrimSpace(period)) {
 	case "daily":
 		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	case "weekly":
+		// Weeks start on Monday.
+		offset := (int(now.Weekday()) + 6) % 7
+		return time.Date(now.Year(), now.Month(), now.Day()-offset, 0, 0, 0, 0, now.Location()).Unix()
+	case "yearly":
+		return time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, now.Location()).Unix()
 	case "total", "none":
 		return 0
 	case "monthly", "":
@@ -28,6 +34,21 @@ func quotaWindowStart(period string, now time.Time) int64 {
 	default:
 		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).Unix()
 	}
+}
+
+// quotaUsageStart is where a user's counted usage begins: the start of their
+// quota period, or later if their usage was reset by hand since then.
+func quotaUsageStart(period string, anchor int64, now time.Time) int64 {
+	start := quotaWindowStart(period, now)
+	if anchor > start {
+		return anchor
+	}
+	return start
+}
+
+// QuotaUsageStart is the exported form for the handlers that show usage.
+func QuotaUsageStart(period string, anchor int64, now time.Time) int64 {
+	return quotaUsageStart(period, anchor, now)
 }
 
 func userQuotaUsage(meta *UserMetadata, now time.Time, store *Store) (int64, bool, error) {
@@ -43,7 +64,11 @@ func userQuotaUsage(meta *UserMetadata, now time.Time, store *Store) (int64, boo
 		return 0, expired, nil
 	}
 
-	samples, err := store.GetCombinedReport(meta.Email, quotaWindowStart(meta.QuotaPeriod, now), now.Unix())
+	anchor, err := store.GetUserQuotaAnchor(meta.Email)
+	if err != nil {
+		return 0, false, err
+	}
+	samples, err := store.GetCombinedReport(meta.Email, quotaUsageStart(meta.QuotaPeriod, anchor, now), now.Unix())
 	if err != nil {
 		return 0, false, err
 	}
