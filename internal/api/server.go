@@ -300,6 +300,7 @@ func (s *Server) Routes() *http.ServeMux {
 	protected.HandleFunc("PUT /api/users/{name}/inbounds/{tag}", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserInInbound))))
 	protected.HandleFunc("PUT /api/users/{name}/route-tags", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserRouteTags))))
 	protected.HandleFunc("PUT /api/users/{name}/external-profiles", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "update", s.handleUpdateUserExternalProfiles))))
+	protected.HandleFunc("POST /api/users/bulk-action", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "bulk_action", s.handleBulkUserAction))))
 	protected.HandleFunc("POST /api/users/bulk", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user", "create", s.handleBulkCreateUsers))))
 	protected.HandleFunc("GET /api/user-templates", s.secure(s.requirePerm(canReadUsers, s.handleListUserTemplates)))
 	protected.HandleFunc("POST /api/user-templates", s.secure(s.requirePerm(canWriteUsers, s.AuditLogger("user_template", "create", s.handleCreateUserTemplate))))
@@ -1548,22 +1549,8 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.config.RemoveUser(name); err != nil {
-		writeErr(w, http.StatusInternalServerError, "Failed to remove user from config: "+err.Error())
-		return
-	}
-
-	if err := s.replaceUserInRouteRules(name, ""); err != nil {
-		log.Printf("Failed to remove user from route rules: %v", err)
-	}
-
-	if err := s.store.RemoveUserFromSubscriptions(name); err != nil {
-		writeErr(w, http.StatusInternalServerError, "Failed to remove user from subscriptions: "+err.Error())
-		return
-	}
-
-	if err := s.store.DeleteUserMetadata(name); err != nil {
-		writeErr(w, http.StatusInternalServerError, "Failed to delete metadata: "+err.Error())
+	if err := s.deleteUserEverywhere(name); err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -1571,6 +1558,24 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	s.cache.Del(cacheKeyAllUsers)
 	s.InvalidateSubCache()
 	w.WriteHeader(http.StatusOK)
+}
+
+// deleteUserEverywhere removes a user from the config, route rules,
+// subscriptions and stored metadata. Callers clear the caches.
+func (s *Server) deleteUserEverywhere(name string) error {
+	if err := s.config.RemoveUser(name); err != nil {
+		return fmt.Errorf("Failed to remove user from config: %w", err)
+	}
+	if err := s.replaceUserInRouteRules(name, ""); err != nil {
+		log.Printf("Failed to remove user from route rules: %v", err)
+	}
+	if err := s.store.RemoveUserFromSubscriptions(name); err != nil {
+		return fmt.Errorf("Failed to remove user from subscriptions: %w", err)
+	}
+	if err := s.store.DeleteUserMetadata(name); err != nil {
+		return fmt.Errorf("Failed to delete metadata: %w", err)
+	}
+	return nil
 }
 
 func (s *Server) handleRemoveUserFromInbound(w http.ResponseWriter, r *http.Request) {
