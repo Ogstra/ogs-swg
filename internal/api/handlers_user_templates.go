@@ -10,7 +10,10 @@ import (
 	"github.com/Ogstra/ogs-swg/internal/core"
 )
 
-const maxUserTemplateNameLength = 64
+const (
+	maxUserTemplateNameLength = 64
+	maxUserTemplateExpireDays = 3650
+)
 
 func (s *Server) handleListUserTemplates(w http.ResponseWriter, r *http.Request) {
 	templates, err := s.store.ListUserTemplates(r.Context())
@@ -42,6 +45,8 @@ func decodeUserTemplate(r *http.Request) (core.UserTemplate, string) {
 		return t, "quota_limit cannot be negative"
 	case t.QuotaPeriod != "monthly" && t.QuotaPeriod != "total":
 		return t, "quota_period must be monthly or total"
+	case t.ExpireDays < 0 || t.ExpireDays > maxUserTemplateExpireDays:
+		return t, "expire_days must be between 0 and 3650"
 	}
 	return t, ""
 }

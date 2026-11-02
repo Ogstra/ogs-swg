@@ -26,6 +26,7 @@ type cachedSub struct {
 	HeaderUp              int64
 	HeaderDown            int64
 	HeaderTot             int64
+	HeaderExpire          int64
 	HeaderProfileInterval *int64
 	HeaderUpdateAlways    bool
 	HeaderHappParams      []happSubscriptionParam
@@ -289,7 +290,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 			s.observeHWIDMigrationArrival(r, sub)
 			s.observeSubscriptionHWID(r, sub, users, deviceAdmitted)
 			c.Body = applySubscriptionFormat(w, r, c, formatDirectSites)
-			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
+			sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExpire, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 			return
 		}
 	}
@@ -334,7 +335,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	s.observeHWIDMigrationArrival(r, sub)
 	s.observeSubscriptionHWID(r, sub, users, deviceAdmitted)
 	c.Body = applySubscriptionFormat(w, r, c, formatDirectSites)
-	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
+	sendSubResponse(w, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExpire, c.HeaderProfileInterval, c.HeaderUpdateAlways, c.HeaderHappParams, migrationNewURL)
 }
 
 // applySubscriptionFormat swaps the body for the ?format= conversion when one
@@ -998,11 +999,14 @@ func servedFromCacheToInt64(v bool) int64 {
 	return 0
 }
 
-func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot int64, profileUpdateInterval *int64, updateAlways bool, happParams []happSubscriptionParam, migrationNewURL string) {
+func sendSubResponse(w http.ResponseWriter, body []byte, profileTitle string, up, down, tot, expire int64, profileUpdateInterval *int64, updateAlways bool, happParams []happSubscriptionParam, migrationNewURL string) {
 	var parts []string
 	parts = append(parts, fmt.Sprintf("upload=%d", up))
 	parts = append(parts, fmt.Sprintf("download=%d", down))
 	parts = append(parts, fmt.Sprintf("total=%d", tot))
+	if expire > 0 {
+		parts = append(parts, fmt.Sprintf("expire=%d", expire))
+	}
 
 	if title := strings.TrimSpace(profileTitle); title != "" {
 		w.Header().Set("Profile-Title", title)

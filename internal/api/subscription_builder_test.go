@@ -24,11 +24,16 @@ type fakeSubscriptionUserSource struct {
 	metadata    map[string]*core.UserMetadata
 	reports     map[string][]core.Sample
 	external    map[string][]core.ExternalProfile
+	expiries    map[string]core.UserExpiry
 	metaErr     error
 }
 
 func (f *fakeSubscriptionUserSource) GetAllInboundMeta() (map[string]core.InboundMeta, error) {
 	return f.inboundMeta, nil
+}
+
+func (f *fakeSubscriptionUserSource) GetUserExpiry(email string) (core.UserExpiry, error) {
+	return f.expiries[email], nil
 }
 
 func (f *fakeSubscriptionUserSource) GetUserMetadata(email string) (*core.UserMetadata, error) {
@@ -496,5 +501,36 @@ func TestBuildSubscription_CacheMissThenHitByteIdentical(t *testing.T) {
 	third := makeRequest()
 	if third.Body.String() != first.Body.String() {
 		t.Fatalf("post-invalidate rebuild differs from original:\n%q\n%q", first.Body.String(), third.Body.String())
+	}
+}
+
+func TestBuildSubscription_ReportsTheEarliestExpiryOnlyWhenEveryMemberHasOne(t *testing.T) {
+	build := func(expiries map[string]core.UserExpiry) cachedSub {
+		return buildSubscription(buildSubscriptionInput{
+			Members: []subscriptionMember{{UserName: "ann"}, {UserName: "ben"}},
+			Users:   &fakeSubscriptionUserSource{expiries: expiries},
+		})
+	}
+
+	if c := build(nil); c.HeaderExpire != 0 {
+		t.Fatalf("expire = %d with no expiries; want none", c.HeaderExpire)
+	}
+	if c := build(map[string]core.UserExpiry{"ann": {ExpiresAt: 2000000000}}); c.HeaderExpire != 0 {
+		t.Fatalf("expire = %d when one member never expires; there is no real date to report", c.HeaderExpire)
+	}
+	c := build(map[string]core.UserExpiry{"ann": {ExpiresAt: 2000000000}, "ben": {ExpiresAt: 1900000000}})
+	if c.HeaderExpire != 1900000000 {
+		t.Fatalf("expire = %d; want the earliest, 1900000000", c.HeaderExpire)
+	}
+
+	rec := httptest.NewRecorder()
+	sendSubResponse(rec, c.Body, c.HeaderName, c.HeaderUp, c.HeaderDown, c.HeaderTot, c.HeaderExpire, nil, false, nil, "")
+	if got := rec.Header().Get("Subscription-Userinfo"); !strings.Contains(got, "expire=1900000000") {
+		t.Fatalf("Subscription-Userinfo = %q", got)
+	}
+	rec = httptest.NewRecorder()
+	sendSubResponse(rec, nil, "", 0, 0, 0, 0, nil, false, nil, "")
+	if got := rec.Header().Get("Subscription-Userinfo"); strings.Contains(got, "expire") {
+		t.Fatalf("Subscription-Userinfo = %q; must not carry expire without a real date", got)
 	}
 }

@@ -921,6 +921,8 @@ type UserStatus struct {
 	RouteTags         []UserRouteTagStatus   `json:"route_tags"`
 	ExternalProfiles  []core.ExternalProfile `json:"external_profiles,omitempty"`
 	SubscriptionQuota *SubQuotaInfo          `json:"subscription_quota,omitempty"`
+	ExpiresAt         int64                  `json:"expires_at"`
+	ExpireAfterDays   int64                  `json:"expire_after_days"`
 }
 
 func (s *Server) replaceUserInRouteRules(oldName, newName string) error {
@@ -1052,6 +1054,7 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userExpiries, _ := s.store.ListUserExpiries()
 	result := []UserStatus{}
 	for name := range uniqueNames {
 		user, isActive := activeMap[name]
@@ -1240,6 +1243,8 @@ func (s *Server) handleGetUsers(w http.ResponseWriter, r *http.Request) {
 			RouteTags:         routeTags,
 			ExternalProfiles:  externalProfiles,
 			SubscriptionQuota: subQuota,
+			ExpiresAt:         userExpiries[name].ExpiresAt,
+			ExpireAfterDays:   userExpiries[name].ExpireAfterDays,
 		})
 	}
 
@@ -1269,6 +1274,10 @@ type CreateUserRequest struct {
 	ResetDay      int    `json:"reset_day"`
 	Enabled       *bool  `json:"enabled,omitempty"`
 	InboundTag    string `json:"inbound_tag,omitempty"`
+	// ExpiresAt (unix seconds) and ExpireAfterDays set when the user stops
+	// working. Omitted fields leave the current setting alone.
+	ExpiresAt       *int64 `json:"expires_at,omitempty"`
+	ExpireAfterDays *int64 `json:"expire_after_days,omitempty"`
 }
 
 func canonicalInboundTags(tags ...string) []string {
@@ -1339,6 +1348,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "Failed to save metadata: "+err.Error())
 		return
 	}
+	if err := s.applyUserExpiry(req.Name, req.ExpiresAt, req.ExpireAfterDays, core.UserExpiry{}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to save expiry: "+err.Error())
+		return
+	}
+	_ = s.store.ReconcileUserQuotaNow(req.Name, s.config)
 
 	s.cache.Del("api:status")
 	s.cache.Del(cacheKeyAllUsers)
@@ -1367,6 +1381,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Load existing metadata upfront — needed for both enable and disable paths.
 	existingMeta, _ := s.store.GetUserMetadata(originalName)
+	previousExpiry, _ := s.store.GetUserExpiry(originalName)
 
 	enabled := true
 	if req.Enabled != nil {
@@ -1500,10 +1515,16 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Failed to rename user in route rules: %v", err)
 		}
 	}
+	// A rename moves the user to a new row, which must keep the expiry.
+	if err := s.applyUserExpiry(req.Name, req.ExpiresAt, req.ExpireAfterDays, previousExpiry); err != nil {
+		writeErr(w, http.StatusInternalServerError, "Failed to save expiry: "+err.Error())
+		return
+	}
 	shouldReconcileQuota := existingMeta == nil ||
 		existingMeta.QuotaLimit != req.QuotaLimit ||
 		existingMeta.QuotaPeriod != req.QuotaPeriod ||
-		!existingMeta.Enabled
+		!existingMeta.Enabled ||
+		req.ExpiresAt != nil || req.ExpireAfterDays != nil
 	if shouldReconcileQuota {
 		if err := s.store.ReconcileUserQuotaNow(req.Name, s.config); err != nil {
 			writeErr(w, http.StatusInternalServerError, "Failed to reconcile user quota: "+err.Error())
@@ -1690,6 +1711,9 @@ func (s *Server) handleBulkCreateUsers(w http.ResponseWriter, r *http.Request) {
 			InboundTags:   canonicalInboundTags(req.InboundTag),
 		}
 		s.store.SaveUserMetadata(meta)
+		if err := s.applyUserExpiry(req.Name, req.ExpiresAt, req.ExpireAfterDays, core.UserExpiry{}); err != nil {
+			log.Printf("Bulk create: expiry for %s: %v", req.Name, err)
+		}
 		_ = s.store.ReconcileUserQuotaNow(req.Name, s.config)
 	}
 

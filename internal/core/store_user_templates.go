@@ -19,7 +19,12 @@ type UserTemplate struct {
 	// RouteTagIDs are the user route tags given to every user made from the
 	// template. Tags are referenced by id, so renaming a tag needs no change here.
 	RouteTagIDs []int64 `json:"route_tag_ids"`
-	CreatedAt   int64   `json:"created_at"`
+	// ExpireDays is how long users made from the template last; 0 means no
+	// expiry. With ExpireOnFirstUse the days start counting at their first
+	// traffic instead of at creation.
+	ExpireDays       int64 `json:"expire_days"`
+	ExpireOnFirstUse bool  `json:"expire_on_first_use"`
+	CreatedAt        int64 `json:"created_at"`
 }
 
 func encodeRouteTagIDs(ids []int64) string {
@@ -72,7 +77,7 @@ var ErrUserTemplateNotFound = errors.New("template not found")
 
 func (s *Store) ListUserTemplates(ctx context.Context) ([]UserTemplate, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, inbound_tag, flow, quota_limit, quota_period, route_tag_ids_json, created_at
+		SELECT id, name, inbound_tag, flow, quota_limit, quota_period, route_tag_ids_json, expire_days, expire_on_first_use, created_at
 		FROM user_templates ORDER BY name COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
@@ -82,9 +87,11 @@ func (s *Store) ListUserTemplates(ctx context.Context) ([]UserTemplate, error) {
 	for rows.Next() {
 		var t UserTemplate
 		var tagIDs string
-		if err := rows.Scan(&t.ID, &t.Name, &t.InboundTag, &t.Flow, &t.QuotaLimit, &t.QuotaPeriod, &tagIDs, &t.CreatedAt); err != nil {
+		var onFirstUse int64
+		if err := rows.Scan(&t.ID, &t.Name, &t.InboundTag, &t.Flow, &t.QuotaLimit, &t.QuotaPeriod, &tagIDs, &t.ExpireDays, &onFirstUse, &t.CreatedAt); err != nil {
 			return nil, err
 		}
+		t.ExpireOnFirstUse = onFirstUse != 0
 		t.RouteTagIDs = decodeRouteTagIDs(tagIDs)
 		out = append(out, t)
 	}
@@ -104,8 +111,8 @@ func (s *Store) CreateUserTemplate(ctx context.Context, t UserTemplate) (int64, 
 		return 0, ErrUserTemplateExists
 	}
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO user_templates (name, inbound_tag, flow, quota_limit, quota_period, route_tag_ids_json)
-		VALUES (?, ?, ?, ?, ?, ?)`, t.Name, t.InboundTag, t.Flow, t.QuotaLimit, t.QuotaPeriod, encodeRouteTagIDs(t.RouteTagIDs))
+		INSERT INTO user_templates (name, inbound_tag, flow, quota_limit, quota_period, route_tag_ids_json, expire_days, expire_on_first_use)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, t.Name, t.InboundTag, t.Flow, t.QuotaLimit, t.QuotaPeriod, encodeRouteTagIDs(t.RouteTagIDs), t.ExpireDays, boolToInt64(t.ExpireOnFirstUse))
 	if err != nil {
 		return 0, err
 	}
@@ -119,8 +126,8 @@ func (s *Store) UpdateUserTemplate(ctx context.Context, t UserTemplate) error {
 		return ErrUserTemplateExists
 	}
 	res, err := s.db.ExecContext(ctx, `
-		UPDATE user_templates SET name = ?, inbound_tag = ?, flow = ?, quota_limit = ?, quota_period = ?, route_tag_ids_json = ?
-		WHERE id = ?`, t.Name, t.InboundTag, t.Flow, t.QuotaLimit, t.QuotaPeriod, encodeRouteTagIDs(t.RouteTagIDs), t.ID)
+		UPDATE user_templates SET name = ?, inbound_tag = ?, flow = ?, quota_limit = ?, quota_period = ?, route_tag_ids_json = ?, expire_days = ?, expire_on_first_use = ?
+		WHERE id = ?`, t.Name, t.InboundTag, t.Flow, t.QuotaLimit, t.QuotaPeriod, encodeRouteTagIDs(t.RouteTagIDs), t.ExpireDays, boolToInt64(t.ExpireOnFirstUse), t.ID)
 	if err != nil {
 		return err
 	}

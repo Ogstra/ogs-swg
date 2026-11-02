@@ -16,6 +16,7 @@ import (
 type subscriptionUserSource interface {
 	GetAllInboundMeta() (map[string]core.InboundMeta, error)
 	GetUserMetadata(email string) (*core.UserMetadata, error)
+	GetUserExpiry(email string) (core.UserExpiry, error)
 	GetCombinedReport(user string, start, end int64) ([]core.Sample, error)
 	GetUserExternalProfiles(userName string) ([]core.ExternalProfile, error)
 }
@@ -93,8 +94,19 @@ func buildSubscription(in buildSubscriptionInput) cachedSub {
 		return proxyDisplayName(username, alias)
 	}
 
+	// The subscription expires when its members do: only when every member has
+	// an expiry is there a real date to report, and then it is the earliest.
+	var expire int64
+	allExpire := len(in.Members) > 0 && in.Users != nil
 	for _, member := range in.Members {
 		username := member.UserName
+		if allExpire {
+			if e, err := in.Users.GetUserExpiry(username); err != nil || e.ExpiresAt <= 0 {
+				allExpire = false
+			} else if expire == 0 || e.ExpiresAt < expire {
+				expire = e.ExpiresAt
+			}
+		}
 		var userMeta *core.UserMetadata
 		if in.Users != nil {
 			userMeta, _ = in.Users.GetUserMetadata(username)
@@ -236,6 +248,9 @@ func buildSubscription(in buildSubscriptionInput) cachedSub {
 			fmt.Sprintf("download=%d", totalDown),
 			fmt.Sprintf("total=%d", totalLimit),
 		}
+		if allExpire && expire > 0 {
+			userinfoParts = append(userinfoParts, fmt.Sprintf("expire=%d", expire))
+		}
 		responseLines = append(responseLines, "#subscription-userinfo: "+strings.Join(userinfoParts, "; "))
 		intervalVal := int64(0)
 		if in.ProfileUpdateInterval != nil {
@@ -295,9 +310,17 @@ func buildSubscription(in buildSubscriptionInput) cachedSub {
 		HeaderUp:              totalUp,
 		HeaderDown:            totalDown,
 		HeaderTot:             totalLimit,
+		HeaderExpire:          expireOrZero(allExpire, expire),
 		HeaderProfileInterval: in.ProfileUpdateInterval,
 		HeaderUpdateAlways:    in.UpdateAlways,
 		HeaderHappParams:      in.HappParams,
 		Links:                 links,
 	}
+}
+
+func expireOrZero(all bool, expire int64) int64 {
+	if all {
+		return expire
+	}
+	return 0
 }

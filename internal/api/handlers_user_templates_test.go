@@ -133,3 +133,28 @@ func TestUserTemplates_RouteTagsFollowTheTagLifecycle(t *testing.T) {
 		t.Fatalf("after deleting a tag the template has %v; want only %d", got, keep.ID)
 	}
 }
+
+func TestUserTemplates_ExpiryFields(t *testing.T) {
+	srv, _ := newNtfyTestServerWithStore(t)
+	create := templateCall(srv, srv.handleCreateUserTemplate, http.MethodPost, "/api/user-templates", "",
+		core.UserTemplate{Name: "Trial", ExpireDays: 7, ExpireOnFirstUse: true})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%q", create.Code, create.Body.String())
+	}
+	if rec := templateCall(srv, srv.handleCreateUserTemplate, http.MethodPost, "/api/user-templates", "",
+		core.UserTemplate{Name: "Forever+", ExpireDays: 99999}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("absurd expiry status=%d; want 400", rec.Code)
+	}
+	if rec := templateCall(srv, srv.handleCreateUserTemplate, http.MethodPost, "/api/user-templates", "",
+		core.UserTemplate{Name: "Negative", ExpireDays: -1}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("negative expiry status=%d; want 400", rec.Code)
+	}
+	list := templateCall(srv, srv.handleListUserTemplates, http.MethodGet, "/api/user-templates", "", nil)
+	var got []core.UserTemplate
+	if err := json.Unmarshal(list.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ExpireDays != 7 || !got[0].ExpireOnFirstUse {
+		t.Fatalf("templates = %#v", got)
+	}
+}
