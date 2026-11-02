@@ -35,28 +35,40 @@ type Store struct {
 	*sqlcStore.Queries
 }
 
+// storeConnectionOptions are applied to every connection the pool opens, not
+// just the first: SQLite settings such as busy_timeout belong to a connection.
+// Transactions begin IMMEDIATE so two writers queue on busy_timeout instead of
+// one failing with "database is locked" when it tries to upgrade a read lock.
+const storeConnectionOptions = "_pragma=busy_timeout(5000)" +
+	"&_pragma=journal_mode(WAL)" +
+	"&_pragma=synchronous(NORMAL)" +
+	"&_pragma=temp_store(MEMORY)" +
+	"&_pragma=mmap_size(30000000000)" +
+	"&_txlock=immediate"
+
+// storeMaxConns lets readers (dashboard, history, the public subscription
+// endpoint) run next to each other and next to the one writer: WAL allows it.
+const storeMaxConns = 4
+
 func NewStore(dbPath string) (*Store, error) {
-	db, err := sql.Open("sqlite", dbPath)
+	dsn := dbPath
+	if strings.Contains(dsn, "?") {
+		dsn += "&" + storeConnectionOptions
+	} else {
+		dsn += "?" + storeConnectionOptions
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 
-	pragmas := []string{
-		"PRAGMA journal_mode=WAL;",
-		"PRAGMA synchronous=NORMAL;",
-		"PRAGMA busy_timeout=5000;",
-		"PRAGMA auto_vacuum=INCREMENTAL;",
-		"PRAGMA mmap_size=30000000000;",
-		"PRAGMA temp_store=MEMORY;",
+	// auto_vacuum only takes effect on a database that has no tables yet, so it
+	// is set once here rather than per connection.
+	if _, err := db.Exec("PRAGMA auto_vacuum=INCREMENTAL;"); err != nil {
+		log.Printf("Warning: Failed to set auto_vacuum: %v", err)
 	}
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			// Log but don't fail - some pragmas might not be critical
-			log.Printf("Warning: Failed to set %s: %v", pragma, err)
-		}
-	}
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(storeMaxConns)
+	db.SetMaxIdleConns(storeMaxConns)
 
 	if err := db.Ping(); err != nil {
 		return nil, err
