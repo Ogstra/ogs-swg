@@ -71,6 +71,7 @@ export default function Settings() {
         active_threshold_bytes: 1024,
         wg_sampler_interval_sec: 60,
         wg_retention_days: 30,
+        subscription_history_retention_days: 0,
         aggregation_enabled: false,
         aggregation_days: 7,
         audit_log_max_mb: 50,
@@ -2046,6 +2047,19 @@ function DatabaseTab({
                                     disabled={!canWriteSettings}
                                     className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
                                 />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-xs font-medium text-slate-400">Subscription history (days)</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    value={features.subscription_history_retention_days ?? 0}
+                                    onChange={e => setFeatures(prev => ({ ...prev, subscription_history_retention_days: Math.max(0, parseInt(e.target.value) || 0) }))}
+                                    disabled={!canWriteSettings}
+                                    title="Delete subscription request history older than this many days. 0 keeps everything."
+                                    className="w-full bg-slate-950 border border-slate-800 rounded px-2 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500/50 transition-colors"
+                                />
+                                <p className="text-xs text-slate-500">0 keeps everything</p>
                             </div>
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-slate-400">SB Interval (s)</label>

@@ -124,6 +124,7 @@ export interface FeatureFlags {
     active_threshold_bytes?: number;
     wg_sampler_interval_sec?: number;
     wg_retention_days?: number;
+    subscription_history_retention_days?: number;
     aggregation_enabled?: boolean;
     aggregation_days?: number;
     audit_log_max_mb?: number;

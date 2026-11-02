@@ -38,6 +38,11 @@ type Config struct {
 	RetentionDays            int      `json:"retention_days" env:"OGS_RETENTION_DAYS" env-default:"90"`
 	WGSamplerIntervalSec     int      `json:"wg_sampler_interval_sec" env:"OGS_WG_SAMPLER_INTERVAL_SEC" env-default:"60"`
 	WGRetentionDays          int      `json:"wg_retention_days" env:"OGS_WG_RETENTION_DAYS" env-default:"30"`
+
+	// SubscriptionHistoryRetentionDays trims the subscription request history.
+	// 0, the default, keeps everything: nothing is deleted unless it is chosen.
+	SubscriptionHistoryRetentionDays int `json:"subscription_history_retention_days" env:"OGS_SUBSCRIPTION_HISTORY_RETENTION_DAYS" env-default:"0"`
+
 	AggregationEnabled       bool     `json:"aggregation_enabled" env:"OGS_AGGREGATION_ENABLED" env-default:"false"`
 	AggregationDays          int      `json:"aggregation_days" env:"OGS_AGGREGATION_DAYS" env-default:"7"`
 	AuditLogMaxMB            int      `json:"audit_log_max_mb" env:"OGS_AUDIT_LOG_MAX_MB" env-default:"50"`

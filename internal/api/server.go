@@ -622,6 +622,16 @@ func StartServer(cfg *core.Config) *Server {
 					}
 				}
 
+				// Subscription request history: only when a retention was chosen.
+				if cfg.SubscriptionHistoryRetentionDays > 0 {
+					cutoff := time.Now().Add(-time.Duration(cfg.SubscriptionHistoryRetentionDays) * 24 * time.Hour).Unix()
+					if err := store.PruneSubscriptionRequestsOlderThan(cutoff); err != nil {
+						log.Printf("Subscription history retention prune error: %v", err)
+					} else {
+						vacuumNeeded = true
+					}
+				}
+
 				// WireGuard Stats Retention
 				if cfg.WGRetentionDays > 0 {
 					cutoff := time.Now().Add(-time.Duration(cfg.WGRetentionDays) * 24 * time.Hour).Unix()

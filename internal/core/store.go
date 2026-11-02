@@ -474,6 +474,10 @@ func (s *Store) initSchema() error {
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN block_reason TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_blocked ON subscription_requests(blocked, requested_at DESC);")
+	// The newest-first history across all subscriptions, and the latest request
+	// of one device, would otherwise scan every row of the table.
+	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_requested_at ON subscription_requests(requested_at DESC, id DESC);")
+	s.db.Exec("CREATE INDEX IF NOT EXISTS idx_subscription_requests_device ON subscription_requests(sub_id, hwid_hash, requested_at DESC);")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN via_worker INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN via_migration INTEGER NOT NULL DEFAULT 0;")
 	s.db.Exec("ALTER TABLE subscription_requests ADD COLUMN migrated_from_sub_id INTEGER NOT NULL DEFAULT 0;")

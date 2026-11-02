@@ -857,6 +857,9 @@ func (s *Server) handleGetFeatures(w http.ResponseWriter, r *http.Request) {
 		"retention_enabled":                s.config.RetentionEnabled,
 		"retention_days":                   s.config.RetentionDays,
 		"wg_retention_days":                s.config.WGRetentionDays,
+
+		"subscription_history_retention_days": s.config.SubscriptionHistoryRetentionDays,
+
 		"sampler_interval_sec":             s.config.SamplerIntervalSec,
 		"wg_sampler_interval_sec":          s.config.WGSamplerIntervalSec,
 		"sampler_paused":                   s.sampler != nil && s.sampler.IsPaused(),
@@ -918,6 +921,17 @@ func (s *Server) handleUpdateFeatures(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.config.RetentionDays < 1 {
 			s.config.RetentionDays = 1
+		}
+	}
+	if v, ok := payload["subscription_history_retention_days"]; ok {
+		switch t := v.(type) {
+		case float64:
+			s.config.SubscriptionHistoryRetentionDays = int(t)
+		case int:
+			s.config.SubscriptionHistoryRetentionDays = t
+		}
+		if s.config.SubscriptionHistoryRetentionDays < 0 {
+			s.config.SubscriptionHistoryRetentionDays = 0
 		}
 	}
 	if v, ok := payload["wg_retention_days"]; ok {
