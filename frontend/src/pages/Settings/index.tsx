@@ -1975,6 +1975,8 @@ function DatabaseTab({
                 return 'Social/Chat Fetcher'
             case 'device_limit':
                 return 'Device limit'
+            case 'no_hwid':
+                return 'No device ID'
             case 'worker_block':
                 return 'Blocked by Worker'
             default:

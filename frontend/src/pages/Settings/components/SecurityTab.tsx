@@ -50,6 +50,7 @@ const reasonVariant = (reason: string) => {
             return 'error'
         case 'rate_limit':
         case 'device_limit':
+        case 'no_hwid':
         case 'worker_block':
             return 'warning'
         case 'ua_browser':
@@ -76,6 +77,8 @@ const formatReasonLabel = (reason: string) => {
             return 'Social/Chat Fetcher'
         case 'device_limit':
             return 'Device limit'
+        case 'no_hwid':
+            return 'No device ID'
         case 'worker_block':
             return 'Blocked by Worker'
         default:
@@ -91,6 +94,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
     const [uaFilterEnabled, setUAFilterEnabled] = useState(false)
     const [socialFetchersBlockEnabled, setSocialFetchersBlockEnabled] = useState(false)
     const [defaultDeviceLimit, setDefaultDeviceLimit] = useState(0)
+    const [emptyWithoutHwid, setEmptyWithoutHwid] = useState(false)
     const [newRule, setNewRule] = useState<CreateProtectionRuleRequest>({
         rule_type: 'ip_block',
         value: '',
@@ -134,6 +138,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
         setUAFilterEnabled(!!settingsQuery.data.ua_filter_enabled)
         setSocialFetchersBlockEnabled(!!settingsQuery.data.social_fetchers_block_enabled)
         setDefaultDeviceLimit(Math.max(0, settingsQuery.data.default_device_limit || 0))
+        setEmptyWithoutHwid(!!settingsQuery.data.empty_without_hwid)
     }, [settingsQuery.data])
 
     const handleSaveCFWorkerURL = async () => {
@@ -157,6 +162,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
             ua_filter_enabled: uaFilterEnabled,
             social_fetchers_block_enabled: socialFetchersBlockEnabled,
             default_device_limit: Math.max(0, Math.floor(Number(defaultDeviceLimit) || 0)),
+            empty_without_hwid: emptyWithoutHwid,
         }),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ['subscription-protection'] })
@@ -267,7 +273,7 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                     </div>
                 ) : (
                     <>
-                        <div className="grid grid-cols-2 xl:grid-cols-5 gap-3 sm:gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4">
                             <div className="space-y-1">
                                 <label className="text-xs font-medium text-slate-400">Max Requests</label>
                                 <input
@@ -302,32 +308,29 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors disabled:opacity-60"
                                 />
                             </div>
-                            <div className="flex items-end">
-                                <label className="flex h-full min-h-[42px] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 w-full">
-                                    <input
-                                        type="checkbox"
-                                        checked={uaFilterEnabled}
-                                        disabled={!canWriteSettings}
-                                        onChange={e => setUAFilterEnabled(e.target.checked)}
-                                        className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
-                                    />
-                                    <span className="leading-tight">Block browser-like User-Agents</span>
-                                </label>
-                            </div>
-                            <div className="flex items-end">
-                                <label className="flex h-full min-h-[42px] items-center gap-2 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-200 w-full">
-                                    <input
-                                        type="checkbox"
-                                        checked={socialFetchersBlockEnabled}
-                                        disabled={!canWriteSettings}
-                                        onChange={e => setSocialFetchersBlockEnabled(e.target.checked)}
-                                        className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40"
-                                    />
-                                    <span className="leading-tight">Block social/chat link fetchers</span>
-                                </label>
-                            </div>
                         </div>
-	                        <div className="flex justify-end mt-4">
+                        <div className="mt-4 space-y-2">
+                            {[
+                                { checked: uaFilterEnabled, set: setUAFilterEnabled, title: 'Block browser-like User-Agents', hint: 'Browsers cannot download a subscription; only subscription clients can.' },
+                                { checked: socialFetchersBlockEnabled, set: setSocialFetchersBlockEnabled, title: 'Block social/chat link fetchers', hint: 'Stops link previews (Telegram, Slack, WhatsApp…) from fetching the link.' },
+                                { checked: emptyWithoutHwid, set: setEmptyWithoutHwid, title: 'Send an empty subscription when the device ID is missing', hint: 'A client that hides or does not send its HWID gets a subscription with no profiles, so they disappear from the app. Clients that never send an HWID, such as v2rayN or Clash, are affected too. Allowlisted IPs are exempt.' },
+                            ].map(option => (
+                                <label key={option.title} className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-3 text-sm text-slate-200">
+                                    <input
+                                        type="checkbox"
+                                        checked={option.checked}
+                                        disabled={!canWriteSettings}
+                                        onChange={e => option.set(e.target.checked)}
+                                        className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-blue-500/40 md:h-4 md:w-4"
+                                    />
+                                    <span>
+                                        <span className="block font-medium">{option.title}</span>
+                                        <span className="mt-0.5 block text-xs text-slate-400">{option.hint}</span>
+                                    </span>
+                                </label>
+                            ))}
+                        </div>
+<div className="flex justify-end mt-4">
 	                            <Button
 	                                onClick={handleSaveSettings}
 	                                isLoading={saveSettingsMutation.isPending}

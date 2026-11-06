@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -384,5 +386,54 @@ func TestPublicSub_TokenLookupCacheNeverOutlivesAChange(t *testing.T) {
 		if rec := hitSubStatus(server, "never-existed", ""); rec.Code != http.StatusNotFound {
 			t.Fatalf("unknown token status=%d", rec.Code)
 		}
+	}
+}
+
+func TestPublicSub_EmptyWithoutHWID(t *testing.T) {
+	server, st := newSubscriptionGoldenServer(t)
+	ctx := context.Background()
+	decode := func(rec *httptest.ResponseRecorder) string {
+		raw, err := base64.StdEncoding.DecodeString(rec.Body.String())
+		if err != nil {
+			t.Fatalf("body is not base64: %v", err)
+		}
+		return string(raw)
+	}
+
+	// Off by default: no HWID still gets the profiles.
+	if got := decode(hitSubStatus(server, migrationTestSrcToken, "")); !strings.Contains(got, "://") {
+		t.Fatalf("with the option off the subscription lost its profiles: %q", got)
+	}
+
+	server.config.SubscriptionProtection.EmptyWithoutHWID = true
+	empty := hitSubStatus(server, migrationTestSrcToken, "")
+	if empty.Code != http.StatusOK {
+		t.Fatalf("status=%d; an empty subscription must still be a 200 so the client replaces its list", empty.Code)
+	}
+	body := decode(empty)
+	if strings.Contains(body, "://") || !strings.Contains(body, "#profile-title:") {
+		t.Fatalf("empty subscription body = %q", body)
+	}
+	if empty.Header().Get("Profile-Title") == "" || empty.Header().Get("profile-update-interval") == "" {
+		t.Fatalf("the empty subscription must keep its headers so the client keeps refreshing: %v", empty.Header())
+	}
+
+	// A request that does carry a device ID is served normally.
+	if got := decode(hitSubStatus(server, migrationTestSrcToken, "device-with-id")); !strings.Contains(got, "://") {
+		t.Fatalf("a request with an HWID got %q", got)
+	}
+
+	rows, err := st.Queries.GetSubscriptionRequestHistory(ctx, store.GetSubscriptionRequestHistoryParams{Column1: 0, SubID: 0, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logged := 0
+	for _, row := range rows {
+		if row.Blocked == 1 && row.BlockReason == "no_hwid" {
+			logged++
+		}
+	}
+	if logged != 1 {
+		t.Fatalf("no_hwid rows in the history = %d; want 1", logged)
 	}
 }

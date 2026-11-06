@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -123,6 +124,16 @@ func (s *Server) lookupPublicSubscription(ctx context.Context, token string) (st
 	return sub, members, true
 }
 
+// sendEmptySubscription answers 200 with a valid subscription that lists no
+// profiles. Clients replace their saved list with it, which removes the
+// profiles, and keep refreshing, so they come back once the HWID is sent.
+func (s *Server) sendEmptySubscription(w http.ResponseWriter, r *http.Request, sub store.GetSubscriptionByTokenRow, token string) {
+	title := subscriptionDisplayName(sub.Name, sub.Alias)
+	body := []byte(base64.StdEncoding.EncodeToString([]byte("#profile-title: " + title)))
+	happParams, _ := s.happSubscriptionParamsForRequest(r, token, sub.HappColorProfile)
+	sendSubResponse(w, body, title, 0, 0, 0, 0, nullableInt64Ptr(sub.ProfileUpdateIntervalHours), int64ToBool(sub.UpdateAlways), happParams, "")
+}
+
 // workerBlockHeader marks a request the Cloudflare Worker already refused.
 const workerBlockHeader = "X-OGS-Worker-Block"
 
@@ -191,6 +202,13 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	if s.config.SubscriptionProtection.UAFilterEnabled && isBrowserUA(r.UserAgent()) {
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "ua_browser")
 		writeErr(w, http.StatusForbidden, "Forbidden")
+		return
+	}
+	// With "empty without HWID" on, a request that hides or omits its device ID
+	// gets a subscription with no profiles. Allowlisted addresses are exempt.
+	if s.config.SubscriptionProtection.EmptyWithoutHWID && !allowlisted && extractSubscriptionRequestMetadata(r).hwidHash == "" {
+		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "no_hwid")
+		s.sendEmptySubscription(w, r, sub, token)
 		return
 	}
 	deviceBlocked, deviceAdmitted := s.checkDeviceLimit(r, sub)

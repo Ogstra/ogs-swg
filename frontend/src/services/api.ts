@@ -309,6 +309,7 @@ export interface SubscriptionProtectionConfig {
     ua_filter_enabled: boolean;
     social_fetchers_block_enabled: boolean;
     default_device_limit?: number;
+    empty_without_hwid?: boolean;
 }
 
 export type ProtectionRuleType = 'ip_block' | 'token_block' | 'ip_allow';

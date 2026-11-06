@@ -94,6 +94,9 @@ type SubscriptionProtectionConfig struct {
 	SocialFetchersBlockEnabled bool `json:"social_fetchers_block_enabled"`
 	// DefaultDeviceLimit applies to subscriptions without their own limit; 0 is unlimited.
 	DefaultDeviceLimit int `json:"default_device_limit"`
+	// EmptyWithoutHWID answers requests that carry no device ID with a
+	// subscription that has no profiles, so a client that hides its HWID loses them.
+	EmptyWithoutHWID bool `json:"empty_without_hwid"`
 }
 
 type UserAccount struct {
