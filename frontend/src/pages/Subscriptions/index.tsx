@@ -302,6 +302,7 @@ export default function Subscriptions() {
     const [subHappThemeId, setSubHappThemeId] = useState('')
     const [subHappDirectSites, setSubHappDirectSites] = useState('')
     const [subDeviceLimit, setSubDeviceLimit] = useState('0')
+    const [subEmptyWithoutHwid, setSubEmptyWithoutHwid] = useState(false)
     const [happDirectSites, setHappDirectSites] = useState('')
     const [subRoutingProfileOpen, setSubRoutingProfileOpen] = useState(false)
     const [happQrLinks, setHappQrLinks] = useState<Record<string, HappQrLinkState>>({})
@@ -407,6 +408,7 @@ export default function Subscriptions() {
         setSubHappThemeId(happThemeId)
         setSubHappDirectSites('')
         setSubDeviceLimit('0')
+        setSubEmptyWithoutHwid(false)
         setModalState({ type: 'create' })
     }
 
@@ -440,6 +442,7 @@ export default function Subscriptions() {
         setSubHappThemeId(subColorProfile ? resolveHappThemeId(subColorProfile) : happThemeId)
         setSubHappDirectSites(sub.happ_direct_sites ?? '')
         setSubDeviceLimit(String(sub.device_limit ?? 0))
+        setSubEmptyWithoutHwid(!!sub.empty_without_hwid)
         setModalState({ type: 'edit', data: sub })
     }
 
@@ -500,6 +503,7 @@ export default function Subscriptions() {
             happ_color_profile: subHappThemeId !== happThemeId ? (HAPP_THEME_PRESETS.find(t => t.id === subHappThemeId)?.value || '') : '',
             happ_direct_sites: subHappDirectSites.trim(),
             device_limit: Math.max(0, Math.floor(Number(subDeviceLimit) || 0)),
+            empty_without_hwid: subEmptyWithoutHwid,
         }
 
         try {
@@ -1078,6 +1082,18 @@ export default function Subscriptions() {
                             />
                         </div>
                     </div>
+                    <label className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-2.5 text-sm text-slate-200">
+                        <input
+                            type="checkbox"
+                            checked={subEmptyWithoutHwid}
+                            onChange={e => setSubEmptyWithoutHwid(e.target.checked)}
+                            className="mt-0.5 h-5 w-5 shrink-0 rounded border-slate-700 bg-slate-900 text-blue-600 md:h-4 md:w-4"
+                        />
+                        <span>
+                            <span className="block font-medium">Empty without device ID</span>
+                            <span className="block text-xs text-slate-400">No HWID, no profiles.</span>
+                        </span>
+                    </label>
                     {renderRefreshPolicyFields(
                         profileUpdateIntervalEnabled,
                         setProfileUpdateIntervalEnabled,

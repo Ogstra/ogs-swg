@@ -45,6 +45,7 @@ type SubscriptionResponse struct {
 	HappDirectSites            string                       `json:"happ_direct_sites"`
 	DeviceLimit                int64                        `json:"device_limit"`
 	DeviceCount                int64                        `json:"device_count"`
+	EmptyWithoutHWID           bool                         `json:"empty_without_hwid"`
 	EffectiveDeviceLimit       int64                        `json:"effective_device_limit"`
 	LastRequestAt              *int64                       `json:"last_request_at"`
 	CreatedAt                  int64                        `json:"created_at"`
@@ -409,6 +410,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 
 	deviceLimits, _ := s.store.ListSubscriptionDeviceLimits(r.Context())
 	deviceCounts, _ := s.store.CountKnownHWIDsBySub(r.Context())
+	emptyWithoutHWID, _ := s.store.ListSubscriptionsEmptyWithoutHWID(r.Context())
 
 	res := make([]SubscriptionResponse, 0, len(subs))
 	includeSecrets := canManageSubscriptionSecrets(r)
@@ -442,6 +444,7 @@ func (s *Server) handleGetSubscriptions(w http.ResponseWriter, r *http.Request) 
 			DeviceLimit:                deviceLimits[sub.ID],
 			EffectiveDeviceLimit:       s.limitOrDefault(deviceLimits[sub.ID]),
 			DeviceCount:                deviceCounts[sub.ID],
+			EmptyWithoutHWID:           emptyWithoutHWID[sub.ID],
 			LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 			CreatedAt:                  sub.CreatedAt.Int64,
 			UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -471,6 +474,7 @@ type CreateSubscriptionRequest struct {
 	HappColorProfile           string                      `json:"happ_color_profile"`
 	HappDirectSites            string                      `json:"happ_direct_sites"`
 	DeviceLimit                *int64                      `json:"device_limit"`
+	EmptyWithoutHWID           *bool                       `json:"empty_without_hwid"`
 }
 
 type SubscriptionMemberRequest struct {
@@ -580,6 +584,9 @@ func (s *Server) handleCreateSubscription(w http.ResponseWriter, r *http.Request
 	if req.DeviceLimit != nil {
 		_ = s.store.SetSubscriptionDeviceLimit(r.Context(), id, *req.DeviceLimit)
 	}
+	if req.EmptyWithoutHWID != nil {
+		_ = s.store.SetSubscriptionEmptyWithoutHWID(r.Context(), id, *req.EmptyWithoutHWID)
+	}
 
 	s.InvalidateSubCache()
 	s.cache.Del(cacheKeyAllSubscriptions)
@@ -615,6 +622,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 	}
 	deviceLimit, _ := s.store.GetSubscriptionDeviceLimit(r.Context(), id)
 	deviceCount, _ := s.store.CountSubscriptionKnownHWIDs(r.Context(), id)
+	emptyWithoutHWID, _ := s.store.GetSubscriptionEmptyWithoutHWID(r.Context(), id)
 
 	writeJSON(w, http.StatusOK, SubscriptionResponse{
 		ID:                         sub.ID,
@@ -634,6 +642,7 @@ func (s *Server) handleGetSubscription(w http.ResponseWriter, r *http.Request) {
 		DeviceLimit:                deviceLimit,
 		EffectiveDeviceLimit:       s.limitOrDefault(deviceLimit),
 		DeviceCount:                deviceCount,
+		EmptyWithoutHWID:           emptyWithoutHWID,
 		LastRequestAt:              interfaceToInt64Ptr(sub.LastRequestAt),
 		CreatedAt:                  sub.CreatedAt.Int64,
 		UpdatedAt:                  sub.UpdatedAt.Int64,
@@ -703,6 +712,13 @@ func (s *Server) handleUpdateSubscription(w http.ResponseWriter, r *http.Request
 	if req.DeviceLimit != nil {
 		if err := s.store.SetSubscriptionDeviceLimit(r.Context(), id, *req.DeviceLimit); err != nil {
 			writeErr(w, http.StatusInternalServerError, "Failed to update device limit")
+			return
+		}
+	}
+
+	if req.EmptyWithoutHWID != nil {
+		if err := s.store.SetSubscriptionEmptyWithoutHWID(r.Context(), id, *req.EmptyWithoutHWID); err != nil {
+			writeErr(w, http.StatusInternalServerError, "Failed to update the empty-without-HWID setting")
 			return
 		}
 	}

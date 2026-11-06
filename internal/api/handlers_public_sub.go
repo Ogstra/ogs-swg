@@ -95,33 +95,37 @@ var (
 type publicSubscriptionEntry struct {
 	Sub     store.GetSubscriptionByTokenRow
 	Members []store.SubscriptionUser
+	// EmptyWithoutHWID: answer a request with no device ID with no profiles.
+	EmptyWithoutHWID bool
 }
 
 // lookupPublicSubscription resolves a token to its subscription and members.
 // Only successful lookups are cached, in the same cache (and so with the same
 // invalidation) as the generated bodies: a changed or deleted subscription is
 // seen at once, and an unknown token always asks the database.
-func (s *Server) lookupPublicSubscription(ctx context.Context, token string) (store.GetSubscriptionByTokenRow, []store.SubscriptionUser, bool) {
+func (s *Server) lookupPublicSubscription(ctx context.Context, token string) (publicSubscriptionEntry, bool) {
 	key := "subentry:" + token
 	if s.cache != nil {
 		if cached, found := s.cache.Get(key); found {
 			if entry, ok := cached.(publicSubscriptionEntry); ok {
-				return entry.Sub, entry.Members, true
+				return entry, true
 			}
 		}
 	}
 	sub, err := s.store.Queries.GetSubscriptionByToken(ctx, token)
 	if err != nil {
-		return store.GetSubscriptionByTokenRow{}, nil, false
+		return publicSubscriptionEntry{}, false
 	}
 	members, err := s.store.Queries.GetSubscriptionMembers(ctx, sub.ID)
 	if err != nil || len(members) == 0 {
-		return store.GetSubscriptionByTokenRow{}, nil, false
+		return publicSubscriptionEntry{}, false
 	}
+	emptyWithoutHWID, _ := s.store.GetSubscriptionEmptyWithoutHWID(ctx, sub.ID)
+	entry := publicSubscriptionEntry{Sub: sub, Members: members, EmptyWithoutHWID: emptyWithoutHWID}
 	if s.cache != nil {
-		s.cache.SetWithTTL(key, publicSubscriptionEntry{Sub: sub, Members: members}, 1, 2*time.Minute)
+		s.cache.SetWithTTL(key, entry, 1, 2*time.Minute)
 	}
-	return sub, members, true
+	return entry, true
 }
 
 // sendEmptySubscription answers 200 with a valid subscription that lists no
@@ -144,11 +148,12 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	sub, memberRows, ok := s.lookupPublicSubscription(r.Context(), token)
+	entry, ok := s.lookupPublicSubscription(r.Context(), token)
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
+	sub, memberRows := entry.Sub, entry.Members
 	users := make([]string, 0, len(memberRows))
 	for _, member := range memberRows {
 		users = append(users, member.UserName)
@@ -204,9 +209,9 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusForbidden, "Forbidden")
 		return
 	}
-	// With "empty without HWID" on, a request that hides or omits its device ID
-	// gets a subscription with no profiles. Allowlisted addresses are exempt.
-	if s.config.SubscriptionProtection.EmptyWithoutHWID && !allowlisted && extractSubscriptionRequestMetadata(r).hwidHash == "" {
+	// A subscription with "empty without HWID" on answers a request that hides
+	// or omits its device ID with no profiles. Allowlisted addresses are exempt.
+	if entry.EmptyWithoutHWID && !allowlisted && extractSubscriptionRequestMetadata(r).hwidHash == "" {
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "no_hwid")
 		s.sendEmptySubscription(w, r, sub, token)
 		return

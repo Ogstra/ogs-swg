@@ -399,13 +399,21 @@ func TestPublicSub_EmptyWithoutHWID(t *testing.T) {
 		}
 		return string(raw)
 	}
+	src, err := st.Queries.GetSubscriptionByToken(ctx, migrationTestSrcToken)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Off by default: no HWID still gets the profiles.
 	if got := decode(hitSubStatus(server, migrationTestSrcToken, "")); !strings.Contains(got, "://") {
 		t.Fatalf("with the option off the subscription lost its profiles: %q", got)
 	}
 
-	server.config.SubscriptionProtection.EmptyWithoutHWID = true
+	if err := st.SetSubscriptionEmptyWithoutHWID(ctx, src.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	server.InvalidateSubCache()
+
 	empty := hitSubStatus(server, migrationTestSrcToken, "")
 	if empty.Code != http.StatusOK {
 		t.Fatalf("status=%d; an empty subscription must still be a 200 so the client replaces its list", empty.Code)
@@ -422,6 +430,10 @@ func TestPublicSub_EmptyWithoutHWID(t *testing.T) {
 	if got := decode(hitSubStatus(server, migrationTestSrcToken, "device-with-id")); !strings.Contains(got, "://") {
 		t.Fatalf("a request with an HWID got %q", got)
 	}
+	// Other subscriptions are not affected: the option belongs to one subscription.
+	if got := decode(hitSubStatus(server, migrationTestDstToken, "")); !strings.Contains(got, "://") {
+		t.Fatalf("a subscription without the option lost its profiles: %q", got)
+	}
 
 	rows, err := st.Queries.GetSubscriptionRequestHistory(ctx, store.GetSubscriptionRequestHistoryParams{Column1: 0, SubID: 0, Limit: 50})
 	if err != nil {
@@ -435,5 +447,14 @@ func TestPublicSub_EmptyWithoutHWID(t *testing.T) {
 	}
 	if logged != 1 {
 		t.Fatalf("no_hwid rows in the history = %d; want 1", logged)
+	}
+
+	// Turning it off brings the profiles back.
+	if err := st.SetSubscriptionEmptyWithoutHWID(ctx, src.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	server.InvalidateSubCache()
+	if got := decode(hitSubStatus(server, migrationTestSrcToken, "")); !strings.Contains(got, "://") {
+		t.Fatalf("after turning it off: %q", got)
 	}
 }

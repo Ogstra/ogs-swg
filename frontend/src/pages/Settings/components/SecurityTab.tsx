@@ -94,7 +94,6 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
     const [uaFilterEnabled, setUAFilterEnabled] = useState(false)
     const [socialFetchersBlockEnabled, setSocialFetchersBlockEnabled] = useState(false)
     const [defaultDeviceLimit, setDefaultDeviceLimit] = useState(0)
-    const [emptyWithoutHwid, setEmptyWithoutHwid] = useState(false)
     const [newRule, setNewRule] = useState<CreateProtectionRuleRequest>({
         rule_type: 'ip_block',
         value: '',
@@ -138,7 +137,6 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
         setUAFilterEnabled(!!settingsQuery.data.ua_filter_enabled)
         setSocialFetchersBlockEnabled(!!settingsQuery.data.social_fetchers_block_enabled)
         setDefaultDeviceLimit(Math.max(0, settingsQuery.data.default_device_limit || 0))
-        setEmptyWithoutHwid(!!settingsQuery.data.empty_without_hwid)
     }, [settingsQuery.data])
 
     const handleSaveCFWorkerURL = async () => {
@@ -162,7 +160,6 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
             ua_filter_enabled: uaFilterEnabled,
             social_fetchers_block_enabled: socialFetchersBlockEnabled,
             default_device_limit: Math.max(0, Math.floor(Number(defaultDeviceLimit) || 0)),
-            empty_without_hwid: emptyWithoutHwid,
         }),
         onSuccess: async () => {
             await queryClient.invalidateQueries({ queryKey: ['subscription-protection'] })
@@ -313,7 +310,6 @@ export default function SecurityTab({ canWriteSettings, success, toastError }: S
                             {[
                                 { checked: uaFilterEnabled, set: setUAFilterEnabled, title: 'Block browser-like User-Agents', hint: 'Browsers cannot download a subscription; only subscription clients can.' },
                                 { checked: socialFetchersBlockEnabled, set: setSocialFetchersBlockEnabled, title: 'Block social/chat link fetchers', hint: 'Stops link previews (Telegram, Slack, WhatsApp…) from fetching the link.' },
-                                { checked: emptyWithoutHwid, set: setEmptyWithoutHwid, title: 'Send an empty subscription when the device ID is missing', hint: 'A client that hides or does not send its HWID gets a subscription with no profiles, so they disappear from the app. Clients that never send an HWID, such as v2rayN or Clash, are affected too. Allowlisted IPs are exempt.' },
                             ].map(option => (
                                 <label key={option.title} className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950 px-3 py-3 text-sm text-slate-200">
                                     <input

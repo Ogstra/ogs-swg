@@ -309,7 +309,6 @@ export interface SubscriptionProtectionConfig {
     ua_filter_enabled: boolean;
     social_fetchers_block_enabled: boolean;
     default_device_limit?: number;
-    empty_without_hwid?: boolean;
 }
 
 export type ProtectionRuleType = 'ip_block' | 'token_block' | 'ip_allow';
@@ -394,6 +393,7 @@ export interface Subscription {
     happ_color_profile?: string;
     happ_direct_sites?: string;
     device_limit?: number;
+    empty_without_hwid?: boolean;
     device_count?: number;
     effective_device_limit?: number;
     quota_limit: number;

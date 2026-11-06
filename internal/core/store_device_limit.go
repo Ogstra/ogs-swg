@@ -65,3 +65,35 @@ func (s *Store) HasIncomingHWIDMigration(ctx context.Context, targetSubID int64,
 	`, targetSubID, hwidHash).Scan(&n)
 	return n > 0, err
 }
+
+// EmptyWithoutHWID makes a subscription answer a request that carries no device
+// ID with a list of no profiles, so a client that hides its HWID loses them.
+
+func (s *Store) GetSubscriptionEmptyWithoutHWID(ctx context.Context, subID int64) (bool, error) {
+	var v int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(empty_without_hwid, 0) FROM subscriptions WHERE id = ?`, subID).Scan(&v)
+	return v != 0, err
+}
+
+func (s *Store) SetSubscriptionEmptyWithoutHWID(ctx context.Context, subID int64, enabled bool) error {
+	_, err := s.db.ExecContext(ctx, `UPDATE subscriptions SET empty_without_hwid = ? WHERE id = ?`, boolToInt64(enabled), subID)
+	return err
+}
+
+// ListSubscriptionsEmptyWithoutHWID returns the ids of the subscriptions that have it on.
+func (s *Store) ListSubscriptionsEmptyWithoutHWID(ctx context.Context) (map[int64]bool, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM subscriptions WHERE COALESCE(empty_without_hwid, 0) != 0`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+	}
+	return out, rows.Err()
+}
