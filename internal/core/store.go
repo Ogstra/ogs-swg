@@ -513,6 +513,7 @@ func (s *Store) initSchema() error {
 	`)
 	s.db.Exec("ALTER TABLE subscriptions ADD COLUMN happ_direct_sites TEXT NOT NULL DEFAULT '';")
 	s.db.Exec("ALTER TABLE ntfy_settings ADD COLUMN enable_new_hwid INTEGER NOT NULL DEFAULT 0;")
+	s.db.Exec("ALTER TABLE ntfy_settings ADD COLUMN enable_no_hwid INTEGER NOT NULL DEFAULT 0;")
 
 	s.backfillSamplesHourly()
 
@@ -743,14 +744,14 @@ func (s *Store) GetNtfySettings(ctx context.Context) (NtfySettings, error) {
 	row := s.db.QueryRowContext(ctx, `
 		SELECT server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
 		       enable_singbox_down, enable_wireguard_down, enable_high_traffic,
-		       enable_config_errors, enable_new_hwid, traffic_threshold_bytes
+		       enable_config_errors, enable_new_hwid, enable_no_hwid, traffic_threshold_bytes
 		FROM ntfy_settings WHERE id = 1
 	`)
 	var out NtfySettings
-	var enableSingboxDown, enableWireguardDown, enableHighTraffic, enableConfigErrors, enableNewHwid int64
+	var enableSingboxDown, enableWireguardDown, enableHighTraffic, enableConfigErrors, enableNewHwid, enableNoHwid int64
 	if err := row.Scan(&out.ServerURL, &out.Topic, &out.AuthMode, &out.BearerToken,
 		&out.BasicUser, &out.BasicPass, &enableSingboxDown, &enableWireguardDown,
-		&enableHighTraffic, &enableConfigErrors, &enableNewHwid, &out.TrafficThresholdBytes); err != nil {
+		&enableHighTraffic, &enableConfigErrors, &enableNewHwid, &enableNoHwid, &out.TrafficThresholdBytes); err != nil {
 		if err == sql.ErrNoRows {
 			return NormalizeNtfySettings(NtfySettings{}), nil
 		}
@@ -761,6 +762,7 @@ func (s *Store) GetNtfySettings(ctx context.Context) (NtfySettings, error) {
 	out.EnableHighTraffic = enableHighTraffic != 0
 	out.EnableConfigErrors = enableConfigErrors != 0
 	out.EnableNewHwid = enableNewHwid != 0
+	out.EnableNoHwid = enableNoHwid != 0
 	return NormalizeNtfySettings(out), nil
 }
 
@@ -770,8 +772,8 @@ func (s *Store) UpdateNtfySettings(ctx context.Context, settings NtfySettings) e
 		INSERT INTO ntfy_settings (
 			id, server_url, topic, auth_mode, bearer_token, basic_user, basic_pass,
 			enable_singbox_down, enable_wireguard_down, enable_high_traffic,
-			enable_config_errors, enable_new_hwid, traffic_threshold_bytes, created_at, updated_at
-		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+			enable_config_errors, enable_new_hwid, enable_no_hwid, traffic_threshold_bytes, created_at, updated_at
+		) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
 		ON CONFLICT(id) DO UPDATE SET
 			server_url = excluded.server_url,
 			topic = excluded.topic,
@@ -784,13 +786,14 @@ func (s *Store) UpdateNtfySettings(ctx context.Context, settings NtfySettings) e
 			enable_high_traffic = excluded.enable_high_traffic,
 			enable_config_errors = excluded.enable_config_errors,
 			enable_new_hwid = excluded.enable_new_hwid,
+			enable_no_hwid = excluded.enable_no_hwid,
 			traffic_threshold_bytes = excluded.traffic_threshold_bytes,
 			updated_at = strftime('%s','now')
 	`, settings.ServerURL, settings.Topic, settings.AuthMode, settings.BearerToken,
 		settings.BasicUser, settings.BasicPass,
 		boolToInt64(settings.EnableSingboxDown), boolToInt64(settings.EnableWireguardDown),
 		boolToInt64(settings.EnableHighTraffic), boolToInt64(settings.EnableConfigErrors),
-		boolToInt64(settings.EnableNewHwid),
+		boolToInt64(settings.EnableNewHwid), boolToInt64(settings.EnableNoHwid),
 		settings.TrafficThresholdBytes)
 	return err
 }

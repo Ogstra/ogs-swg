@@ -1942,6 +1942,12 @@ function DatabaseTab({
     }
 
     const getSubscriptionHistoryBadge = (run: SubscriptionRequestHistoryEntry) => {
+        if (run.block_reason === 'no_hwid') {
+            return {
+                label: 'Empty (no device ID)',
+                className: 'bg-amber-900/20 text-amber-400 border border-amber-900/30',
+            }
+        }
         if (Boolean(run.blocked)) {
             return {
                 label: 'Blocked',
@@ -2227,7 +2233,7 @@ function DatabaseTab({
                                     .map((run) => {
                                     const originalIndex = subscriptionRequestHistory.findIndex(r => r.id === run.id)
                                     const badge = getSubscriptionHistoryBadge(run)
-                                    const isBlocked = Boolean(run.blocked)
+                                    const isBlocked = Boolean(run.blocked) && run.block_reason !== 'no_hwid'
                                     const blockedReason = formatBlockedReasonLabel(run.block_reason)
                                     const country = (() => {
                                         const value = (run.country || '').trim()

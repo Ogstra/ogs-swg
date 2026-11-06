@@ -24,6 +24,7 @@ type ntfySettingsRequest struct {
 	EnableHighTraffic     bool   `json:"enable_high_traffic"`
 	EnableConfigErrors    bool   `json:"enable_config_errors"`
 	EnableNewHwid         bool   `json:"enable_new_hwid"`
+	EnableNoHwid          bool   `json:"enable_no_hwid"`
 	TrafficThresholdBytes int64  `json:"traffic_threshold_bytes"`
 }
 
@@ -42,6 +43,7 @@ type ntfySettingsResponse struct {
 	EnableHighTraffic     bool   `json:"enable_high_traffic"`
 	EnableConfigErrors    bool   `json:"enable_config_errors"`
 	EnableNewHwid         bool   `json:"enable_new_hwid"`
+	EnableNoHwid          bool   `json:"enable_no_hwid"`
 	TrafficThresholdBytes int64  `json:"traffic_threshold_bytes"`
 }
 
@@ -58,6 +60,7 @@ func ntfySettingsToResponse(s core.NtfySettings) ntfySettingsResponse {
 		EnableHighTraffic:     s.EnableHighTraffic,
 		EnableConfigErrors:    s.EnableConfigErrors,
 		EnableNewHwid:         s.EnableNewHwid,
+		EnableNoHwid:          s.EnableNoHwid,
 		TrafficThresholdBytes: s.TrafficThresholdBytes,
 	}
 }
@@ -85,6 +88,7 @@ func (s *Server) mergeNtfySecrets(ctx context.Context, req ntfySettingsRequest) 
 		EnableHighTraffic:     req.EnableHighTraffic,
 		EnableConfigErrors:    req.EnableConfigErrors,
 		EnableNewHwid:         req.EnableNewHwid,
+		EnableNoHwid:          req.EnableNoHwid,
 		TrafficThresholdBytes: req.TrafficThresholdBytes,
 	}
 

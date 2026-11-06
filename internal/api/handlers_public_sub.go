@@ -213,6 +213,7 @@ func (s *Server) handlePublicSubscription(w http.ResponseWriter, r *http.Request
 	// or omits its device ID with no profiles. Allowlisted addresses are exempt.
 	if entry.EmptyWithoutHWID && !allowlisted && extractSubscriptionRequestMetadata(r).hwidHash == "" {
 		s.recordBlockedSubscriptionRequest(r, sub.ID, users, "no_hwid")
+		s.notifyNoHWID(r, sub, users)
 		s.sendEmptySubscription(w, r, sub, token)
 		return
 	}

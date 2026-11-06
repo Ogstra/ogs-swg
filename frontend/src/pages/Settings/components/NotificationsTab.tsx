@@ -27,6 +27,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
     const [enableHighTraffic, setEnableHighTraffic] = useState(false)
     const [enableConfigErrors, setEnableConfigErrors] = useState(false)
     const [enableNewHwid, setEnableNewHwid] = useState(false)
+    const [enableNoHwid, setEnableNoHwid] = useState(false)
     const [trafficThresholdBytes, setTrafficThresholdBytes] = useState(0)
 
     const settingsQuery = useQuery({
@@ -49,6 +50,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
         setEnableHighTraffic(!!data.enable_high_traffic)
         setEnableConfigErrors(!!data.enable_config_errors)
         setEnableNewHwid(!!data.enable_new_hwid)
+        setEnableNoHwid(!!data.enable_no_hwid)
         setTrafficThresholdBytes(data.traffic_threshold_bytes || 0)
     }, [settingsQuery.data])
 
@@ -64,6 +66,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
         enable_high_traffic: enableHighTraffic,
         enable_config_errors: enableConfigErrors,
         enable_new_hwid: enableNewHwid,
+        enable_no_hwid: enableNoHwid,
         traffic_threshold_bytes: trafficThresholdBytes,
     })
 
@@ -290,6 +293,20 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
                         />
                         <div>
                             <div className="font-semibold text-white">New device on a subscription</div>
+                        </div>
+                    </label>
+
+                    <label className="flex items-start gap-4 p-4 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition-colors">
+                        <input
+                            type="checkbox"
+                            checked={enableNoHwid}
+                            onChange={e => setEnableNoHwid(e.target.checked)}
+                            disabled={!canWriteSettings}
+                            className="mt-1 h-4 w-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-offset-slate-900 disabled:opacity-60"
+                        />
+                        <div>
+                            <div className="font-semibold text-white">Request without a device ID</div>
+                            <div className="text-sm text-slate-400">Only for subscriptions that require one.</div>
                         </div>
                     </label>
 

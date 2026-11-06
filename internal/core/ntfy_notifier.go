@@ -292,6 +292,14 @@ func (n *NtfyNotifier) ObserveDeviceLimitBlocked(ctx context.Context, info NtfyD
 	})
 }
 
+// ObserveNoHWID publishes that a subscription requiring a device ID was
+// requested without one.
+func (n *NtfyNotifier) ObserveNoHWID(ctx context.Context, info NtfyNoHWIDInfo) {
+	n.send(ctx, func(s NtfySettings) bool { return s.EnableNoHwid }, func() NtfyMessage {
+		return NtfyNoHWIDMessage(info)
+	})
+}
+
 // NotifyConfigApplyFailed publishes a config-apply-failed notification every
 // time it is called (no dedupe — this represents a distinct operator-facing
 // action/error, not a poll result). Callers are responsible for not calling

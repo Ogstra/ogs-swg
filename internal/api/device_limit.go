@@ -83,6 +83,27 @@ func (s *Server) checkDeviceLimit(r *http.Request, sub store.GetSubscriptionByTo
 	return false, err == nil && isNew
 }
 
+// notifyNoHWID tells the operator that a request reached a subscription that
+// requires a device ID without one. A client that retries all day is reported
+// once an hour per subscription, address and client.
+func (s *Server) notifyNoHWID(r *http.Request, sub store.GetSubscriptionByTokenRow, users []string) {
+	if s.ntfyNotifier == nil {
+		return
+	}
+	meta := extractSubscriptionRequestMetadata(r)
+	clientIP := resolveSubscriptionRequestIP(r)
+	if !s.deviceLimitNotices.shouldNotify("nohwid\x00"+sub.Name+"\x00"+clientIP+"\x00"+meta.userAgent, s.now()) {
+		return
+	}
+	s.ntfyNotifier.ObserveNoHWID(r.Context(), core.NtfyNoHWIDInfo{
+		SubscriptionName: sub.Name,
+		Username:         strings.Join(users, ", "),
+		UserAgent:        meta.userAgent,
+		Country:          meta.country,
+		ClientIP:         clientIP,
+	})
+}
+
 func (s *Server) notifyDeviceLimit(r *http.Request, sub store.GetSubscriptionByTokenRow, users []string) {
 	if s.ntfyNotifier == nil {
 		return

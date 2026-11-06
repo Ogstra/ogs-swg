@@ -491,6 +491,7 @@ export interface NtfySettingsResponse {
     enable_high_traffic: boolean;
     enable_config_errors: boolean;
     enable_new_hwid: boolean;
+    enable_no_hwid: boolean;
     traffic_threshold_bytes: number;
 }
 
@@ -506,6 +507,7 @@ export interface NtfySettingsRequest {
     enable_high_traffic: boolean;
     enable_config_errors: boolean;
     enable_new_hwid: boolean;
+    enable_no_hwid: boolean;
     traffic_threshold_bytes: number;
 }
 

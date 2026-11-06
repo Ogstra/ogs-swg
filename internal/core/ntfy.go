@@ -28,6 +28,7 @@ type NtfySettings struct {
 	EnableHighTraffic     bool   `json:"enable_high_traffic"`
 	EnableConfigErrors    bool   `json:"enable_config_errors"`
 	EnableNewHwid         bool   `json:"enable_new_hwid"`
+	EnableNoHwid          bool   `json:"enable_no_hwid"`
 	TrafficThresholdBytes int64  `json:"traffic_threshold_bytes"`
 }
 
