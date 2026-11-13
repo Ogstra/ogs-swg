@@ -5,6 +5,8 @@ import { Card } from '../../../components/ui/Card'
 import { Button } from '../../../components/ui/Button'
 import { api, type NtfySettingsRequest } from '../../../services/api'
 
+const BYTES_PER_MB = 1024 * 1024
+
 interface NotificationsTabProps {
     canWriteSettings: boolean
     success: (msg: string) => void
@@ -28,7 +30,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
     const [enableConfigErrors, setEnableConfigErrors] = useState(false)
     const [enableNewHwid, setEnableNewHwid] = useState(false)
     const [enableNoHwid, setEnableNoHwid] = useState(false)
-    const [trafficThresholdBytes, setTrafficThresholdBytes] = useState(0)
+    const [trafficThresholdMB, setTrafficThresholdMB] = useState(0)
 
     const settingsQuery = useQuery({
         queryKey: ['ntfy-settings'],
@@ -51,7 +53,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
         setEnableConfigErrors(!!data.enable_config_errors)
         setEnableNewHwid(!!data.enable_new_hwid)
         setEnableNoHwid(!!data.enable_no_hwid)
-        setTrafficThresholdBytes(data.traffic_threshold_bytes || 0)
+        setTrafficThresholdMB(Math.round(((data.traffic_threshold_bytes || 0) / BYTES_PER_MB) * 100) / 100)
     }, [settingsQuery.data])
 
     const buildPayload = (): NtfySettingsRequest => ({
@@ -67,7 +69,7 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
         enable_config_errors: enableConfigErrors,
         enable_new_hwid: enableNewHwid,
         enable_no_hwid: enableNoHwid,
-        traffic_threshold_bytes: trafficThresholdBytes,
+        traffic_threshold_bytes: Math.round(trafficThresholdMB * BYTES_PER_MB),
     })
 
     const saveMutation = useMutation({
@@ -312,18 +314,18 @@ export default function NotificationsTab({ canWriteSettings, success, toastError
 
                     <div>
                         <label className="block text-sm font-medium text-slate-300 mb-2">
-                            Traffic threshold (bytes)
+                            Traffic threshold (MB)
                         </label>
                         <input
                             type="number"
                             min={0}
-                            value={trafficThresholdBytes}
-                            onChange={e => setTrafficThresholdBytes(Math.max(0, Number(e.target.value) || 0))}
+                            value={trafficThresholdMB}
+                            onChange={e => setTrafficThresholdMB(Math.max(0, Number(e.target.value) || 0))}
                             disabled={!canWriteSettings}
                             className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500/50 transition-colors disabled:opacity-60"
                         />
                         <p className="text-xs text-slate-500 mt-1">
-                            Total sing-box + WireGuard bytes measured over each sampler interval. 0 disables this alert.
+                            Total sing-box + WireGuard traffic measured over each sampler interval. 0 disables this alert.
                         </p>
                     </div>
 
